@@ -1,0 +1,69 @@
+{
+  "calls": {
+    "c_000001": {
+      "call_id": "c_000001",
+      "depth": 0,
+      "duration_ns": 591688,
+      "end_ns": 1230105812972904,
+      "exception": null,
+      "func_id": "sympy.core.function.expand",
+      "inputs": {
+        "expr": {
+          "display": "cos(sin(x + 2))",
+          "pickle_b64": "gAWVsQAAAAAAAACMKHN5bXB5LmZ1bmN0aW9ucy5lbGVtZW50YXJ5LnRyaWdvbm9tZXRyaWOUjANjb3OUk5RoAIwDc2lulJOUjA5zeW1weS5jb3JlLmFkZJSMA0FkZJSTlIwSc3ltcHkuY29yZS5udW1iZXJzlIwHSW50ZWdlcpSTlEsChZSBlIwRc3ltcHkuY29yZS5zeW1ib2yUjAZTeW1ib2yUk5SMAXiUhZSBlIaUgZSFlIGUhZSBlC4=",
+          "python_type": "sympy.functions.elementary.trigonometric.cos",
+          "repr": "cos(sin(x + 2))",
+          "srepr": "cos(sin(Add(Symbol('x'), Integer(2))))",
+          "type_tag": "sympy.Basic"
+        }
+      },
+      "output": {
+        "display": "cos(sin(x + 2))",
+        "pickle_b64": "gAWVsQAAAAAAAACMKHN5bXB5LmZ1bmN0aW9ucy5lbGVtZW50YXJ5LnRyaWdvbm9tZXRyaWOUjANjb3OUk5RoAIwDc2lulJOUjA5zeW1weS5jb3JlLmFkZJSMA0FkZJSTlIwSc3ltcHkuY29yZS5udW1iZXJzlIwHSW50ZWdlcpSTlEsChZSBlIwRc3ltcHkuY29yZS5zeW1ib2yUjAZTeW1ib2yUk5SMAXiUhZSBlIaUgZSFlIGUhZSBlC4=",
+        "python_type": "sympy.functions.elementary.trigonometric.cos",
+        "repr": "cos(sin(x + 2))",
+        "srepr": "cos(sin(Add(Symbol('x'), Integer(2))))",
+        "type_tag": "sympy.Basic"
+      },
+      "parent_call_id": null,
+      "start_ns": 1230105812381216,
+      "subcalls": [],
+      "thread_id": 126840304047936
+    }
+  },
+  "episode": {
+    "call_ids": [
+      "c_000001"
+    ],
+    "duration_ms": 42.56269591860473,
+    "entry_func_id": "expand",
+    "episode_id": "expand_15",
+    "final_output": {
+      "display": "cos(sin(x + 2))",
+      "pickle_b64": "gAWVsQAAAAAAAACMKHN5bXB5LmZ1bmN0aW9ucy5lbGVtZW50YXJ5LnRyaWdvbm9tZXRyaWOUjANjb3OUk5RoAIwDc2lulJOUjA5zeW1weS5jb3JlLmFkZJSMA0FkZJSTlIwSc3ltcHkuY29yZS5udW1iZXJzlIwHSW50ZWdlcpSTlEsChZSBlIwRc3ltcHkuY29yZS5zeW1ib2yUjAZTeW1ib2yUk5SMAXiUhZSBlIaUgZSFlIGUhZSBlC4=",
+      "python_type": "sympy.functions.elementary.trigonometric.cos",
+      "repr": "cos(sin(x + 2))",
+      "srepr": "cos(sin(Add(Symbol('x'), Integer(2))))",
+      "type_tag": "sympy.Basic"
+    },
+    "input": {
+      "expr": {
+        "display": "cos(sin((x + 2)))",
+        "pickle_b64": "gAWVFQAAAAAAAACMEWNvcyhzaW4oKHggKyAyKSkplC4=",
+        "python_type": "builtins.str",
+        "repr": "'cos(sin((x + 2)))'",
+        "type_tag": "python"
+      }
+    },
+    "input_seed": 15,
+    "max_depth": 0,
+    "metadata": {
+      "entrypoint_name": "expand"
+    },
+    "num_calls": 1,
+    "pattern_label": "chain",
+    "root_call_id": "c_000001",
+    "status": "ok",
+    "task_family": "expand"
+  }
+}

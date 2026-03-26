@@ -1,0 +1,69 @@
+{
+  "calls": {
+    "c_000001": {
+      "call_id": "c_000001",
+      "depth": 0,
+      "duration_ns": 3672975,
+      "end_ns": 1230106167487352,
+      "exception": null,
+      "func_id": "sympy.core.function.expand",
+      "inputs": {
+        "expr": {
+          "display": "(x**2 + x)/(x*sin(y)**2 + x*cos(y)**2)",
+          "pickle_b64": "gAWVPAEAAAAAAACMDnN5bXB5LmNvcmUubXVslIwDTXVslJOUjBBzeW1weS5jb3JlLnBvd2VylIwDUG93lJOUjA5zeW1weS5jb3JlLmFkZJSMA0FkZJSTlGgCjBFzeW1weS5jb3JlLnN5bWJvbJSMBlN5bWJvbJSTlIwBeJSFlIGUaAWMKHN5bXB5LmZ1bmN0aW9ucy5lbGVtZW50YXJ5LnRyaWdvbm9tZXRyaWOUjANjb3OUk5RoC4wBeZSFlIGUhZSBlIwSc3ltcHkuY29yZS5udW1iZXJzlIwHSW50ZWdlcpSTlEsChZSBlIaUgZSGlIGUaAJoDmgFaA+MA3NpbpSTlGgUhZSBlGgbhpSBlIaUgZSGlIGUaBeMC05lZ2F0aXZlT25llJOUKYGUhpSBlGgIaA5oBWgOaBuGlIGUhpSBlIaUgZQu",
+          "python_type": "sympy.core.mul.Mul",
+          "repr": "(x**2 + x)/(x*sin(y)**2 + x*cos(y)**2)",
+          "srepr": "Mul(Add(Pow(Symbol('x'), Integer(2)), Symbol('x')), Pow(Add(Mul(Symbol('x'), Pow(sin(Symbol('y')), Integer(2))), Mul(Symbol('x'), Pow(cos(Symbol('y')), Integer(2)))), Integer(-1)))",
+          "type_tag": "sympy.Basic"
+        }
+      },
+      "output": {
+        "display": "x**2/(x*sin(y)**2 + x*cos(y)**2) + x/(x*sin(y)**2 + x*cos(y)**2)",
+        "pickle_b64": "gAWVRAEAAAAAAACMDnN5bXB5LmNvcmUuYWRklIwDQWRklJOUjA5zeW1weS5jb3JlLm11bJSMA011bJSTlIwRc3ltcHkuY29yZS5zeW1ib2yUjAZTeW1ib2yUk5SMAXiUhZSBlIwQc3ltcHkuY29yZS5wb3dlcpSMA1Bvd5STlGgCaAVoC2gOjChzeW1weS5mdW5jdGlvbnMuZWxlbWVudGFyeS50cmlnb25vbWV0cmljlIwDY29zlJOUaAiMAXmUhZSBlIWUgZSMEnN5bXB5LmNvcmUubnVtYmVyc5SMB0ludGVnZXKUk5RLAoWUgZSGlIGUhpSBlGgFaAtoDmgPjANzaW6Uk5RoFIWUgZRoG4aUgZSGlIGUhpSBlGgXjAtOZWdhdGl2ZU9uZZSTlCmBlIaUgZSGlIGUaAVoDmgLaBuGlIGUaC6GlIGUhpSBlC4=",
+        "python_type": "sympy.core.add.Add",
+        "repr": "x**2/(x*sin(y)**2 + x*cos(y)**2) + x/(x*sin(y)**2 + x*cos(y)**2)",
+        "srepr": "Add(Mul(Pow(Symbol('x'), Integer(2)), Pow(Add(Mul(Symbol('x'), Pow(sin(Symbol('y')), Integer(2))), Mul(Symbol('x'), Pow(cos(Symbol('y')), Integer(2)))), Integer(-1))), Mul(Symbol('x'), Pow(Add(Mul(Symbol('x'), Pow(sin(Symbol('y')), Integer(2))), Mul(Symbol('x'), Pow(cos(Symbol('y')), Integer(2)))), Integer(-1))))",
+        "type_tag": "sympy.Basic"
+      },
+      "parent_call_id": null,
+      "start_ns": 1230106163814377,
+      "subcalls": [],
+      "thread_id": 126840304047936
+    }
+  },
+  "episode": {
+    "call_ids": [
+      "c_000001"
+    ],
+    "duration_ms": 47.67184890806675,
+    "entry_func_id": "expand",
+    "episode_id": "expand_16",
+    "final_output": {
+      "display": "x**2/(x*sin(y)**2 + x*cos(y)**2) + x/(x*sin(y)**2 + x*cos(y)**2)",
+      "pickle_b64": "gAWVRAEAAAAAAACMDnN5bXB5LmNvcmUuYWRklIwDQWRklJOUjA5zeW1weS5jb3JlLm11bJSMA011bJSTlIwRc3ltcHkuY29yZS5zeW1ib2yUjAZTeW1ib2yUk5SMAXiUhZSBlIwQc3ltcHkuY29yZS5wb3dlcpSMA1Bvd5STlGgCaAVoC2gOjChzeW1weS5mdW5jdGlvbnMuZWxlbWVudGFyeS50cmlnb25vbWV0cmljlIwDY29zlJOUaAiMAXmUhZSBlIWUgZSMEnN5bXB5LmNvcmUubnVtYmVyc5SMB0ludGVnZXKUk5RLAoWUgZSGlIGUhpSBlGgFaAtoDmgPjANzaW6Uk5RoFIWUgZRoG4aUgZSGlIGUhpSBlGgXjAtOZWdhdGl2ZU9uZZSTlCmBlIaUgZSGlIGUaAVoDmgLaBuGlIGUaC6GlIGUhpSBlC4=",
+      "python_type": "sympy.core.add.Add",
+      "repr": "x**2/(x*sin(y)**2 + x*cos(y)**2) + x/(x*sin(y)**2 + x*cos(y)**2)",
+      "srepr": "Add(Mul(Pow(Symbol('x'), Integer(2)), Pow(Add(Mul(Symbol('x'), Pow(sin(Symbol('y')), Integer(2))), Mul(Symbol('x'), Pow(cos(Symbol('y')), Integer(2)))), Integer(-1))), Mul(Symbol('x'), Pow(Add(Mul(Symbol('x'), Pow(sin(Symbol('y')), Integer(2))), Mul(Symbol('x'), Pow(cos(Symbol('y')), Integer(2)))), Integer(-1))))",
+      "type_tag": "sympy.Basic"
+    },
+    "input": {
+      "expr": {
+        "display": "(x + x**2)/(x*sin(y)**2 + x*cos(y)**2)",
+        "pickle_b64": "gAWVKgAAAAAAAACMJih4ICsgeCoqMikvKHgqc2luKHkpKioyICsgeCpjb3MoeSkqKjIplC4=",
+        "python_type": "builtins.str",
+        "repr": "'(x + x**2)/(x*sin(y)**2 + x*cos(y)**2)'",
+        "type_tag": "python"
+      }
+    },
+    "input_seed": 16,
+    "max_depth": 0,
+    "metadata": {
+      "entrypoint_name": "expand"
+    },
+    "num_calls": 1,
+    "pattern_label": "chain",
+    "root_call_id": "c_000001",
+    "status": "ok",
+    "task_family": "expand"
+  }
+}

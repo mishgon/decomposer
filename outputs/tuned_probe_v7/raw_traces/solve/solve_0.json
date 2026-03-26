@@ -1,0 +1,326 @@
+{
+  "calls": {
+    "c_000001": {
+      "call_id": "c_000001",
+      "depth": 0,
+      "duration_ns": 12099679,
+      "end_ns": 1230107336355787,
+      "exception": null,
+      "func_id": "sympy.solvers.solvers.solve",
+      "inputs": {
+        "expr": {
+          "display": "x**2 - 1",
+          "pickle_b64": "gAWVoAAAAAAAAACMDnN5bXB5LmNvcmUuYWRklIwDQWRklJOUjBJzeW1weS5jb3JlLm51bWJlcnOUjAtOZWdhdGl2ZU9uZZSTlCmBlIwQc3ltcHkuY29yZS5wb3dlcpSMA1Bvd5STlIwRc3ltcHkuY29yZS5zeW1ib2yUjAZTeW1ib2yUk5SMAXiUhZSBlGgDjAdJbnRlZ2VylJOUSwKFlIGUhpSBlIaUgZQu",
+          "python_type": "sympy.core.add.Add",
+          "repr": "x**2 - 1",
+          "srepr": "Add(Pow(Symbol('x'), Integer(2)), Integer(-1))",
+          "type_tag": "sympy.Basic"
+        },
+        "symbol_names": {
+          "display": "['x']",
+          "items": [
+            {
+              "display": "x",
+              "pickle_b64": "gAWVBQAAAAAAAACMAXiULg==",
+              "python_type": "builtins.str",
+              "repr": "'x'",
+              "type_tag": "python"
+            }
+          ],
+          "pickle_b64": "gAWVCAAAAAAAAABdlIwBeJRhLg==",
+          "python_type": "builtins.list",
+          "repr": "['x']",
+          "type_tag": "sequence"
+        }
+      },
+      "output": {
+        "display": "[-1, 1]",
+        "items": [
+          {
+            "display": "-1",
+            "pickle_b64": "gAWVKQAAAAAAAACMEnN5bXB5LmNvcmUubnVtYmVyc5SMC05lZ2F0aXZlT25llJOUKYGULg==",
+            "python_type": "sympy.core.numbers.NegativeOne",
+            "repr": "-1",
+            "srepr": "Integer(-1)",
+            "type_tag": "sympy.Basic"
+          },
+          {
+            "display": "1",
+            "pickle_b64": "gAWVIQAAAAAAAACMEnN5bXB5LmNvcmUubnVtYmVyc5SMA09uZZSTlCmBlC4=",
+            "python_type": "sympy.core.numbers.One",
+            "repr": "1",
+            "srepr": "Integer(1)",
+            "type_tag": "sympy.Basic"
+          }
+        ],
+        "pickle_b64": "gAWVOgAAAAAAAABdlCiMEnN5bXB5LmNvcmUubnVtYmVyc5SMC05lZ2F0aXZlT25llJOUKYGUaAGMA09uZZSTlCmBlGUu",
+        "python_type": "builtins.list",
+        "repr": "[-1, 1]",
+        "type_tag": "sequence"
+      },
+      "parent_call_id": null,
+      "start_ns": 1230107324256108,
+      "subcalls": [
+        "c_000002"
+      ],
+      "thread_id": 126840304047936
+    },
+    "c_000002": {
+      "call_id": "c_000002",
+      "depth": 1,
+      "duration_ns": 10285738,
+      "end_ns": 1230107336154403,
+      "exception": null,
+      "func_id": "sympy.solvers.solvers._solve",
+      "inputs": {
+        "_denominators": {
+          "display": "set()",
+          "pickle_b64": "gAWPlC4=",
+          "python_type": "builtins.set",
+          "repr": "set()",
+          "type_tag": "python"
+        },
+        "arg0": {
+          "display": "x**2 - 1",
+          "pickle_b64": "gAWVoAAAAAAAAACMDnN5bXB5LmNvcmUuYWRklIwDQWRklJOUjBJzeW1weS5jb3JlLm51bWJlcnOUjAtOZWdhdGl2ZU9uZZSTlCmBlIwQc3ltcHkuY29yZS5wb3dlcpSMA1Bvd5STlIwRc3ltcHkuY29yZS5zeW1ib2yUjAZTeW1ib2yUk5SMAXiUhZSBlGgDjAdJbnRlZ2VylJOUSwKFlIGUhpSBlIaUgZQu",
+          "python_type": "sympy.core.add.Add",
+          "repr": "x**2 - 1",
+          "srepr": "Add(Pow(Symbol('x'), Integer(2)), Integer(-1))",
+          "type_tag": "sympy.Basic"
+        },
+        "arg1": {
+          "display": "x",
+          "pickle_b64": "gAWVKAAAAAAAAACMEXN5bXB5LmNvcmUuc3ltYm9slIwGU3ltYm9slJOUjAF4lIWUgZQu",
+          "python_type": "sympy.core.symbol.Symbol",
+          "repr": "x",
+          "srepr": "Symbol('x')",
+          "type_tag": "sympy.Basic"
+        },
+        "cubics": {
+          "display": "True",
+          "pickle_b64": "gAWILg==",
+          "python_type": "builtins.bool",
+          "repr": "True",
+          "type_tag": "python"
+        },
+        "quartics": {
+          "display": "True",
+          "pickle_b64": "gAWILg==",
+          "python_type": "builtins.bool",
+          "repr": "True",
+          "type_tag": "python"
+        },
+        "quintics": {
+          "display": "True",
+          "pickle_b64": "gAWILg==",
+          "python_type": "builtins.bool",
+          "repr": "True",
+          "type_tag": "python"
+        }
+      },
+      "output": {
+        "display": "[{x: -1}, {x: 1}]",
+        "items": [
+          {
+            "display": "{x: -1}",
+            "items": [
+              {
+                "key": {
+                  "display": "x",
+                  "pickle_b64": "gAWVKAAAAAAAAACMEXN5bXB5LmNvcmUuc3ltYm9slIwGU3ltYm9slJOUjAF4lIWUgZQu",
+                  "python_type": "sympy.core.symbol.Symbol",
+                  "repr": "x",
+                  "srepr": "Symbol('x')",
+                  "type_tag": "sympy.Basic"
+                },
+                "value": {
+                  "display": "-1",
+                  "pickle_b64": "gAWVKQAAAAAAAACMEnN5bXB5LmNvcmUubnVtYmVyc5SMC05lZ2F0aXZlT25llJOUKYGULg==",
+                  "python_type": "sympy.core.numbers.NegativeOne",
+                  "repr": "-1",
+                  "srepr": "Integer(-1)",
+                  "type_tag": "sympy.Basic"
+                }
+              }
+            ],
+            "pickle_b64": "gAWVUwAAAAAAAAB9lIwRc3ltcHkuY29yZS5zeW1ib2yUjAZTeW1ib2yUk5SMAXiUhZSBlIwSc3ltcHkuY29yZS5udW1iZXJzlIwLTmVnYXRpdmVPbmWUk5QpgZRzLg==",
+            "python_type": "builtins.dict",
+            "repr": "{x: -1}",
+            "type_tag": "mapping"
+          },
+          {
+            "display": "{x: 1}",
+            "items": [
+              {
+                "key": {
+                  "display": "x",
+                  "pickle_b64": "gAWVKAAAAAAAAACMEXN5bXB5LmNvcmUuc3ltYm9slIwGU3ltYm9slJOUjAF4lIWUgZQu",
+                  "python_type": "sympy.core.symbol.Symbol",
+                  "repr": "x",
+                  "srepr": "Symbol('x')",
+                  "type_tag": "sympy.Basic"
+                },
+                "value": {
+                  "display": "1",
+                  "pickle_b64": "gAWVIQAAAAAAAACMEnN5bXB5LmNvcmUubnVtYmVyc5SMA09uZZSTlCmBlC4=",
+                  "python_type": "sympy.core.numbers.One",
+                  "repr": "1",
+                  "srepr": "Integer(1)",
+                  "type_tag": "sympy.Basic"
+                }
+              }
+            ],
+            "pickle_b64": "gAWVSwAAAAAAAAB9lIwRc3ltcHkuY29yZS5zeW1ib2yUjAZTeW1ib2yUk5SMAXiUhZSBlIwSc3ltcHkuY29yZS5udW1iZXJzlIwDT25llJOUKYGUcy4=",
+            "python_type": "builtins.dict",
+            "repr": "{x: 1}",
+            "type_tag": "mapping"
+          }
+        ],
+        "pickle_b64": "gAWVaQAAAAAAAABdlCh9lIwRc3ltcHkuY29yZS5zeW1ib2yUjAZTeW1ib2yUk5SMAXiUhZSBlIwSc3ltcHkuY29yZS5udW1iZXJzlIwLTmVnYXRpdmVPbmWUk5QpgZRzfZRoB2gIjANPbmWUk5QpgZRzZS4=",
+        "python_type": "builtins.list",
+        "repr": "[{x: -1}, {x: 1}]",
+        "type_tag": "sequence"
+      },
+      "parent_call_id": "c_000001",
+      "start_ns": 1230107325868665,
+      "subcalls": [
+        "c_000003"
+      ],
+      "thread_id": 126840304047936
+    },
+    "c_000003": {
+      "call_id": "c_000003",
+      "depth": 2,
+      "duration_ns": 5966207,
+      "end_ns": 1230107332348389,
+      "exception": null,
+      "func_id": "sympy.solvers.solvers.solve_linear",
+      "inputs": {
+        "arg0": {
+          "display": "x**2 - 1",
+          "pickle_b64": "gAWVoAAAAAAAAACMDnN5bXB5LmNvcmUuYWRklIwDQWRklJOUjBJzeW1weS5jb3JlLm51bWJlcnOUjAtOZWdhdGl2ZU9uZZSTlCmBlIwQc3ltcHkuY29yZS5wb3dlcpSMA1Bvd5STlIwRc3ltcHkuY29yZS5zeW1ib2yUjAZTeW1ib2yUk5SMAXiUhZSBlGgDjAdJbnRlZ2VylJOUSwKFlIGUhpSBlIaUgZQu",
+          "python_type": "sympy.core.add.Add",
+          "repr": "x**2 - 1",
+          "srepr": "Add(Pow(Symbol('x'), Integer(2)), Integer(-1))",
+          "type_tag": "sympy.Basic"
+        },
+        "symbols": {
+          "display": "(x,)",
+          "items": [
+            {
+              "display": "x",
+              "pickle_b64": "gAWVKAAAAAAAAACMEXN5bXB5LmNvcmUuc3ltYm9slIwGU3ltYm9slJOUjAF4lIWUgZQu",
+              "python_type": "sympy.core.symbol.Symbol",
+              "repr": "x",
+              "srepr": "Symbol('x')",
+              "type_tag": "sympy.Basic"
+            }
+          ],
+          "pickle_b64": "gAWVKgAAAAAAAACMEXN5bXB5LmNvcmUuc3ltYm9slIwGU3ltYm9slJOUjAF4lIWUgZSFlC4=",
+          "python_type": "builtins.tuple",
+          "repr": "(x,)",
+          "type_tag": "sequence"
+        }
+      },
+      "output": {
+        "display": "(x**2 - 1, 1)",
+        "items": [
+          {
+            "display": "x**2 - 1",
+            "pickle_b64": "gAWVoAAAAAAAAACMDnN5bXB5LmNvcmUuYWRklIwDQWRklJOUjBJzeW1weS5jb3JlLm51bWJlcnOUjAtOZWdhdGl2ZU9uZZSTlCmBlIwQc3ltcHkuY29yZS5wb3dlcpSMA1Bvd5STlIwRc3ltcHkuY29yZS5zeW1ib2yUjAZTeW1ib2yUk5SMAXiUhZSBlGgDjAdJbnRlZ2VylJOUSwKFlIGUhpSBlIaUgZQu",
+            "python_type": "sympy.core.add.Add",
+            "repr": "x**2 - 1",
+            "srepr": "Add(Pow(Symbol('x'), Integer(2)), Integer(-1))",
+            "type_tag": "sympy.Basic"
+          },
+          {
+            "display": "1",
+            "pickle_b64": "gAWVIQAAAAAAAACMEnN5bXB5LmNvcmUubnVtYmVyc5SMA09uZZSTlCmBlC4=",
+            "python_type": "sympy.core.numbers.One",
+            "repr": "1",
+            "srepr": "Integer(1)",
+            "type_tag": "sympy.Basic"
+          }
+        ],
+        "pickle_b64": "gAWVrwAAAAAAAACMDnN5bXB5LmNvcmUuYWRklIwDQWRklJOUjBJzeW1weS5jb3JlLm51bWJlcnOUjAtOZWdhdGl2ZU9uZZSTlCmBlIwQc3ltcHkuY29yZS5wb3dlcpSMA1Bvd5STlIwRc3ltcHkuY29yZS5zeW1ib2yUjAZTeW1ib2yUk5SMAXiUhZSBlGgDjAdJbnRlZ2VylJOUSwKFlIGUhpSBlIaUgZRoA4wDT25llJOUKYGUhpQu",
+        "python_type": "builtins.tuple",
+        "repr": "(x**2 - 1, 1)",
+        "type_tag": "sequence"
+      },
+      "parent_call_id": "c_000002",
+      "start_ns": 1230107326382182,
+      "subcalls": [],
+      "thread_id": 126840304047936
+    }
+  },
+  "episode": {
+    "call_ids": [
+      "c_000001",
+      "c_000002",
+      "c_000003"
+    ],
+    "duration_ms": 51.713711116462946,
+    "entry_func_id": "solve",
+    "episode_id": "solve_0",
+    "final_output": {
+      "display": "[-1, 1]",
+      "items": [
+        {
+          "display": "-1",
+          "pickle_b64": "gAWVKQAAAAAAAACMEnN5bXB5LmNvcmUubnVtYmVyc5SMC05lZ2F0aXZlT25llJOUKYGULg==",
+          "python_type": "sympy.core.numbers.NegativeOne",
+          "repr": "-1",
+          "srepr": "Integer(-1)",
+          "type_tag": "sympy.Basic"
+        },
+        {
+          "display": "1",
+          "pickle_b64": "gAWVIQAAAAAAAACMEnN5bXB5LmNvcmUubnVtYmVyc5SMA09uZZSTlCmBlC4=",
+          "python_type": "sympy.core.numbers.One",
+          "repr": "1",
+          "srepr": "Integer(1)",
+          "type_tag": "sympy.Basic"
+        }
+      ],
+      "pickle_b64": "gAWVOgAAAAAAAABdlCiMEnN5bXB5LmNvcmUubnVtYmVyc5SMC05lZ2F0aXZlT25llJOUKYGUaAGMA09uZZSTlCmBlGUu",
+      "python_type": "builtins.list",
+      "repr": "[-1, 1]",
+      "type_tag": "sequence"
+    },
+    "input": {
+      "expr": {
+        "display": "x**2 - 1",
+        "pickle_b64": "gAWVDAAAAAAAAACMCHgqKjIgLSAxlC4=",
+        "python_type": "builtins.str",
+        "repr": "'x**2 - 1'",
+        "type_tag": "python"
+      },
+      "symbol_names": {
+        "display": "['x']",
+        "items": [
+          {
+            "display": "x",
+            "pickle_b64": "gAWVBQAAAAAAAACMAXiULg==",
+            "python_type": "builtins.str",
+            "repr": "'x'",
+            "type_tag": "python"
+          }
+        ],
+        "pickle_b64": "gAWVCAAAAAAAAABdlIwBeJRhLg==",
+        "python_type": "builtins.list",
+        "repr": "['x']",
+        "type_tag": "sequence"
+      }
+    },
+    "input_seed": 0,
+    "max_depth": 2,
+    "metadata": {
+      "entrypoint_name": "solve"
+    },
+    "num_calls": 3,
+    "pattern_label": "chain",
+    "root_call_id": "c_000001",
+    "status": "ok",
+    "task_family": "solve"
+  }
+}

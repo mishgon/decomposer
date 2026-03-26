@@ -1,0 +1,52 @@
+{
+  "catalog_entries": 4,
+  "episodes": 72,
+  "family_num_calls": {
+    "expand": {
+      "avg": 1.0,
+      "max": 1,
+      "min": 1,
+      "n": 20
+    },
+    "factor": {
+      "avg": 3.0,
+      "max": 3,
+      "min": 3,
+      "n": 20
+    },
+    "simplify": {
+      "avg": 16.65,
+      "max": 48,
+      "min": 11,
+      "n": 20
+    },
+    "solve": {
+      "avg": 4.17,
+      "max": 9,
+      "min": 2,
+      "n": 12
+    }
+  },
+  "pattern_counts": {
+    "chain": 49,
+    "mixed": 23
+  },
+  "status_counts": {
+    "ok": 72
+  },
+  "training_examples": 72,
+  "trajectory_length_counts": {
+    "expand:1": 20,
+    "factor:2": 20,
+    "simplify:1": 2,
+    "simplify:11": 1,
+    "simplify:2": 11,
+    "simplify:3": 3,
+    "simplify:4": 2,
+    "simplify:5": 1,
+    "solve:2": 1,
+    "solve:3": 6,
+    "solve:4": 2,
+    "solve:5": 3
+  }
+}

@@ -1,0 +1,677 @@
+{
+  "examples": [
+    {
+      "chain_type": "simplify_mixed",
+      "entry_function": "simplify",
+      "episode_id": "simplify_18",
+      "final_output": "x + 1",
+      "ideal_tool_steps": [
+        {
+          "args": {
+            "expr": "$0"
+          },
+          "reason": "Combine fractions, cancel common factors, and normalize multiplicative structure.",
+          "result": "$1",
+          "tool": "sympy.rational_simplify",
+          "value": "(x**2 - 1)*(sin(y)**2 + cos(y)**2)/(x - 1)"
+        },
+        {
+          "args": {
+            "expr": "$1"
+          },
+          "reason": "Apply trigonometric identities or deep trig normalization.",
+          "result": "$2",
+          "tool": "sympy.trig_simplify",
+          "value": "(x**2 - 1)/(x - 1)"
+        },
+        {
+          "args": {
+            "expr": "$2"
+          },
+          "reason": "Combine fractions, cancel common factors, and normalize multiplicative structure.",
+          "result": "$3",
+          "tool": "sympy.rational_simplify",
+          "value": "x + 1"
+        }
+      ],
+      "input": "((x**2 - 1)/(x - 1))*(sin(y)**2 + cos(y)**2)",
+      "num_calls": 14,
+      "pattern_label": "mixed",
+      "raw_call_sequence": [
+        {
+          "call_id": "c_000001",
+          "depth": 0,
+          "func_id": "sympy.simplify.simplify.simplify",
+          "output": "x + 1"
+        },
+        {
+          "call_id": "c_000002",
+          "depth": 1,
+          "func_id": "sympy.simplify.simplify.simplify",
+          "output": "y"
+        },
+        {
+          "call_id": "c_000003",
+          "depth": 1,
+          "func_id": "sympy.simplify.simplify.simplify",
+          "output": "y"
+        },
+        {
+          "call_id": "c_000004",
+          "depth": 1,
+          "func_id": "sympy.simplify.powsimp.powsimp",
+          "output": "(x**2 - 1)*(sin(y)**2 + cos(y)**2)/(x - 1)"
+        },
+        {
+          "call_id": "c_000005",
+          "depth": 1,
+          "func_id": "sympy.polys.polytools.cancel",
+          "output": "x*sin(y)**2 + x*cos(y)**2 + sin(y)**2 + cos(y)**2"
+        },
+        {
+          "call_id": "c_000006",
+          "depth": 1,
+          "func_id": "sympy.polys.rationaltools.together",
+          "output": "(x**2 - 1)*(sin(y)**2 + cos(y)**2)/(x - 1)"
+        },
+        {
+          "call_id": "c_000007",
+          "depth": 1,
+          "func_id": "sympy.polys.rationaltools.together",
+          "output": "x*sin(y)**2 + x*cos(y)**2 + sin(y)**2 + cos(y)**2"
+        },
+        {
+          "call_id": "c_000008",
+          "depth": 1,
+          "func_id": "sympy.core.exprtools.factor_terms",
+          "output": "(x**2 - 1)*(sin(y)**2 + cos(y)**2)/(x - 1)"
+        },
+        {
+          "call_id": "c_000009",
+          "depth": 1,
+          "func_id": "sympy.simplify.hyperexpand.hyperexpand",
+          "output": "(x**2 - 1)*(sin(y)**2 + cos(y)**2)/(x - 1)"
+        },
+        {
+          "call_id": "c_000010",
+          "depth": 1,
+          "func_id": "sympy.simplify.trigsimp.trigsimp",
+          "output": "(x**2 - 1)/(x - 1)"
+        },
+        {
+          "call_id": "c_000011",
+          "depth": 1,
+          "func_id": "sympy.simplify.powsimp.powsimp",
+          "output": "(x**2 - 1)/(x - 1)"
+        },
+        {
+          "call_id": "c_000012",
+          "depth": 1,
+          "func_id": "sympy.simplify.powsimp.powsimp",
+          "output": "(x**2 - 1)/(x - 1)"
+        },
+        {
+          "call_id": "c_000013",
+          "depth": 1,
+          "func_id": "sympy.polys.polytools.cancel",
+          "output": "x + 1"
+        },
+        {
+          "call_id": "c_000014",
+          "depth": 1,
+          "func_id": "sympy.core.exprtools.factor_terms",
+          "output": "x + 1"
+        }
+      ],
+      "tool_steps": [
+        {
+          "args": {
+            "expr": "$0"
+          },
+          "reason": "Combine fractions, cancel common factors, and normalize multiplicative structure.",
+          "result": "$1",
+          "tool": "sympy.rational_simplify",
+          "value": "(x**2 - 1)*(sin(y)**2 + cos(y)**2)/(x - 1)"
+        },
+        {
+          "args": {
+            "expr": "$1"
+          },
+          "reason": "Apply trigonometric identities or deep trig normalization.",
+          "result": "$2",
+          "tool": "sympy.trig_simplify",
+          "value": "(x**2 - 1)/(x - 1)"
+        },
+        {
+          "args": {
+            "expr": "$2"
+          },
+          "reason": "Combine fractions, cancel common factors, and normalize multiplicative structure.",
+          "result": "$3",
+          "tool": "sympy.rational_simplify",
+          "value": "x + 1"
+        }
+      ]
+    },
+    {
+      "chain_type": "simplify_mixed",
+      "entry_function": "simplify",
+      "episode_id": "simplify_3",
+      "final_output": "2",
+      "ideal_tool_steps": [
+        {
+          "args": {
+            "expr": "$0"
+          },
+          "reason": "Combine fractions, cancel common factors, and normalize multiplicative structure.",
+          "result": "$1",
+          "tool": "sympy.rational_simplify",
+          "value": "2*(sin(x)**2 + cos(x)**2)"
+        },
+        {
+          "args": {
+            "expr": "$1"
+          },
+          "reason": "Apply trigonometric identities or deep trig normalization.",
+          "result": "$2",
+          "tool": "sympy.trig_simplify",
+          "value": "2"
+        }
+      ],
+      "input": "((sin(x)**2 + cos(x)**2) + (sin(x)**2 + cos(x)**2))",
+      "num_calls": 14,
+      "pattern_label": "mixed",
+      "raw_call_sequence": [
+        {
+          "call_id": "c_000001",
+          "depth": 0,
+          "func_id": "sympy.simplify.simplify.simplify",
+          "output": "2"
+        },
+        {
+          "call_id": "c_000002",
+          "depth": 1,
+          "func_id": "sympy.simplify.simplify.simplify",
+          "output": "x"
+        },
+        {
+          "call_id": "c_000003",
+          "depth": 1,
+          "func_id": "sympy.simplify.simplify.simplify",
+          "output": "x"
+        },
+        {
+          "call_id": "c_000004",
+          "depth": 1,
+          "func_id": "sympy.simplify.powsimp.powsimp",
+          "output": "2*sin(x)**2 + 2*cos(x)**2"
+        },
+        {
+          "call_id": "c_000005",
+          "depth": 1,
+          "func_id": "sympy.polys.polytools.cancel",
+          "output": "2*sin(x)**2 + 2*cos(x)**2"
+        },
+        {
+          "call_id": "c_000006",
+          "depth": 1,
+          "func_id": "sympy.polys.rationaltools.together",
+          "output": "2*(sin(x)**2 + cos(x)**2)"
+        },
+        {
+          "call_id": "c_000007",
+          "depth": 1,
+          "func_id": "sympy.polys.rationaltools.together",
+          "output": "2*(sin(x)**2 + cos(x)**2)"
+        },
+        {
+          "call_id": "c_000008",
+          "depth": 1,
+          "func_id": "sympy.core.exprtools.factor_terms",
+          "output": "2*(sin(x)**2 + cos(x)**2)"
+        },
+        {
+          "call_id": "c_000009",
+          "depth": 1,
+          "func_id": "sympy.simplify.hyperexpand.hyperexpand",
+          "output": "2*(sin(x)**2 + cos(x)**2)"
+        },
+        {
+          "call_id": "c_000010",
+          "depth": 1,
+          "func_id": "sympy.simplify.trigsimp.trigsimp",
+          "output": "2"
+        },
+        {
+          "call_id": "c_000011",
+          "depth": 1,
+          "func_id": "sympy.simplify.powsimp.powsimp",
+          "output": "2"
+        },
+        {
+          "call_id": "c_000012",
+          "depth": 1,
+          "func_id": "sympy.simplify.powsimp.powsimp",
+          "output": "2"
+        },
+        {
+          "call_id": "c_000013",
+          "depth": 1,
+          "func_id": "sympy.polys.polytools.cancel",
+          "output": "2"
+        },
+        {
+          "call_id": "c_000014",
+          "depth": 1,
+          "func_id": "sympy.core.exprtools.factor_terms",
+          "output": "2"
+        }
+      ],
+      "tool_steps": [
+        {
+          "args": {
+            "expr": "$0"
+          },
+          "reason": "Combine fractions, cancel common factors, and normalize multiplicative structure.",
+          "result": "$1",
+          "tool": "sympy.rational_simplify",
+          "value": "2*(sin(x)**2 + cos(x)**2)"
+        },
+        {
+          "args": {
+            "expr": "$1"
+          },
+          "reason": "Apply trigonometric identities or deep trig normalization.",
+          "result": "$2",
+          "tool": "sympy.trig_simplify",
+          "value": "2"
+        }
+      ]
+    },
+    {
+      "chain_type": "solve_branching",
+      "entry_function": "solve",
+      "episode_id": "solve_3",
+      "final_output": "[pi/2]",
+      "ideal_tool_steps": [
+        {
+          "args": {
+            "expr": "$0",
+            "symbol_names": [
+              "x"
+            ]
+          },
+          "reason": "Inspect the solver state to expose explicit candidate solution branches.",
+          "result": "$1",
+          "tool": "sympy.inspect_branches",
+          "value": "[{'branch_id': 'b0', 'binding': '{x: pi/2}', 'resolved_value': '{x: pi/2}'}, {'branch_id': 'b1', 'binding': '{x: asin(_t)}', 'resolved_value': '{x: asin(_t)}'}, {'branch_id': 'b2', 'binding': '{x: pi - asin(_t)}', 'resolved_value': '{x: pi - asin(_t)}'}]"
+        },
+        {
+          "args": {
+            "branch_id": "b0",
+            "expr": "$1",
+            "symbol_names": [
+              "x"
+            ]
+          },
+          "reason": "Solve one branch or reduced subproblem produced by the solver.",
+          "result": "$2",
+          "tool": "sympy.solve_branch",
+          "value": "{'branch_id': 'b0', 'binding': '{x: pi/2}', 'resolved_value': '{x: pi/2}'}"
+        }
+      ],
+      "input": "sin(x) - 1",
+      "num_calls": 9,
+      "pattern_label": "mixed",
+      "raw_call_sequence": [
+        {
+          "call_id": "c_000001",
+          "depth": 0,
+          "func_id": "sympy.solvers.solvers.solve",
+          "output": "[pi/2]"
+        },
+        {
+          "call_id": "c_000002",
+          "depth": 1,
+          "func_id": "sympy.solvers.solvers._solve",
+          "output": "[{x: pi/2}]"
+        },
+        {
+          "call_id": "c_000003",
+          "depth": 2,
+          "func_id": "sympy.solvers.solvers.solve_linear",
+          "output": "(sin(x) - 1, 1)"
+        },
+        {
+          "call_id": "c_000004",
+          "depth": 2,
+          "func_id": "sympy.solvers.solvers._solve",
+          "output": "[{x: asin(_t)}, {x: pi - asin(_t)}]"
+        },
+        {
+          "call_id": "c_000005",
+          "depth": 3,
+          "func_id": "sympy.solvers.solvers.solve_linear",
+          "output": "(-_t + sin(x), 1)"
+        },
+        {
+          "call_id": "c_000006",
+          "depth": 3,
+          "func_id": "sympy.solvers.solvers._solve",
+          "output": "[{x: asin(_t)}]"
+        },
+        {
+          "call_id": "c_000007",
+          "depth": 4,
+          "func_id": "sympy.solvers.solvers.solve_linear",
+          "output": "(x, asin(_t))"
+        },
+        {
+          "call_id": "c_000008",
+          "depth": 3,
+          "func_id": "sympy.solvers.solvers._solve",
+          "output": "[{x: pi - asin(_t)}]"
+        },
+        {
+          "call_id": "c_000009",
+          "depth": 4,
+          "func_id": "sympy.solvers.solvers.solve_linear",
+          "output": "(x, pi - asin(_t))"
+        }
+      ],
+      "tool_steps": [
+        {
+          "args": {
+            "expr": "$0",
+            "symbol_names": [
+              "x"
+            ]
+          },
+          "reason": "Start solving the whole equation or system.",
+          "result": "$1",
+          "tool": "sympy.solve",
+          "value": "[pi/2]"
+        },
+        {
+          "args": {
+            "expr": "$1",
+            "symbol_names": [
+              "x"
+            ]
+          },
+          "reason": "Inspect the solver state to expose explicit candidate solution branches.",
+          "result": "$2",
+          "tool": "sympy.inspect_branches",
+          "value": "[{'branch_id': 'b0', 'binding': '{x: pi/2}', 'resolved_value': '{x: pi/2}'}, {'branch_id': 'b1', 'binding': '{x: asin(_t)}', 'resolved_value': '{x: asin(_t)}'}, {'branch_id': 'b2', 'binding': '{x: pi - asin(_t)}', 'resolved_value': '{x: pi - asin(_t)}'}]"
+        },
+        {
+          "args": {
+            "branch_id": "b0",
+            "expr": "$2",
+            "symbol_names": [
+              "x"
+            ]
+          },
+          "reason": "Solve one branch or reduced subproblem produced by the solver.",
+          "result": "$3",
+          "tool": "sympy.solve_branch",
+          "value": "{'branch_id': 'b0', 'binding': '{x: pi/2}', 'resolved_value': '{x: pi/2}'}"
+        },
+        {
+          "args": {
+            "branch_id": "b1",
+            "expr": "$3",
+            "symbol_names": [
+              "x"
+            ]
+          },
+          "reason": "Solve one branch or reduced subproblem produced by the solver.",
+          "result": "$4",
+          "tool": "sympy.solve_branch",
+          "value": "{'branch_id': 'b1', 'binding': '{x: asin(_t)}', 'resolved_value': '{x: asin(_t)}'}"
+        },
+        {
+          "args": {
+            "branch_id": "b2",
+            "expr": "$4",
+            "symbol_names": [
+              "x"
+            ]
+          },
+          "reason": "Solve one branch or reduced subproblem produced by the solver.",
+          "result": "$5",
+          "tool": "sympy.solve_branch",
+          "value": "{'branch_id': 'b2', 'binding': '{x: pi - asin(_t)}', 'resolved_value': '{x: pi - asin(_t)}'}"
+        }
+      ]
+    },
+    {
+      "chain_type": "solve_branching",
+      "entry_function": "solve",
+      "episode_id": "solve_0",
+      "final_output": "[-1, 1]",
+      "ideal_tool_steps": [
+        {
+          "args": {
+            "expr": "$0",
+            "symbol_names": [
+              "x"
+            ]
+          },
+          "reason": "Inspect the solver state to expose explicit candidate solution branches.",
+          "result": "$1",
+          "tool": "sympy.inspect_branches",
+          "value": "[{'branch_id': 'b0', 'binding': '{x: -1}', 'resolved_value': '{x: -1}'}, {'branch_id': 'b1', 'binding': '{x: 1}', 'resolved_value': '{x: 1}'}]"
+        },
+        {
+          "args": {
+            "branch_id": "b0",
+            "expr": "$1",
+            "symbol_names": [
+              "x"
+            ]
+          },
+          "reason": "Solve one branch or reduced subproblem produced by the solver.",
+          "result": "$2",
+          "tool": "sympy.solve_branch",
+          "value": "{'branch_id': 'b0', 'binding': '{x: -1}', 'resolved_value': '{x: -1}'}"
+        }
+      ],
+      "input": "x**2 - 1",
+      "num_calls": 3,
+      "pattern_label": "chain",
+      "raw_call_sequence": [
+        {
+          "call_id": "c_000001",
+          "depth": 0,
+          "func_id": "sympy.solvers.solvers.solve",
+          "output": "[-1, 1]"
+        },
+        {
+          "call_id": "c_000002",
+          "depth": 1,
+          "func_id": "sympy.solvers.solvers._solve",
+          "output": "[{x: -1}, {x: 1}]"
+        },
+        {
+          "call_id": "c_000003",
+          "depth": 2,
+          "func_id": "sympy.solvers.solvers.solve_linear",
+          "output": "(x**2 - 1, 1)"
+        }
+      ],
+      "tool_steps": [
+        {
+          "args": {
+            "expr": "$0",
+            "symbol_names": [
+              "x"
+            ]
+          },
+          "reason": "Start solving the whole equation or system.",
+          "result": "$1",
+          "tool": "sympy.solve",
+          "value": "[-1, 1]"
+        },
+        {
+          "args": {
+            "expr": "$1",
+            "symbol_names": [
+              "x"
+            ]
+          },
+          "reason": "Inspect the solver state to expose explicit candidate solution branches.",
+          "result": "$2",
+          "tool": "sympy.inspect_branches",
+          "value": "[{'branch_id': 'b0', 'binding': '{x: -1}', 'resolved_value': '{x: -1}'}, {'branch_id': 'b1', 'binding': '{x: 1}', 'resolved_value': '{x: 1}'}]"
+        },
+        {
+          "args": {
+            "branch_id": "b0",
+            "expr": "$2",
+            "symbol_names": [
+              "x"
+            ]
+          },
+          "reason": "Solve one branch or reduced subproblem produced by the solver.",
+          "result": "$3",
+          "tool": "sympy.solve_branch",
+          "value": "{'branch_id': 'b0', 'binding': '{x: -1}', 'resolved_value': '{x: -1}'}"
+        },
+        {
+          "args": {
+            "branch_id": "b1",
+            "expr": "$3",
+            "symbol_names": [
+              "x"
+            ]
+          },
+          "reason": "Solve one branch or reduced subproblem produced by the solver.",
+          "result": "$4",
+          "tool": "sympy.solve_branch",
+          "value": "{'branch_id': 'b1', 'binding': '{x: 1}', 'resolved_value': '{x: 1}'}"
+        }
+      ]
+    },
+    {
+      "chain_type": "factor_decompose",
+      "entry_function": "factor",
+      "episode_id": "factor_0",
+      "final_output": "4*x",
+      "ideal_tool_steps": [
+        {
+          "args": {
+            "expr": "$0"
+          },
+          "reason": "Return the factorized form of the current expression.",
+          "result": "$1",
+          "tool": "sympy.factor",
+          "value": "4*x"
+        }
+      ],
+      "input": "(((x + x) + x) + x)",
+      "num_calls": 3,
+      "pattern_label": "chain",
+      "raw_call_sequence": [
+        {
+          "call_id": "c_000001",
+          "depth": 0,
+          "func_id": "sympy.polys.polytools.factor",
+          "output": "4*x"
+        },
+        {
+          "call_id": "c_000002",
+          "depth": 1,
+          "func_id": "sympy.polys.polytools._generic_factor",
+          "output": "4*x"
+        },
+        {
+          "call_id": "c_000003",
+          "depth": 2,
+          "func_id": "sympy.polys.polytools._symbolic_factor",
+          "output": "4*x"
+        }
+      ],
+      "tool_steps": [
+        {
+          "args": {
+            "expr": "$0"
+          },
+          "reason": "Return the factorized form of the current expression.",
+          "result": "$1",
+          "tool": "sympy.factor",
+          "value": "4*x"
+        },
+        {
+          "args": {
+            "expr": "$1"
+          },
+          "reason": "Perform internal polynomial factor decomposition before the final factor form.",
+          "result": "$2",
+          "tool": "sympy.factor_decompose",
+          "value": "4*x"
+        }
+      ]
+    },
+    {
+      "chain_type": "factor_decompose",
+      "entry_function": "factor",
+      "episode_id": "factor_1",
+      "final_output": "sin(y + 3)",
+      "ideal_tool_steps": [
+        {
+          "args": {
+            "expr": "$0"
+          },
+          "reason": "Return the factorized form of the current expression.",
+          "result": "$1",
+          "tool": "sympy.factor",
+          "value": "sin(y + 3)"
+        }
+      ],
+      "input": "sin((((y + 1) + 1) + 1))",
+      "num_calls": 3,
+      "pattern_label": "chain",
+      "raw_call_sequence": [
+        {
+          "call_id": "c_000001",
+          "depth": 0,
+          "func_id": "sympy.polys.polytools.factor",
+          "output": "sin(y + 3)"
+        },
+        {
+          "call_id": "c_000002",
+          "depth": 1,
+          "func_id": "sympy.polys.polytools._generic_factor",
+          "output": "sin(y + 3)"
+        },
+        {
+          "call_id": "c_000003",
+          "depth": 2,
+          "func_id": "sympy.polys.polytools._symbolic_factor",
+          "output": "sin(y + 3)"
+        }
+      ],
+      "tool_steps": [
+        {
+          "args": {
+            "expr": "$0"
+          },
+          "reason": "Return the factorized form of the current expression.",
+          "result": "$1",
+          "tool": "sympy.factor",
+          "value": "sin(y + 3)"
+        },
+        {
+          "args": {
+            "expr": "$1"
+          },
+          "reason": "Perform internal polynomial factor decomposition before the final factor form.",
+          "result": "$2",
+          "tool": "sympy.factor_decompose",
+          "value": "sin(y + 3)"
+        }
+      ]
+    }
+  ]
+}

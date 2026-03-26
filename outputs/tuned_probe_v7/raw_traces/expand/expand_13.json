@@ -1,0 +1,69 @@
+{
+  "calls": {
+    "c_000001": {
+      "call_id": "c_000001",
+      "depth": 0,
+      "duration_ns": 679339,
+      "end_ns": 1230105303822809,
+      "exception": null,
+      "func_id": "sympy.core.function.expand",
+      "inputs": {
+        "expr": {
+          "display": "3*sin(x)",
+          "pickle_b64": "gAWVowAAAAAAAACMDnN5bXB5LmNvcmUubXVslIwDTXVslJOUjBJzeW1weS5jb3JlLm51bWJlcnOUjAdJbnRlZ2VylJOUSwOFlIGUjChzeW1weS5mdW5jdGlvbnMuZWxlbWVudGFyeS50cmlnb25vbWV0cmljlIwDc2lulJOUjBFzeW1weS5jb3JlLnN5bWJvbJSMBlN5bWJvbJSTlIwBeJSFlIGUhZSBlIaUgZQu",
+          "python_type": "sympy.core.mul.Mul",
+          "repr": "3*sin(x)",
+          "srepr": "Mul(Integer(3), sin(Symbol('x')))",
+          "type_tag": "sympy.Basic"
+        }
+      },
+      "output": {
+        "display": "3*sin(x)",
+        "pickle_b64": "gAWVowAAAAAAAACMDnN5bXB5LmNvcmUubXVslIwDTXVslJOUjBJzeW1weS5jb3JlLm51bWJlcnOUjAdJbnRlZ2VylJOUSwOFlIGUjChzeW1weS5mdW5jdGlvbnMuZWxlbWVudGFyeS50cmlnb25vbWV0cmljlIwDc2lulJOUjBFzeW1weS5jb3JlLnN5bWJvbJSMBlN5bWJvbJSTlIwBeJSFlIGUhZSBlIaUgZQu",
+        "python_type": "sympy.core.mul.Mul",
+        "repr": "3*sin(x)",
+        "srepr": "Mul(Integer(3), sin(Symbol('x')))",
+        "type_tag": "sympy.Basic"
+      },
+      "parent_call_id": null,
+      "start_ns": 1230105303143470,
+      "subcalls": [],
+      "thread_id": 126840304047936
+    }
+  },
+  "episode": {
+    "call_ids": [
+      "c_000001"
+    ],
+    "duration_ms": 9.463855996727943,
+    "entry_func_id": "expand",
+    "episode_id": "expand_13",
+    "final_output": {
+      "display": "3*sin(x)",
+      "pickle_b64": "gAWVowAAAAAAAACMDnN5bXB5LmNvcmUubXVslIwDTXVslJOUjBJzeW1weS5jb3JlLm51bWJlcnOUjAdJbnRlZ2VylJOUSwOFlIGUjChzeW1weS5mdW5jdGlvbnMuZWxlbWVudGFyeS50cmlnb25vbWV0cmljlIwDc2lulJOUjBFzeW1weS5jb3JlLnN5bWJvbJSMBlN5bWJvbJSTlIwBeJSFlIGUhZSBlIaUgZQu",
+      "python_type": "sympy.core.mul.Mul",
+      "repr": "3*sin(x)",
+      "srepr": "Mul(Integer(3), sin(Symbol('x')))",
+      "type_tag": "sympy.Basic"
+    },
+    "input": {
+      "expr": {
+        "display": "(sin(x) * 3)",
+        "pickle_b64": "gAWVEAAAAAAAAACMDChzaW4oeCkgKiAzKZQu",
+        "python_type": "builtins.str",
+        "repr": "'(sin(x) * 3)'",
+        "type_tag": "python"
+      }
+    },
+    "input_seed": 13,
+    "max_depth": 0,
+    "metadata": {
+      "entrypoint_name": "expand"
+    },
+    "num_calls": 1,
+    "pattern_label": "chain",
+    "root_call_id": "c_000001",
+    "status": "ok",
+    "task_family": "expand"
+  }
+}

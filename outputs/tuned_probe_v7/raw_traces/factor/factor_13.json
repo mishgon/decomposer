@@ -1,0 +1,190 @@
+{
+  "calls": {
+    "c_000001": {
+      "call_id": "c_000001",
+      "depth": 0,
+      "duration_ns": 3562904,
+      "end_ns": 1230105328793892,
+      "exception": null,
+      "func_id": "sympy.polys.polytools.factor",
+      "inputs": {
+        "expr": {
+          "display": "3*sin(x)",
+          "pickle_b64": "gAWVowAAAAAAAACMDnN5bXB5LmNvcmUubXVslIwDTXVslJOUjBJzeW1weS5jb3JlLm51bWJlcnOUjAdJbnRlZ2VylJOUSwOFlIGUjChzeW1weS5mdW5jdGlvbnMuZWxlbWVudGFyeS50cmlnb25vbWV0cmljlIwDc2lulJOUjBFzeW1weS5jb3JlLnN5bWJvbJSMBlN5bWJvbJSTlIwBeJSFlIGUhZSBlIaUgZQu",
+          "python_type": "sympy.core.mul.Mul",
+          "repr": "3*sin(x)",
+          "srepr": "Mul(Integer(3), sin(Symbol('x')))",
+          "type_tag": "sympy.Basic"
+        }
+      },
+      "output": {
+        "display": "3*sin(x)",
+        "pickle_b64": "gAWVowAAAAAAAACMDnN5bXB5LmNvcmUubXVslIwDTXVslJOUjBJzeW1weS5jb3JlLm51bWJlcnOUjAdJbnRlZ2VylJOUSwOFlIGUjChzeW1weS5mdW5jdGlvbnMuZWxlbWVudGFyeS50cmlnb25vbWV0cmljlIwDc2lulJOUjBFzeW1weS5jb3JlLnN5bWJvbJSMBlN5bWJvbJSTlIwBeJSFlIGUhZSBlIaUgZQu",
+        "python_type": "sympy.core.mul.Mul",
+        "repr": "3*sin(x)",
+        "srepr": "Mul(Integer(3), sin(Symbol('x')))",
+        "type_tag": "sympy.Basic"
+      },
+      "parent_call_id": null,
+      "start_ns": 1230105325230988,
+      "subcalls": [
+        "c_000002"
+      ],
+      "thread_id": 126840304047936
+    },
+    "c_000002": {
+      "call_id": "c_000002",
+      "depth": 1,
+      "duration_ns": 2809493,
+      "end_ns": 1230105328622666,
+      "exception": null,
+      "func_id": "sympy.polys.polytools._generic_factor",
+      "inputs": {
+        "arg0": {
+          "display": "3*sin(x)",
+          "pickle_b64": "gAWVowAAAAAAAACMDnN5bXB5LmNvcmUubXVslIwDTXVslJOUjBJzeW1weS5jb3JlLm51bWJlcnOUjAdJbnRlZ2VylJOUSwOFlIGUjChzeW1weS5mdW5jdGlvbnMuZWxlbWVudGFyeS50cmlnb25vbWV0cmljlIwDc2lulJOUjBFzeW1weS5jb3JlLnN5bWJvbJSMBlN5bWJvbJSTlIwBeJSFlIGUhZSBlIaUgZQu",
+          "python_type": "sympy.core.mul.Mul",
+          "repr": "3*sin(x)",
+          "srepr": "Mul(Integer(3), sin(Symbol('x')))",
+          "type_tag": "sympy.Basic"
+        },
+        "arg1": {
+          "display": "()",
+          "items": [],
+          "pickle_b64": "gAUpLg==",
+          "python_type": "builtins.tuple",
+          "repr": "()",
+          "type_tag": "sequence"
+        },
+        "arg2": {
+          "display": "{}",
+          "items": [],
+          "pickle_b64": "gAV9lC4=",
+          "python_type": "builtins.dict",
+          "repr": "{}",
+          "type_tag": "mapping"
+        },
+        "method": {
+          "display": "factor",
+          "pickle_b64": "gAWVCgAAAAAAAACMBmZhY3RvcpQu",
+          "python_type": "builtins.str",
+          "repr": "'factor'",
+          "type_tag": "python"
+        }
+      },
+      "output": {
+        "display": "3*sin(x)",
+        "pickle_b64": "gAWVowAAAAAAAACMDnN5bXB5LmNvcmUubXVslIwDTXVslJOUjBJzeW1weS5jb3JlLm51bWJlcnOUjAdJbnRlZ2VylJOUSwOFlIGUjChzeW1weS5mdW5jdGlvbnMuZWxlbWVudGFyeS50cmlnb25vbWV0cmljlIwDc2lulJOUjBFzeW1weS5jb3JlLnN5bWJvbJSMBlN5bWJvbJSTlIwBeJSFlIGUhZSBlIaUgZQu",
+        "python_type": "sympy.core.mul.Mul",
+        "repr": "3*sin(x)",
+        "srepr": "Mul(Integer(3), sin(Symbol('x')))",
+        "type_tag": "sympy.Basic"
+      },
+      "parent_call_id": "c_000001",
+      "start_ns": 1230105325813173,
+      "subcalls": [
+        "c_000003"
+      ],
+      "thread_id": 126840304047936
+    },
+    "c_000003": {
+      "call_id": "c_000003",
+      "depth": 2,
+      "duration_ns": 1623444,
+      "end_ns": 1230105328445622,
+      "exception": null,
+      "func_id": "sympy.polys.polytools._symbolic_factor",
+      "inputs": {
+        "arg0": {
+          "display": "3*sin(x)",
+          "pickle_b64": "gAWVowAAAAAAAACMDnN5bXB5LmNvcmUubXVslIwDTXVslJOUjBJzeW1weS5jb3JlLm51bWJlcnOUjAdJbnRlZ2VylJOUSwOFlIGUjChzeW1weS5mdW5jdGlvbnMuZWxlbWVudGFyeS50cmlnb25vbWV0cmljlIwDc2lulJOUjBFzeW1weS5jb3JlLnN5bWJvbJSMBlN5bWJvbJSTlIwBeJSFlIGUhZSBlIaUgZQu",
+          "python_type": "sympy.core.mul.Mul",
+          "repr": "3*sin(x)",
+          "srepr": "Mul(Integer(3), sin(Symbol('x')))",
+          "type_tag": "sympy.Basic"
+        },
+        "arg1": {
+          "display": "{'fraction': True}",
+          "items": [
+            {
+              "key": {
+                "display": "fraction",
+                "pickle_b64": "gAWVDAAAAAAAAACMCGZyYWN0aW9ulC4=",
+                "python_type": "builtins.str",
+                "repr": "'fraction'",
+                "type_tag": "python"
+              },
+              "value": {
+                "display": "True",
+                "pickle_b64": "gAWILg==",
+                "python_type": "builtins.bool",
+                "repr": "True",
+                "type_tag": "python"
+              }
+            }
+          ],
+          "pickle_b64": "gAWVNwAAAAAAAACMF3N5bXB5LnBvbHlzLnBvbHlvcHRpb25zlIwHT3B0aW9uc5STlCmBlIwIZnJhY3Rpb26UiHMu",
+          "python_type": "sympy.polys.polyoptions.Options",
+          "repr": "{'fraction': True}",
+          "type_tag": "mapping"
+        },
+        "arg2": {
+          "display": "factor",
+          "pickle_b64": "gAWVCgAAAAAAAACMBmZhY3RvcpQu",
+          "python_type": "builtins.str",
+          "repr": "'factor'",
+          "type_tag": "python"
+        }
+      },
+      "output": {
+        "display": "3*sin(x)",
+        "pickle_b64": "gAWVowAAAAAAAACMDnN5bXB5LmNvcmUubXVslIwDTXVslJOUjBJzeW1weS5jb3JlLm51bWJlcnOUjAdJbnRlZ2VylJOUSwOFlIGUjChzeW1weS5mdW5jdGlvbnMuZWxlbWVudGFyeS50cmlnb25vbWV0cmljlIwDc2lulJOUjBFzeW1weS5jb3JlLnN5bWJvbJSMBlN5bWJvbJSTlIwBeJSFlIGUhZSBlIaUgZQu",
+        "python_type": "sympy.core.mul.Mul",
+        "repr": "3*sin(x)",
+        "srepr": "Mul(Integer(3), sin(Symbol('x')))",
+        "type_tag": "sympy.Basic"
+      },
+      "parent_call_id": "c_000002",
+      "start_ns": 1230105326822178,
+      "subcalls": [],
+      "thread_id": 126840304047936
+    }
+  },
+  "episode": {
+    "call_ids": [
+      "c_000001",
+      "c_000002",
+      "c_000003"
+    ],
+    "duration_ms": 14.485389925539494,
+    "entry_func_id": "factor",
+    "episode_id": "factor_13",
+    "final_output": {
+      "display": "3*sin(x)",
+      "pickle_b64": "gAWVowAAAAAAAACMDnN5bXB5LmNvcmUubXVslIwDTXVslJOUjBJzeW1weS5jb3JlLm51bWJlcnOUjAdJbnRlZ2VylJOUSwOFlIGUjChzeW1weS5mdW5jdGlvbnMuZWxlbWVudGFyeS50cmlnb25vbWV0cmljlIwDc2lulJOUjBFzeW1weS5jb3JlLnN5bWJvbJSMBlN5bWJvbJSTlIwBeJSFlIGUhZSBlIaUgZQu",
+      "python_type": "sympy.core.mul.Mul",
+      "repr": "3*sin(x)",
+      "srepr": "Mul(Integer(3), sin(Symbol('x')))",
+      "type_tag": "sympy.Basic"
+    },
+    "input": {
+      "expr": {
+        "display": "(sin(x) * 3)",
+        "pickle_b64": "gAWVEAAAAAAAAACMDChzaW4oeCkgKiAzKZQu",
+        "python_type": "builtins.str",
+        "repr": "'(sin(x) * 3)'",
+        "type_tag": "python"
+      }
+    },
+    "input_seed": 13,
+    "max_depth": 2,
+    "metadata": {
+      "entrypoint_name": "factor"
+    },
+    "num_calls": 3,
+    "pattern_label": "chain",
+    "root_call_id": "c_000001",
+    "status": "ok",
+    "task_family": "factor"
+  }
+}

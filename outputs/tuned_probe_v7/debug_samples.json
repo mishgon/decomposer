@@ -1,0 +1,1773 @@
+{
+  "abstract_samples": [
+    {
+      "final_answer": {
+        "display": "cos(sin(sin(x + 2)))",
+        "pickle_b64": "gAWVtwAAAAAAAACMKHN5bXB5LmZ1bmN0aW9ucy5lbGVtZW50YXJ5LnRyaWdvbm9tZXRyaWOUjANjb3OUk5RoAIwDc2lulJOUaASMDnN5bXB5LmNvcmUuYWRklIwDQWRklJOUjBJzeW1weS5jb3JlLm51bWJlcnOUjAdJbnRlZ2VylJOUSwKFlIGUjBFzeW1weS5jb3JlLnN5bWJvbJSMBlN5bWJvbJSTlIwBeJSFlIGUhpSBlIWUgZSFlIGUhZSBlC4=",
+        "python_type": "sympy.functions.elementary.trigonometric.cos",
+        "repr": "cos(sin(sin(x + 2)))",
+        "srepr": "cos(sin(sin(Add(Symbol('x'), Integer(2)))))",
+        "type_tag": "sympy.Basic"
+      },
+      "gold_trajectory": [
+        {
+          "assistant": {
+            "tool_call": {
+              "args": {
+                "arg0": "x + 2",
+                "doit": "True",
+                "inverse": "False",
+                "measure": "<function count_ops at 0x735c4dcbd120>",
+                "ratio": "1.7",
+                "rational": "False"
+              },
+              "tool": "sympy.simplify"
+            }
+          }
+        },
+        {
+          "tool": {
+            "result": "$1",
+            "value": "x + 2"
+          }
+        },
+        {
+          "assistant": {
+            "tool_call": {
+              "args": {
+                "arg0": "x + 2"
+              },
+              "tool": "sympy.rational_simplify"
+            }
+          }
+        },
+        {
+          "tool": {
+            "result": "$2",
+            "value": "x + 2"
+          }
+        },
+        {
+          "assistant": {
+            "tool_call": {
+              "args": {
+                "arg0": "sin(x + 2)",
+                "doit": "True",
+                "inverse": "False",
+                "measure": "<function count_ops at 0x735c4dcbd120>",
+                "ratio": "1.7",
+                "rational": "False"
+              },
+              "tool": "sympy.simplify"
+            }
+          }
+        },
+        {
+          "tool": {
+            "result": "$3",
+            "value": "sin(x + 2)"
+          }
+        },
+        {
+          "assistant": {
+            "tool_call": {
+              "args": {
+                "arg0": "x + 2",
+                "doit": "True",
+                "inverse": "False",
+                "measure": "<function count_ops at 0x735c4dcbd120>",
+                "ratio": "1.7",
+                "rational": "False"
+              },
+              "tool": "sympy.simplify"
+            }
+          }
+        },
+        {
+          "tool": {
+            "result": "$4",
+            "value": "x + 2"
+          }
+        },
+        {
+          "assistant": {
+            "tool_call": {
+              "args": {
+                "arg0": "x + 2"
+              },
+              "tool": "sympy.rational_simplify"
+            }
+          }
+        },
+        {
+          "tool": {
+            "result": "$5",
+            "value": "x + 2"
+          }
+        },
+        {
+          "assistant": {
+            "tool_call": {
+              "args": {
+                "arg0": "sin(sin(x + 2))",
+                "doit": "True",
+                "inverse": "False",
+                "measure": "<function count_ops at 0x735c4dcbd120>",
+                "ratio": "1.7",
+                "rational": "False"
+              },
+              "tool": "sympy.simplify"
+            }
+          }
+        },
+        {
+          "tool": {
+            "result": "$6",
+            "value": "sin(sin(x + 2))"
+          }
+        },
+        {
+          "assistant": {
+            "tool_call": {
+              "args": {
+                "arg0": "x + 2",
+                "doit": "True",
+                "inverse": "False",
+                "measure": "<function count_ops at 0x735c4dcbd120>",
+                "ratio": "1.7",
+                "rational": "False"
+              },
+              "tool": "sympy.simplify"
+            }
+          }
+        },
+        {
+          "tool": {
+            "result": "$7",
+            "value": "x + 2"
+          }
+        },
+        {
+          "assistant": {
+            "tool_call": {
+              "args": {
+                "arg0": "x + 2"
+              },
+              "tool": "sympy.rational_simplify"
+            }
+          }
+        },
+        {
+          "tool": {
+            "result": "$8",
+            "value": "x + 2"
+          }
+        },
+        {
+          "assistant": {
+            "tool_call": {
+              "args": {
+                "arg0": "sin(x + 2)",
+                "doit": "True",
+                "inverse": "False",
+                "measure": "<function count_ops at 0x735c4dcbd120>",
+                "ratio": "1.7",
+                "rational": "False"
+              },
+              "tool": "sympy.simplify"
+            }
+          }
+        },
+        {
+          "tool": {
+            "result": "$9",
+            "value": "sin(x + 2)"
+          }
+        },
+        {
+          "assistant": {
+            "tool_call": {
+              "args": {
+                "arg0": "x + 2",
+                "doit": "True",
+                "inverse": "False",
+                "measure": "<function count_ops at 0x735c4dcbd120>",
+                "ratio": "1.7",
+                "rational": "False"
+              },
+              "tool": "sympy.simplify"
+            }
+          }
+        },
+        {
+          "tool": {
+            "result": "$10",
+            "value": "x + 2"
+          }
+        },
+        {
+          "assistant": {
+            "tool_call": {
+              "args": {
+                "arg0": "x + 2"
+              },
+              "tool": "sympy.rational_simplify"
+            }
+          }
+        },
+        {
+          "tool": {
+            "result": "$11",
+            "value": "x + 2"
+          }
+        }
+      ],
+      "metadata": {
+        "episode_id": "simplify_2",
+        "pattern_label": "mixed",
+        "status": "ok"
+      },
+      "task": {
+        "entry_function": "simplify",
+        "goal": "match SymPy reference output",
+        "input": {
+          "expr": {
+            "display": "cos(sin(sin((x + 2))))",
+            "pickle_b64": "gAWVGgAAAAAAAACMFmNvcyhzaW4oc2luKCh4ICsgMikpKSmULg==",
+            "python_type": "builtins.str",
+            "repr": "'cos(sin(sin((x + 2))))'",
+            "type_tag": "python"
+          }
+        }
+      },
+      "tools": [
+        "sympy.rational_simplify",
+        "sympy.simplify"
+      ]
+    },
+    {
+      "final_answer": {
+        "display": "[pi/2]",
+        "items": [
+          {
+            "display": "pi/2",
+            "pickle_b64": "gAWVSwAAAAAAAACMDnN5bXB5LmNvcmUubXVslIwDTXVslJOUjBJzeW1weS5jb3JlLm51bWJlcnOUjARIYWxmlJOUKYGUaAOMAlBplJOUKYGUhpSBlC4=",
+            "python_type": "sympy.core.mul.Mul",
+            "repr": "pi/2",
+            "srepr": "Mul(Rational(1, 2), pi)",
+            "type_tag": "sympy.Basic"
+          }
+        ],
+        "pickle_b64": "gAWVTgAAAAAAAABdlIwOc3ltcHkuY29yZS5tdWyUjANNdWyUk5SMEnN5bXB5LmNvcmUubnVtYmVyc5SMBEhhbGaUk5QpgZRoBIwCUGmUk5QpgZSGlIGUYS4=",
+        "python_type": "builtins.list",
+        "repr": "[pi/2]",
+        "type_tag": "sequence"
+      },
+      "gold_trajectory": [
+        {
+          "assistant": {
+            "tool_call": {
+              "args": {
+                "expr": "sin(x) - 1",
+                "symbol_names": "['x']"
+              },
+              "tool": "sympy.solve"
+            }
+          }
+        },
+        {
+          "tool": {
+            "result": "$1",
+            "value": "[pi/2]"
+          }
+        },
+        {
+          "assistant": {
+            "tool_call": {
+              "args": {
+                "_denominators": "set()",
+                "arg0": "sin(x) - 1",
+                "arg1": "x",
+                "cubics": "True",
+                "quartics": "True",
+                "quintics": "True"
+              },
+              "tool": "sympy.inspect_branches"
+            }
+          }
+        },
+        {
+          "tool": {
+            "result": "$2",
+            "value": "[{'branch_id': 'b0', 'binding': '{x: pi/2}', 'resolved_value': '{x: pi/2}'}, {'branch_id': 'b1', 'binding': '{x: asin(_t)}', 'resolved_value': '{x: asin(_t)}'}, {'branch_id': 'b2', 'binding': '{x: pi - asin(_t)}', 'resolved_value': '{x: pi - asin(_t)}'}]"
+          }
+        },
+        {
+          "assistant": {
+            "tool_call": {
+              "args": {
+                "_denominators": "set()",
+                "arg0": "sin(x) - 1",
+                "arg1": "x",
+                "branch_id": "b0",
+                "cubics": "True",
+                "quartics": "True",
+                "quintics": "True"
+              },
+              "tool": "sympy.solve_branch"
+            }
+          }
+        },
+        {
+          "tool": {
+            "result": "$3",
+            "value": "{'branch_id': 'b0', 'binding': '{x: pi/2}', 'resolved_value': '{x: pi/2}'}"
+          }
+        },
+        {
+          "assistant": {
+            "tool_call": {
+              "args": {
+                "_denominators": "set()",
+                "arg0": "sin(x) - 1",
+                "arg1": "x",
+                "branch_id": "b1",
+                "cubics": "True",
+                "quartics": "True",
+                "quintics": "True"
+              },
+              "tool": "sympy.solve_branch"
+            }
+          }
+        },
+        {
+          "tool": {
+            "result": "$4",
+            "value": "{'branch_id': 'b1', 'binding': '{x: asin(_t)}', 'resolved_value': '{x: asin(_t)}'}"
+          }
+        },
+        {
+          "assistant": {
+            "tool_call": {
+              "args": {
+                "_denominators": "set()",
+                "arg0": "sin(x) - 1",
+                "arg1": "x",
+                "branch_id": "b2",
+                "cubics": "True",
+                "quartics": "True",
+                "quintics": "True"
+              },
+              "tool": "sympy.solve_branch"
+            }
+          }
+        },
+        {
+          "tool": {
+            "result": "$5",
+            "value": "{'branch_id': 'b2', 'binding': '{x: pi - asin(_t)}', 'resolved_value': '{x: pi - asin(_t)}'}"
+          }
+        }
+      ],
+      "metadata": {
+        "episode_id": "solve_3",
+        "pattern_label": "mixed",
+        "status": "ok"
+      },
+      "task": {
+        "entry_function": "solve",
+        "goal": "match SymPy reference output",
+        "input": {
+          "expr": {
+            "display": "sin(x) - 1",
+            "pickle_b64": "gAWVDgAAAAAAAACMCnNpbih4KSAtIDGULg==",
+            "python_type": "builtins.str",
+            "repr": "'sin(x) - 1'",
+            "type_tag": "python"
+          },
+          "symbol_names": {
+            "display": "['x']",
+            "items": [
+              {
+                "display": "x",
+                "pickle_b64": "gAWVBQAAAAAAAACMAXiULg==",
+                "python_type": "builtins.str",
+                "repr": "'x'",
+                "type_tag": "python"
+              }
+            ],
+            "pickle_b64": "gAWVCAAAAAAAAABdlIwBeJRhLg==",
+            "python_type": "builtins.list",
+            "repr": "['x']",
+            "type_tag": "sequence"
+          }
+        }
+      },
+      "tools": [
+        "sympy.inspect_branches",
+        "sympy.solve",
+        "sympy.solve_branch"
+      ]
+    },
+    {
+      "final_answer": {
+        "display": "[pi/2]",
+        "items": [
+          {
+            "display": "pi/2",
+            "pickle_b64": "gAWVSwAAAAAAAACMDnN5bXB5LmNvcmUubXVslIwDTXVslJOUjBJzeW1weS5jb3JlLm51bWJlcnOUjARIYWxmlJOUKYGUaAOMAlBplJOUKYGUhpSBlC4=",
+            "python_type": "sympy.core.mul.Mul",
+            "repr": "pi/2",
+            "srepr": "Mul(Rational(1, 2), pi)",
+            "type_tag": "sympy.Basic"
+          }
+        ],
+        "pickle_b64": "gAWVTgAAAAAAAABdlIwOc3ltcHkuY29yZS5tdWyUjANNdWyUk5SMEnN5bXB5LmNvcmUubnVtYmVyc5SMBEhhbGaUk5QpgZRoBIwCUGmUk5QpgZSGlIGUYS4=",
+        "python_type": "builtins.list",
+        "repr": "[pi/2]",
+        "type_tag": "sequence"
+      },
+      "gold_trajectory": [
+        {
+          "assistant": {
+            "tool_call": {
+              "args": {
+                "expr": "sin(x) - 1",
+                "symbol_names": "['x']"
+              },
+              "tool": "sympy.solve"
+            }
+          }
+        },
+        {
+          "tool": {
+            "result": "$1",
+            "value": "[pi/2]"
+          }
+        },
+        {
+          "assistant": {
+            "tool_call": {
+              "args": {
+                "_denominators": "set()",
+                "arg0": "sin(x) - 1",
+                "arg1": "x",
+                "cubics": "True",
+                "quartics": "True",
+                "quintics": "True"
+              },
+              "tool": "sympy.inspect_branches"
+            }
+          }
+        },
+        {
+          "tool": {
+            "result": "$2",
+            "value": "[{'branch_id': 'b0', 'binding': '{x: pi/2}', 'resolved_value': '{x: pi/2}'}, {'branch_id': 'b1', 'binding': '{x: asin(_t)}', 'resolved_value': '{x: asin(_t)}'}, {'branch_id': 'b2', 'binding': '{x: pi - asin(_t)}', 'resolved_value': '{x: pi - asin(_t)}'}]"
+          }
+        },
+        {
+          "assistant": {
+            "tool_call": {
+              "args": {
+                "_denominators": "set()",
+                "arg0": "sin(x) - 1",
+                "arg1": "x",
+                "branch_id": "b0",
+                "cubics": "True",
+                "quartics": "True",
+                "quintics": "True"
+              },
+              "tool": "sympy.solve_branch"
+            }
+          }
+        },
+        {
+          "tool": {
+            "result": "$3",
+            "value": "{'branch_id': 'b0', 'binding': '{x: pi/2}', 'resolved_value': '{x: pi/2}'}"
+          }
+        },
+        {
+          "assistant": {
+            "tool_call": {
+              "args": {
+                "_denominators": "set()",
+                "arg0": "sin(x) - 1",
+                "arg1": "x",
+                "branch_id": "b1",
+                "cubics": "True",
+                "quartics": "True",
+                "quintics": "True"
+              },
+              "tool": "sympy.solve_branch"
+            }
+          }
+        },
+        {
+          "tool": {
+            "result": "$4",
+            "value": "{'branch_id': 'b1', 'binding': '{x: asin(_t)}', 'resolved_value': '{x: asin(_t)}'}"
+          }
+        },
+        {
+          "assistant": {
+            "tool_call": {
+              "args": {
+                "_denominators": "set()",
+                "arg0": "sin(x) - 1",
+                "arg1": "x",
+                "branch_id": "b2",
+                "cubics": "True",
+                "quartics": "True",
+                "quintics": "True"
+              },
+              "tool": "sympy.solve_branch"
+            }
+          }
+        },
+        {
+          "tool": {
+            "result": "$5",
+            "value": "{'branch_id': 'b2', 'binding': '{x: pi - asin(_t)}', 'resolved_value': '{x: pi - asin(_t)}'}"
+          }
+        }
+      ],
+      "metadata": {
+        "episode_id": "solve_8",
+        "pattern_label": "mixed",
+        "status": "ok"
+      },
+      "task": {
+        "entry_function": "solve",
+        "goal": "match SymPy reference output",
+        "input": {
+          "expr": {
+            "display": "sin(x) - 1",
+            "pickle_b64": "gAWVDgAAAAAAAACMCnNpbih4KSAtIDGULg==",
+            "python_type": "builtins.str",
+            "repr": "'sin(x) - 1'",
+            "type_tag": "python"
+          },
+          "symbol_names": {
+            "display": "['x']",
+            "items": [
+              {
+                "display": "x",
+                "pickle_b64": "gAWVBQAAAAAAAACMAXiULg==",
+                "python_type": "builtins.str",
+                "repr": "'x'",
+                "type_tag": "python"
+              }
+            ],
+            "pickle_b64": "gAWVCAAAAAAAAABdlIwBeJRhLg==",
+            "python_type": "builtins.list",
+            "repr": "['x']",
+            "type_tag": "sequence"
+          }
+        }
+      },
+      "tools": [
+        "sympy.inspect_branches",
+        "sympy.solve",
+        "sympy.solve_branch"
+      ]
+    },
+    {
+      "final_answer": {
+        "display": "[pi/2]",
+        "items": [
+          {
+            "display": "pi/2",
+            "pickle_b64": "gAWVSwAAAAAAAACMDnN5bXB5LmNvcmUubXVslIwDTXVslJOUjBJzeW1weS5jb3JlLm51bWJlcnOUjARIYWxmlJOUKYGUaAOMAlBplJOUKYGUhpSBlC4=",
+            "python_type": "sympy.core.mul.Mul",
+            "repr": "pi/2",
+            "srepr": "Mul(Rational(1, 2), pi)",
+            "type_tag": "sympy.Basic"
+          }
+        ],
+        "pickle_b64": "gAWVTgAAAAAAAABdlIwOc3ltcHkuY29yZS5tdWyUjANNdWyUk5SMEnN5bXB5LmNvcmUubnVtYmVyc5SMBEhhbGaUk5QpgZRoBIwCUGmUk5QpgZSGlIGUYS4=",
+        "python_type": "builtins.list",
+        "repr": "[pi/2]",
+        "type_tag": "sequence"
+      },
+      "gold_trajectory": [
+        {
+          "assistant": {
+            "tool_call": {
+              "args": {
+                "expr": "sin(x) - 1",
+                "symbol_names": "['x']"
+              },
+              "tool": "sympy.solve"
+            }
+          }
+        },
+        {
+          "tool": {
+            "result": "$1",
+            "value": "[pi/2]"
+          }
+        },
+        {
+          "assistant": {
+            "tool_call": {
+              "args": {
+                "_denominators": "set()",
+                "arg0": "sin(x) - 1",
+                "arg1": "x",
+                "cubics": "True",
+                "quartics": "True",
+                "quintics": "True"
+              },
+              "tool": "sympy.inspect_branches"
+            }
+          }
+        },
+        {
+          "tool": {
+            "result": "$2",
+            "value": "[{'branch_id': 'b0', 'binding': '{x: pi/2}', 'resolved_value': '{x: pi/2}'}, {'branch_id': 'b1', 'binding': '{x: asin(_t)}', 'resolved_value': '{x: asin(_t)}'}, {'branch_id': 'b2', 'binding': '{x: pi - asin(_t)}', 'resolved_value': '{x: pi - asin(_t)}'}]"
+          }
+        },
+        {
+          "assistant": {
+            "tool_call": {
+              "args": {
+                "_denominators": "set()",
+                "arg0": "sin(x) - 1",
+                "arg1": "x",
+                "branch_id": "b0",
+                "cubics": "True",
+                "quartics": "True",
+                "quintics": "True"
+              },
+              "tool": "sympy.solve_branch"
+            }
+          }
+        },
+        {
+          "tool": {
+            "result": "$3",
+            "value": "{'branch_id': 'b0', 'binding': '{x: pi/2}', 'resolved_value': '{x: pi/2}'}"
+          }
+        },
+        {
+          "assistant": {
+            "tool_call": {
+              "args": {
+                "_denominators": "set()",
+                "arg0": "sin(x) - 1",
+                "arg1": "x",
+                "branch_id": "b1",
+                "cubics": "True",
+                "quartics": "True",
+                "quintics": "True"
+              },
+              "tool": "sympy.solve_branch"
+            }
+          }
+        },
+        {
+          "tool": {
+            "result": "$4",
+            "value": "{'branch_id': 'b1', 'binding': '{x: asin(_t)}', 'resolved_value': '{x: asin(_t)}'}"
+          }
+        },
+        {
+          "assistant": {
+            "tool_call": {
+              "args": {
+                "_denominators": "set()",
+                "arg0": "sin(x) - 1",
+                "arg1": "x",
+                "branch_id": "b2",
+                "cubics": "True",
+                "quartics": "True",
+                "quintics": "True"
+              },
+              "tool": "sympy.solve_branch"
+            }
+          }
+        },
+        {
+          "tool": {
+            "result": "$5",
+            "value": "{'branch_id': 'b2', 'binding': '{x: pi - asin(_t)}', 'resolved_value': '{x: pi - asin(_t)}'}"
+          }
+        }
+      ],
+      "metadata": {
+        "episode_id": "solve_10",
+        "pattern_label": "mixed",
+        "status": "ok"
+      },
+      "task": {
+        "entry_function": "solve",
+        "goal": "match SymPy reference output",
+        "input": {
+          "expr": {
+            "display": "sin(x) - 1",
+            "pickle_b64": "gAWVDgAAAAAAAACMCnNpbih4KSAtIDGULg==",
+            "python_type": "builtins.str",
+            "repr": "'sin(x) - 1'",
+            "type_tag": "python"
+          },
+          "symbol_names": {
+            "display": "['x']",
+            "items": [
+              {
+                "display": "x",
+                "pickle_b64": "gAWVBQAAAAAAAACMAXiULg==",
+                "python_type": "builtins.str",
+                "repr": "'x'",
+                "type_tag": "python"
+              }
+            ],
+            "pickle_b64": "gAWVCAAAAAAAAABdlIwBeJRhLg==",
+            "python_type": "builtins.list",
+            "repr": "['x']",
+            "type_tag": "sequence"
+          }
+        }
+      },
+      "tools": [
+        "sympy.inspect_branches",
+        "sympy.solve",
+        "sympy.solve_branch"
+      ]
+    },
+    {
+      "final_answer": {
+        "display": "cos(sin(x + 2))",
+        "pickle_b64": "gAWVsQAAAAAAAACMKHN5bXB5LmZ1bmN0aW9ucy5lbGVtZW50YXJ5LnRyaWdvbm9tZXRyaWOUjANjb3OUk5RoAIwDc2lulJOUjA5zeW1weS5jb3JlLmFkZJSMA0FkZJSTlIwSc3ltcHkuY29yZS5udW1iZXJzlIwHSW50ZWdlcpSTlEsChZSBlIwRc3ltcHkuY29yZS5zeW1ib2yUjAZTeW1ib2yUk5SMAXiUhZSBlIaUgZSFlIGUhZSBlC4=",
+        "python_type": "sympy.functions.elementary.trigonometric.cos",
+        "repr": "cos(sin(x + 2))",
+        "srepr": "cos(sin(Add(Symbol('x'), Integer(2))))",
+        "type_tag": "sympy.Basic"
+      },
+      "gold_trajectory": [
+        {
+          "assistant": {
+            "tool_call": {
+              "args": {
+                "arg0": "x + 2",
+                "doit": "True",
+                "inverse": "False",
+                "measure": "<function count_ops at 0x735c4dcbd120>",
+                "ratio": "1.7",
+                "rational": "False"
+              },
+              "tool": "sympy.simplify"
+            }
+          }
+        },
+        {
+          "tool": {
+            "result": "$1",
+            "value": "x + 2"
+          }
+        },
+        {
+          "assistant": {
+            "tool_call": {
+              "args": {
+                "arg0": "x + 2"
+              },
+              "tool": "sympy.rational_simplify"
+            }
+          }
+        },
+        {
+          "tool": {
+            "result": "$2",
+            "value": "x + 2"
+          }
+        },
+        {
+          "assistant": {
+            "tool_call": {
+              "args": {
+                "arg0": "sin(x + 2)",
+                "doit": "True",
+                "inverse": "False",
+                "measure": "<function count_ops at 0x735c4dcbd120>",
+                "ratio": "1.7",
+                "rational": "False"
+              },
+              "tool": "sympy.simplify"
+            }
+          }
+        },
+        {
+          "tool": {
+            "result": "$3",
+            "value": "sin(x + 2)"
+          }
+        },
+        {
+          "assistant": {
+            "tool_call": {
+              "args": {
+                "arg0": "x + 2",
+                "doit": "True",
+                "inverse": "False",
+                "measure": "<function count_ops at 0x735c4dcbd120>",
+                "ratio": "1.7",
+                "rational": "False"
+              },
+              "tool": "sympy.simplify"
+            }
+          }
+        },
+        {
+          "tool": {
+            "result": "$4",
+            "value": "x + 2"
+          }
+        },
+        {
+          "assistant": {
+            "tool_call": {
+              "args": {
+                "arg0": "x + 2"
+              },
+              "tool": "sympy.rational_simplify"
+            }
+          }
+        },
+        {
+          "tool": {
+            "result": "$5",
+            "value": "x + 2"
+          }
+        }
+      ],
+      "metadata": {
+        "episode_id": "simplify_15",
+        "pattern_label": "mixed",
+        "status": "ok"
+      },
+      "task": {
+        "entry_function": "simplify",
+        "goal": "match SymPy reference output",
+        "input": {
+          "expr": {
+            "display": "cos(sin((x + 2)))",
+            "pickle_b64": "gAWVFQAAAAAAAACMEWNvcyhzaW4oKHggKyAyKSkplC4=",
+            "python_type": "builtins.str",
+            "repr": "'cos(sin((x + 2)))'",
+            "type_tag": "python"
+          }
+        }
+      },
+      "tools": [
+        "sympy.rational_simplify",
+        "sympy.simplify"
+      ]
+    }
+  ],
+  "raw_samples": [
+    {
+      "call_sequence": [
+        {
+          "call_id": "c_000001",
+          "depth": 0,
+          "func_id": "sympy.simplify.simplify.simplify",
+          "output": "cos(sin(sin(x + 2)))"
+        },
+        {
+          "call_id": "c_000002",
+          "depth": 1,
+          "func_id": "sympy.simplify.simplify.simplify",
+          "output": "x + 2"
+        },
+        {
+          "call_id": "c_000003",
+          "depth": 2,
+          "func_id": "sympy.simplify.powsimp.powsimp",
+          "output": "x + 2"
+        },
+        {
+          "call_id": "c_000004",
+          "depth": 2,
+          "func_id": "sympy.polys.polytools.cancel",
+          "output": "x + 2"
+        },
+        {
+          "call_id": "c_000005",
+          "depth": 2,
+          "func_id": "sympy.polys.rationaltools.together",
+          "output": "x + 2"
+        },
+        {
+          "call_id": "c_000006",
+          "depth": 2,
+          "func_id": "sympy.polys.rationaltools.together",
+          "output": "x + 2"
+        },
+        {
+          "call_id": "c_000007",
+          "depth": 2,
+          "func_id": "sympy.core.exprtools.factor_terms",
+          "output": "x + 2"
+        },
+        {
+          "call_id": "c_000008",
+          "depth": 2,
+          "func_id": "sympy.simplify.hyperexpand.hyperexpand",
+          "output": "x + 2"
+        },
+        {
+          "call_id": "c_000009",
+          "depth": 2,
+          "func_id": "sympy.simplify.powsimp.powsimp",
+          "output": "x + 2"
+        },
+        {
+          "call_id": "c_000010",
+          "depth": 2,
+          "func_id": "sympy.simplify.powsimp.powsimp",
+          "output": "x + 2"
+        },
+        {
+          "call_id": "c_000011",
+          "depth": 2,
+          "func_id": "sympy.polys.polytools.cancel",
+          "output": "x + 2"
+        },
+        {
+          "call_id": "c_000012",
+          "depth": 2,
+          "func_id": "sympy.core.exprtools.factor_terms",
+          "output": "x + 2"
+        },
+        {
+          "call_id": "c_000013",
+          "depth": 1,
+          "func_id": "sympy.simplify.simplify.simplify",
+          "output": "sin(x + 2)"
+        },
+        {
+          "call_id": "c_000014",
+          "depth": 2,
+          "func_id": "sympy.simplify.simplify.simplify",
+          "output": "x + 2"
+        },
+        {
+          "call_id": "c_000015",
+          "depth": 3,
+          "func_id": "sympy.simplify.powsimp.powsimp",
+          "output": "x + 2"
+        },
+        {
+          "call_id": "c_000016",
+          "depth": 3,
+          "func_id": "sympy.polys.polytools.cancel",
+          "output": "x + 2"
+        },
+        {
+          "call_id": "c_000017",
+          "depth": 3,
+          "func_id": "sympy.polys.rationaltools.together",
+          "output": "x + 2"
+        },
+        {
+          "call_id": "c_000018",
+          "depth": 3,
+          "func_id": "sympy.polys.rationaltools.together",
+          "output": "x + 2"
+        },
+        {
+          "call_id": "c_000019",
+          "depth": 3,
+          "func_id": "sympy.core.exprtools.factor_terms",
+          "output": "x + 2"
+        },
+        {
+          "call_id": "c_000020",
+          "depth": 3,
+          "func_id": "sympy.simplify.hyperexpand.hyperexpand",
+          "output": "x + 2"
+        },
+        {
+          "call_id": "c_000021",
+          "depth": 3,
+          "func_id": "sympy.simplify.powsimp.powsimp",
+          "output": "x + 2"
+        },
+        {
+          "call_id": "c_000022",
+          "depth": 3,
+          "func_id": "sympy.simplify.powsimp.powsimp",
+          "output": "x + 2"
+        },
+        {
+          "call_id": "c_000023",
+          "depth": 3,
+          "func_id": "sympy.polys.polytools.cancel",
+          "output": "x + 2"
+        },
+        {
+          "call_id": "c_000024",
+          "depth": 3,
+          "func_id": "sympy.core.exprtools.factor_terms",
+          "output": "x + 2"
+        },
+        {
+          "call_id": "c_000025",
+          "depth": 1,
+          "func_id": "sympy.simplify.simplify.simplify",
+          "output": "sin(sin(x + 2))"
+        },
+        {
+          "call_id": "c_000026",
+          "depth": 2,
+          "func_id": "sympy.simplify.simplify.simplify",
+          "output": "x + 2"
+        },
+        {
+          "call_id": "c_000027",
+          "depth": 3,
+          "func_id": "sympy.simplify.powsimp.powsimp",
+          "output": "x + 2"
+        },
+        {
+          "call_id": "c_000028",
+          "depth": 3,
+          "func_id": "sympy.polys.polytools.cancel",
+          "output": "x + 2"
+        },
+        {
+          "call_id": "c_000029",
+          "depth": 3,
+          "func_id": "sympy.polys.rationaltools.together",
+          "output": "x + 2"
+        },
+        {
+          "call_id": "c_000030",
+          "depth": 3,
+          "func_id": "sympy.polys.rationaltools.together",
+          "output": "x + 2"
+        },
+        {
+          "call_id": "c_000031",
+          "depth": 3,
+          "func_id": "sympy.core.exprtools.factor_terms",
+          "output": "x + 2"
+        },
+        {
+          "call_id": "c_000032",
+          "depth": 3,
+          "func_id": "sympy.simplify.hyperexpand.hyperexpand",
+          "output": "x + 2"
+        },
+        {
+          "call_id": "c_000033",
+          "depth": 3,
+          "func_id": "sympy.simplify.powsimp.powsimp",
+          "output": "x + 2"
+        },
+        {
+          "call_id": "c_000034",
+          "depth": 3,
+          "func_id": "sympy.simplify.powsimp.powsimp",
+          "output": "x + 2"
+        },
+        {
+          "call_id": "c_000035",
+          "depth": 3,
+          "func_id": "sympy.polys.polytools.cancel",
+          "output": "x + 2"
+        },
+        {
+          "call_id": "c_000036",
+          "depth": 3,
+          "func_id": "sympy.core.exprtools.factor_terms",
+          "output": "x + 2"
+        },
+        {
+          "call_id": "c_000037",
+          "depth": 2,
+          "func_id": "sympy.simplify.simplify.simplify",
+          "output": "sin(x + 2)"
+        },
+        {
+          "call_id": "c_000038",
+          "depth": 3,
+          "func_id": "sympy.simplify.simplify.simplify",
+          "output": "x + 2"
+        },
+        {
+          "call_id": "c_000039",
+          "depth": 4,
+          "func_id": "sympy.simplify.powsimp.powsimp",
+          "output": "x + 2"
+        },
+        {
+          "call_id": "c_000040",
+          "depth": 4,
+          "func_id": "sympy.polys.polytools.cancel",
+          "output": "x + 2"
+        },
+        {
+          "call_id": "c_000041",
+          "depth": 4,
+          "func_id": "sympy.polys.rationaltools.together",
+          "output": "x + 2"
+        },
+        {
+          "call_id": "c_000042",
+          "depth": 4,
+          "func_id": "sympy.polys.rationaltools.together",
+          "output": "x + 2"
+        },
+        {
+          "call_id": "c_000043",
+          "depth": 4,
+          "func_id": "sympy.core.exprtools.factor_terms",
+          "output": "x + 2"
+        },
+        {
+          "call_id": "c_000044",
+          "depth": 4,
+          "func_id": "sympy.simplify.hyperexpand.hyperexpand",
+          "output": "x + 2"
+        },
+        {
+          "call_id": "c_000045",
+          "depth": 4,
+          "func_id": "sympy.simplify.powsimp.powsimp",
+          "output": "x + 2"
+        },
+        {
+          "call_id": "c_000046",
+          "depth": 4,
+          "func_id": "sympy.simplify.powsimp.powsimp",
+          "output": "x + 2"
+        },
+        {
+          "call_id": "c_000047",
+          "depth": 4,
+          "func_id": "sympy.polys.polytools.cancel",
+          "output": "x + 2"
+        },
+        {
+          "call_id": "c_000048",
+          "depth": 4,
+          "func_id": "sympy.core.exprtools.factor_terms",
+          "output": "x + 2"
+        }
+      ],
+      "entry_function": "simplify",
+      "episode_id": "simplify_2",
+      "final_output": "cos(sin(sin(x + 2)))",
+      "input": "cos(sin(sin((x + 2))))",
+      "num_calls": 48,
+      "path": "/home/sivtsov/tooling_decomposer/outputs/tuned_probe_v7/raw_traces/simplify/simplify_2.json",
+      "pattern_label": "mixed"
+    },
+    {
+      "call_sequence": [
+        {
+          "call_id": "c_000001",
+          "depth": 0,
+          "func_id": "sympy.simplify.simplify.simplify",
+          "output": "cos(sin(x + 2))"
+        },
+        {
+          "call_id": "c_000002",
+          "depth": 1,
+          "func_id": "sympy.simplify.simplify.simplify",
+          "output": "x + 2"
+        },
+        {
+          "call_id": "c_000003",
+          "depth": 2,
+          "func_id": "sympy.simplify.powsimp.powsimp",
+          "output": "x + 2"
+        },
+        {
+          "call_id": "c_000004",
+          "depth": 2,
+          "func_id": "sympy.polys.polytools.cancel",
+          "output": "x + 2"
+        },
+        {
+          "call_id": "c_000005",
+          "depth": 2,
+          "func_id": "sympy.polys.rationaltools.together",
+          "output": "x + 2"
+        },
+        {
+          "call_id": "c_000006",
+          "depth": 2,
+          "func_id": "sympy.polys.rationaltools.together",
+          "output": "x + 2"
+        },
+        {
+          "call_id": "c_000007",
+          "depth": 2,
+          "func_id": "sympy.core.exprtools.factor_terms",
+          "output": "x + 2"
+        },
+        {
+          "call_id": "c_000008",
+          "depth": 2,
+          "func_id": "sympy.simplify.hyperexpand.hyperexpand",
+          "output": "x + 2"
+        },
+        {
+          "call_id": "c_000009",
+          "depth": 2,
+          "func_id": "sympy.simplify.powsimp.powsimp",
+          "output": "x + 2"
+        },
+        {
+          "call_id": "c_000010",
+          "depth": 2,
+          "func_id": "sympy.simplify.powsimp.powsimp",
+          "output": "x + 2"
+        },
+        {
+          "call_id": "c_000011",
+          "depth": 2,
+          "func_id": "sympy.polys.polytools.cancel",
+          "output": "x + 2"
+        },
+        {
+          "call_id": "c_000012",
+          "depth": 2,
+          "func_id": "sympy.core.exprtools.factor_terms",
+          "output": "x + 2"
+        },
+        {
+          "call_id": "c_000013",
+          "depth": 1,
+          "func_id": "sympy.simplify.simplify.simplify",
+          "output": "sin(x + 2)"
+        },
+        {
+          "call_id": "c_000014",
+          "depth": 2,
+          "func_id": "sympy.simplify.simplify.simplify",
+          "output": "x + 2"
+        },
+        {
+          "call_id": "c_000015",
+          "depth": 3,
+          "func_id": "sympy.simplify.powsimp.powsimp",
+          "output": "x + 2"
+        },
+        {
+          "call_id": "c_000016",
+          "depth": 3,
+          "func_id": "sympy.polys.polytools.cancel",
+          "output": "x + 2"
+        },
+        {
+          "call_id": "c_000017",
+          "depth": 3,
+          "func_id": "sympy.polys.rationaltools.together",
+          "output": "x + 2"
+        },
+        {
+          "call_id": "c_000018",
+          "depth": 3,
+          "func_id": "sympy.polys.rationaltools.together",
+          "output": "x + 2"
+        },
+        {
+          "call_id": "c_000019",
+          "depth": 3,
+          "func_id": "sympy.core.exprtools.factor_terms",
+          "output": "x + 2"
+        },
+        {
+          "call_id": "c_000020",
+          "depth": 3,
+          "func_id": "sympy.simplify.hyperexpand.hyperexpand",
+          "output": "x + 2"
+        },
+        {
+          "call_id": "c_000021",
+          "depth": 3,
+          "func_id": "sympy.simplify.powsimp.powsimp",
+          "output": "x + 2"
+        },
+        {
+          "call_id": "c_000022",
+          "depth": 3,
+          "func_id": "sympy.simplify.powsimp.powsimp",
+          "output": "x + 2"
+        },
+        {
+          "call_id": "c_000023",
+          "depth": 3,
+          "func_id": "sympy.polys.polytools.cancel",
+          "output": "x + 2"
+        },
+        {
+          "call_id": "c_000024",
+          "depth": 3,
+          "func_id": "sympy.core.exprtools.factor_terms",
+          "output": "x + 2"
+        }
+      ],
+      "entry_function": "simplify",
+      "episode_id": "simplify_15",
+      "final_output": "cos(sin(x + 2))",
+      "input": "cos(sin((x + 2)))",
+      "num_calls": 24,
+      "path": "/home/sivtsov/tooling_decomposer/outputs/tuned_probe_v7/raw_traces/simplify/simplify_15.json",
+      "pattern_label": "mixed"
+    },
+    {
+      "call_sequence": [
+        {
+          "call_id": "c_000001",
+          "depth": 0,
+          "func_id": "sympy.simplify.simplify.simplify",
+          "output": "sin(2*y) + 3"
+        },
+        {
+          "call_id": "c_000002",
+          "depth": 1,
+          "func_id": "sympy.simplify.simplify.simplify",
+          "output": "2*y"
+        },
+        {
+          "call_id": "c_000003",
+          "depth": 2,
+          "func_id": "sympy.simplify.powsimp.powsimp",
+          "output": "2*y"
+        },
+        {
+          "call_id": "c_000004",
+          "depth": 2,
+          "func_id": "sympy.polys.polytools.cancel",
+          "output": "2*y"
+        },
+        {
+          "call_id": "c_000005",
+          "depth": 2,
+          "func_id": "sympy.polys.rationaltools.together",
+          "output": "2*y"
+        },
+        {
+          "call_id": "c_000006",
+          "depth": 2,
+          "func_id": "sympy.polys.rationaltools.together",
+          "output": "2*y"
+        },
+        {
+          "call_id": "c_000007",
+          "depth": 2,
+          "func_id": "sympy.core.exprtools.factor_terms",
+          "output": "2*y"
+        },
+        {
+          "call_id": "c_000008",
+          "depth": 2,
+          "func_id": "sympy.simplify.hyperexpand.hyperexpand",
+          "output": "2*y"
+        },
+        {
+          "call_id": "c_000009",
+          "depth": 2,
+          "func_id": "sympy.simplify.powsimp.powsimp",
+          "output": "2*y"
+        },
+        {
+          "call_id": "c_000010",
+          "depth": 2,
+          "func_id": "sympy.simplify.powsimp.powsimp",
+          "output": "2*y"
+        },
+        {
+          "call_id": "c_000011",
+          "depth": 2,
+          "func_id": "sympy.polys.polytools.cancel",
+          "output": "2*y"
+        },
+        {
+          "call_id": "c_000012",
+          "depth": 2,
+          "func_id": "sympy.core.exprtools.factor_terms",
+          "output": "2*y"
+        },
+        {
+          "call_id": "c_000013",
+          "depth": 1,
+          "func_id": "sympy.simplify.powsimp.powsimp",
+          "output": "sin(2*y) + 3"
+        },
+        {
+          "call_id": "c_000014",
+          "depth": 1,
+          "func_id": "sympy.polys.polytools.cancel",
+          "output": "sin(2*y) + 3"
+        },
+        {
+          "call_id": "c_000015",
+          "depth": 1,
+          "func_id": "sympy.polys.rationaltools.together",
+          "output": "sin(2*y) + 3"
+        },
+        {
+          "call_id": "c_000016",
+          "depth": 1,
+          "func_id": "sympy.polys.rationaltools.together",
+          "output": "sin(2*y) + 3"
+        },
+        {
+          "call_id": "c_000017",
+          "depth": 1,
+          "func_id": "sympy.core.exprtools.factor_terms",
+          "output": "sin(2*y) + 3"
+        },
+        {
+          "call_id": "c_000018",
+          "depth": 1,
+          "func_id": "sympy.simplify.hyperexpand.hyperexpand",
+          "output": "sin(2*y) + 3"
+        },
+        {
+          "call_id": "c_000019",
+          "depth": 1,
+          "func_id": "sympy.simplify.trigsimp.trigsimp",
+          "output": "sin(2*y) + 3"
+        },
+        {
+          "call_id": "c_000020",
+          "depth": 1,
+          "func_id": "sympy.simplify.powsimp.powsimp",
+          "output": "sin(2*y) + 3"
+        },
+        {
+          "call_id": "c_000021",
+          "depth": 1,
+          "func_id": "sympy.simplify.powsimp.powsimp",
+          "output": "sin(2*y) + 3"
+        },
+        {
+          "call_id": "c_000022",
+          "depth": 1,
+          "func_id": "sympy.polys.polytools.cancel",
+          "output": "sin(2*y) + 3"
+        },
+        {
+          "call_id": "c_000023",
+          "depth": 1,
+          "func_id": "sympy.core.exprtools.factor_terms",
+          "output": "sin(2*y) + 3"
+        }
+      ],
+      "entry_function": "simplify",
+      "episode_id": "simplify_7",
+      "final_output": "sin(2*y) + 3",
+      "input": "(sin((y * 2)) + 3)",
+      "num_calls": 23,
+      "path": "/home/sivtsov/tooling_decomposer/outputs/tuned_probe_v7/raw_traces/simplify/simplify_7.json",
+      "pattern_label": "mixed"
+    },
+    {
+      "call_sequence": [
+        {
+          "call_id": "c_000001",
+          "depth": 0,
+          "func_id": "sympy.simplify.simplify.simplify",
+          "output": "sin(2*y)**2"
+        },
+        {
+          "call_id": "c_000002",
+          "depth": 1,
+          "func_id": "sympy.simplify.simplify.simplify",
+          "output": "2*y"
+        },
+        {
+          "call_id": "c_000003",
+          "depth": 2,
+          "func_id": "sympy.simplify.powsimp.powsimp",
+          "output": "2*y"
+        },
+        {
+          "call_id": "c_000004",
+          "depth": 2,
+          "func_id": "sympy.polys.polytools.cancel",
+          "output": "2*y"
+        },
+        {
+          "call_id": "c_000005",
+          "depth": 2,
+          "func_id": "sympy.polys.rationaltools.together",
+          "output": "2*y"
+        },
+        {
+          "call_id": "c_000006",
+          "depth": 2,
+          "func_id": "sympy.polys.rationaltools.together",
+          "output": "2*y"
+        },
+        {
+          "call_id": "c_000007",
+          "depth": 2,
+          "func_id": "sympy.core.exprtools.factor_terms",
+          "output": "2*y"
+        },
+        {
+          "call_id": "c_000008",
+          "depth": 2,
+          "func_id": "sympy.simplify.hyperexpand.hyperexpand",
+          "output": "2*y"
+        },
+        {
+          "call_id": "c_000009",
+          "depth": 2,
+          "func_id": "sympy.simplify.powsimp.powsimp",
+          "output": "2*y"
+        },
+        {
+          "call_id": "c_000010",
+          "depth": 2,
+          "func_id": "sympy.simplify.powsimp.powsimp",
+          "output": "2*y"
+        },
+        {
+          "call_id": "c_000011",
+          "depth": 2,
+          "func_id": "sympy.polys.polytools.cancel",
+          "output": "2*y"
+        },
+        {
+          "call_id": "c_000012",
+          "depth": 2,
+          "func_id": "sympy.core.exprtools.factor_terms",
+          "output": "2*y"
+        },
+        {
+          "call_id": "c_000013",
+          "depth": 1,
+          "func_id": "sympy.simplify.powsimp.powsimp",
+          "output": "sin(2*y)**2"
+        },
+        {
+          "call_id": "c_000014",
+          "depth": 1,
+          "func_id": "sympy.polys.polytools.cancel",
+          "output": "sin(2*y)**2"
+        },
+        {
+          "call_id": "c_000015",
+          "depth": 1,
+          "func_id": "sympy.polys.rationaltools.together",
+          "output": "sin(2*y)**2"
+        },
+        {
+          "call_id": "c_000016",
+          "depth": 1,
+          "func_id": "sympy.polys.rationaltools.together",
+          "output": "sin(2*y)**2"
+        },
+        {
+          "call_id": "c_000017",
+          "depth": 1,
+          "func_id": "sympy.core.exprtools.factor_terms",
+          "output": "sin(2*y)**2"
+        },
+        {
+          "call_id": "c_000018",
+          "depth": 1,
+          "func_id": "sympy.simplify.hyperexpand.hyperexpand",
+          "output": "sin(2*y)**2"
+        },
+        {
+          "call_id": "c_000019",
+          "depth": 1,
+          "func_id": "sympy.simplify.trigsimp.trigsimp",
+          "output": "sin(2*y)**2"
+        },
+        {
+          "call_id": "c_000020",
+          "depth": 1,
+          "func_id": "sympy.simplify.powsimp.powsimp",
+          "output": "sin(2*y)**2"
+        },
+        {
+          "call_id": "c_000021",
+          "depth": 1,
+          "func_id": "sympy.simplify.powsimp.powsimp",
+          "output": "sin(2*y)**2"
+        },
+        {
+          "call_id": "c_000022",
+          "depth": 1,
+          "func_id": "sympy.polys.polytools.cancel",
+          "output": "sin(2*y)**2"
+        },
+        {
+          "call_id": "c_000023",
+          "depth": 1,
+          "func_id": "sympy.core.exprtools.factor_terms",
+          "output": "sin(2*y)**2"
+        }
+      ],
+      "entry_function": "simplify",
+      "episode_id": "simplify_8",
+      "final_output": "sin(2*y)**2",
+      "input": "(sin((y * 2)))**2",
+      "num_calls": 23,
+      "path": "/home/sivtsov/tooling_decomposer/outputs/tuned_probe_v7/raw_traces/simplify/simplify_8.json",
+      "pattern_label": "mixed"
+    },
+    {
+      "call_sequence": [
+        {
+          "call_id": "c_000001",
+          "depth": 0,
+          "func_id": "sympy.simplify.simplify.simplify",
+          "output": "cos(x + y)**2"
+        },
+        {
+          "call_id": "c_000002",
+          "depth": 1,
+          "func_id": "sympy.simplify.simplify.simplify",
+          "output": "x + y"
+        },
+        {
+          "call_id": "c_000003",
+          "depth": 2,
+          "func_id": "sympy.simplify.powsimp.powsimp",
+          "output": "x + y"
+        },
+        {
+          "call_id": "c_000004",
+          "depth": 2,
+          "func_id": "sympy.polys.polytools.cancel",
+          "output": "x + y"
+        },
+        {
+          "call_id": "c_000005",
+          "depth": 2,
+          "func_id": "sympy.polys.rationaltools.together",
+          "output": "x + y"
+        },
+        {
+          "call_id": "c_000006",
+          "depth": 2,
+          "func_id": "sympy.polys.rationaltools.together",
+          "output": "x + y"
+        },
+        {
+          "call_id": "c_000007",
+          "depth": 2,
+          "func_id": "sympy.core.exprtools.factor_terms",
+          "output": "x + y"
+        },
+        {
+          "call_id": "c_000008",
+          "depth": 2,
+          "func_id": "sympy.simplify.hyperexpand.hyperexpand",
+          "output": "x + y"
+        },
+        {
+          "call_id": "c_000009",
+          "depth": 2,
+          "func_id": "sympy.simplify.powsimp.powsimp",
+          "output": "x + y"
+        },
+        {
+          "call_id": "c_000010",
+          "depth": 2,
+          "func_id": "sympy.simplify.powsimp.powsimp",
+          "output": "x + y"
+        },
+        {
+          "call_id": "c_000011",
+          "depth": 2,
+          "func_id": "sympy.polys.polytools.cancel",
+          "output": "x + y"
+        },
+        {
+          "call_id": "c_000012",
+          "depth": 2,
+          "func_id": "sympy.core.exprtools.factor_terms",
+          "output": "x + y"
+        },
+        {
+          "call_id": "c_000013",
+          "depth": 1,
+          "func_id": "sympy.simplify.powsimp.powsimp",
+          "output": "cos(x + y)**2"
+        },
+        {
+          "call_id": "c_000014",
+          "depth": 1,
+          "func_id": "sympy.polys.polytools.cancel",
+          "output": "cos(x + y)**2"
+        },
+        {
+          "call_id": "c_000015",
+          "depth": 1,
+          "func_id": "sympy.polys.rationaltools.together",
+          "output": "cos(x + y)**2"
+        },
+        {
+          "call_id": "c_000016",
+          "depth": 1,
+          "func_id": "sympy.polys.rationaltools.together",
+          "output": "cos(x + y)**2"
+        },
+        {
+          "call_id": "c_000017",
+          "depth": 1,
+          "func_id": "sympy.core.exprtools.factor_terms",
+          "output": "cos(x + y)**2"
+        },
+        {
+          "call_id": "c_000018",
+          "depth": 1,
+          "func_id": "sympy.simplify.hyperexpand.hyperexpand",
+          "output": "cos(x + y)**2"
+        },
+        {
+          "call_id": "c_000019",
+          "depth": 1,
+          "func_id": "sympy.simplify.trigsimp.trigsimp",
+          "output": "cos(x + y)**2"
+        },
+        {
+          "call_id": "c_000020",
+          "depth": 1,
+          "func_id": "sympy.simplify.powsimp.powsimp",
+          "output": "cos(x + y)**2"
+        },
+        {
+          "call_id": "c_000021",
+          "depth": 1,
+          "func_id": "sympy.simplify.powsimp.powsimp",
+          "output": "cos(x + y)**2"
+        },
+        {
+          "call_id": "c_000022",
+          "depth": 1,
+          "func_id": "sympy.polys.polytools.cancel",
+          "output": "cos(x + y)**2"
+        },
+        {
+          "call_id": "c_000023",
+          "depth": 1,
+          "func_id": "sympy.core.exprtools.factor_terms",
+          "output": "cos(x + y)**2"
+        }
+      ],
+      "entry_function": "simplify",
+      "episode_id": "simplify_9",
+      "final_output": "cos(x + y)**2",
+      "input": "(cos((x + y)))**2",
+      "num_calls": 23,
+      "path": "/home/sivtsov/tooling_decomposer/outputs/tuned_probe_v7/raw_traces/simplify/simplify_9.json",
+      "pattern_label": "mixed"
+    }
+  ]
+}

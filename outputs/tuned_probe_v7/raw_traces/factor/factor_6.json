@@ -1,0 +1,190 @@
+{
+  "calls": {
+    "c_000001": {
+      "call_id": "c_000001",
+      "depth": 0,
+      "duration_ns": 3646765,
+      "end_ns": 1230103354397720,
+      "exception": null,
+      "func_id": "sympy.polys.polytools.factor",
+      "inputs": {
+        "expr": {
+          "display": "cos(y + 5)",
+          "pickle_b64": "gAWVowAAAAAAAACMKHN5bXB5LmZ1bmN0aW9ucy5lbGVtZW50YXJ5LnRyaWdvbm9tZXRyaWOUjANjb3OUk5SMDnN5bXB5LmNvcmUuYWRklIwDQWRklJOUjBJzeW1weS5jb3JlLm51bWJlcnOUjAdJbnRlZ2VylJOUSwWFlIGUjBFzeW1weS5jb3JlLnN5bWJvbJSMBlN5bWJvbJSTlIwBeZSFlIGUhpSBlIWUgZQu",
+          "python_type": "sympy.functions.elementary.trigonometric.cos",
+          "repr": "cos(y + 5)",
+          "srepr": "cos(Add(Symbol('y'), Integer(5)))",
+          "type_tag": "sympy.Basic"
+        }
+      },
+      "output": {
+        "display": "cos(y + 5)",
+        "pickle_b64": "gAWVowAAAAAAAACMKHN5bXB5LmZ1bmN0aW9ucy5lbGVtZW50YXJ5LnRyaWdvbm9tZXRyaWOUjANjb3OUk5SMDnN5bXB5LmNvcmUuYWRklIwDQWRklJOUjBJzeW1weS5jb3JlLm51bWJlcnOUjAdJbnRlZ2VylJOUSwWFlIGUjBFzeW1weS5jb3JlLnN5bWJvbJSMBlN5bWJvbJSTlIwBeZSFlIGUhpSBlIWUgZQu",
+        "python_type": "sympy.functions.elementary.trigonometric.cos",
+        "repr": "cos(y + 5)",
+        "srepr": "cos(Add(Symbol('y'), Integer(5)))",
+        "type_tag": "sympy.Basic"
+      },
+      "parent_call_id": null,
+      "start_ns": 1230103350750955,
+      "subcalls": [
+        "c_000002"
+      ],
+      "thread_id": 126840304047936
+    },
+    "c_000002": {
+      "call_id": "c_000002",
+      "depth": 1,
+      "duration_ns": 2791556,
+      "end_ns": 1230103354111845,
+      "exception": null,
+      "func_id": "sympy.polys.polytools._generic_factor",
+      "inputs": {
+        "arg0": {
+          "display": "cos(y + 5)",
+          "pickle_b64": "gAWVowAAAAAAAACMKHN5bXB5LmZ1bmN0aW9ucy5lbGVtZW50YXJ5LnRyaWdvbm9tZXRyaWOUjANjb3OUk5SMDnN5bXB5LmNvcmUuYWRklIwDQWRklJOUjBJzeW1weS5jb3JlLm51bWJlcnOUjAdJbnRlZ2VylJOUSwWFlIGUjBFzeW1weS5jb3JlLnN5bWJvbJSMBlN5bWJvbJSTlIwBeZSFlIGUhpSBlIWUgZQu",
+          "python_type": "sympy.functions.elementary.trigonometric.cos",
+          "repr": "cos(y + 5)",
+          "srepr": "cos(Add(Symbol('y'), Integer(5)))",
+          "type_tag": "sympy.Basic"
+        },
+        "arg1": {
+          "display": "()",
+          "items": [],
+          "pickle_b64": "gAUpLg==",
+          "python_type": "builtins.tuple",
+          "repr": "()",
+          "type_tag": "sequence"
+        },
+        "arg2": {
+          "display": "{}",
+          "items": [],
+          "pickle_b64": "gAV9lC4=",
+          "python_type": "builtins.dict",
+          "repr": "{}",
+          "type_tag": "mapping"
+        },
+        "method": {
+          "display": "factor",
+          "pickle_b64": "gAWVCgAAAAAAAACMBmZhY3RvcpQu",
+          "python_type": "builtins.str",
+          "repr": "'factor'",
+          "type_tag": "python"
+        }
+      },
+      "output": {
+        "display": "cos(y + 5)",
+        "pickle_b64": "gAWVowAAAAAAAACMKHN5bXB5LmZ1bmN0aW9ucy5lbGVtZW50YXJ5LnRyaWdvbm9tZXRyaWOUjANjb3OUk5SMDnN5bXB5LmNvcmUuYWRklIwDQWRklJOUjBJzeW1weS5jb3JlLm51bWJlcnOUjAdJbnRlZ2VylJOUSwWFlIGUjBFzeW1weS5jb3JlLnN5bWJvbJSMBlN5bWJvbJSTlIwBeZSFlIGUhpSBlIWUgZQu",
+        "python_type": "sympy.functions.elementary.trigonometric.cos",
+        "repr": "cos(y + 5)",
+        "srepr": "cos(Add(Symbol('y'), Integer(5)))",
+        "type_tag": "sympy.Basic"
+      },
+      "parent_call_id": "c_000001",
+      "start_ns": 1230103351320289,
+      "subcalls": [
+        "c_000003"
+      ],
+      "thread_id": 126840304047936
+    },
+    "c_000003": {
+      "call_id": "c_000003",
+      "depth": 2,
+      "duration_ns": 1680771,
+      "end_ns": 1230103353805497,
+      "exception": null,
+      "func_id": "sympy.polys.polytools._symbolic_factor",
+      "inputs": {
+        "arg0": {
+          "display": "cos(y + 5)",
+          "pickle_b64": "gAWVowAAAAAAAACMKHN5bXB5LmZ1bmN0aW9ucy5lbGVtZW50YXJ5LnRyaWdvbm9tZXRyaWOUjANjb3OUk5SMDnN5bXB5LmNvcmUuYWRklIwDQWRklJOUjBJzeW1weS5jb3JlLm51bWJlcnOUjAdJbnRlZ2VylJOUSwWFlIGUjBFzeW1weS5jb3JlLnN5bWJvbJSMBlN5bWJvbJSTlIwBeZSFlIGUhpSBlIWUgZQu",
+          "python_type": "sympy.functions.elementary.trigonometric.cos",
+          "repr": "cos(y + 5)",
+          "srepr": "cos(Add(Symbol('y'), Integer(5)))",
+          "type_tag": "sympy.Basic"
+        },
+        "arg1": {
+          "display": "{'fraction': True}",
+          "items": [
+            {
+              "key": {
+                "display": "fraction",
+                "pickle_b64": "gAWVDAAAAAAAAACMCGZyYWN0aW9ulC4=",
+                "python_type": "builtins.str",
+                "repr": "'fraction'",
+                "type_tag": "python"
+              },
+              "value": {
+                "display": "True",
+                "pickle_b64": "gAWILg==",
+                "python_type": "builtins.bool",
+                "repr": "True",
+                "type_tag": "python"
+              }
+            }
+          ],
+          "pickle_b64": "gAWVNwAAAAAAAACMF3N5bXB5LnBvbHlzLnBvbHlvcHRpb25zlIwHT3B0aW9uc5STlCmBlIwIZnJhY3Rpb26UiHMu",
+          "python_type": "sympy.polys.polyoptions.Options",
+          "repr": "{'fraction': True}",
+          "type_tag": "mapping"
+        },
+        "arg2": {
+          "display": "factor",
+          "pickle_b64": "gAWVCgAAAAAAAACMBmZhY3RvcpQu",
+          "python_type": "builtins.str",
+          "repr": "'factor'",
+          "type_tag": "python"
+        }
+      },
+      "output": {
+        "display": "cos(y + 5)",
+        "pickle_b64": "gAWVowAAAAAAAACMKHN5bXB5LmZ1bmN0aW9ucy5lbGVtZW50YXJ5LnRyaWdvbm9tZXRyaWOUjANjb3OUk5SMDnN5bXB5LmNvcmUuYWRklIwDQWRklJOUjBJzeW1weS5jb3JlLm51bWJlcnOUjAdJbnRlZ2VylJOUSwWFlIGUjBFzeW1weS5jb3JlLnN5bWJvbJSMBlN5bWJvbJSTlIwBeZSFlIGUhpSBlIWUgZQu",
+        "python_type": "sympy.functions.elementary.trigonometric.cos",
+        "repr": "cos(y + 5)",
+        "srepr": "cos(Add(Symbol('y'), Integer(5)))",
+        "type_tag": "sympy.Basic"
+      },
+      "parent_call_id": "c_000002",
+      "start_ns": 1230103352124726,
+      "subcalls": [],
+      "thread_id": 126840304047936
+    }
+  },
+  "episode": {
+    "call_ids": [
+      "c_000001",
+      "c_000002",
+      "c_000003"
+    ],
+    "duration_ms": 45.27173796668649,
+    "entry_func_id": "factor",
+    "episode_id": "factor_6",
+    "final_output": {
+      "display": "cos(y + 5)",
+      "pickle_b64": "gAWVowAAAAAAAACMKHN5bXB5LmZ1bmN0aW9ucy5lbGVtZW50YXJ5LnRyaWdvbm9tZXRyaWOUjANjb3OUk5SMDnN5bXB5LmNvcmUuYWRklIwDQWRklJOUjBJzeW1weS5jb3JlLm51bWJlcnOUjAdJbnRlZ2VylJOUSwWFlIGUjBFzeW1weS5jb3JlLnN5bWJvbJSMBlN5bWJvbJSTlIwBeZSFlIGUhpSBlIWUgZQu",
+      "python_type": "sympy.functions.elementary.trigonometric.cos",
+      "repr": "cos(y + 5)",
+      "srepr": "cos(Add(Symbol('y'), Integer(5)))",
+      "type_tag": "sympy.Basic"
+    },
+    "input": {
+      "expr": {
+        "display": "cos(((y + 2) + 3))",
+        "pickle_b64": "gAWVFgAAAAAAAACMEmNvcygoKHkgKyAyKSArIDMpKZQu",
+        "python_type": "builtins.str",
+        "repr": "'cos(((y + 2) + 3))'",
+        "type_tag": "python"
+      }
+    },
+    "input_seed": 6,
+    "max_depth": 2,
+    "metadata": {
+      "entrypoint_name": "factor"
+    },
+    "num_calls": 3,
+    "pattern_label": "chain",
+    "root_call_id": "c_000001",
+    "status": "ok",
+    "task_family": "factor"
+  }
+}

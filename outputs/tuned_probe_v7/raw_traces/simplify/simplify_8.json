@@ -1,0 +1,887 @@
+{
+  "calls": {
+    "c_000001": {
+      "call_id": "c_000001",
+      "depth": 0,
+      "duration_ns": 192546007,
+      "end_ns": 1230103888926448,
+      "exception": null,
+      "func_id": "sympy.simplify.simplify.simplify",
+      "inputs": {
+        "expr": {
+          "display": "sin(2*y)**2",
+          "pickle_b64": "gAWVxAAAAAAAAACMEHN5bXB5LmNvcmUucG93ZXKUjANQb3eUk5SMKHN5bXB5LmZ1bmN0aW9ucy5lbGVtZW50YXJ5LnRyaWdvbm9tZXRyaWOUjANzaW6Uk5SMDnN5bXB5LmNvcmUubXVslIwDTXVslJOUjBJzeW1weS5jb3JlLm51bWJlcnOUjAdJbnRlZ2VylJOUSwKFlIGUjBFzeW1weS5jb3JlLnN5bWJvbJSMBlN5bWJvbJSTlIwBeZSFlIGUhpSBlIWUgZRoDYaUgZQu",
+          "python_type": "sympy.core.power.Pow",
+          "repr": "sin(2*y)**2",
+          "srepr": "Pow(sin(Mul(Integer(2), Symbol('y'))), Integer(2))",
+          "type_tag": "sympy.Basic"
+        }
+      },
+      "output": {
+        "display": "sin(2*y)**2",
+        "pickle_b64": "gAWVxAAAAAAAAACMEHN5bXB5LmNvcmUucG93ZXKUjANQb3eUk5SMKHN5bXB5LmZ1bmN0aW9ucy5lbGVtZW50YXJ5LnRyaWdvbm9tZXRyaWOUjANzaW6Uk5SMDnN5bXB5LmNvcmUubXVslIwDTXVslJOUjBJzeW1weS5jb3JlLm51bWJlcnOUjAdJbnRlZ2VylJOUSwKFlIGUjBFzeW1weS5jb3JlLnN5bWJvbJSMBlN5bWJvbJSTlIwBeZSFlIGUhpSBlIWUgZRoDYaUgZQu",
+        "python_type": "sympy.core.power.Pow",
+        "repr": "sin(2*y)**2",
+        "srepr": "Pow(sin(Mul(Integer(2), Symbol('y'))), Integer(2))",
+        "type_tag": "sympy.Basic"
+      },
+      "parent_call_id": null,
+      "start_ns": 1230103696380441,
+      "subcalls": [
+        "c_000002",
+        "c_000013",
+        "c_000014",
+        "c_000015",
+        "c_000016",
+        "c_000017",
+        "c_000018",
+        "c_000019",
+        "c_000020",
+        "c_000021",
+        "c_000022",
+        "c_000023"
+      ],
+      "thread_id": 126840304047936
+    },
+    "c_000002": {
+      "call_id": "c_000002",
+      "depth": 1,
+      "duration_ns": 118640435,
+      "end_ns": 1230103847364061,
+      "exception": null,
+      "func_id": "sympy.simplify.simplify.simplify",
+      "inputs": {
+        "arg0": {
+          "display": "2*y",
+          "pickle_b64": "gAWVbAAAAAAAAACMDnN5bXB5LmNvcmUubXVslIwDTXVslJOUjBJzeW1weS5jb3JlLm51bWJlcnOUjAdJbnRlZ2VylJOUSwKFlIGUjBFzeW1weS5jb3JlLnN5bWJvbJSMBlN5bWJvbJSTlIwBeZSFlIGUhpSBlC4=",
+          "python_type": "sympy.core.mul.Mul",
+          "repr": "2*y",
+          "srepr": "Mul(Integer(2), Symbol('y'))",
+          "type_tag": "sympy.Basic"
+        },
+        "doit": {
+          "display": "True",
+          "pickle_b64": "gAWILg==",
+          "python_type": "builtins.bool",
+          "repr": "True",
+          "type_tag": "python"
+        },
+        "inverse": {
+          "display": "False",
+          "pickle_b64": "gAWJLg==",
+          "python_type": "builtins.bool",
+          "repr": "False",
+          "type_tag": "python"
+        },
+        "measure": {
+          "display": "<function count_ops at 0x735c4dcbd120>",
+          "pickle_b64": "gAWVJQAAAAAAAACME3N5bXB5LmNvcmUuZnVuY3Rpb26UjAljb3VudF9vcHOUk5Qu",
+          "python_type": "builtins.function",
+          "repr": "<function count_ops at 0x735c4dcbd120>",
+          "type_tag": "python"
+        },
+        "ratio": {
+          "display": "1.7",
+          "pickle_b64": "gAWVCgAAAAAAAABHP/szMzMzMzMu",
+          "python_type": "builtins.float",
+          "repr": "1.7",
+          "type_tag": "python"
+        },
+        "rational": {
+          "display": "False",
+          "pickle_b64": "gAWJLg==",
+          "python_type": "builtins.bool",
+          "repr": "False",
+          "type_tag": "python"
+        }
+      },
+      "output": {
+        "display": "2*y",
+        "pickle_b64": "gAWVbAAAAAAAAACMDnN5bXB5LmNvcmUubXVslIwDTXVslJOUjBJzeW1weS5jb3JlLm51bWJlcnOUjAdJbnRlZ2VylJOUSwKFlIGUjBFzeW1weS5jb3JlLnN5bWJvbJSMBlN5bWJvbJSTlIwBeZSFlIGUhpSBlC4=",
+        "python_type": "sympy.core.mul.Mul",
+        "repr": "2*y",
+        "srepr": "Mul(Integer(2), Symbol('y'))",
+        "type_tag": "sympy.Basic"
+      },
+      "parent_call_id": "c_000001",
+      "start_ns": 1230103728723626,
+      "subcalls": [
+        "c_000003",
+        "c_000004",
+        "c_000005",
+        "c_000006",
+        "c_000007",
+        "c_000008",
+        "c_000009",
+        "c_000010",
+        "c_000011",
+        "c_000012"
+      ],
+      "thread_id": 126840304047936
+    },
+    "c_000003": {
+      "call_id": "c_000003",
+      "depth": 2,
+      "duration_ns": 630197,
+      "end_ns": 1230103729785813,
+      "exception": null,
+      "func_id": "sympy.simplify.powsimp.powsimp",
+      "inputs": {
+        "arg0": {
+          "display": "2*y",
+          "pickle_b64": "gAWVbAAAAAAAAACMDnN5bXB5LmNvcmUubXVslIwDTXVslJOUjBJzeW1weS5jb3JlLm51bWJlcnOUjAdJbnRlZ2VylJOUSwKFlIGUjBFzeW1weS5jb3JlLnN5bWJvbJSMBlN5bWJvbJSTlIwBeZSFlIGUhpSBlC4=",
+          "python_type": "sympy.core.mul.Mul",
+          "repr": "2*y",
+          "srepr": "Mul(Integer(2), Symbol('y'))",
+          "type_tag": "sympy.Basic"
+        }
+      },
+      "output": {
+        "display": "2*y",
+        "pickle_b64": "gAWVbAAAAAAAAACMDnN5bXB5LmNvcmUubXVslIwDTXVslJOUjBJzeW1weS5jb3JlLm51bWJlcnOUjAdJbnRlZ2VylJOUSwKFlIGUjBFzeW1weS5jb3JlLnN5bWJvbJSMBlN5bWJvbJSTlIwBeZSFlIGUhpSBlC4=",
+        "python_type": "sympy.core.mul.Mul",
+        "repr": "2*y",
+        "srepr": "Mul(Integer(2), Symbol('y'))",
+        "type_tag": "sympy.Basic"
+      },
+      "parent_call_id": "c_000002",
+      "start_ns": 1230103729155616,
+      "subcalls": [],
+      "thread_id": 126840304047936
+    },
+    "c_000004": {
+      "call_id": "c_000004",
+      "depth": 2,
+      "duration_ns": 2659206,
+      "end_ns": 1230103732591145,
+      "exception": null,
+      "func_id": "sympy.polys.polytools.cancel",
+      "inputs": {
+        "arg0": {
+          "display": "2*y",
+          "pickle_b64": "gAWVbAAAAAAAAACMDnN5bXB5LmNvcmUubXVslIwDTXVslJOUjBJzeW1weS5jb3JlLm51bWJlcnOUjAdJbnRlZ2VylJOUSwKFlIGUjBFzeW1weS5jb3JlLnN5bWJvbJSMBlN5bWJvbJSTlIwBeZSFlIGUhpSBlC4=",
+          "python_type": "sympy.core.mul.Mul",
+          "repr": "2*y",
+          "srepr": "Mul(Integer(2), Symbol('y'))",
+          "type_tag": "sympy.Basic"
+        }
+      },
+      "output": {
+        "display": "2*y",
+        "pickle_b64": "gAWVbAAAAAAAAACMDnN5bXB5LmNvcmUubXVslIwDTXVslJOUjBJzeW1weS5jb3JlLm51bWJlcnOUjAdJbnRlZ2VylJOUSwKFlIGUjBFzeW1weS5jb3JlLnN5bWJvbJSMBlN5bWJvbJSTlIwBeZSFlIGUhpSBlC4=",
+        "python_type": "sympy.core.mul.Mul",
+        "repr": "2*y",
+        "srepr": "Mul(Integer(2), Symbol('y'))",
+        "type_tag": "sympy.Basic"
+      },
+      "parent_call_id": "c_000002",
+      "start_ns": 1230103729931939,
+      "subcalls": [],
+      "thread_id": 126840304047936
+    },
+    "c_000005": {
+      "call_id": "c_000005",
+      "depth": 2,
+      "duration_ns": 180464,
+      "end_ns": 1230103733603058,
+      "exception": null,
+      "func_id": "sympy.polys.rationaltools.together",
+      "inputs": {
+        "arg0": {
+          "display": "2*y",
+          "pickle_b64": "gAWVbAAAAAAAAACMDnN5bXB5LmNvcmUubXVslIwDTXVslJOUjBJzeW1weS5jb3JlLm51bWJlcnOUjAdJbnRlZ2VylJOUSwKFlIGUjBFzeW1weS5jb3JlLnN5bWJvbJSMBlN5bWJvbJSTlIwBeZSFlIGUhpSBlC4=",
+          "python_type": "sympy.core.mul.Mul",
+          "repr": "2*y",
+          "srepr": "Mul(Integer(2), Symbol('y'))",
+          "type_tag": "sympy.Basic"
+        },
+        "deep": {
+          "display": "True",
+          "pickle_b64": "gAWILg==",
+          "python_type": "builtins.bool",
+          "repr": "True",
+          "type_tag": "python"
+        }
+      },
+      "output": {
+        "display": "2*y",
+        "pickle_b64": "gAWVbAAAAAAAAACMDnN5bXB5LmNvcmUubXVslIwDTXVslJOUjBJzeW1weS5jb3JlLm51bWJlcnOUjAdJbnRlZ2VylJOUSwKFlIGUjBFzeW1weS5jb3JlLnN5bWJvbJSMBlN5bWJvbJSTlIwBeZSFlIGUhpSBlC4=",
+        "python_type": "sympy.core.mul.Mul",
+        "repr": "2*y",
+        "srepr": "Mul(Integer(2), Symbol('y'))",
+        "type_tag": "sympy.Basic"
+      },
+      "parent_call_id": "c_000002",
+      "start_ns": 1230103733422594,
+      "subcalls": [],
+      "thread_id": 126840304047936
+    },
+    "c_000006": {
+      "call_id": "c_000006",
+      "depth": 2,
+      "duration_ns": 136462,
+      "end_ns": 1230103733900768,
+      "exception": null,
+      "func_id": "sympy.polys.rationaltools.together",
+      "inputs": {
+        "arg0": {
+          "display": "2*y",
+          "pickle_b64": "gAWVbAAAAAAAAACMDnN5bXB5LmNvcmUubXVslIwDTXVslJOUjBJzeW1weS5jb3JlLm51bWJlcnOUjAdJbnRlZ2VylJOUSwKFlIGUjBFzeW1weS5jb3JlLnN5bWJvbJSMBlN5bWJvbJSTlIwBeZSFlIGUhpSBlC4=",
+          "python_type": "sympy.core.mul.Mul",
+          "repr": "2*y",
+          "srepr": "Mul(Integer(2), Symbol('y'))",
+          "type_tag": "sympy.Basic"
+        },
+        "deep": {
+          "display": "True",
+          "pickle_b64": "gAWILg==",
+          "python_type": "builtins.bool",
+          "repr": "True",
+          "type_tag": "python"
+        }
+      },
+      "output": {
+        "display": "2*y",
+        "pickle_b64": "gAWVbAAAAAAAAACMDnN5bXB5LmNvcmUubXVslIwDTXVslJOUjBJzeW1weS5jb3JlLm51bWJlcnOUjAdJbnRlZ2VylJOUSwKFlIGUjBFzeW1weS5jb3JlLnN5bWJvbJSMBlN5bWJvbJSTlIwBeZSFlIGUhpSBlC4=",
+        "python_type": "sympy.core.mul.Mul",
+        "repr": "2*y",
+        "srepr": "Mul(Integer(2), Symbol('y'))",
+        "type_tag": "sympy.Basic"
+      },
+      "parent_call_id": "c_000002",
+      "start_ns": 1230103733764306,
+      "subcalls": [],
+      "thread_id": 126840304047936
+    },
+    "c_000007": {
+      "call_id": "c_000007",
+      "depth": 2,
+      "duration_ns": 165138,
+      "end_ns": 1230103734242364,
+      "exception": null,
+      "func_id": "sympy.core.exprtools.factor_terms",
+      "inputs": {
+        "arg0": {
+          "display": "2*y",
+          "pickle_b64": "gAWVbAAAAAAAAACMDnN5bXB5LmNvcmUubXVslIwDTXVslJOUjBJzeW1weS5jb3JlLm51bWJlcnOUjAdJbnRlZ2VylJOUSwKFlIGUjBFzeW1weS5jb3JlLnN5bWJvbJSMBlN5bWJvbJSTlIwBeZSFlIGUhpSBlC4=",
+          "python_type": "sympy.core.mul.Mul",
+          "repr": "2*y",
+          "srepr": "Mul(Integer(2), Symbol('y'))",
+          "type_tag": "sympy.Basic"
+        },
+        "sign": {
+          "display": "False",
+          "pickle_b64": "gAWJLg==",
+          "python_type": "builtins.bool",
+          "repr": "False",
+          "type_tag": "python"
+        }
+      },
+      "output": {
+        "display": "2*y",
+        "pickle_b64": "gAWVbAAAAAAAAACMDnN5bXB5LmNvcmUubXVslIwDTXVslJOUjBJzeW1weS5jb3JlLm51bWJlcnOUjAdJbnRlZ2VylJOUSwKFlIGUjBFzeW1weS5jb3JlLnN5bWJvbJSMBlN5bWJvbJSTlIwBeZSFlIGUhpSBlC4=",
+        "python_type": "sympy.core.mul.Mul",
+        "repr": "2*y",
+        "srepr": "Mul(Integer(2), Symbol('y'))",
+        "type_tag": "sympy.Basic"
+      },
+      "parent_call_id": "c_000002",
+      "start_ns": 1230103734077226,
+      "subcalls": [],
+      "thread_id": 126840304047936
+    },
+    "c_000008": {
+      "call_id": "c_000008",
+      "depth": 2,
+      "duration_ns": 200671,
+      "end_ns": 1230103734585366,
+      "exception": null,
+      "func_id": "sympy.simplify.hyperexpand.hyperexpand",
+      "inputs": {
+        "arg0": {
+          "display": "2*y",
+          "pickle_b64": "gAWVbAAAAAAAAACMDnN5bXB5LmNvcmUubXVslIwDTXVslJOUjBJzeW1weS5jb3JlLm51bWJlcnOUjAdJbnRlZ2VylJOUSwKFlIGUjBFzeW1weS5jb3JlLnN5bWJvbJSMBlN5bWJvbJSTlIwBeZSFlIGUhpSBlC4=",
+          "python_type": "sympy.core.mul.Mul",
+          "repr": "2*y",
+          "srepr": "Mul(Integer(2), Symbol('y'))",
+          "type_tag": "sympy.Basic"
+        }
+      },
+      "output": {
+        "display": "2*y",
+        "pickle_b64": "gAWVbAAAAAAAAACMDnN5bXB5LmNvcmUubXVslIwDTXVslJOUjBJzeW1weS5jb3JlLm51bWJlcnOUjAdJbnRlZ2VylJOUSwKFlIGUjBFzeW1weS5jb3JlLnN5bWJvbJSMBlN5bWJvbJSTlIwBeZSFlIGUhpSBlC4=",
+        "python_type": "sympy.core.mul.Mul",
+        "repr": "2*y",
+        "srepr": "Mul(Integer(2), Symbol('y'))",
+        "type_tag": "sympy.Basic"
+      },
+      "parent_call_id": "c_000002",
+      "start_ns": 1230103734384695,
+      "subcalls": [],
+      "thread_id": 126840304047936
+    },
+    "c_000009": {
+      "call_id": "c_000009",
+      "depth": 2,
+      "duration_ns": 264857,
+      "end_ns": 1230103845705366,
+      "exception": null,
+      "func_id": "sympy.simplify.powsimp.powsimp",
+      "inputs": {
+        "arg0": {
+          "display": "2*y",
+          "pickle_b64": "gAWVbAAAAAAAAACMDnN5bXB5LmNvcmUubXVslIwDTXVslJOUjBJzeW1weS5jb3JlLm51bWJlcnOUjAdJbnRlZ2VylJOUSwKFlIGUjBFzeW1weS5jb3JlLnN5bWJvbJSMBlN5bWJvbJSTlIwBeZSFlIGUhpSBlC4=",
+          "python_type": "sympy.core.mul.Mul",
+          "repr": "2*y",
+          "srepr": "Mul(Integer(2), Symbol('y'))",
+          "type_tag": "sympy.Basic"
+        },
+        "combine": {
+          "display": "exp",
+          "pickle_b64": "gAWVBwAAAAAAAACMA2V4cJQu",
+          "python_type": "builtins.str",
+          "repr": "'exp'",
+          "type_tag": "python"
+        },
+        "deep": {
+          "display": "True",
+          "pickle_b64": "gAWILg==",
+          "python_type": "builtins.bool",
+          "repr": "True",
+          "type_tag": "python"
+        }
+      },
+      "output": {
+        "display": "2*y",
+        "pickle_b64": "gAWVbAAAAAAAAACMDnN5bXB5LmNvcmUubXVslIwDTXVslJOUjBJzeW1weS5jb3JlLm51bWJlcnOUjAdJbnRlZ2VylJOUSwKFlIGUjBFzeW1weS5jb3JlLnN5bWJvbJSMBlN5bWJvbJSTlIwBeZSFlIGUhpSBlC4=",
+        "python_type": "sympy.core.mul.Mul",
+        "repr": "2*y",
+        "srepr": "Mul(Integer(2), Symbol('y'))",
+        "type_tag": "sympy.Basic"
+      },
+      "parent_call_id": "c_000002",
+      "start_ns": 1230103845440509,
+      "subcalls": [],
+      "thread_id": 126840304047936
+    },
+    "c_000010": {
+      "call_id": "c_000010",
+      "depth": 2,
+      "duration_ns": 248601,
+      "end_ns": 1230103846069211,
+      "exception": null,
+      "func_id": "sympy.simplify.powsimp.powsimp",
+      "inputs": {
+        "arg0": {
+          "display": "2*y",
+          "pickle_b64": "gAWVbAAAAAAAAACMDnN5bXB5LmNvcmUubXVslIwDTXVslJOUjBJzeW1weS5jb3JlLm51bWJlcnOUjAdJbnRlZ2VylJOUSwKFlIGUjBFzeW1weS5jb3JlLnN5bWJvbJSMBlN5bWJvbJSTlIwBeZSFlIGUhpSBlC4=",
+          "python_type": "sympy.core.mul.Mul",
+          "repr": "2*y",
+          "srepr": "Mul(Integer(2), Symbol('y'))",
+          "type_tag": "sympy.Basic"
+        }
+      },
+      "output": {
+        "display": "2*y",
+        "pickle_b64": "gAWVbAAAAAAAAACMDnN5bXB5LmNvcmUubXVslIwDTXVslJOUjBJzeW1weS5jb3JlLm51bWJlcnOUjAdJbnRlZ2VylJOUSwKFlIGUjBFzeW1weS5jb3JlLnN5bWJvbJSMBlN5bWJvbJSTlIwBeZSFlIGUhpSBlC4=",
+        "python_type": "sympy.core.mul.Mul",
+        "repr": "2*y",
+        "srepr": "Mul(Integer(2), Symbol('y'))",
+        "type_tag": "sympy.Basic"
+      },
+      "parent_call_id": "c_000002",
+      "start_ns": 1230103845820610,
+      "subcalls": [],
+      "thread_id": 126840304047936
+    },
+    "c_000011": {
+      "call_id": "c_000011",
+      "depth": 2,
+      "duration_ns": 483107,
+      "end_ns": 1230103846662597,
+      "exception": null,
+      "func_id": "sympy.polys.polytools.cancel",
+      "inputs": {
+        "arg0": {
+          "display": "2*y",
+          "pickle_b64": "gAWVbAAAAAAAAACMDnN5bXB5LmNvcmUubXVslIwDTXVslJOUjBJzeW1weS5jb3JlLm51bWJlcnOUjAdJbnRlZ2VylJOUSwKFlIGUjBFzeW1weS5jb3JlLnN5bWJvbJSMBlN5bWJvbJSTlIwBeZSFlIGUhpSBlC4=",
+          "python_type": "sympy.core.mul.Mul",
+          "repr": "2*y",
+          "srepr": "Mul(Integer(2), Symbol('y'))",
+          "type_tag": "sympy.Basic"
+        }
+      },
+      "output": {
+        "display": "2*y",
+        "pickle_b64": "gAWVbAAAAAAAAACMDnN5bXB5LmNvcmUubXVslIwDTXVslJOUjBJzeW1weS5jb3JlLm51bWJlcnOUjAdJbnRlZ2VylJOUSwKFlIGUjBFzeW1weS5jb3JlLnN5bWJvbJSMBlN5bWJvbJSTlIwBeZSFlIGUhpSBlC4=",
+        "python_type": "sympy.core.mul.Mul",
+        "repr": "2*y",
+        "srepr": "Mul(Integer(2), Symbol('y'))",
+        "type_tag": "sympy.Basic"
+      },
+      "parent_call_id": "c_000002",
+      "start_ns": 1230103846179490,
+      "subcalls": [],
+      "thread_id": 126840304047936
+    },
+    "c_000012": {
+      "call_id": "c_000012",
+      "depth": 2,
+      "duration_ns": 128845,
+      "end_ns": 1230103846899114,
+      "exception": null,
+      "func_id": "sympy.core.exprtools.factor_terms",
+      "inputs": {
+        "arg0": {
+          "display": "2*y",
+          "pickle_b64": "gAWVbAAAAAAAAACMDnN5bXB5LmNvcmUubXVslIwDTXVslJOUjBJzeW1weS5jb3JlLm51bWJlcnOUjAdJbnRlZ2VylJOUSwKFlIGUjBFzeW1weS5jb3JlLnN5bWJvbJSMBlN5bWJvbJSTlIwBeZSFlIGUhpSBlC4=",
+          "python_type": "sympy.core.mul.Mul",
+          "repr": "2*y",
+          "srepr": "Mul(Integer(2), Symbol('y'))",
+          "type_tag": "sympy.Basic"
+        }
+      },
+      "output": {
+        "display": "2*y",
+        "pickle_b64": "gAWVbAAAAAAAAACMDnN5bXB5LmNvcmUubXVslIwDTXVslJOUjBJzeW1weS5jb3JlLm51bWJlcnOUjAdJbnRlZ2VylJOUSwKFlIGUjBFzeW1weS5jb3JlLnN5bWJvbJSMBlN5bWJvbJSTlIwBeZSFlIGUhpSBlC4=",
+        "python_type": "sympy.core.mul.Mul",
+        "repr": "2*y",
+        "srepr": "Mul(Integer(2), Symbol('y'))",
+        "type_tag": "sympy.Basic"
+      },
+      "parent_call_id": "c_000002",
+      "start_ns": 1230103846770269,
+      "subcalls": [],
+      "thread_id": 126840304047936
+    },
+    "c_000013": {
+      "call_id": "c_000013",
+      "depth": 1,
+      "duration_ns": 781060,
+      "end_ns": 1230103848423124,
+      "exception": null,
+      "func_id": "sympy.simplify.powsimp.powsimp",
+      "inputs": {
+        "arg0": {
+          "display": "sin(2*y)**2",
+          "pickle_b64": "gAWVxAAAAAAAAACMEHN5bXB5LmNvcmUucG93ZXKUjANQb3eUk5SMKHN5bXB5LmZ1bmN0aW9ucy5lbGVtZW50YXJ5LnRyaWdvbm9tZXRyaWOUjANzaW6Uk5SMDnN5bXB5LmNvcmUubXVslIwDTXVslJOUjBJzeW1weS5jb3JlLm51bWJlcnOUjAdJbnRlZ2VylJOUSwKFlIGUjBFzeW1weS5jb3JlLnN5bWJvbJSMBlN5bWJvbJSTlIwBeZSFlIGUhpSBlIWUgZRoDYaUgZQu",
+          "python_type": "sympy.core.power.Pow",
+          "repr": "sin(2*y)**2",
+          "srepr": "Pow(sin(Mul(Integer(2), Symbol('y'))), Integer(2))",
+          "type_tag": "sympy.Basic"
+        }
+      },
+      "output": {
+        "display": "sin(2*y)**2",
+        "pickle_b64": "gAWVxAAAAAAAAACMEHN5bXB5LmNvcmUucG93ZXKUjANQb3eUk5SMKHN5bXB5LmZ1bmN0aW9ucy5lbGVtZW50YXJ5LnRyaWdvbm9tZXRyaWOUjANzaW6Uk5SMDnN5bXB5LmNvcmUubXVslIwDTXVslJOUjBJzeW1weS5jb3JlLm51bWJlcnOUjAdJbnRlZ2VylJOUSwKFlIGUjBFzeW1weS5jb3JlLnN5bWJvbJSMBlN5bWJvbJSTlIwBeZSFlIGUhpSBlIWUgZRoDYaUgZQu",
+        "python_type": "sympy.core.power.Pow",
+        "repr": "sin(2*y)**2",
+        "srepr": "Pow(sin(Mul(Integer(2), Symbol('y'))), Integer(2))",
+        "type_tag": "sympy.Basic"
+      },
+      "parent_call_id": "c_000001",
+      "start_ns": 1230103847642064,
+      "subcalls": [],
+      "thread_id": 126840304047936
+    },
+    "c_000014": {
+      "call_id": "c_000014",
+      "depth": 1,
+      "duration_ns": 1455156,
+      "end_ns": 1230103850098726,
+      "exception": null,
+      "func_id": "sympy.polys.polytools.cancel",
+      "inputs": {
+        "arg0": {
+          "display": "sin(2*y)**2",
+          "pickle_b64": "gAWVxAAAAAAAAACMEHN5bXB5LmNvcmUucG93ZXKUjANQb3eUk5SMKHN5bXB5LmZ1bmN0aW9ucy5lbGVtZW50YXJ5LnRyaWdvbm9tZXRyaWOUjANzaW6Uk5SMDnN5bXB5LmNvcmUubXVslIwDTXVslJOUjBJzeW1weS5jb3JlLm51bWJlcnOUjAdJbnRlZ2VylJOUSwKFlIGUjBFzeW1weS5jb3JlLnN5bWJvbJSMBlN5bWJvbJSTlIwBeZSFlIGUhpSBlIWUgZRoDYaUgZQu",
+          "python_type": "sympy.core.power.Pow",
+          "repr": "sin(2*y)**2",
+          "srepr": "Pow(sin(Mul(Integer(2), Symbol('y'))), Integer(2))",
+          "type_tag": "sympy.Basic"
+        }
+      },
+      "output": {
+        "display": "sin(2*y)**2",
+        "pickle_b64": "gAWVxAAAAAAAAACMEHN5bXB5LmNvcmUucG93ZXKUjANQb3eUk5SMKHN5bXB5LmZ1bmN0aW9ucy5lbGVtZW50YXJ5LnRyaWdvbm9tZXRyaWOUjANzaW6Uk5SMDnN5bXB5LmNvcmUubXVslIwDTXVslJOUjBJzeW1weS5jb3JlLm51bWJlcnOUjAdJbnRlZ2VylJOUSwKFlIGUjBFzeW1weS5jb3JlLnN5bWJvbJSMBlN5bWJvbJSTlIwBeZSFlIGUhpSBlIWUgZRoDYaUgZQu",
+        "python_type": "sympy.core.power.Pow",
+        "repr": "sin(2*y)**2",
+        "srepr": "Pow(sin(Mul(Integer(2), Symbol('y'))), Integer(2))",
+        "type_tag": "sympy.Basic"
+      },
+      "parent_call_id": "c_000001",
+      "start_ns": 1230103848643570,
+      "subcalls": [],
+      "thread_id": 126840304047936
+    },
+    "c_000015": {
+      "call_id": "c_000015",
+      "depth": 1,
+      "duration_ns": 213841,
+      "end_ns": 1230103851035902,
+      "exception": null,
+      "func_id": "sympy.polys.rationaltools.together",
+      "inputs": {
+        "arg0": {
+          "display": "sin(2*y)**2",
+          "pickle_b64": "gAWVxAAAAAAAAACMEHN5bXB5LmNvcmUucG93ZXKUjANQb3eUk5SMKHN5bXB5LmZ1bmN0aW9ucy5lbGVtZW50YXJ5LnRyaWdvbm9tZXRyaWOUjANzaW6Uk5SMDnN5bXB5LmNvcmUubXVslIwDTXVslJOUjBJzeW1weS5jb3JlLm51bWJlcnOUjAdJbnRlZ2VylJOUSwKFlIGUjBFzeW1weS5jb3JlLnN5bWJvbJSMBlN5bWJvbJSTlIwBeZSFlIGUhpSBlIWUgZRoDYaUgZQu",
+          "python_type": "sympy.core.power.Pow",
+          "repr": "sin(2*y)**2",
+          "srepr": "Pow(sin(Mul(Integer(2), Symbol('y'))), Integer(2))",
+          "type_tag": "sympy.Basic"
+        },
+        "deep": {
+          "display": "True",
+          "pickle_b64": "gAWILg==",
+          "python_type": "builtins.bool",
+          "repr": "True",
+          "type_tag": "python"
+        }
+      },
+      "output": {
+        "display": "sin(2*y)**2",
+        "pickle_b64": "gAWVxAAAAAAAAACMEHN5bXB5LmNvcmUucG93ZXKUjANQb3eUk5SMKHN5bXB5LmZ1bmN0aW9ucy5lbGVtZW50YXJ5LnRyaWdvbm9tZXRyaWOUjANzaW6Uk5SMDnN5bXB5LmNvcmUubXVslIwDTXVslJOUjBJzeW1weS5jb3JlLm51bWJlcnOUjAdJbnRlZ2VylJOUSwKFlIGUjBFzeW1weS5jb3JlLnN5bWJvbJSMBlN5bWJvbJSTlIwBeZSFlIGUhpSBlIWUgZRoDYaUgZQu",
+        "python_type": "sympy.core.power.Pow",
+        "repr": "sin(2*y)**2",
+        "srepr": "Pow(sin(Mul(Integer(2), Symbol('y'))), Integer(2))",
+        "type_tag": "sympy.Basic"
+      },
+      "parent_call_id": "c_000001",
+      "start_ns": 1230103850822061,
+      "subcalls": [],
+      "thread_id": 126840304047936
+    },
+    "c_000016": {
+      "call_id": "c_000016",
+      "depth": 1,
+      "duration_ns": 179999,
+      "end_ns": 1230103851400245,
+      "exception": null,
+      "func_id": "sympy.polys.rationaltools.together",
+      "inputs": {
+        "arg0": {
+          "display": "sin(2*y)**2",
+          "pickle_b64": "gAWVxAAAAAAAAACMEHN5bXB5LmNvcmUucG93ZXKUjANQb3eUk5SMKHN5bXB5LmZ1bmN0aW9ucy5lbGVtZW50YXJ5LnRyaWdvbm9tZXRyaWOUjANzaW6Uk5SMDnN5bXB5LmNvcmUubXVslIwDTXVslJOUjBJzeW1weS5jb3JlLm51bWJlcnOUjAdJbnRlZ2VylJOUSwKFlIGUjBFzeW1weS5jb3JlLnN5bWJvbJSMBlN5bWJvbJSTlIwBeZSFlIGUhpSBlIWUgZRoDYaUgZQu",
+          "python_type": "sympy.core.power.Pow",
+          "repr": "sin(2*y)**2",
+          "srepr": "Pow(sin(Mul(Integer(2), Symbol('y'))), Integer(2))",
+          "type_tag": "sympy.Basic"
+        },
+        "deep": {
+          "display": "True",
+          "pickle_b64": "gAWILg==",
+          "python_type": "builtins.bool",
+          "repr": "True",
+          "type_tag": "python"
+        }
+      },
+      "output": {
+        "display": "sin(2*y)**2",
+        "pickle_b64": "gAWVxAAAAAAAAACMEHN5bXB5LmNvcmUucG93ZXKUjANQb3eUk5SMKHN5bXB5LmZ1bmN0aW9ucy5lbGVtZW50YXJ5LnRyaWdvbm9tZXRyaWOUjANzaW6Uk5SMDnN5bXB5LmNvcmUubXVslIwDTXVslJOUjBJzeW1weS5jb3JlLm51bWJlcnOUjAdJbnRlZ2VylJOUSwKFlIGUjBFzeW1weS5jb3JlLnN5bWJvbJSMBlN5bWJvbJSTlIwBeZSFlIGUhpSBlIWUgZRoDYaUgZQu",
+        "python_type": "sympy.core.power.Pow",
+        "repr": "sin(2*y)**2",
+        "srepr": "Pow(sin(Mul(Integer(2), Symbol('y'))), Integer(2))",
+        "type_tag": "sympy.Basic"
+      },
+      "parent_call_id": "c_000001",
+      "start_ns": 1230103851220246,
+      "subcalls": [],
+      "thread_id": 126840304047936
+    },
+    "c_000017": {
+      "call_id": "c_000017",
+      "depth": 1,
+      "duration_ns": 201003,
+      "end_ns": 1230103851773083,
+      "exception": null,
+      "func_id": "sympy.core.exprtools.factor_terms",
+      "inputs": {
+        "arg0": {
+          "display": "sin(2*y)**2",
+          "pickle_b64": "gAWVxAAAAAAAAACMEHN5bXB5LmNvcmUucG93ZXKUjANQb3eUk5SMKHN5bXB5LmZ1bmN0aW9ucy5lbGVtZW50YXJ5LnRyaWdvbm9tZXRyaWOUjANzaW6Uk5SMDnN5bXB5LmNvcmUubXVslIwDTXVslJOUjBJzeW1weS5jb3JlLm51bWJlcnOUjAdJbnRlZ2VylJOUSwKFlIGUjBFzeW1weS5jb3JlLnN5bWJvbJSMBlN5bWJvbJSTlIwBeZSFlIGUhpSBlIWUgZRoDYaUgZQu",
+          "python_type": "sympy.core.power.Pow",
+          "repr": "sin(2*y)**2",
+          "srepr": "Pow(sin(Mul(Integer(2), Symbol('y'))), Integer(2))",
+          "type_tag": "sympy.Basic"
+        },
+        "sign": {
+          "display": "False",
+          "pickle_b64": "gAWJLg==",
+          "python_type": "builtins.bool",
+          "repr": "False",
+          "type_tag": "python"
+        }
+      },
+      "output": {
+        "display": "sin(2*y)**2",
+        "pickle_b64": "gAWVxAAAAAAAAACMEHN5bXB5LmNvcmUucG93ZXKUjANQb3eUk5SMKHN5bXB5LmZ1bmN0aW9ucy5lbGVtZW50YXJ5LnRyaWdvbm9tZXRyaWOUjANzaW6Uk5SMDnN5bXB5LmNvcmUubXVslIwDTXVslJOUjBJzeW1weS5jb3JlLm51bWJlcnOUjAdJbnRlZ2VylJOUSwKFlIGUjBFzeW1weS5jb3JlLnN5bWJvbJSMBlN5bWJvbJSTlIwBeZSFlIGUhpSBlIWUgZRoDYaUgZQu",
+        "python_type": "sympy.core.power.Pow",
+        "repr": "sin(2*y)**2",
+        "srepr": "Pow(sin(Mul(Integer(2), Symbol('y'))), Integer(2))",
+        "type_tag": "sympy.Basic"
+      },
+      "parent_call_id": "c_000001",
+      "start_ns": 1230103851572080,
+      "subcalls": [],
+      "thread_id": 126840304047936
+    },
+    "c_000018": {
+      "call_id": "c_000018",
+      "depth": 1,
+      "duration_ns": 261203,
+      "end_ns": 1230103852213586,
+      "exception": null,
+      "func_id": "sympy.simplify.hyperexpand.hyperexpand",
+      "inputs": {
+        "arg0": {
+          "display": "sin(2*y)**2",
+          "pickle_b64": "gAWVxAAAAAAAAACMEHN5bXB5LmNvcmUucG93ZXKUjANQb3eUk5SMKHN5bXB5LmZ1bmN0aW9ucy5lbGVtZW50YXJ5LnRyaWdvbm9tZXRyaWOUjANzaW6Uk5SMDnN5bXB5LmNvcmUubXVslIwDTXVslJOUjBJzeW1weS5jb3JlLm51bWJlcnOUjAdJbnRlZ2VylJOUSwKFlIGUjBFzeW1weS5jb3JlLnN5bWJvbJSMBlN5bWJvbJSTlIwBeZSFlIGUhpSBlIWUgZRoDYaUgZQu",
+          "python_type": "sympy.core.power.Pow",
+          "repr": "sin(2*y)**2",
+          "srepr": "Pow(sin(Mul(Integer(2), Symbol('y'))), Integer(2))",
+          "type_tag": "sympy.Basic"
+        }
+      },
+      "output": {
+        "display": "sin(2*y)**2",
+        "pickle_b64": "gAWVxAAAAAAAAACMEHN5bXB5LmNvcmUucG93ZXKUjANQb3eUk5SMKHN5bXB5LmZ1bmN0aW9ucy5lbGVtZW50YXJ5LnRyaWdvbm9tZXRyaWOUjANzaW6Uk5SMDnN5bXB5LmNvcmUubXVslIwDTXVslJOUjBJzeW1weS5jb3JlLm51bWJlcnOUjAdJbnRlZ2VylJOUSwKFlIGUjBFzeW1weS5jb3JlLnN5bWJvbJSMBlN5bWJvbJSTlIwBeZSFlIGUhpSBlIWUgZRoDYaUgZQu",
+        "python_type": "sympy.core.power.Pow",
+        "repr": "sin(2*y)**2",
+        "srepr": "Pow(sin(Mul(Integer(2), Symbol('y'))), Integer(2))",
+        "type_tag": "sympy.Basic"
+      },
+      "parent_call_id": "c_000001",
+      "start_ns": 1230103851952383,
+      "subcalls": [],
+      "thread_id": 126840304047936
+    },
+    "c_000019": {
+      "call_id": "c_000019",
+      "depth": 1,
+      "duration_ns": 24199393,
+      "end_ns": 1230103876609197,
+      "exception": null,
+      "func_id": "sympy.simplify.trigsimp.trigsimp",
+      "inputs": {
+        "arg0": {
+          "display": "sin(2*y)**2",
+          "pickle_b64": "gAWVxAAAAAAAAACMEHN5bXB5LmNvcmUucG93ZXKUjANQb3eUk5SMKHN5bXB5LmZ1bmN0aW9ucy5lbGVtZW50YXJ5LnRyaWdvbm9tZXRyaWOUjANzaW6Uk5SMDnN5bXB5LmNvcmUubXVslIwDTXVslJOUjBJzeW1weS5jb3JlLm51bWJlcnOUjAdJbnRlZ2VylJOUSwKFlIGUjBFzeW1weS5jb3JlLnN5bWJvbJSMBlN5bWJvbJSTlIwBeZSFlIGUhpSBlIWUgZRoDYaUgZQu",
+          "python_type": "sympy.core.power.Pow",
+          "repr": "sin(2*y)**2",
+          "srepr": "Pow(sin(Mul(Integer(2), Symbol('y'))), Integer(2))",
+          "type_tag": "sympy.Basic"
+        },
+        "deep": {
+          "display": "True",
+          "pickle_b64": "gAWILg==",
+          "python_type": "builtins.bool",
+          "repr": "True",
+          "type_tag": "python"
+        }
+      },
+      "output": {
+        "display": "sin(2*y)**2",
+        "pickle_b64": "gAWVxAAAAAAAAACMEHN5bXB5LmNvcmUucG93ZXKUjANQb3eUk5SMKHN5bXB5LmZ1bmN0aW9ucy5lbGVtZW50YXJ5LnRyaWdvbm9tZXRyaWOUjANzaW6Uk5SMDnN5bXB5LmNvcmUubXVslIwDTXVslJOUjBJzeW1weS5jb3JlLm51bWJlcnOUjAdJbnRlZ2VylJOUSwKFlIGUjBFzeW1weS5jb3JlLnN5bWJvbJSMBlN5bWJvbJSTlIwBeZSFlIGUhpSBlIWUgZRoDYaUgZQu",
+        "python_type": "sympy.core.power.Pow",
+        "repr": "sin(2*y)**2",
+        "srepr": "Pow(sin(Mul(Integer(2), Symbol('y'))), Integer(2))",
+        "type_tag": "sympy.Basic"
+      },
+      "parent_call_id": "c_000001",
+      "start_ns": 1230103852409804,
+      "subcalls": [],
+      "thread_id": 126840304047936
+    },
+    "c_000020": {
+      "call_id": "c_000020",
+      "depth": 1,
+      "duration_ns": 434881,
+      "end_ns": 1230103877315722,
+      "exception": null,
+      "func_id": "sympy.simplify.powsimp.powsimp",
+      "inputs": {
+        "arg0": {
+          "display": "sin(2*y)**2",
+          "pickle_b64": "gAWVxAAAAAAAAACMEHN5bXB5LmNvcmUucG93ZXKUjANQb3eUk5SMKHN5bXB5LmZ1bmN0aW9ucy5lbGVtZW50YXJ5LnRyaWdvbm9tZXRyaWOUjANzaW6Uk5SMDnN5bXB5LmNvcmUubXVslIwDTXVslJOUjBJzeW1weS5jb3JlLm51bWJlcnOUjAdJbnRlZ2VylJOUSwKFlIGUjBFzeW1weS5jb3JlLnN5bWJvbJSMBlN5bWJvbJSTlIwBeZSFlIGUhpSBlIWUgZRoDYaUgZQu",
+          "python_type": "sympy.core.power.Pow",
+          "repr": "sin(2*y)**2",
+          "srepr": "Pow(sin(Mul(Integer(2), Symbol('y'))), Integer(2))",
+          "type_tag": "sympy.Basic"
+        },
+        "combine": {
+          "display": "exp",
+          "pickle_b64": "gAWVBwAAAAAAAACMA2V4cJQu",
+          "python_type": "builtins.str",
+          "repr": "'exp'",
+          "type_tag": "python"
+        },
+        "deep": {
+          "display": "True",
+          "pickle_b64": "gAWILg==",
+          "python_type": "builtins.bool",
+          "repr": "True",
+          "type_tag": "python"
+        }
+      },
+      "output": {
+        "display": "sin(2*y)**2",
+        "pickle_b64": "gAWVxAAAAAAAAACMEHN5bXB5LmNvcmUucG93ZXKUjANQb3eUk5SMKHN5bXB5LmZ1bmN0aW9ucy5lbGVtZW50YXJ5LnRyaWdvbm9tZXRyaWOUjANzaW6Uk5SMDnN5bXB5LmNvcmUubXVslIwDTXVslJOUjBJzeW1weS5jb3JlLm51bWJlcnOUjAdJbnRlZ2VylJOUSwKFlIGUjBFzeW1weS5jb3JlLnN5bWJvbJSMBlN5bWJvbJSTlIwBeZSFlIGUhpSBlIWUgZRoDYaUgZQu",
+        "python_type": "sympy.core.power.Pow",
+        "repr": "sin(2*y)**2",
+        "srepr": "Pow(sin(Mul(Integer(2), Symbol('y'))), Integer(2))",
+        "type_tag": "sympy.Basic"
+      },
+      "parent_call_id": "c_000001",
+      "start_ns": 1230103876880841,
+      "subcalls": [],
+      "thread_id": 126840304047936
+    },
+    "c_000021": {
+      "call_id": "c_000021",
+      "depth": 1,
+      "duration_ns": 316234,
+      "end_ns": 1230103877803381,
+      "exception": null,
+      "func_id": "sympy.simplify.powsimp.powsimp",
+      "inputs": {
+        "arg0": {
+          "display": "sin(2*y)**2",
+          "pickle_b64": "gAWVxAAAAAAAAACMEHN5bXB5LmNvcmUucG93ZXKUjANQb3eUk5SMKHN5bXB5LmZ1bmN0aW9ucy5lbGVtZW50YXJ5LnRyaWdvbm9tZXRyaWOUjANzaW6Uk5SMDnN5bXB5LmNvcmUubXVslIwDTXVslJOUjBJzeW1weS5jb3JlLm51bWJlcnOUjAdJbnRlZ2VylJOUSwKFlIGUjBFzeW1weS5jb3JlLnN5bWJvbJSMBlN5bWJvbJSTlIwBeZSFlIGUhpSBlIWUgZRoDYaUgZQu",
+          "python_type": "sympy.core.power.Pow",
+          "repr": "sin(2*y)**2",
+          "srepr": "Pow(sin(Mul(Integer(2), Symbol('y'))), Integer(2))",
+          "type_tag": "sympy.Basic"
+        }
+      },
+      "output": {
+        "display": "sin(2*y)**2",
+        "pickle_b64": "gAWVxAAAAAAAAACMEHN5bXB5LmNvcmUucG93ZXKUjANQb3eUk5SMKHN5bXB5LmZ1bmN0aW9ucy5lbGVtZW50YXJ5LnRyaWdvbm9tZXRyaWOUjANzaW6Uk5SMDnN5bXB5LmNvcmUubXVslIwDTXVslJOUjBJzeW1weS5jb3JlLm51bWJlcnOUjAdJbnRlZ2VylJOUSwKFlIGUjBFzeW1weS5jb3JlLnN5bWJvbJSMBlN5bWJvbJSTlIwBeZSFlIGUhpSBlIWUgZRoDYaUgZQu",
+        "python_type": "sympy.core.power.Pow",
+        "repr": "sin(2*y)**2",
+        "srepr": "Pow(sin(Mul(Integer(2), Symbol('y'))), Integer(2))",
+        "type_tag": "sympy.Basic"
+      },
+      "parent_call_id": "c_000001",
+      "start_ns": 1230103877487147,
+      "subcalls": [],
+      "thread_id": 126840304047936
+    },
+    "c_000022": {
+      "call_id": "c_000022",
+      "depth": 1,
+      "duration_ns": 590980,
+      "end_ns": 1230103878564045,
+      "exception": null,
+      "func_id": "sympy.polys.polytools.cancel",
+      "inputs": {
+        "arg0": {
+          "display": "sin(2*y)**2",
+          "pickle_b64": "gAWVxAAAAAAAAACMEHN5bXB5LmNvcmUucG93ZXKUjANQb3eUk5SMKHN5bXB5LmZ1bmN0aW9ucy5lbGVtZW50YXJ5LnRyaWdvbm9tZXRyaWOUjANzaW6Uk5SMDnN5bXB5LmNvcmUubXVslIwDTXVslJOUjBJzeW1weS5jb3JlLm51bWJlcnOUjAdJbnRlZ2VylJOUSwKFlIGUjBFzeW1weS5jb3JlLnN5bWJvbJSMBlN5bWJvbJSTlIwBeZSFlIGUhpSBlIWUgZRoDYaUgZQu",
+          "python_type": "sympy.core.power.Pow",
+          "repr": "sin(2*y)**2",
+          "srepr": "Pow(sin(Mul(Integer(2), Symbol('y'))), Integer(2))",
+          "type_tag": "sympy.Basic"
+        }
+      },
+      "output": {
+        "display": "sin(2*y)**2",
+        "pickle_b64": "gAWVxAAAAAAAAACMEHN5bXB5LmNvcmUucG93ZXKUjANQb3eUk5SMKHN5bXB5LmZ1bmN0aW9ucy5lbGVtZW50YXJ5LnRyaWdvbm9tZXRyaWOUjANzaW6Uk5SMDnN5bXB5LmNvcmUubXVslIwDTXVslJOUjBJzeW1weS5jb3JlLm51bWJlcnOUjAdJbnRlZ2VylJOUSwKFlIGUjBFzeW1weS5jb3JlLnN5bWJvbJSMBlN5bWJvbJSTlIwBeZSFlIGUhpSBlIWUgZRoDYaUgZQu",
+        "python_type": "sympy.core.power.Pow",
+        "repr": "sin(2*y)**2",
+        "srepr": "Pow(sin(Mul(Integer(2), Symbol('y'))), Integer(2))",
+        "type_tag": "sympy.Basic"
+      },
+      "parent_call_id": "c_000001",
+      "start_ns": 1230103877973065,
+      "subcalls": [],
+      "thread_id": 126840304047936
+    },
+    "c_000023": {
+      "call_id": "c_000023",
+      "depth": 1,
+      "duration_ns": 202127,
+      "end_ns": 1230103878940215,
+      "exception": null,
+      "func_id": "sympy.core.exprtools.factor_terms",
+      "inputs": {
+        "arg0": {
+          "display": "sin(2*y)**2",
+          "pickle_b64": "gAWVxAAAAAAAAACMEHN5bXB5LmNvcmUucG93ZXKUjANQb3eUk5SMKHN5bXB5LmZ1bmN0aW9ucy5lbGVtZW50YXJ5LnRyaWdvbm9tZXRyaWOUjANzaW6Uk5SMDnN5bXB5LmNvcmUubXVslIwDTXVslJOUjBJzeW1weS5jb3JlLm51bWJlcnOUjAdJbnRlZ2VylJOUSwKFlIGUjBFzeW1weS5jb3JlLnN5bWJvbJSMBlN5bWJvbJSTlIwBeZSFlIGUhpSBlIWUgZRoDYaUgZQu",
+          "python_type": "sympy.core.power.Pow",
+          "repr": "sin(2*y)**2",
+          "srepr": "Pow(sin(Mul(Integer(2), Symbol('y'))), Integer(2))",
+          "type_tag": "sympy.Basic"
+        }
+      },
+      "output": {
+        "display": "sin(2*y)**2",
+        "pickle_b64": "gAWVxAAAAAAAAACMEHN5bXB5LmNvcmUucG93ZXKUjANQb3eUk5SMKHN5bXB5LmZ1bmN0aW9ucy5lbGVtZW50YXJ5LnRyaWdvbm9tZXRyaWOUjANzaW6Uk5SMDnN5bXB5LmNvcmUubXVslIwDTXVslJOUjBJzeW1weS5jb3JlLm51bWJlcnOUjAdJbnRlZ2VylJOUSwKFlIGUjBFzeW1weS5jb3JlLnN5bWJvbJSMBlN5bWJvbJSTlIwBeZSFlIGUhpSBlIWUgZRoDYaUgZQu",
+        "python_type": "sympy.core.power.Pow",
+        "repr": "sin(2*y)**2",
+        "srepr": "Pow(sin(Mul(Integer(2), Symbol('y'))), Integer(2))",
+        "type_tag": "sympy.Basic"
+      },
+      "parent_call_id": "c_000001",
+      "start_ns": 1230103878738088,
+      "subcalls": [],
+      "thread_id": 126840304047936
+    }
+  },
+  "episode": {
+    "call_ids": [
+      "c_000001",
+      "c_000002",
+      "c_000003",
+      "c_000004",
+      "c_000005",
+      "c_000006",
+      "c_000007",
+      "c_000008",
+      "c_000009",
+      "c_000010",
+      "c_000011",
+      "c_000012",
+      "c_000013",
+      "c_000014",
+      "c_000015",
+      "c_000016",
+      "c_000017",
+      "c_000018",
+      "c_000019",
+      "c_000020",
+      "c_000021",
+      "c_000022",
+      "c_000023"
+    ],
+    "duration_ms": 203.6391170695424,
+    "entry_func_id": "simplify",
+    "episode_id": "simplify_8",
+    "final_output": {
+      "display": "sin(2*y)**2",
+      "pickle_b64": "gAWVxAAAAAAAAACMEHN5bXB5LmNvcmUucG93ZXKUjANQb3eUk5SMKHN5bXB5LmZ1bmN0aW9ucy5lbGVtZW50YXJ5LnRyaWdvbm9tZXRyaWOUjANzaW6Uk5SMDnN5bXB5LmNvcmUubXVslIwDTXVslJOUjBJzeW1weS5jb3JlLm51bWJlcnOUjAdJbnRlZ2VylJOUSwKFlIGUjBFzeW1weS5jb3JlLnN5bWJvbJSMBlN5bWJvbJSTlIwBeZSFlIGUhpSBlIWUgZRoDYaUgZQu",
+      "python_type": "sympy.core.power.Pow",
+      "repr": "sin(2*y)**2",
+      "srepr": "Pow(sin(Mul(Integer(2), Symbol('y'))), Integer(2))",
+      "type_tag": "sympy.Basic"
+    },
+    "input": {
+      "expr": {
+        "display": "(sin((y * 2)))**2",
+        "pickle_b64": "gAWVFQAAAAAAAACMEShzaW4oKHkgKiAyKSkpKioylC4=",
+        "python_type": "builtins.str",
+        "repr": "'(sin((y * 2)))**2'",
+        "type_tag": "python"
+      }
+    },
+    "input_seed": 8,
+    "max_depth": 2,
+    "metadata": {
+      "entrypoint_name": "simplify"
+    },
+    "num_calls": 23,
+    "pattern_label": "mixed",
+    "root_call_id": "c_000001",
+    "status": "ok",
+    "task_family": "simplify"
+  }
+}

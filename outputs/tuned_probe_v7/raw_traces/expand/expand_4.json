@@ -1,0 +1,69 @@
+{
+  "calls": {
+    "c_000001": {
+      "call_id": "c_000001",
+      "depth": 0,
+      "duration_ns": 1079182,
+      "end_ns": 1230102698213939,
+      "exception": null,
+      "func_id": "sympy.core.function.expand",
+      "inputs": {
+        "expr": {
+          "display": "x*y**4",
+          "pickle_b64": "gAWVlQAAAAAAAACMDnN5bXB5LmNvcmUubXVslIwDTXVslJOUjBFzeW1weS5jb3JlLnN5bWJvbJSMBlN5bWJvbJSTlIwBeJSFlIGUjBBzeW1weS5jb3JlLnBvd2VylIwDUG93lJOUaAWMAXmUhZSBlIwSc3ltcHkuY29yZS5udW1iZXJzlIwHSW50ZWdlcpSTlEsEhZSBlIaUgZSGlIGULg==",
+          "python_type": "sympy.core.mul.Mul",
+          "repr": "x*y**4",
+          "srepr": "Mul(Symbol('x'), Pow(Symbol('y'), Integer(4)))",
+          "type_tag": "sympy.Basic"
+        }
+      },
+      "output": {
+        "display": "x*y**4",
+        "pickle_b64": "gAWVlQAAAAAAAACMDnN5bXB5LmNvcmUubXVslIwDTXVslJOUjBFzeW1weS5jb3JlLnN5bWJvbJSMBlN5bWJvbJSTlIwBeJSFlIGUjBBzeW1weS5jb3JlLnBvd2VylIwDUG93lJOUaAWMAXmUhZSBlIwSc3ltcHkuY29yZS5udW1iZXJzlIwHSW50ZWdlcpSTlEsEhZSBlIaUgZSGlIGULg==",
+        "python_type": "sympy.core.mul.Mul",
+        "repr": "x*y**4",
+        "srepr": "Mul(Symbol('x'), Pow(Symbol('y'), Integer(4)))",
+        "type_tag": "sympy.Basic"
+      },
+      "parent_call_id": null,
+      "start_ns": 1230102697134757,
+      "subcalls": [],
+      "thread_id": 126840304047936
+    }
+  },
+  "episode": {
+    "call_ids": [
+      "c_000001"
+    ],
+    "duration_ms": 43.341959826648235,
+    "entry_func_id": "expand",
+    "episode_id": "expand_4",
+    "final_output": {
+      "display": "x*y**4",
+      "pickle_b64": "gAWVlQAAAAAAAACMDnN5bXB5LmNvcmUubXVslIwDTXVslJOUjBFzeW1weS5jb3JlLnN5bWJvbJSMBlN5bWJvbJSTlIwBeJSFlIGUjBBzeW1weS5jb3JlLnBvd2VylIwDUG93lJOUaAWMAXmUhZSBlIwSc3ltcHkuY29yZS5udW1iZXJzlIwHSW50ZWdlcpSTlEsEhZSBlIaUgZSGlIGULg==",
+      "python_type": "sympy.core.mul.Mul",
+      "repr": "x*y**4",
+      "srepr": "Mul(Symbol('x'), Pow(Symbol('y'), Integer(4)))",
+      "type_tag": "sympy.Basic"
+    },
+    "input": {
+      "expr": {
+        "display": "((((x * y) * y) * y) * y)",
+        "pickle_b64": "gAWVHQAAAAAAAACMGSgoKCh4ICogeSkgKiB5KSAqIHkpICogeSmULg==",
+        "python_type": "builtins.str",
+        "repr": "'((((x * y) * y) * y) * y)'",
+        "type_tag": "python"
+      }
+    },
+    "input_seed": 4,
+    "max_depth": 0,
+    "metadata": {
+      "entrypoint_name": "expand"
+    },
+    "num_calls": 1,
+    "pattern_label": "chain",
+    "root_call_id": "c_000001",
+    "status": "ok",
+    "task_family": "expand"
+  }
+}
