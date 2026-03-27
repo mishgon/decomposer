@@ -18,6 +18,13 @@ class FunctionDef:
     docstring_summary: str | None = None
     visibility: str = "private"
     kind: str = "function"
+    owner: str | None = None
+    family: str | None = None
+    priority: str | None = None
+    callability: str | None = None
+    semantic_score: int | None = None
+    returns_structured_object: bool | None = None
+    likely_trace_depth: str | None = None
 
     def to_dict(self) -> dict:
         return asdict(self)

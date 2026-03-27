@@ -37,6 +37,15 @@ SIMPLE_TEMPLATES = [
     "(x + y) + 2",
 ]
 
+APART_TEMPLATES = [
+    "(x + 1)/(x*(x + 2))",
+    "(2*x + 3)/((x - 1)*(x + 1))",
+    "(x**2 + 3*x + 2)/(x*(x + 1))",
+    "(3*x + 1)/((x - 2)*(x + 2))",
+    "(x + 4)/(x*(x - 3))",
+    "(x**2 + 1)/(x*(x - 1)*(x + 1))",
+]
+
 
 def make_expr_seed(seed: int) -> str:
     rng = random.Random(seed)
@@ -64,3 +73,10 @@ def make_expr_seed(seed: int) -> str:
         else:
             expr = f"{rng.choice(UNARY_FUNCTIONS)}({expr})"
     return expr
+
+
+def make_apart_seed(seed: int) -> str:
+    rng = random.Random(seed)
+    if seed < len(APART_TEMPLATES):
+        return APART_TEMPLATES[seed]
+    return rng.choice(APART_TEMPLATES)

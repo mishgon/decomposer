@@ -9,19 +9,70 @@ ABSTRACT_TOOL_NAMES = {
     "sympy.simplify.simplify.simplify": "sympy.simplify",
     "sympy.simplify.trigsimp.trigsimp": "sympy.trigsimp",
     "sympy.simplify.powsimp.powsimp": "sympy.powsimp",
+    "sympy.simplify.radsimp.radsimp": "sympy.radsimp",
+    "sympy.simplify.simplify.nsimplify": "sympy.nsimplify",
+    "sympy.simplify.combsimp.combsimp": "sympy.combsimp",
+    "sympy.simplify.gammasimp.gammasimp": "sympy.gammasimp",
+    "sympy.simplify.radsimp.collect": "sympy.collect",
+    "sympy.core.function.expand_mul": "sympy.expand_mul",
+    "sympy.simplify.trigsimp.expand_trig": "sympy.expand_trig",
+    "sympy.core.function.expand_log": "sympy.expand_log",
+    "sympy.core.function.expand_power_base": "sympy.expand_power_base",
+    "sympy.core.function.expand_power_exp": "sympy.expand_power_exp",
+    "sympy.simplify.simplify.logcombine": "sympy.logcombine",
     "sympy.polys.polytools.cancel": "sympy.cancel",
+    "sympy.polys.partfrac.apart": "sympy.apart",
     "sympy.polys.rationaltools.together": "sympy.together",
     "sympy.core.exprtools.factor_terms": "sympy.factor_terms",
     "sympy.polys.polytools.factor": "sympy.factor",
     "sympy.polys.polytools.factor_list": "sympy.factor_list",
+    "sympy.polys.polytools.Poly": "sympy.Poly",
+    "sympy.polys.polytools.sqf_part": "sympy.sqf_part",
+    "sympy.polys.polytools.sqf_list": "sympy.sqf_list",
+    "sympy.polys.polytools.discriminant": "sympy.discriminant",
+    "sympy.polys.polytools.gcd": "sympy.gcd",
+    "sympy.polys.polytools.gcd_list": "sympy.gcd_list",
+    "sympy.polys.polytools.lcm": "sympy.lcm",
+    "sympy.polys.polytools.resultant": "sympy.resultant",
+    "sympy.polys.polytools.terms_gcd": "sympy.terms_gcd",
+    "sympy.polys.polytools.div": "sympy.div",
+    "sympy.polys.polytools.rem": "sympy.rem",
     "sympy.polys.polytools._generic_factor": "sympy.factor_core",
     "sympy.polys.polytools._symbolic_factor": "sympy.factor_symbolic",
+    "sympy.polys.polyroots.roots": "sympy.roots",
+    "sympy.polys.polytools.groebner": "sympy.groebner",
+    "sympy.polys.polytools.GroebnerBasis.reduce": "sympy.GroebnerBasis.reduce",
     "sympy.simplify.hyperexpand.hyperexpand": "sympy.hyperexpand",
     "sympy.core.function.expand": "sympy.expand",
+    "sympy.core.function.diff": "sympy.diff",
+    "sympy.integrals.integrals.integrate": "sympy.integrate",
+    "sympy.series.limits.limit": "sympy.limit",
+    "sympy.series.series.series": "sympy.series",
     "sympy.solvers.solvers.solve": "sympy.solve",
+    "sympy.solvers.solveset.solveset": "sympy.solveset",
+    "sympy.solvers.solveset.linsolve": "sympy.linsolve",
+    "sympy.solvers.solveset.nonlinsolve": "sympy.nonlinsolve",
+    "sympy.solvers.solvers.nsolve": "sympy.nsolve",
+    "sympy.solvers.solveset.linear_eq_to_matrix": "sympy.linear_eq_to_matrix",
+    "sympy.solvers.inequalities.reduce_inequalities": "sympy.reduce_inequalities",
+    "sympy.solvers.solvers.checksol": "sympy.checksol",
+    "sympy.solvers.diophantine.diophantine.diophantine": "sympy.diophantine",
     "sympy.solvers.solvers.solve_linear": "sympy.solve_linear",
+    "sympy.solvers.solvers.solve_undetermined_coeffs": "sympy.solve_undetermined_coeffs",
+    "sympy.solvers.solvers.solve_linear_system": "sympy.solve_linear_system",
+    "sympy.solvers.solvers.solve_linear_system_LU": "sympy.solve_linear_system_LU",
+    "sympy.solvers.polysys.solve_poly_system": "sympy.solve_poly_system",
     "sympy.solvers.solvers._solve": "sympy.solve_subproblem",
     "sympy.solvers.solvers._solve_system": "sympy.solve_system",
+    "sympy.solvers.solvers.unrad": "sympy.unrad",
+    "sympy.sets.sets.Interval": "sympy.Interval",
+    "sympy.sets.sets.FiniteSet": "sympy.FiniteSet",
+    "sympy.sets.sets.Union": "sympy.Union",
+    "sympy.sets.sets.Intersection": "sympy.Intersection",
+    "sympy.sets.sets.Complement": "sympy.Complement",
+    "sympy.series.residues.residue": "sympy.residue",
+    "sympy.concrete.summations.summation": "sympy.summation",
+    "sympy.logic.boolalg.simplify_logic": "sympy.simplify_logic",
 }
 
 SKIP_IF_UNCHANGED = {
@@ -47,6 +98,7 @@ SOLVE_CLUSTER = {"sympy.solve_subproblem", "sympy.solve_system", "sympy.solve_li
 def abstract_episode(raw_episode: dict) -> list[dict]:
     steps: list[dict] = []
     root_call_id = raw_episode["episode"].get("root_call_id")
+    entry_tool = _entry_tool_name(raw_episode["episode"].get("entry_func_id"))
     raw_steps: list[dict] = []
     previous_signature: tuple[str, tuple[tuple[str, str], ...], str] | None = None
     for call_id in raw_episode["episode"]["call_ids"]:
@@ -58,14 +110,14 @@ def abstract_episode(raw_episode: dict) -> list[dict]:
             continue
         step_args = _extract_args(call["inputs"])
         output = call["output"] or {"display": "None"}
-        if _should_skip_step(tool_name, step_args, output):
+        if _should_skip_step(tool_name, step_args, output, preserve=call_id == root_call_id and tool_name == entry_tool):
             continue
         signature = (tool_name, tuple(sorted(step_args.items())), output.get("display", "None"))
         if signature == previous_signature:
             continue
         raw_steps.append({"tool": tool_name, "args": step_args, "value": output})
         previous_signature = signature
-    macro_steps = _compress_steps(raw_steps)
+    macro_steps = _compress_steps(raw_steps, preserve_root_tool=entry_tool)
     for handle_index, step in enumerate(macro_steps, start=1):
         steps.append(
             AbstractStep(
@@ -102,7 +154,15 @@ def _extract_args(inputs: dict) -> dict:
     return args
 
 
-def _should_skip_step(tool_name: str, args: dict, output: dict) -> bool:
+def _entry_tool_name(entry_func_id: str | None) -> str | None:
+    if not entry_func_id:
+        return None
+    return f"sympy.{entry_func_id}"
+
+
+def _should_skip_step(tool_name: str, args: dict, output: dict, *, preserve: bool = False) -> bool:
+    if preserve:
+        return False
     input_display = args.get("arg0") or args.get("expr")
     output_display = output.get("display")
     if tool_name in SKIP_IF_UNCHANGED and input_display and input_display == output_display:
@@ -110,12 +170,17 @@ def _should_skip_step(tool_name: str, args: dict, output: dict) -> bool:
     return False
 
 
-def _compress_steps(raw_steps: list[dict]) -> list[dict]:
+def _compress_steps(raw_steps: list[dict], *, preserve_root_tool: str | None = None) -> list[dict]:
     compressed: list[dict] = []
     idx = 0
     while idx < len(raw_steps):
         step = raw_steps[idx]
         tool = step["tool"]
+
+        if idx == 0 and tool == preserve_root_tool:
+            compressed.append(step)
+            idx += 1
+            continue
 
         if tool in RATIONAL_CLUSTER:
             idx, compressed_step = _consume_cluster(
