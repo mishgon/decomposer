@@ -191,6 +191,11 @@ cython_debug/
 # Ruff stuff:
 .ruff_cache/
 
+# Local datasets and run artifacts
+data/
+musique_v1.0.zip
+runs/
+
 # PyPI configuration file
 .pypirc
 

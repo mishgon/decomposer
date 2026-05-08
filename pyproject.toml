@@ -1,9 +1,0 @@
-[project]
-name = "decomposer"
-version = "0.1.0"
-description = "Learning to Decompose Tasks"
-requires-python = ">=3.11"
-dependencies = [
-    "datasets>=4.8.4",
-    "pymupdf>=1.24.0",
-]
