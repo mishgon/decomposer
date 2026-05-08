@@ -137,3 +137,43 @@ Answer:"""
         {"role": "system", "content": SINGLE_HOP_QA_SYSTEM_PROMPT},
         {"role": "user", "content": user_content},
     ]
+
+
+BASELINE_FEW_SHOT_PROMPT = '''Examples:
+
+Context:
+[0] The Collegian (Houston Baptist University)
+The Collegian is the bi-weekly official student publication of Houston Baptist University in Houston, Texas.
+
+[1] Houston Baptist University
+Houston Baptist University is a private Baptist university in Sharpstown, Houston, Texas. It was founded in 1960.
+
+Question: When was the institute that owned The Collegian founded?
+Answer: 1960
+
+---
+
+Context:
+[0] Green (Steve Hillage album)
+Green is the fourth studio album by British progressive rock musician Steve Hillage.
+
+[1] Miquette Giraudy
+Miquette Giraudy is a keyboard player and vocalist, best known for her work in Gong and with her partner Steve Hillage.
+
+Question: Who is the spouse of the Green performer?
+Answer: Miquette Giraudy'''
+
+
+def build_baseline_messages(question: str, context: str) -> list[dict]:
+    user_content = f"""{BASELINE_FEW_SHOT_PROMPT}
+
+---
+
+Context:
+{context}
+
+Question: {question}
+Answer: """
+    return [
+        {"role": "user", "content": user_content},
+    ]

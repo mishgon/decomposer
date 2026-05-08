@@ -9,7 +9,7 @@ import ast
 import json
 import os
 from pathlib import Path
-from urllib import request
+from urllib import error, request
 
 from prompts import (
     DECOMPOSER_FEW_SHOT_PROMPT,
@@ -19,7 +19,8 @@ from prompts import (
 
 
 DEFAULT_DATA_PATH = Path("data/musique_ans_v1.0_dev.jsonl")
-DEFAULT_MODEL = "qwen/qwen3.6-27b"
+DEFAULT_DECOMPOSER_MODEL = "qwen/qwen3.6-27b"
+DEFAULT_QA_MODEL = "qwen/qwen3.5-9b"
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 
@@ -62,16 +63,23 @@ def build_func_spec(example: dict) -> str:
     """'''
 
 
-def call_openrouter(messages: list[dict], model: str) -> str:
+def call_openrouter(
+    messages: list[dict],
+    model: str,
+    enable_thinking: bool | None = None,
+) -> str:
     api_key = os.environ.get("OPENROUTER_API_KEY")
     if not api_key:
         raise RuntimeError("OPENROUTER_API_KEY is not set.")
 
-    payload = json.dumps({
+    payload = {
         "model": model,
         "messages": messages,
         "temperature": 0,
-    }).encode()
+    }
+    if enable_thinking is not None:
+        payload["enable_thinking"] = enable_thinking
+    payload = json.dumps(payload).encode()
     http_request = request.Request(
         OPENROUTER_URL,
         data=payload,
@@ -81,8 +89,15 @@ def call_openrouter(messages: list[dict], model: str) -> str:
         },
         method="POST",
     )
-    with request.urlopen(http_request, timeout=120) as response:
-        data = json.loads(response.read().decode())
+    try:
+        with request.urlopen(http_request, timeout=120) as response:
+            data = json.loads(response.read().decode())
+    except error.HTTPError as exc:
+        response_body = exc.read().decode(errors="replace")
+        raise RuntimeError(
+            f"OpenRouter request failed for model {model}: "
+            f"HTTP {exc.code} {exc.reason}: {response_body}"
+        ) from exc
     return data["choices"][0]["message"]["content"].strip("\n")
 
 
@@ -116,7 +131,7 @@ def validate_func_src(func_src: str) -> None:
             raise ValueError("Generated body must not access dunder attributes.")
 
 
-def exec_func(func_src: str, context: str, model: str) -> tuple[str, list[dict]]:
+def exec_func(func_src: str, context: str, qa_model: str) -> tuple[str, list[dict]]:
     validate_func_src(func_src)
     namespace = {"__builtins__": {"len": len, "str": str, "int": int, "float": float}}
     exec(func_src, namespace)
@@ -125,7 +140,7 @@ def exec_func(func_src: str, context: str, model: str) -> tuple[str, list[dict]]
     # tools
     def answer_single_hop_question(question: str, context: str) -> str:
         messages = build_single_hop_qa_messages(question, context)
-        answer = call_openrouter(messages, model)
+        answer = call_openrouter(messages, qa_model, enable_thinking=False)
         tool_calling_logs.append({"tool": "answer_single_hop_question", "question": question, "answer": answer})
         return answer
 
@@ -137,7 +152,8 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--data", type=Path, default=DEFAULT_DATA_PATH)
     parser.add_argument("--index", type=int, default=0)
-    parser.add_argument("--model", default=DEFAULT_MODEL)
+    parser.add_argument("--decomposer-model", default=DEFAULT_DECOMPOSER_MODEL)
+    parser.add_argument("--qa-model", default=DEFAULT_QA_MODEL)
     parser.add_argument("--show-examples", action="store_true")
     return parser.parse_args()
 
@@ -160,7 +176,7 @@ def main() -> None:
 
     func_spec = build_func_spec(example)
     messages = build_decomposer_messages(func_spec)
-    func_body = call_openrouter(messages, args.model)
+    func_body = call_openrouter(messages, args.decomposer_model, enable_thinking=True)
     print("\nGenerated function body:")
     print(func_body)
 
@@ -168,7 +184,7 @@ def main() -> None:
     print("\nRendered function source:")
     print(func_src)
 
-    prediction, tool_calling_logs = exec_func(func_src, format_context(example), args.model)
+    prediction, tool_calling_logs = exec_func(func_src, format_context(example), args.qa_model)
     print("\nTool calling logs:")
     for call in tool_calling_logs:
         print(f"- {call['question']} -> {call['answer']}")
