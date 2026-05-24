@@ -1,0 +1,42 @@
+[project]
+name = "decomposer"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "gdown>=6.0.0",
+    "requests>=2.33.0",
+    "torch==2.10.0",
+    "torchaudio==2.10.0",
+    "torchvision==0.25.0",
+    "transformers>=5.2.0",
+    "vllm==0.19.0",
+]
+
+[tool.uv]
+override-dependencies = [
+    "transformers>=5.2.0",
+]
+
+[tool.uv.sources]
+torch = [
+    { index = "pytorch-cu128", marker = "sys_platform == 'linux'" },
+]
+torchaudio = [
+    { index = "pytorch-cu128", marker = "sys_platform == 'linux'" },
+]
+torchvision = [
+    { index = "pytorch-cu128", marker = "sys_platform == 'linux'" },
+]
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
