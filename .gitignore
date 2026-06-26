@@ -193,8 +193,7 @@ cython_debug/
 
 # Local datasets and run artifacts
 data/
-musique_v1.0.zip
-runs/
+artifacts/
 
 # PyPI configuration file
 .pypirc
@@ -210,3 +209,4 @@ runs/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
