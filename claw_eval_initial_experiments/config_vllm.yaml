@@ -1,0 +1,46 @@
+# vLLM local inference configuration (single-server topology).
+#
+# Start a vLLM server first, e.g.:
+#   ./scripts/vllm/serve_single.sh Qwen/Qwen3.5-122B-A10B 8000
+#
+# Then set in .env (takes precedence over LOCALINFERENCE_*):
+#   VLLM_BASE_URL=http://127.0.0.1:8000/v1
+#   VLLM_MODEL_ID=Qwen/Qwen3.5-122B-A10B
+#
+# Optional readiness polling (default on):
+#   VLLM_WAIT_FOR_MODEL=1
+#   VLLM_READY_TIMEOUT_S=600
+
+model:
+  api_key: unused
+  base_url: http://127.0.0.1:8000/v1
+  model_id: Qwen/Qwen3.5-122B-A10B
+  context_window: 1000000
+  temperature: 0.0
+  extra_body:
+    chat_template_kwargs:
+      enable_thinking: false
+
+judge:
+  api_key: unused
+  base_url: http://127.0.0.1:8000/v1
+  model_id: Qwen/Qwen3.5-122B-A10B
+  enabled: true
+
+react:
+  max_turns: 352
+  max_environment_tool_calls: 320
+  retry_empty_model_response: false
+  retry_missing_required_tool: false
+  retry_transitional_tool_text: false
+  transitional_tool_retry_limit: 2
+
+defaults:
+  trace_dir: traces
+  tasks_dir: tasks
+
+vllm:
+  enabled: true
+  wait_for_model: true
+  ready_timeout_s: 600
+  ready_poll_s: 5.0

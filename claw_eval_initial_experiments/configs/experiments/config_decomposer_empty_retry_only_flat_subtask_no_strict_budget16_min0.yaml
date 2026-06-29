@@ -1,0 +1,59 @@
+model:
+  api_key: unused
+  base_url: http://127.0.0.1:8000/v1
+  model_id: Qwen/Qwen3.6-27B
+  context_window: 1000000
+  temperature: 0.0
+  extra_body:
+    chat_template_kwargs:
+      enable_thinking: false
+
+executor_model:
+  api_key: unused
+  base_url: http://127.0.0.1:8001/v1
+  model_id: Qwen/Qwen3.5-4B
+  context_window: 1000000
+  temperature: 0.0
+  extra_body:
+    chat_template_kwargs:
+      enable_thinking: false
+
+judge:
+  api_key: unused
+  base_url: http://127.0.0.1:8000/v1
+  model_id: Qwen/Qwen3.6-27B
+  enabled: true
+
+decomposer:
+  max_decomposer_turns: 32
+  max_delegations: 16
+  min_delegations_before_final: 1
+  decomposer_max_output_tokens: 2048
+  executor_max_turns: 20
+  executor_max_output_tokens: 1024
+  executor_min_tool_calls: 0
+  executor_max_environment_tool_calls: 20
+  executor_report_max_tokens: 512
+  executor_report_mode: strict
+  executor_synthetic_failure_report: false
+  executor_prompt_mode: flat_subtask
+  executor_evidence_mode: none
+  executor_evidence_max_chars: 2000
+  manager_valid_tool_guidance: false
+
+react:
+  retry_empty_model_response: true
+  retry_missing_required_tool: false
+  retry_transitional_tool_text: false
+  transitional_tool_retry_limit: 2
+
+defaults:
+  trace_dir: traces/retry_empty_only_decomposer_flat_subtask_no_strict_budget16_min0
+  tasks_dir: tasks
+
+vllm:
+  enabled: true
+  wait_for_model: true
+  ready_timeout_s: 600
+  ready_poll_s: 5.0
+  check_health: true

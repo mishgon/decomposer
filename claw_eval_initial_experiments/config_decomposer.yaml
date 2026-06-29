@@ -1,0 +1,56 @@
+# Decomposer experiment configuration (large decomposer + small executor).
+#
+# Provider priority: VLLM_* env > LOCALINFERENCE_* env > OpenRouter YAML defaults.
+# Multi-server vLLM example — set in .env:
+#   VLLM_DECOMPOSER_BASE_URL=http://127.0.0.1:8000/v1
+#   VLLM_EXECUTOR_BASE_URL=http://127.0.0.1:8001/v1
+# See scripts/vllm/serve_decomposer_pair.sh
+
+model:
+  api_key: ${OPENROUTER_API_KEY}
+  base_url: https://openrouter.ai/api/v1
+  model_id: Qwen/Qwen3.5-122B-A10B
+  context_window: 1000000
+  extra_body:
+    reasoning:
+      effort: high
+
+executor_model:
+  api_key: ${OPENROUTER_API_KEY}
+  base_url: https://openrouter.ai/api/v1
+  model_id: Qwen/Qwen3.5-4B
+  context_window: 1000000
+  temperature: 0.0
+  extra_body:
+    chat_template_kwargs:
+      enable_thinking: false
+
+decomposer:
+  max_decomposer_turns: 15
+  max_delegations: 8
+  decomposer_max_output_tokens: 2048
+  executor_max_turns: null
+  executor_max_output_tokens: 1024
+  executor_min_tool_calls: 1
+  executor_max_environment_tool_calls: 20
+  executor_report_max_tokens: 512
+  executor_report_mode: strict
+  executor_synthetic_failure_report: false
+  executor_evidence_mode: none
+  executor_evidence_max_chars: 2000
+
+judge:
+  api_key: ${OPENROUTER_API_KEY}
+  base_url: https://openrouter.ai/api/v1
+  model_id: google/gemini-3-flash-preview
+  enabled: true
+
+react:
+  retry_empty_model_response: false
+  retry_missing_required_tool: false
+  retry_transitional_tool_text: false
+  transitional_tool_retry_limit: 2
+
+defaults:
+  trace_dir: traces
+  tasks_dir: tasks

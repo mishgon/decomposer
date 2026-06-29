@@ -1,0 +1,35 @@
+# Flat local vLLM baseline with only transitional tool-text retry enabled.
+model:
+  api_key: unused
+  base_url: http://127.0.0.1:8000/v1
+  model_id: Qwen/Qwen3.5-122B-A10B
+  context_window: 1000000
+  temperature: 0.0
+  extra_body:
+    chat_template_kwargs:
+      enable_thinking: false
+
+judge:
+  api_key: unused
+  base_url: http://127.0.0.1:8000/v1
+  model_id: Qwen/Qwen3.6-27B
+  enabled: true
+
+react:
+  max_turns: 352
+  max_environment_tool_calls: 320
+  retry_empty_model_response: false
+  retry_missing_required_tool: false
+  retry_transitional_tool_text: true
+  transitional_tool_retry_limit: 2
+
+defaults:
+  trace_dir: traces/retry_transitional_flat
+  tasks_dir: tasks
+
+vllm:
+  enabled: true
+  wait_for_model: true
+  ready_timeout_s: 600
+  ready_poll_s: 5.0
+  check_health: true
