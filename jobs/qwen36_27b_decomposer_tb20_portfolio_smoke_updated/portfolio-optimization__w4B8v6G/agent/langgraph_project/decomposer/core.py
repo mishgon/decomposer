@@ -43,7 +43,7 @@ Note that each report contains only the subagent's final message, while the tool
 calls and the tool outputs are not included by default. Thus, your and
 subagents' contexts are isolated from each other by design. This is intentional
 to prevent context rot and overflow. However, you can explicitly ask a subagent
-to include any information you really need in its final response.
+to include any information in its final response, if you really need it.
 
 Follow these general principles:
 - If you are uncertain about how to prompt the next subagent toward the goal (or
@@ -53,9 +53,10 @@ Follow these general principles:
   subagents toward the initial goal (subgoal) when you are certain that they
   will make progress.
 - The word "minimal" in the previous bullet point means that you should avoid
-  asking subagents to report raw tool outputs, broad environment dumps, or other
-  redundant information. Explicitly instruct subagents what to include and what
-  not to include in their final message, which constitutes the report's content.
+  asking subagents to report their full tool-calling traces, broad environment
+  dumps, or other redundant information. Explicitly instruct subagents what to
+  include and what not to include in their final message, which constitutes
+  the report's content.
 - Do not assume a subagent succeeded until it is claimed in the `content`
   field of its report. Note that the `status` field only reflects whether the
   subagent has completed without errors or interruptions, but does not reflect
@@ -84,10 +85,8 @@ You specify the task in the `prompt` argument. In principle, it can be any
 free-form text (e.g., question, query, instructions, etc.), but you should avoid
 broad or vague prompts. Specify the subagent's goal and provide helpful
 instructions on how to achieve it, if you can. Finally, describe in detail what
-information subagent must include in its final response. Note that subagents
-might not know that their context is isolated from yours and it is your
-responsibility to instruct subagents clearly to produce an informative final
-response.
+information subagent must include in its final response. It is your
+responsibility to instruct subagents clearly to produce informative reports.
 
 You should avoid delegating risky tasks that may lead to harmful and
 irreversible changes in the environment. To reduce your uncertainty, spawn

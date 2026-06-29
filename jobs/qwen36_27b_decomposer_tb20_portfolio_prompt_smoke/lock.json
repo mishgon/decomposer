@@ -1,0 +1,135 @@
+{
+    "schema_version": 1,
+    "created_at": "2026-06-28T20:31:38.170497Z",
+    "harbor": {
+        "version": "0.15.0",
+        "is_editable": false
+    },
+    "invocation": [
+        ".venv/bin/harbor",
+        "run",
+        "-d",
+        "terminal-bench@2.0",
+        "--include-task-name",
+        "portfolio-optimization",
+        "--n-tasks",
+        "1",
+        "--n-concurrent",
+        "1",
+        "--agent",
+        "langgraph",
+        "--model",
+        "openai:Qwen/Qwen3.6-27B",
+        "--ak",
+        "project_path=/home/goncharov/decomposer/benchmarks/terminal_bench_decomposer",
+        "--ak",
+        "graph=decomposer",
+        "--ae",
+        "OPENAI_BASE_URL=http://172.17.0.1:8011/v1",
+        "--ae",
+        "OPENAI_API_KEY=****",
+        "--ae",
+        "OPENAI_MODEL=Qwen/Qwen3.6-27B",
+        "--ae",
+        "OPENAI_MAX_TOKENS=****",
+        "--ae",
+        "OPENAI_TIMEOUT=3600",
+        "--ae",
+        "OPENAI_TEMPERATURE=0.6",
+        "--ae",
+        "OPENAI_TOP_P=0.95",
+        "--ae",
+        "OPENAI_TOP_K=20",
+        "--ae",
+        "OPENAI_MIN_P=0",
+        "--ae",
+        "OPENAI_PRESENCE_PENALTY=0",
+        "--ae",
+        "OPENAI_REPETITION_PENALTY=1.0",
+        "--ae",
+        "NO_PROXY=localhost,127.0.0.1,172.17.0.1,178.72.132.75",
+        "--ae",
+        "no_proxy=localhost,127.0.0.1,172.17.0.1,178.72.132.75",
+        "--allow-agent-host",
+        "172.17.0.1",
+        "--job-name",
+        "qwen36_27b_decomposer_tb20_portfolio_prompt_smoke",
+        "--jobs-dir",
+        "jobs",
+        "--timeout-multiplier",
+        "1",
+        "--yes"
+    ],
+    "n_concurrent_trials": 1,
+    "retry": {
+        "max_retries": 0,
+        "exclude_exceptions": [
+            "RewardFileNotFoundError",
+            "VerifierTimeoutError",
+            "AgentTimeoutError",
+            "RewardFileEmptyError",
+            "VerifierOutputParseError"
+        ],
+        "wait_multiplier": 1.0,
+        "min_wait_sec": 1.0,
+        "max_wait_sec": 60.0
+    },
+    "trials": [
+        {
+            "task": {
+                "name": "portfolio-optimization",
+                "type": "git",
+                "digest": "sha256:39d86721d013a5f5b2337efd0aa7cca5723f79d9b397ef72ff533698cd03600d",
+                "source": "terminal-bench",
+                "path": "portfolio-optimization",
+                "git_url": "https://github.com/laude-institute/terminal-bench-2.git",
+                "git_commit_id": "69671fbaac6d67a7ef0dfec016cc38a64ef7a77c"
+            },
+            "timeout_multiplier": 1.0,
+            "agent": {
+                "name": "langgraph",
+                "model_name": "openai:Qwen/Qwen3.6-27B",
+                "skills": [],
+                "extra_allowed_hosts": [
+                    "172.17.0.1"
+                ],
+                "kwargs": {
+                    "project_path": "/home/goncharov/decomposer/benchmarks/terminal_bench_decomposer",
+                    "graph": "decomposer"
+                },
+                "env": {
+                    "OPENAI_BASE_URL": "http://172.17.0.1:8011/v1",
+                    "OPENAI_API_KEY": "****",
+                    "OPENAI_MODEL": "Qwen/Qwen3.6-27B",
+                    "OPENAI_MAX_TOKENS": "****",
+                    "OPENAI_TIMEOUT": "3600",
+                    "OPENAI_TEMPERATURE": "0.6",
+                    "OPENAI_TOP_P": "0.95",
+                    "OPENAI_TOP_K": "20",
+                    "OPENAI_MIN_P": "0",
+                    "OPENAI_PRESENCE_PENALTY": "0",
+                    "OPENAI_REPETITION_PENALTY": "1.0",
+                    "NO_PROXY": "localhost,127.0.0.1,172.17.0.1,178.72.132.75",
+                    "no_proxy": "localhost,127.0.0.1,172.17.0.1,178.72.132.75"
+                },
+                "mcp_servers": []
+            },
+            "skills": [],
+            "environment": {
+                "type": "docker",
+                "force_build": false,
+                "delete": true,
+                "cpu_enforcement_policy": "auto",
+                "memory_enforcement_policy": "auto",
+                "extra_docker_compose": [],
+                "env": {},
+                "kwargs": {},
+                "extra_allowed_hosts": []
+            },
+            "verifier": {
+                "env": {},
+                "disable": false
+            }
+        }
+    ]
+}

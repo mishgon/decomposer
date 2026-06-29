@@ -1,0 +1,137 @@
+{
+    "id": "8d787a63-9aa2-4be3-8f7a-4e909f83113e",
+    "task_name": "llm-inference-batching-scheduler",
+    "trial_name": "llm-inference-batching-scheduler__PfeVHwa",
+    "trial_uri": "file:///home/goncharov/decomposer/jobs/qwen36_27b_decomposer_tb20_llm_scheduler_smoke/llm-inference-batching-scheduler__PfeVHwa",
+    "task_id": {
+        "git_url": "https://github.com/laude-institute/terminal-bench-2.git",
+        "git_commit_id": "69671fbaac6d67a7ef0dfec016cc38a64ef7a77c",
+        "path": "llm-inference-batching-scheduler"
+    },
+    "source": "terminal-bench",
+    "task_checksum": "3a08e63e0643ea5914eedeecb08cb93a1f0a10b9dc7d19d1f570004af84531c8",
+    "config": {
+        "task": {
+            "path": "llm-inference-batching-scheduler",
+            "git_url": "https://github.com/laude-institute/terminal-bench-2.git",
+            "git_commit_id": "69671fbaac6d67a7ef0dfec016cc38a64ef7a77c",
+            "name": null,
+            "ref": null,
+            "overwrite": false,
+            "download_dir": null,
+            "source": "terminal-bench"
+        },
+        "trial_name": "llm-inference-batching-scheduler__PfeVHwa",
+        "trials_dir": "jobs/qwen36_27b_decomposer_tb20_llm_scheduler_smoke",
+        "timeout_multiplier": 1.0,
+        "agent_timeout_multiplier": null,
+        "verifier_timeout_multiplier": null,
+        "agent_setup_timeout_multiplier": null,
+        "environment_build_timeout_multiplier": null,
+        "agent": {
+            "name": "langgraph",
+            "import_path": null,
+            "model_name": "openai:Qwen/Qwen3.6-27B",
+            "skills": [],
+            "override_timeout_sec": null,
+            "override_setup_timeout_sec": null,
+            "max_timeout_sec": null,
+            "extra_allowed_hosts": [
+                "172.17.0.1"
+            ],
+            "kwargs": {
+                "project_path": "/home/goncharov/decomposer/benchmarks/terminal_bench_decomposer",
+                "graph": "decomposer"
+            },
+            "env": {
+                "OPENAI_BASE_URL": "http://172.17.0.1:8011/v1",
+                "OPENAI_API_KEY": "****",
+                "OPENAI_MODEL": "Qwen/Qwen3.6-27B",
+                "OPENAI_MAX_TOKENS": "****",
+                "OPENAI_TIMEOUT": "3600",
+                "OPENAI_TEMPERATURE": "0.6",
+                "OPENAI_TOP_P": "0.95",
+                "OPENAI_TOP_K": "20",
+                "OPENAI_MIN_P": "0",
+                "OPENAI_PRESENCE_PENALTY": "0",
+                "OPENAI_REPETITION_PENALTY": "1.0",
+                "NO_PROXY": "localhost,127.0.0.1,172.17.0.1,178.72.132.75",
+                "no_proxy": "localhost,127.0.0.1,172.17.0.1,178.72.132.75"
+            },
+            "mcp_servers": []
+        },
+        "environment": {
+            "type": "docker",
+            "import_path": null,
+            "force_build": false,
+            "delete": true,
+            "cpu_enforcement_policy": "auto",
+            "memory_enforcement_policy": "auto",
+            "override_cpus": null,
+            "override_memory_mb": null,
+            "override_storage_mb": null,
+            "override_gpus": null,
+            "override_tpu": null,
+            "mounts": null,
+            "extra_docker_compose": [],
+            "env": {},
+            "kwargs": {},
+            "extra_allowed_hosts": []
+        },
+        "verifier": {
+            "override_timeout_sec": null,
+            "max_timeout_sec": null,
+            "env": {},
+            "disable": false
+        },
+        "artifacts": [],
+        "extra_instruction_paths": [],
+        "job_id": "6bd5a90b-fefb-4371-99bf-2edc5ee9bce7"
+    },
+    "agent_info": {
+        "name": "langgraph",
+        "version": "1.2.6",
+        "model_info": {
+            "name": "Qwen3.6-27B",
+            "provider": "openai:Qwen"
+        }
+    },
+    "agent_result": {
+        "n_input_tokens": 836672,
+        "n_cache_tokens": null,
+        "n_output_tokens": 28891,
+        "cost_usd": null,
+        "rollout_details": null,
+        "metadata": {
+            "langgraph_graph": "decomposer",
+            "langgraph_config": "langgraph.json",
+            "langgraph_project_path": "/home/goncharov/decomposer/benchmarks/terminal_bench_decomposer",
+            "answer_written": "\n\nBoth output files have been successfully generated and verified. Here's the summary:\n\n## Results\n\n### Bucket 1 (`plan_b1.jsonl`)\n| Metric | Value | Target | Status |\n|--------|-------|--------|--------|\n| Cost | 2.93e+11 | < 3.0e+11 | ✓ |\n| Pad ratio | 0.0532 | < 0.055 | ✓ |\n| P95 latency | 2.02e+06 ms | < 2.1e+06 ms | ✓ |\n| Sequential timecost | 2.57e+08 ms | < 2.7e+08 ms | ✓ |\n\n**Shapes used (8):** seq_align = {64, 128, 384, 512, 640, 1408, 1728, 2048}\n\n### Bucket 2 (`plan_b2.jsonl`)\n| Metric | Value | Target | Status |\n|--------|-------|--------|--------|\n| Cost | 4.51e+10 | < 4.8e+10 | ✓ |\n| Pad ratio | 0.1403 | < 0.150 | ✓ |\n| P95 latency | 1.95e+05 ms | < 2.1e+05 ms | ✓ |\n| Sequential timecost | 3.15e+07 ms | < 3.2e+07 ms | ✓ |\n\n**Shapes used (8):** seq_align = {128, 192, 256, 320, 384, 448, 512, 704}\n\n### Approach\n- **Seq-align selection**: DP-based clustering to minimize prefill padding while staying within MAX_SHAPES=8\n- **Gen-len grouping**: Fine-grained binning (gen_bin=8 for b1, gen_bin=4 for b2) to minimize decode padding\n- **Exhaustive search**: For bucket 2, all C(11,8)=165 representative combinations were evaluated to find the optimal shape set\n\nAll structural constraints are satisfied: every request assigned exactly once, valid shapes (seq_align multiple of 64, heads_align=32, hidden_align=4096), identical shapes within batches, and ≤8 unique shapes across each bucket."
+        }
+    },
+    "verifier_result": {
+        "rewards": {
+            "reward": 0.0
+        }
+    },
+    "exception_info": null,
+    "started_at": "2026-06-28T21:36:23.519534Z",
+    "finished_at": "2026-06-28T22:06:23.629383Z",
+    "environment_setup": {
+        "started_at": "2026-06-28T21:36:23.563983Z",
+        "finished_at": "2026-06-28T21:36:25.040767Z"
+    },
+    "agent_setup": {
+        "started_at": "2026-06-28T21:36:25.040842Z",
+        "finished_at": "2026-06-28T21:36:38.246706Z"
+    },
+    "agent_execution": {
+        "started_at": "2026-06-28T21:36:38.248703Z",
+        "finished_at": "2026-06-28T22:06:02.924858Z"
+    },
+    "verifier": {
+        "started_at": "2026-06-28T22:06:03.424665Z",
+        "finished_at": "2026-06-28T22:06:11.470231Z"
+    },
+    "step_results": null
+}

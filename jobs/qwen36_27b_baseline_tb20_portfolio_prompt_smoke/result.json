@@ -1,0 +1,39 @@
+{
+    "id": "faa98612-2566-4499-b461-83939e643fd3",
+    "started_at": "2026-06-28T23:20:30.019729",
+    "updated_at": "2026-06-28T23:30:46.005257",
+    "finished_at": "2026-06-28T23:30:46.005257",
+    "n_total_trials": 1,
+    "stats": {
+        "n_completed_trials": 1,
+        "n_errored_trials": 0,
+        "n_running_trials": 0,
+        "n_pending_trials": 0,
+        "n_cancelled_trials": 0,
+        "n_retries": 0,
+        "evals": {
+            "langgraph__Qwen3.6-27B__terminal-bench": {
+                "n_trials": 1,
+                "n_errors": 0,
+                "metrics": [
+                    {
+                        "mean": 1.0
+                    }
+                ],
+                "pass_at_k": {},
+                "reward_stats": {
+                    "reward": {
+                        "1.0": [
+                            "portfolio-optimization__vNftiFS"
+                        ]
+                    }
+                },
+                "exception_stats": {}
+            }
+        },
+        "n_input_tokens": 66091,
+        "n_cache_tokens": null,
+        "n_output_tokens": 10975,
+        "cost_usd": null
+    }
+}

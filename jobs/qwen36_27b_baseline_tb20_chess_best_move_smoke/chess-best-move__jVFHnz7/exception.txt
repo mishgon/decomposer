@@ -1,0 +1,40 @@
+Traceback (most recent call last):
+  File "/home/goncharov/decomposer/.venv/lib/python3.12/site-packages/harbor/trial/single_step.py", line 71, in _run_agent
+    await self._run_agent_phase(
+  File "/home/goncharov/decomposer/.venv/lib/python3.12/site-packages/harbor/trial/trial.py", line 424, in _run_agent_phase
+    await asyncio.wait_for(
+  File "/home/goncharov/.local/share/uv/python/cpython-3.12.12-linux-x86_64-gnu/lib/python3.12/asyncio/tasks.py", line 520, in wait_for
+    return await fut
+           ^^^^^^^^^
+  File "/home/goncharov/decomposer/.venv/lib/python3.12/site-packages/harbor/agents/installed/base.py", line 52, in wrapper
+    return await fn(self, instruction, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/goncharov/decomposer/.venv/lib/python3.12/site-packages/harbor/agents/installed/langgraph.py", line 237, in run
+    await self.exec_as_agent(environment, command=command, env=env)
+  File "/home/goncharov/decomposer/.venv/lib/python3.12/site-packages/harbor/agents/installed/base.py", line 412, in exec_as_agent
+    return await self._exec(
+           ^^^^^^^^^^^^^^^^^
+  File "/home/goncharov/decomposer/.venv/lib/python3.12/site-packages/harbor/agents/installed/base.py", line 379, in _exec
+    raise self._classify_exec_error(command, result)
+harbor.agents.installed.base.NonZeroAgentExitCodeError: Command failed (exit 1): /opt/harbor-langgraph-venv/bin/python /installed-agent/langgraph_runner.py --project-dir /installed-agent/langgraph-project --config langgraph.json --graph baseline --instruction-file /installed-agent/instruction.txt --result-path /logs/agent/result.json --output-path /logs/agent/langgraph.txt --summary-path /logs/agent/summary.json --model openai:Qwen/Qwen3.6-27B --model-kwargs-json '{}' --configurable-json '{}' 2>&1 | stdbuf -oL tee /logs/agent/langgraph-run.log
+stdout: Traceback (most recent call last):
+  File "/installed-agent/langgraph_runner.py", line 300, in <module>
+    asyncio.run(main())
+  File "/usr/lib/python3.12/asyncio/runners.py", line 194, in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/asyncio/runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/asyncio/base_events.py", line 687, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+  File "/installed-agent/langgraph_runner.py", line 281, in main
+    result = await _ainvoke(
+             ^^^^^^^^^^^^^^^
+  File "/installed-agent/langgraph_runner.py", line 199, in _ainvoke
+    return await graph.ainvoke(input_value, config=config)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/harbor-langgraph-venv/lib/python3.12/site-packages/langgraph/pregel/main.py", line 4105, in ainvoke
+    async for chunk in self. ... [truncated]
+stderr: None

@@ -20,30 +20,19 @@ from typing_extensions import TypedDict
 logger = logging.getLogger(__name__)
 
 
-DECOMPOSER_SYSTEM_PROMPT = f"""You are a Decomposer agent.
+DECOMPOSER_SYSTEM_PROMPT = """You are a Decomposer agent.
 
-You initially see only the user prompt specifying your goal in the environment.
-You can interact with the environment only via spawning and prompting subagents
-of different types and reading their reports. You can decompose your goal into
-immediate subgoals, prompt subagents to achieve them, read their reports, define
-next subgoals, prompt new subagents, etc., until you are sure that your main
-goal has been achieved.
-
-Specifically, you can interact with subagents by calling the following tools:
+You initially see only the user prompt specifying your goal in some environment.
+You cannot interact with the environment directly. Your only interface to the
+environment is through subagents. Specifically, you can call two tools:
 - `spawn_subagent` with `prompt` and `subagent_type_id` args. It spawns a fresh
   subagent and runs it with the given prompt asynchronously in the background.
-  You can imagine that the spawned subagents have their own isolated contexts
-  and tools for interacting with the environment, do their best to follow your
-  prompts, and finally write and submit their reports to a shared queue. If a
-  subagent fails with an error, it also submits a report with the error message.
+  You can imagine that the spawned subagents have their own tools for
+  interacting with the environment, do their best to follow your prompts, and
+  submit their reports to a shared queue when they are done. If a subagent fails
+  with an error, it also submits a report with the error message.
 - `wait` with no args. It waits for at least one subagent report to be available
   in the queue and dequeues all reports from the queue as the tool output.
-
-Note that each report contains only the subagent's final message, while the tool
-calls and the tool outputs are not included by default. Thus, your and
-subagents' contexts are isolated from each other by design. This is intentional
-to prevent context rot and overflow. However, you can explicitly ask a subagent
-to include any information you really need in its final response.
 
 Follow these general principles:
 - If you are uncertain about how to prompt the next subagent toward the goal (or
@@ -52,18 +41,18 @@ Follow these general principles:
   subagents to gather the missing information. Proceed to spawn and prompt new
   subagents toward the initial goal (subgoal) when you are certain that they
   will make progress.
-- The word "minimal" in the previous bullet point means that you should avoid
-  asking subagents to report raw tool outputs, broad environment dumps, or other
-  redundant information. Explicitly instruct subagents what to include and what
-  not to include in their final message, which constitutes the report's content.
-- Do not assume a subagent succeeded until it is claimed in the `content`
+- The word "minimal" in the previous bullet point means that you should not ask
+  subagents to report tool-calling traces, broad environment dumps, or other
+  redundant information. Explicitly instruct subagents what to report and what
+  not to report.
+- Do not assume a subagent succeeded until it is claimed in the `response`
   field of its report. Note that the `status` field only reflects whether the
   subagent has completed without errors or interruptions, but does not reflect
   whether the subagent solved the prompted task properly.
 - Before assigning a task to a subagent, make sure it cannot be split into
   smaller subtasks that can be *safely* executed in parallel. Otherwise, assign
   the parallel subtasks to multiple concurrent subagents.
-- Spawn concurrent subagents only when you are 100% certain that they will not
+- Spawn concurrent subagents only when you are 100\% certain that they will not
   interfere with each other. Otherwise, wait for the first subagent to complete
   and spawn the next subagent.
 - When `wait` returns "No running subagents to wait for.", spawn new subagents;
@@ -84,10 +73,7 @@ You specify the task in the `prompt` argument. In principle, it can be any
 free-form text (e.g., question, query, instructions, etc.), but you should avoid
 broad or vague prompts. Specify the subagent's goal and provide helpful
 instructions on how to achieve it, if you can. Finally, describe in detail what
-information subagent must include in its final response. Note that subagents
-might not know that their context is isolated from yours and it is your
-responsibility to instruct subagents clearly to produce an informative final
-response.
+information you want to receive in the subagent's report.
 
 You should avoid delegating risky tasks that may lead to harmful and
 irreversible changes in the environment. To reduce your uncertainty, spawn
@@ -130,15 +116,13 @@ until at least one running subagent completes and returns its report. On
 timeout, it returns "No current subagent runs completed."
 
 The reports are formatted as a JSON list. Each report contains
-`subagent_run_id`, `status`, `content`, and `error_message` fields. Use the
+`subagent_run_id`, `status`, `response`, and `error` fields. Use the
 `subagent_run_id` field to identify the subagent run that produced the report.
 Note that the `status` field only reflects whether the subagent has completed
 without errors or interruptions, but does not reflect whether the subagent
-solved the prompted task properly. If `status` is `"success"`, the `content`
-field contains the subagent's final message. If it is empty, this means that
-your prompt did not instruct the subagent clearly enough to return a final
-response. If `status` is `"error"`, the `error_message` field contains the error
-message, if any.
+solved the prompted task properly. If `status` is `"success"`, the `response`
+field contains the subagent's report. If `status` is `"error"`, the `error`
+field contains the error message, if any.
 
 IMPORTANT: do not use this tool when there are no running subagents to wait for.
 If you call it once and it returns "No running subagents to wait for.", do not
@@ -160,13 +144,6 @@ class SubagentType(TypedDict):
     headers: NotRequired[dict[str, str]]
 
 
-class SubagentReport(TypedDict):
-    subagent_run_id: str
-    status: str
-    content: str | None
-    error_message: str | None
-
-
 class SubagentRun(TypedDict):
     subagent_run_id: str
     # TODO: Add `subagent_id` when `invoke_subagent` is introduced. It should
@@ -178,7 +155,8 @@ class SubagentRun(TypedDict):
     status: str
     tool_call_count: NotRequired[int | None]
     prompt: str
-    report: NotRequired[SubagentReport | None]
+    response: NotRequired[str | None]
+    error: NotRequired[str | None]
 
 
 def _subagent_runs_reducer(
@@ -386,8 +364,8 @@ def _build_wait_tool(
                     continue
 
                 tool_call_count = None
-                content = None
-                error_message = None
+                response = None
+                error = None
 
                 if run["status"] == "success":
                     history = client.threads.get_history(
@@ -414,25 +392,27 @@ def _build_wait_tool(
                     last_message = run_messages[-1]
                     if last_message["type"] == "ai" and not last_message.get("tool_calls"):
                         content = last_message.get("content")
-                        if not isinstance(content, str) and content is not None:
-                            content = json.dumps(content, ensure_ascii=False)
+                        if isinstance(content, str):
+                            response = content
+                        elif content is not None:
+                            response = json.dumps(content, ensure_ascii=False)
 
                 elif run["status"] == "error":
                     error = run.get("error")
-                    error_message = str(error) if error else None
+                    error = str(error) if error else None
 
-                report: SubagentReport = {
+                tool_output.append({
                     "subagent_run_id": subagent_run_id,
                     "status": run["status"],
-                    "content": content,
-                    "error_message": error_message,
-                }
-                tool_output.append(report)
+                    "response": response,
+                    "error": error,
+                })
                 updated_runs[subagent_run_id] = {
                     **subagent_run,
                     "status": run["status"],
                     "tool_call_count": tool_call_count,
-                    "report": report,
+                    "response": response,
+                    "error": error,
                 }
 
             if tool_output:
@@ -535,8 +515,8 @@ def _build_wait_tool(
         tool_output: list[dict[str, Any]] = []
         for subagent_run_id, subagent_run, run in finished_run_items:
             tool_call_count = None
-            content = None
-            error_message = None
+            response = None
+            error = None
 
             if run["status"] == "success":
                 client = clients.get_async(subagent_run["subagent_type_id"])
@@ -564,25 +544,27 @@ def _build_wait_tool(
                 last_message = run_messages[-1]
                 if last_message["type"] == "ai" and not last_message.get("tool_calls"):
                     content = last_message.get("content")
-                    if not isinstance(content, str) and content is not None:
-                        content = json.dumps(content, ensure_ascii=False)
+                    if isinstance(content, str):
+                        response = content
+                    elif content is not None:
+                        response = json.dumps(content, ensure_ascii=False)
 
             elif run["status"] == "error":
                 error = run.get("error")
-                error_message = str(error) if error else None
+                error = str(error) if error else None
 
-            report: SubagentReport = {
+            tool_output.append({
                 "subagent_run_id": subagent_run_id,
                 "status": run["status"],
-                "content": content,
-                "error_message": error_message,
-            }
-            tool_output.append(report)
+                "response": response,
+                "error": error,
+            })
             updated_runs[subagent_run_id] = {
                 **subagent_run,
                 "status": run["status"],
                 "tool_call_count": tool_call_count,
-                "report": report,
+                "response": response,
+                "error": error,
             }
 
         return Command(
@@ -648,7 +630,7 @@ def create_decomposer_agent(
     Create a Decomposer agent.
 
     Given a user prompt, the Decomposer agent starts spawning subagents and
-    prompting them to achieve the goal. Depending on the subagents' reports,
+    prompting them to achieve the goal. Depending on the subagents' responses,
     the Decomposer agent either spawns more subagents or responds to the user.
 
     The Decomposer agent works in a standard tool-calling loop. At each step, it

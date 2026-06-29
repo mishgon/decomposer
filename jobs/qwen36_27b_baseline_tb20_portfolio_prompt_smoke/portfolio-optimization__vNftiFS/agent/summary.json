@@ -1,0 +1,8 @@
+{
+  "answer_written": "\n\nAll tests pass. Here's a summary of what was implemented:\n\n**`portfolio_optimized.c`** \u2014 C extension with two functions:\n- `portfolio_risk_c`: Computes `sqrt(x^T * S * x)` by first computing the matrix-vector product `S*x` then the dot product with `x`. Works directly with Python lists (via `PyList_GetItem`/`PyFloat_AS_DOUBLE`) to avoid numpy conversion overhead, while also supporting numpy arrays.\n- `portfolio_return_c`: Computes `weights^T * returns` as a simple dot product. Same dual-path approach.\n\n**`portfolio_optimized.py`** \u2014 Thin Python wrapper that passes inputs directly to the C extension without any conversion, keeping overhead minimal.\n\n**Results:**\n- **Correctness**: Exact match with Python baseline (0.00e+00 difference, well within 1e-10 tolerance)\n- **Performance**: 11.4x speedup at 5000 assets, 12.0x speedup at 8000 assets (both far exceeding the 1.2x requirement)\n- **Scalability**: Successfully handles 8000-asset portfolios",
+  "usage": {
+    "input_tokens": 66091,
+    "output_tokens": 10975,
+    "total_tokens": 77066
+  }
+}

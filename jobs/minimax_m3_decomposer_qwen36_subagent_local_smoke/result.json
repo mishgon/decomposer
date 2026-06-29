@@ -1,0 +1,258 @@
+{
+  "messages": [
+    {
+      "type": "human",
+      "data": {
+        "content": "Run a minimal subagent communication smoke test. Spawn exactly one baseline subagent. Ask it to use bash to report the current working directory and to print the token MINIMAX_QWEN_SMOKE_OK. Tell the subagent that its final response must include only: cwd=<cwd> and token=<token>. After waiting for the report, reply with the cwd and token you received.",
+        "additional_kwargs": {},
+        "response_metadata": {},
+        "type": "human",
+        "name": null,
+        "id": "ba1bddfd-83e6-4d7d-b2a7-21ab92ede65c"
+      }
+    },
+    {
+      "type": "ai",
+      "data": {
+        "content": "",
+        "additional_kwargs": {
+          "refusal": null
+        },
+        "response_metadata": {
+          "token_usage": {
+            "completion_tokens": 218,
+            "prompt_tokens": 2040,
+            "total_tokens": 2258,
+            "completion_tokens_details": {
+              "accepted_prediction_tokens": null,
+              "audio_tokens": 0,
+              "reasoning_tokens": 86,
+              "rejected_prediction_tokens": null,
+              "image_tokens": 0
+            },
+            "prompt_tokens_details": {
+              "audio_tokens": 0,
+              "cached_tokens": 0,
+              "cache_write_tokens": 0,
+              "video_tokens": 0
+            },
+            "cost": 0.0008736,
+            "is_byok": false,
+            "cost_details": {
+              "upstream_inference_cost": 0.0008736,
+              "upstream_inference_prompt_cost": 0.000612,
+              "upstream_inference_completions_cost": 0.0002616
+            }
+          },
+          "model_provider": "openai",
+          "model_name": "minimax/minimax-m3-20260531",
+          "system_fingerprint": null,
+          "id": "gen-1782723127-uwYvF2EASU61PXXoxa6U",
+          "finish_reason": "tool_calls",
+          "logprobs": null
+        },
+        "type": "ai",
+        "name": null,
+        "id": "lc_run--019f1294-2698-70d2-9395-ab061f11b4f7-0",
+        "tool_calls": [
+          {
+            "name": "spawn_subagent",
+            "args": {
+              "prompt": "Please run a minimal smoke test using bash. Do exactly the following:\n\n1. Run `pwd` to print the current working directory.\n2. Print the token string: MINIMAX_QWEN_SMOKE_OK\n\nYour final response must include ONLY these two lines, nothing else:\ncwd=<the output of pwd>\ntoken=MINIMAX_QWEN_SMOKE_OK\n\nDo not include any other text, explanations, or commentary.",
+              "subagent_type_id": "baseline"
+            },
+            "id": "call_019f129435457a328a0f6318",
+            "type": "tool_call"
+          }
+        ],
+        "invalid_tool_calls": [],
+        "usage_metadata": {
+          "input_tokens": 2040,
+          "output_tokens": 218,
+          "total_tokens": 2258,
+          "input_token_details": {
+            "audio": 0,
+            "cache_read": 0
+          },
+          "output_token_details": {
+            "audio": 0,
+            "reasoning": 86
+          }
+        }
+      }
+    },
+    {
+      "type": "tool",
+      "data": {
+        "content": "{\"subagent_run_id\": \"019f1294-35fb-7090-ad88-2f16f8063fcc\"}",
+        "additional_kwargs": {},
+        "response_metadata": {},
+        "type": "tool",
+        "name": "spawn_subagent",
+        "id": "f313c3c1-3e33-4fa8-8ad5-0049c41fb2b5",
+        "tool_call_id": "call_019f129435457a328a0f6318",
+        "artifact": null,
+        "status": "success"
+      }
+    },
+    {
+      "type": "ai",
+      "data": {
+        "content": "",
+        "additional_kwargs": {
+          "refusal": null
+        },
+        "response_metadata": {
+          "token_usage": {
+            "completion_tokens": 54,
+            "prompt_tokens": 2214,
+            "total_tokens": 2268,
+            "completion_tokens_details": {
+              "accepted_prediction_tokens": null,
+              "audio_tokens": 0,
+              "reasoning_tokens": 35,
+              "rejected_prediction_tokens": null,
+              "image_tokens": 0
+            },
+            "prompt_tokens_details": {
+              "audio_tokens": 0,
+              "cached_tokens": 0,
+              "cache_write_tokens": 0,
+              "video_tokens": 0
+            },
+            "cost": 0.000729,
+            "is_byok": false,
+            "cost_details": {
+              "upstream_inference_cost": 0.000729,
+              "upstream_inference_prompt_cost": 0.0006642,
+              "upstream_inference_completions_cost": 6.48e-05
+            }
+          },
+          "model_provider": "openai",
+          "model_name": "minimax/minimax-m3-20260531",
+          "system_fingerprint": null,
+          "id": "gen-1782723130-vNk4DSjKEVvGkJK5oHfE",
+          "finish_reason": "tool_calls",
+          "logprobs": null
+        },
+        "type": "ai",
+        "name": null,
+        "id": "lc_run--019f1294-360a-7aa0-afbf-e65075acfa0a-0",
+        "tool_calls": [
+          {
+            "name": "wait",
+            "args": {},
+            "id": "call_019f1294405771c1b16a7fa4",
+            "type": "tool_call"
+          }
+        ],
+        "invalid_tool_calls": [],
+        "usage_metadata": {
+          "input_tokens": 2214,
+          "output_tokens": 54,
+          "total_tokens": 2268,
+          "input_token_details": {
+            "audio": 0,
+            "cache_read": 0
+          },
+          "output_token_details": {
+            "audio": 0,
+            "reasoning": 35
+          }
+        }
+      }
+    },
+    {
+      "type": "tool",
+      "data": {
+        "content": "[{\"subagent_run_id\": \"019f1294-35fb-7090-ad88-2f16f8063fcc\", \"status\": \"success\", \"content\": \"\\n\\ncwd=/home/goncharov/decomposer/benchmarks/terminal_bench_decomposer/baseline_sidecar\\ntoken=MINIMAX_QWEN_SMOKE_OK\", \"error_message\": null}]",
+        "additional_kwargs": {},
+        "response_metadata": {},
+        "type": "tool",
+        "name": "wait",
+        "id": "4d736bbe-f3e5-4976-9643-5e4630f16e69",
+        "tool_call_id": "call_019f1294405771c1b16a7fa4",
+        "artifact": null,
+        "status": "success"
+      }
+    },
+    {
+      "type": "ai",
+      "data": {
+        "content": "Smoke test complete. Report from subagent:\n\n- **cwd**: `/home/goncharov/decomposer/benchmarks/terminal_bench_decomposer/baseline_sidecar`\n- **token**: `MINIMAX_QWEN_SMOKE_OK`",
+        "additional_kwargs": {
+          "refusal": null
+        },
+        "response_metadata": {
+          "token_usage": {
+            "completion_tokens": 70,
+            "prompt_tokens": 2329,
+            "total_tokens": 2399,
+            "completion_tokens_details": {
+              "accepted_prediction_tokens": null,
+              "audio_tokens": 0,
+              "reasoning_tokens": 15,
+              "rejected_prediction_tokens": null,
+              "image_tokens": 0
+            },
+            "prompt_tokens_details": {
+              "audio_tokens": 0,
+              "cached_tokens": 2176,
+              "cache_write_tokens": 0,
+              "video_tokens": 0
+            },
+            "cost": 0.00026046,
+            "is_byok": false,
+            "cost_details": {
+              "upstream_inference_cost": 0.00026046,
+              "upstream_inference_prompt_cost": 0.00017646,
+              "upstream_inference_completions_cost": 8.4e-05
+            }
+          },
+          "model_provider": "openai",
+          "model_name": "minimax/minimax-m3-20260531",
+          "system_fingerprint": null,
+          "id": "gen-1782723139-5Jhdgrpqmh2xVFb0pfaP",
+          "finish_reason": "stop",
+          "logprobs": null
+        },
+        "type": "ai",
+        "name": null,
+        "id": "lc_run--019f1294-546c-7203-b933-205a2efead57-0",
+        "tool_calls": [],
+        "invalid_tool_calls": [],
+        "usage_metadata": {
+          "input_tokens": 2329,
+          "output_tokens": 70,
+          "total_tokens": 2399,
+          "input_token_details": {
+            "audio": 0,
+            "cache_read": 2176
+          },
+          "output_token_details": {
+            "audio": 0,
+            "reasoning": 15
+          }
+        }
+      }
+    }
+  ],
+  "subagent_runs": {
+    "019f1294-35fb-7090-ad88-2f16f8063fcc": {
+      "subagent_run_id": "019f1294-35fb-7090-ad88-2f16f8063fcc",
+      "subagent_type_id": "baseline",
+      "assistant_id": "1b8fd252-5776-5330-90b9-a7e560362474",
+      "thread_id": "019f1294-35f9-7532-bef4-56b04094433a",
+      "run_id": "019f1294-35fb-7090-ad88-2f16f8063fcc",
+      "status": "success",
+      "prompt": "Please run a minimal smoke test using bash. Do exactly the following:\n\n1. Run `pwd` to print the current working directory.\n2. Print the token string: MINIMAX_QWEN_SMOKE_OK\n\nYour final response must include ONLY these two lines, nothing else:\ncwd=<the output of pwd>\ntoken=MINIMAX_QWEN_SMOKE_OK\n\nDo not include any other text, explanations, or commentary.",
+      "tool_call_count": 1,
+      "report": {
+        "subagent_run_id": "019f1294-35fb-7090-ad88-2f16f8063fcc",
+        "status": "success",
+        "content": "\n\ncwd=/home/goncharov/decomposer/benchmarks/terminal_bench_decomposer/baseline_sidecar\ntoken=MINIMAX_QWEN_SMOKE_OK",
+        "error_message": null
+      }
+    }
+  }
+}

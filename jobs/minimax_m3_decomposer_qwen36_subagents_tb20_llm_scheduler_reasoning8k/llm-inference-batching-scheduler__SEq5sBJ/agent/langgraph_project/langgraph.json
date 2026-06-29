@@ -1,0 +1,9 @@
+{
+  "dependencies": [
+    "./requirements.txt"
+  ],
+  "graphs": {
+    "decomposer": "./agent.py:make_decomposer"
+  },
+  "python_version": "3.12"
+}

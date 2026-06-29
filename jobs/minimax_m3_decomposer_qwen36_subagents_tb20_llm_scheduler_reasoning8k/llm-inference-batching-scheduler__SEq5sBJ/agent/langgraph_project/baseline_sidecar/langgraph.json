@@ -1,0 +1,9 @@
+{
+  "dependencies": [
+    "./requirements.txt"
+  ],
+  "graphs": {
+    "baseline": "./agent.py:make_baseline"
+  },
+  "python_version": "3.12"
+}

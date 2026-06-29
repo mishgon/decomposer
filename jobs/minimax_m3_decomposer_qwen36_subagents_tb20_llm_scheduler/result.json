@@ -1,0 +1,39 @@
+{
+    "id": "c449cf48-fb86-47da-8a54-f973a37a54cc",
+    "started_at": "2026-06-29T12:19:12.260688",
+    "updated_at": "2026-06-29T12:22:52.708989",
+    "finished_at": "2026-06-29T12:22:52.708989",
+    "n_total_trials": 1,
+    "stats": {
+        "n_completed_trials": 1,
+        "n_errored_trials": 0,
+        "n_running_trials": 0,
+        "n_pending_trials": 0,
+        "n_cancelled_trials": 0,
+        "n_retries": 0,
+        "evals": {
+            "langgraph__minimax-m3__terminal-bench": {
+                "n_trials": 1,
+                "n_errors": 0,
+                "metrics": [
+                    {
+                        "mean": 0.0
+                    }
+                ],
+                "pass_at_k": {},
+                "reward_stats": {
+                    "reward": {
+                        "0.0": [
+                            "llm-inference-batching-scheduler__qTJpq8k"
+                        ]
+                    }
+                },
+                "exception_stats": {}
+            }
+        },
+        "n_input_tokens": 32640,
+        "n_cache_tokens": null,
+        "n_output_tokens": 4535,
+        "cost_usd": null
+    }
+}

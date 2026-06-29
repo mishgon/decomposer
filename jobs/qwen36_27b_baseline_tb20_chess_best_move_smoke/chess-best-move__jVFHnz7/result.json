@@ -1,0 +1,125 @@
+{
+    "id": "fcdc950f-ce3b-492f-b2bd-474a24c26bd4",
+    "task_name": "chess-best-move",
+    "trial_name": "chess-best-move__jVFHnz7",
+    "trial_uri": "file:///home/goncharov/decomposer/jobs/qwen36_27b_baseline_tb20_chess_best_move_smoke/chess-best-move__jVFHnz7",
+    "task_id": {
+        "git_url": "https://github.com/laude-institute/terminal-bench-2.git",
+        "git_commit_id": "69671fbaac6d67a7ef0dfec016cc38a64ef7a77c",
+        "path": "chess-best-move"
+    },
+    "source": "terminal-bench",
+    "task_checksum": "a31d482d846322d57f0e3ee3c56d4ff2171fe39908dadd8092d036f17114fbef",
+    "config": {
+        "task": {
+            "path": "chess-best-move",
+            "git_url": "https://github.com/laude-institute/terminal-bench-2.git",
+            "git_commit_id": "69671fbaac6d67a7ef0dfec016cc38a64ef7a77c",
+            "name": null,
+            "ref": null,
+            "overwrite": false,
+            "download_dir": null,
+            "source": "terminal-bench"
+        },
+        "trial_name": "chess-best-move__jVFHnz7",
+        "trials_dir": "jobs/qwen36_27b_baseline_tb20_chess_best_move_smoke",
+        "timeout_multiplier": 2.0,
+        "agent_timeout_multiplier": null,
+        "verifier_timeout_multiplier": null,
+        "agent_setup_timeout_multiplier": null,
+        "environment_build_timeout_multiplier": null,
+        "agent": {
+            "name": "langgraph",
+            "import_path": null,
+            "model_name": "openai:Qwen/Qwen3.6-27B",
+            "skills": [],
+            "override_timeout_sec": null,
+            "override_setup_timeout_sec": null,
+            "max_timeout_sec": null,
+            "extra_allowed_hosts": [
+                "172.17.0.1"
+            ],
+            "kwargs": {
+                "project_path": "/home/goncharov/decomposer/benchmarks/terminal_bench_baseline",
+                "graph": "baseline"
+            },
+            "env": {
+                "OPENAI_BASE_URL": "http://172.17.0.1:8011/v1",
+                "OPENAI_API_KEY": "****",
+                "OPENAI_MODEL": "Qwen/Qwen3.6-27B",
+                "NO_PROXY": "localhost,127.0.0.1,172.17.0.1,178.72.132.75",
+                "no_proxy": "localhost,127.0.0.1,172.17.0.1,178.72.132.75"
+            },
+            "mcp_servers": []
+        },
+        "environment": {
+            "type": "docker",
+            "import_path": null,
+            "force_build": false,
+            "delete": true,
+            "cpu_enforcement_policy": "auto",
+            "memory_enforcement_policy": "auto",
+            "override_cpus": null,
+            "override_memory_mb": null,
+            "override_storage_mb": null,
+            "override_gpus": null,
+            "override_tpu": null,
+            "mounts": null,
+            "extra_docker_compose": [],
+            "env": {},
+            "kwargs": {},
+            "extra_allowed_hosts": []
+        },
+        "verifier": {
+            "override_timeout_sec": null,
+            "max_timeout_sec": null,
+            "env": {},
+            "disable": false
+        },
+        "artifacts": [],
+        "extra_instruction_paths": [],
+        "job_id": "81015b80-c473-4f00-9b14-4a082b0b1c52"
+    },
+    "agent_info": {
+        "name": "langgraph",
+        "version": "1.2.6",
+        "model_info": {
+            "name": "Qwen3.6-27B",
+            "provider": "openai:Qwen"
+        }
+    },
+    "agent_result": {
+        "n_input_tokens": null,
+        "n_cache_tokens": null,
+        "n_output_tokens": null,
+        "cost_usd": null,
+        "rollout_details": null,
+        "metadata": null
+    },
+    "verifier_result": null,
+    "exception_info": {
+        "exception_type": "NonZeroAgentExitCodeError",
+        "exception_message": "Command failed (exit 1): /opt/harbor-langgraph-venv/bin/python /installed-agent/langgraph_runner.py --project-dir /installed-agent/langgraph-project --config langgraph.json --graph baseline --instruction-file /installed-agent/instruction.txt --result-path /logs/agent/result.json --output-path /logs/agent/langgraph.txt --summary-path /logs/agent/summary.json --model openai:Qwen/Qwen3.6-27B --model-kwargs-json '{}' --configurable-json '{}' 2>&1 | stdbuf -oL tee /logs/agent/langgraph-run.log\nstdout: Traceback (most recent call last):\n  File \"/installed-agent/langgraph_runner.py\", line 300, in <module>\n    asyncio.run(main())\n  File \"/usr/lib/python3.12/asyncio/runners.py\", line 194, in run\n    return runner.run(main)\n           ^^^^^^^^^^^^^^^^\n  File \"/usr/lib/python3.12/asyncio/runners.py\", line 118, in run\n    return self._loop.run_until_complete(task)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/lib/python3.12/asyncio/base_events.py\", line 687, in run_until_complete\n    return future.result()\n           ^^^^^^^^^^^^^^^\n  File \"/installed-agent/langgraph_runner.py\", line 281, in main\n    result = await _ainvoke(\n             ^^^^^^^^^^^^^^^\n  File \"/installed-agent/langgraph_runner.py\", line 199, in _ainvoke\n    return await graph.ainvoke(input_value, config=config)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/opt/harbor-langgraph-venv/lib/python3.12/site-packages/langgraph/pregel/main.py\", line 4105, in ainvoke\n    async for chunk in self. ... [truncated]\nstderr: None",
+        "exception_traceback": "Traceback (most recent call last):\n  File \"/home/goncharov/decomposer/.venv/lib/python3.12/site-packages/harbor/trial/single_step.py\", line 71, in _run_agent\n    await self._run_agent_phase(\n  File \"/home/goncharov/decomposer/.venv/lib/python3.12/site-packages/harbor/trial/trial.py\", line 424, in _run_agent_phase\n    await asyncio.wait_for(\n  File \"/home/goncharov/.local/share/uv/python/cpython-3.12.12-linux-x86_64-gnu/lib/python3.12/asyncio/tasks.py\", line 520, in wait_for\n    return await fut\n           ^^^^^^^^^\n  File \"/home/goncharov/decomposer/.venv/lib/python3.12/site-packages/harbor/agents/installed/base.py\", line 52, in wrapper\n    return await fn(self, instruction, *args, **kwargs)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/goncharov/decomposer/.venv/lib/python3.12/site-packages/harbor/agents/installed/langgraph.py\", line 237, in run\n    await self.exec_as_agent(environment, command=command, env=env)\n  File \"/home/goncharov/decomposer/.venv/lib/python3.12/site-packages/harbor/agents/installed/base.py\", line 412, in exec_as_agent\n    return await self._exec(\n           ^^^^^^^^^^^^^^^^^\n  File \"/home/goncharov/decomposer/.venv/lib/python3.12/site-packages/harbor/agents/installed/base.py\", line 379, in _exec\n    raise self._classify_exec_error(command, result)\nharbor.agents.installed.base.NonZeroAgentExitCodeError: Command failed (exit 1): /opt/harbor-langgraph-venv/bin/python /installed-agent/langgraph_runner.py --project-dir /installed-agent/langgraph-project --config langgraph.json --graph baseline --instruction-file /installed-agent/instruction.txt --result-path /logs/agent/result.json --output-path /logs/agent/langgraph.txt --summary-path /logs/agent/summary.json --model openai:Qwen/Qwen3.6-27B --model-kwargs-json '{}' --configurable-json '{}' 2>&1 | stdbuf -oL tee /logs/agent/langgraph-run.log\nstdout: Traceback (most recent call last):\n  File \"/installed-agent/langgraph_runner.py\", line 300, in <module>\n    asyncio.run(main())\n  File \"/usr/lib/python3.12/asyncio/runners.py\", line 194, in run\n    return runner.run(main)\n           ^^^^^^^^^^^^^^^^\n  File \"/usr/lib/python3.12/asyncio/runners.py\", line 118, in run\n    return self._loop.run_until_complete(task)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/lib/python3.12/asyncio/base_events.py\", line 687, in run_until_complete\n    return future.result()\n           ^^^^^^^^^^^^^^^\n  File \"/installed-agent/langgraph_runner.py\", line 281, in main\n    result = await _ainvoke(\n             ^^^^^^^^^^^^^^^\n  File \"/installed-agent/langgraph_runner.py\", line 199, in _ainvoke\n    return await graph.ainvoke(input_value, config=config)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/opt/harbor-langgraph-venv/lib/python3.12/site-packages/langgraph/pregel/main.py\", line 4105, in ainvoke\n    async for chunk in self. ... [truncated]\nstderr: None\n",
+        "occurred_at": "2026-06-26T21:40:04.057967"
+    },
+    "started_at": "2026-06-26T18:30:59.198416Z",
+    "finished_at": "2026-06-26T18:40:24.970060Z",
+    "environment_setup": {
+        "started_at": "2026-06-26T18:30:59.259498Z",
+        "finished_at": "2026-06-26T18:31:27.102398Z"
+    },
+    "agent_setup": {
+        "started_at": "2026-06-26T18:31:27.102487Z",
+        "finished_at": "2026-06-26T18:31:45.346612Z"
+    },
+    "agent_execution": {
+        "started_at": "2026-06-26T18:31:45.346821Z",
+        "finished_at": "2026-06-26T18:40:04.054423Z"
+    },
+    "verifier": {
+        "started_at": "2026-06-26T18:40:04.574546Z",
+        "finished_at": "2026-06-26T18:40:13.293800Z"
+    },
+    "step_results": null
+}

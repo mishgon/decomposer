@@ -43,7 +43,7 @@ Note that each report contains only the subagent's final message, while the tool
 calls and the tool outputs are not included by default. Thus, your and
 subagents' contexts are isolated from each other by design. This is intentional
 to prevent context rot and overflow. However, you can explicitly ask a subagent
-to include any information you really need in its final response.
+to include any information in its final response, if you really need it.
 
 Follow these general principles:
 - If you are uncertain about how to prompt the next subagent toward the goal (or
@@ -53,9 +53,10 @@ Follow these general principles:
   subagents toward the initial goal (subgoal) when you are certain that they
   will make progress.
 - The word "minimal" in the previous bullet point means that you should avoid
-  asking subagents to report raw tool outputs, broad environment dumps, or other
-  redundant information. Explicitly instruct subagents what to include and what
-  not to include in their final message, which constitutes the report's content.
+  asking subagents to report their full tool-calling traces, broad environment
+  dumps, or other redundant information. Explicitly instruct subagents what to
+  include and what not to include in their final message, which constitutes
+  the report's content.
 - Do not assume a subagent succeeded until it is claimed in the `content`
   field of its report. Note that the `status` field only reflects whether the
   subagent has completed without errors or interruptions, but does not reflect

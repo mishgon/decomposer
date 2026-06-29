@@ -1,0 +1,137 @@
+{
+    "id": "33bf4de5-c91d-4186-87fc-f9ac384defea",
+    "task_name": "portfolio-optimization",
+    "trial_name": "portfolio-optimization__vNftiFS",
+    "trial_uri": "file:///home/goncharov/decomposer/jobs/qwen36_27b_baseline_tb20_portfolio_prompt_smoke/portfolio-optimization__vNftiFS",
+    "task_id": {
+        "git_url": "https://github.com/laude-institute/terminal-bench-2.git",
+        "git_commit_id": "69671fbaac6d67a7ef0dfec016cc38a64ef7a77c",
+        "path": "portfolio-optimization"
+    },
+    "source": "terminal-bench",
+    "task_checksum": "da8a95d2c518a70ef66e47f3571fffd3f9172334c1c24e01d9ee232bdebd428c",
+    "config": {
+        "task": {
+            "path": "portfolio-optimization",
+            "git_url": "https://github.com/laude-institute/terminal-bench-2.git",
+            "git_commit_id": "69671fbaac6d67a7ef0dfec016cc38a64ef7a77c",
+            "name": null,
+            "ref": null,
+            "overwrite": false,
+            "download_dir": null,
+            "source": "terminal-bench"
+        },
+        "trial_name": "portfolio-optimization__vNftiFS",
+        "trials_dir": "jobs/qwen36_27b_baseline_tb20_portfolio_prompt_smoke",
+        "timeout_multiplier": 1.0,
+        "agent_timeout_multiplier": null,
+        "verifier_timeout_multiplier": null,
+        "agent_setup_timeout_multiplier": null,
+        "environment_build_timeout_multiplier": null,
+        "agent": {
+            "name": "langgraph",
+            "import_path": null,
+            "model_name": "openai:Qwen/Qwen3.6-27B",
+            "skills": [],
+            "override_timeout_sec": null,
+            "override_setup_timeout_sec": null,
+            "max_timeout_sec": null,
+            "extra_allowed_hosts": [
+                "172.17.0.1"
+            ],
+            "kwargs": {
+                "project_path": "/home/goncharov/decomposer/benchmarks/terminal_bench_baseline",
+                "graph": "baseline"
+            },
+            "env": {
+                "OPENAI_BASE_URL": "http://172.17.0.1:8011/v1",
+                "OPENAI_API_KEY": "****",
+                "OPENAI_MODEL": "Qwen/Qwen3.6-27B",
+                "OPENAI_MAX_TOKENS": "****",
+                "OPENAI_TIMEOUT": "3600",
+                "OPENAI_TEMPERATURE": "0.6",
+                "OPENAI_TOP_P": "0.95",
+                "OPENAI_TOP_K": "20",
+                "OPENAI_MIN_P": "0",
+                "OPENAI_PRESENCE_PENALTY": "0",
+                "OPENAI_REPETITION_PENALTY": "1.0",
+                "NO_PROXY": "localhost,127.0.0.1,172.17.0.1,178.72.132.75",
+                "no_proxy": "localhost,127.0.0.1,172.17.0.1,178.72.132.75"
+            },
+            "mcp_servers": []
+        },
+        "environment": {
+            "type": "docker",
+            "import_path": null,
+            "force_build": false,
+            "delete": true,
+            "cpu_enforcement_policy": "auto",
+            "memory_enforcement_policy": "auto",
+            "override_cpus": null,
+            "override_memory_mb": null,
+            "override_storage_mb": null,
+            "override_gpus": null,
+            "override_tpu": null,
+            "mounts": null,
+            "extra_docker_compose": [],
+            "env": {},
+            "kwargs": {},
+            "extra_allowed_hosts": []
+        },
+        "verifier": {
+            "override_timeout_sec": null,
+            "max_timeout_sec": null,
+            "env": {},
+            "disable": false
+        },
+        "artifacts": [],
+        "extra_instruction_paths": [],
+        "job_id": "faa98612-2566-4499-b461-83939e643fd3"
+    },
+    "agent_info": {
+        "name": "langgraph",
+        "version": "1.2.6",
+        "model_info": {
+            "name": "Qwen3.6-27B",
+            "provider": "openai:Qwen"
+        }
+    },
+    "agent_result": {
+        "n_input_tokens": 66091,
+        "n_cache_tokens": null,
+        "n_output_tokens": 10975,
+        "cost_usd": null,
+        "rollout_details": null,
+        "metadata": {
+            "langgraph_graph": "baseline",
+            "langgraph_config": "langgraph.json",
+            "langgraph_project_path": "/home/goncharov/decomposer/benchmarks/terminal_bench_baseline",
+            "answer_written": "\n\nAll tests pass. Here's a summary of what was implemented:\n\n**`portfolio_optimized.c`** — C extension with two functions:\n- `portfolio_risk_c`: Computes `sqrt(x^T * S * x)` by first computing the matrix-vector product `S*x` then the dot product with `x`. Works directly with Python lists (via `PyList_GetItem`/`PyFloat_AS_DOUBLE`) to avoid numpy conversion overhead, while also supporting numpy arrays.\n- `portfolio_return_c`: Computes `weights^T * returns` as a simple dot product. Same dual-path approach.\n\n**`portfolio_optimized.py`** — Thin Python wrapper that passes inputs directly to the C extension without any conversion, keeping overhead minimal.\n\n**Results:**\n- **Correctness**: Exact match with Python baseline (0.00e+00 difference, well within 1e-10 tolerance)\n- **Performance**: 11.4x speedup at 5000 assets, 12.0x speedup at 8000 assets (both far exceeding the 1.2x requirement)\n- **Scalability**: Successfully handles 8000-asset portfolios"
+        }
+    },
+    "verifier_result": {
+        "rewards": {
+            "reward": 1.0
+        }
+    },
+    "exception_info": null,
+    "started_at": "2026-06-28T20:20:30.126161Z",
+    "finished_at": "2026-06-28T20:30:45.996902Z",
+    "environment_setup": {
+        "started_at": "2026-06-28T20:20:30.188474Z",
+        "finished_at": "2026-06-28T20:20:32.250553Z"
+    },
+    "agent_setup": {
+        "started_at": "2026-06-28T20:20:32.250707Z",
+        "finished_at": "2026-06-28T20:20:41.747516Z"
+    },
+    "agent_execution": {
+        "started_at": "2026-06-28T20:20:41.747742Z",
+        "finished_at": "2026-06-28T20:29:21.011638Z"
+    },
+    "verifier": {
+        "started_at": "2026-06-28T20:29:21.482774Z",
+        "finished_at": "2026-06-28T20:30:34.339591Z"
+    },
+    "step_results": null
+}
