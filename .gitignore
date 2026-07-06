@@ -191,8 +191,10 @@ cython_debug/
 # Ruff stuff:
 .ruff_cache/
 
-# Local datasets and run artifacts
-data/
+# LangGraph dev runtime
+.langgraph_api/
+
+# Generated artifacts
 artifacts/
 
 # PyPI configuration file

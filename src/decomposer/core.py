@@ -23,48 +23,62 @@ logger = logging.getLogger(__name__)
 
 SUBAGENT_PROMPT_MAX_TOKENS = 1024
 SUBAGENT_REPORT_MAX_TOKENS = 1024
-DECOMPOSER_SYSTEM_PROMPT = f"""You are a Decomposer agent.
+DECOMPOSER_SYSTEM_PROMPT = f"""You are an ultimate manager agent. You are not an expert in any field or domain (except for management). You NEVER write or read code. You delegate ALL the work that requires complex reasoning, writing and reading code, domain-specific knowledge or expertise to subagents.
 
-You initially see only the user prompt specifying your goal in the environment. You cannot touch the environment directly; you interact with it exclusively via spawning and prompting subagents and reading their reports. Decompose your goal into immediate subgoals or tasks, prompt subagents to achieve / execute them, read their reports, define next subgoals / tasks, prompt new subagents, etc., until you are sure that your main goal has been achieved.
+# How you work BY DESIGN
 
-Specifically, you can interact with the environment by calling the following tools:
-- `spawn_subagent` with `subagent_type_id` and `prompt` args. It spawns a fresh subagent and runs it with the given prompt asynchronously in the background. You can imagine that the spawned subagents have their own isolated contexts and tools for reasoning and interacting with the environment, do their best to follow your prompts, and finally write and submit their reports to a shared queue. If a subagent fails with an error, it also submits a report with the error message.
-- `wait` with no args. It waits for at least one subagent report to be available in the queue and dequeues all reports from the queue as the tool output.
+Given a user prompt specifying a *task*, you can delegate *subtasks* to asynchronous subagents, asynchronously read their reports as soon as they are available and delegate next unblocked subtasks to new asynchronous subagents. You continue to delegate new subtasks until all the work is done or cannot be completed for some reason. Then, you compose a final response to the user based on the subagents' reports.
 
-Note that each report contains only the subagent's final message, while the remaining subagent's context, i.e. prompt, tool calls, and tool outputs, are not included. Moreover, the subagent's final message is always truncated to at most {SUBAGENT_REPORT_MAX_TOKENS} tokens. Subagents are not responsible for this truncation and cannot control it. This is intentional to prevent your context rot and overflow. Still, you can ask subagents to include any information within the token limits in their final responses.
+Technically, you work in a standard tool-calling loop using the following two tools:
+- `spawn_subagent` with `subagent_type_id` and `prompt` args. It spawns a fresh subagent, runs it with the prompt asynchronously in the background, and immediately returns the `subagent_run_id`. The spawned subagents have their own isolated contexts, might have their own tools, and do their best to follow and respond to your prompts. When a subagent completes, its last message is truncated to at most {SUBAGENT_REPORT_MAX_TOKENS} tokens and submitted to a report queue. If a subagent fails with an error, a report with the error message is submitted. Note that `spawn_subagent` does not return the subagent's report. Use `wait` to collect subagent reports.
+- `wait` with no args. It waits for at least one new report to be available in the queue and dequeues all reports from the queue as the tool output. Using this tool is the only way to receive subagents' reports.
 
-Follow these general principles:
-- Delegate all the work that requires domain-specific knowledge or expertise to the appropriate subagents. Your role is only to optimally decompose the goals / tasks into subgoals / subtasks and manage the subagents to achieve / execute them. Still, you are responsible for the final result.
-- Decompose goals / tasks to independent subgoals / subtasks that can be achieved / executed *in parallel* and assign them to concurrent subagents whenever possible. This can significantly speed up the work.
-- Stop spawning and waiting for subagents when the main goal has been achieved and respond to the user.
+By default, subagents are unaware of each other. They also do not know that their full context (e.g., tool calls, tool outputs, etc.) is hidden from you and that their last message must be a self-contained report. They also do not know that this report is always truncated to at most {SUBAGENT_REPORT_MAX_TOKENS} tokens and cannot control this truncation. That's why you should carefully prompt a subagent what to include and what not to include in its last message.
+
+# Rules you MUST follow
+
+- Never rely on your own expertise in any field except for management. Use only common sense and outsource any complex subtasks to subagents.
+- Never write or read code yourself. The only thing you can do with the code is copying and pasting it, if necessary.
+
+# Good patterns to follow
+
+- Decompose the initial task into small atomic subtasks.
+- If the initial task decomposition is not straightforward, delegate it as a planning subtask to the first subagent (its report should be a plan). Eventually, you could also delegate re-planning subtasks if needed.
+- Parallelize the work whenever possible. Immediately delegate all the currently unblocked independent subtasks to concurrent subagents.
+- Ask subagents to response with the minimal necessary piece of information.
+
+# Bad patterns to avoid
+
+- Avoid asking subagents to show you raw source files content, tool calling traces, and other low-level information.
+
 """
 
 
 SPAWN_SUBAGENT_TOOL_DESCRIPTION_TEMPLATE = """Spawns a fresh subagent of a certain type and runs it in the background with the given prompt.
 
-Use this tool when you want to set a subgoal or delegate a task (e.g., gather a piece of information or change the environmental state in a specific way) to a fresh subagent of a certain type.
+Use this tool when you want to delegate a subtask to a fresh subagent of a certain type.
 
-Depending on the subgoal / task, select the subagent type best suited to handle it. First optimize quality, then cost. Specify the type using the `subagent_type_id` argument. Available subagent types are listed in the table below:
+Depending on the subtask, select the subagent type best suited to handle it. First optimize quality, then cost. Specify the type using the `subagent_type_id` argument. Available subagent types are listed in the table below:
 
 | Agent type ID | Description |
 | --- | --- |
 {available_subagent_types}
 
-Specify the subgoal / task in the `prompt` argument. It can be any free-form text (e.g., goal, task, question, query, instructions, etc.) up to {subagent_prompt_max_tokens} tokens (longer prompts are rejected). A good prompt states the subagent's goal / task, provides minimal required context and explicitly describes what information the subagent's final response must or must not include. Note that subagents might not know that their context is isolated from yours and that you receive only their final response truncated to at most {subagent_report_max_tokens} tokens. It is your responsibility to instruct subagents to produce an informative final response no longer than {subagent_report_max_tokens} tokens.
+Specify the subtask in the `prompt` argument. It can be any free-form text up to {subagent_prompt_max_tokens} tokens (longer prompts are rejected).
 
-When called properly, this tool creates a new subagent with a fresh context, asynchronously runs it in the background, and returns immediately with `subagent_run_id`, a unique identifier for the subagent run.
+When called properly, this tool creates a new subagent with a fresh context, asynchronously runs it in the background with the given prompt, and returns immediately with `subagent_run_id`, a unique identifier of the subagent run.
 
 IMPORTANT: this tool does not return the subagent's report. Use `wait` to collect subagent reports.
 
-You can call this tool multiple times (in a single message or separate messages) to asynchronously spawn multiple concurrent subagents without waiting for the previously spawned subagents.
+You can call this tool multiple times (in a single message or separate messages) to asynchronously spawn multiple concurrent subagents without waiting for all of the previously spawned subagents.
 
-Spawn as many subagents as needed to achieve the main goal, but no more than necessary.
+Spawn as many subagents as needed, but no more than necessary.
 """
 
 WAIT_TIMEOUT_SECONDS = 60.0
 WAIT_TOOL_DESCRIPTION = f"""Waits for at least one new report to become available and returns all new subagent reports that have been produced since the last `wait` call.
 
-Use this tool when you have already spawned all subagents you find necessary at the moment, and you want to wait for updates.
+Use this tool when you have already spawned all subagents for all the currently unblocked subtasks, and you want to wait for updates.
 
 This tool takes no arguments. If there are no new reports and no running subagents, it returns immediately with "No running subagents to wait for." If any subagents have completed since the last `wait` call, it immediately returns their reports. Otherwise, it waits for {WAIT_TIMEOUT_SECONDS} seconds until at least one running subagent completes and returns its report. On timeout, it returns "No current subagent runs completed."
 
@@ -129,10 +143,9 @@ def _build_spawn_subagent_schema(subagent_types: dict[str, SubagentType]) -> typ
         )
         prompt: str = Field(
             description=(
-                "The subgoal / task prompt to send to the spawned subagent. "
+                "The prompt to send to the spawned subagent. "
                 f"Must be no longer than {SUBAGENT_PROMPT_MAX_TOKENS} tokens. "
-                "Specifies what the subagent should do and what information "
-                "its final response must or must not include."
+                "Specifies the subagent's subtask."
             )
         )
 
@@ -613,6 +626,7 @@ def create_decomposer_agent(
     subagent_types: Sequence[SubagentType],
     *,
     checkpointer: Checkpointer | None = None,
+    middleware: Sequence[AgentMiddleware] | None = None,
 ) -> CompiledStateGraph:
     """
     Create a Decomposer agent.
@@ -636,14 +650,16 @@ def create_decomposer_agent(
         decomposer_model: The language model for the Decomposer agent.
         subagent_types: The available subagent types.
         checkpointer: The checkpointer for the Decomposer agent.
+        middleware: Additional LangChain middleware for the Decomposer agent.
     """
-    middleware = [
+    agent_middleware = [
         DecomposerAgentMiddleware(subagent_types),
+        *(middleware or []),
     ]
     return create_agent(
         model=decomposer_model,
         tools=[],
         system_prompt=DECOMPOSER_SYSTEM_PROMPT,
-        middleware=middleware,
+        middleware=agent_middleware,
         checkpointer=checkpointer,
     )
