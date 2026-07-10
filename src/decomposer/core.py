@@ -18,77 +18,18 @@ from langgraph_sdk.client import LangGraphClient, SyncLangGraphClient
 from pydantic import BaseModel, Field
 from typing_extensions import TypedDict
 
+from .prompts import (
+    DECOMPOSER_SYSTEM_PROMPT, SPAWN_SUBAGENT_TOOL_DESCRIPTION,
+    PROMPT_PARAMETER_DESCRIPTION, SUBAGENT_TYPE_ID_PARAMETER_DESCRIPTION,
+    WAIT_TOOL_DESCRIPTION
+)
+
 logger = logging.getLogger(__name__)
 
 
 SUBAGENT_PROMPT_MAX_TOKENS = 1024
 SUBAGENT_REPORT_MAX_TOKENS = 1024
-DECOMPOSER_SYSTEM_PROMPT = f"""You are an ultimate manager agent. You are not an expert in any field or domain (except for management). You NEVER write or read code. You delegate ALL the work that requires complex reasoning, writing and reading code, domain-specific knowledge or expertise to subagents.
-
-# How you work BY DESIGN
-
-Given a user prompt specifying a *task*, you can delegate *subtasks* to asynchronous subagents, asynchronously read their reports as soon as they are available and delegate next unblocked subtasks to new asynchronous subagents. You continue to delegate new subtasks until all the work is done or cannot be completed for some reason. Then, you compose a final response to the user based on the subagents' reports.
-
-Technically, you work in a standard tool-calling loop using the following two tools:
-- `spawn_subagent` with `subagent_type_id` and `prompt` args. It spawns a fresh subagent, runs it with the prompt asynchronously in the background, and immediately returns the `subagent_run_id`. The spawned subagents have their own isolated contexts, might have their own tools, and do their best to follow and respond to your prompts. When a subagent completes, its last message is truncated to at most {SUBAGENT_REPORT_MAX_TOKENS} tokens and submitted to a report queue. If a subagent fails with an error, a report with the error message is submitted. Note that `spawn_subagent` does not return the subagent's report. Use `wait` to collect subagent reports.
-- `wait` with no args. It waits for at least one new report to be available in the queue and dequeues all reports from the queue as the tool output. Using this tool is the only way to receive subagents' reports.
-
-By default, subagents are unaware of each other. They also do not know that their full context (e.g., tool calls, tool outputs, etc.) is hidden from you and that their last message must be a self-contained report. They also do not know that this report is always truncated to at most {SUBAGENT_REPORT_MAX_TOKENS} tokens and cannot control this truncation. That's why you should carefully prompt a subagent what to include and what not to include in its last message.
-
-# Rules you MUST follow
-
-- Never rely on your own expertise in any field except for management. Use only common sense and outsource any complex subtasks to subagents.
-- Never write or read code yourself. The only thing you can do with the code is copying and pasting it, if necessary.
-- Never prompt subagents to show you full raw source files contents, tool-calling traces, and other broad unspecific information.
-
-# Good patterns to follow
-
-- Decompose the initial task into small atomic subtasks.
-- If the initial task decomposition is not straightforward, delegate it as a planning subtask to the first subagent (its report should be a plan). Eventually, you could also delegate re-planning subtasks if needed.
-- Parallelize the work whenever possible. Immediately delegate all the currently unblocked independent subtasks to concurrent subagents.
-- Ask subagents to response with the minimal necessary piece of information.
-
-# Priority of the system prompt over the user prompt
-
-The priority of the system prompt is higher than that of the user prompt. Even if the user prompt explicitly tells YOU to do something, e.g., read a file, write a code, call a tool, etc., you must strictly follow the system prompt, especially "Rules you MUST follow" section. User does not care who does the work, you or subagents.
-
-"""
-
-
-SPAWN_SUBAGENT_TOOL_DESCRIPTION_TEMPLATE = """Spawns a fresh subagent of a certain type and runs it in the background with the given prompt.
-
-Use this tool when you want to delegate a subtask to a fresh subagent of a certain type.
-
-Depending on the subtask, select the subagent type best suited to handle it. First optimize quality, then cost. Specify the type using the `subagent_type_id` argument. Available subagent types are listed in the table below:
-
-| Agent type ID | Description |
-| --- | --- |
-{available_subagent_types}
-
-Specify the subtask in the `prompt` argument.
-
-When called properly, this tool creates a new subagent with a fresh context, asynchronously runs it in the background with the given prompt, and returns immediately with `subagent_run_id`, a unique identifier of the subagent run.
-
-IMPORTANT: this tool does not return the subagent's report. Use `wait` to collect subagent reports.
-
-You can call this tool multiple times (in a single message or separate messages) to asynchronously spawn multiple concurrent subagents without waiting for all of the previously spawned subagents.
-
-Spawn as many subagents as needed, but no more than necessary.
-"""
-
 WAIT_TIMEOUT_SECONDS = 60.0
-WAIT_TOOL_DESCRIPTION = f"""Waits for at least one new report to become available and returns all new subagent reports that have been produced since the last `wait` call.
-
-Use this tool when you have already spawned all subagents for all the currently unblocked subtasks, and you want to wait for updates.
-
-This tool takes no arguments. If there are no new reports and no running subagents, it returns immediately with "No running subagents to wait for." If any subagents have completed since the last `wait` call, it immediately returns their reports. Otherwise, it waits for {WAIT_TIMEOUT_SECONDS} seconds until at least one running subagent completes and returns its report. On timeout, it returns "No current subagent runs completed."
-
-The reports are formatted as a JSON list. Each report contains `subagent_run_id`, `status`, and `content` fields. Use the `subagent_run_id` field to identify the subagent run that produced the report. Note that the `status` field only reflects whether the subagent has completed without errors or interruptions, but does not reflect whether the subagent achieved the subgoal. If `status` is `"success"`, the `content` field contains the subagent's final message truncated to at most {SUBAGENT_REPORT_MAX_TOKENS} tokens. If it is empty, this means that your prompt did not instruct the subagent clearly enough to return a final response. If `status` is `"error"`, the `content` field contains the error message, if any. Error messages are also truncated to at most {SUBAGENT_REPORT_MAX_TOKENS} tokens.
-
-Do not use this tool when there are no running subagents to wait for. If you call it once and it returns "No running subagents to wait for.", do not call it again until you have spawned new subagents.
-"""
-
-
 SYNC_WAIT_POLL_SECONDS = 5.0
 TERMINAL_STATUSES = frozenset({"success", "error", "timeout", "interrupted"})
 SUBAGENT_RECURSION_LIMIT = 200  # ~100 tool calls
@@ -132,23 +73,41 @@ def _subagent_runs_reducer(
     return merged
 
 
+def _get_current_subagent_runs(
+    subagent_runs: dict[str, SubagentRun],
+) -> dict[str, SubagentRun]:
+    terminal_runs_without_reports = {
+        subagent_run_id: subagent_run
+        for subagent_run_id, subagent_run in subagent_runs.items()
+        if subagent_run["status"] in TERMINAL_STATUSES
+        and subagent_run.get("report") is None
+    }
+    if terminal_runs_without_reports:
+        details = ", ".join(
+            f"`{subagent_run_id}` ({subagent_run['status']})"
+            for subagent_run_id, subagent_run in terminal_runs_without_reports.items()
+        )
+        raise RuntimeError(
+            "Invalid Decomposer state: terminal subagent runs have no collected "
+            f"report: {details}."
+        )
+
+    return {
+        subagent_run_id: subagent_run
+        for subagent_run_id, subagent_run in subagent_runs.items()
+        if subagent_run["status"] not in TERMINAL_STATUSES
+    }
+
+
 def _build_spawn_subagent_schema(subagent_types: dict[str, SubagentType]) -> type[BaseModel]:
     available_subagent_type_ids = ", ".join(f"`{k}`" for k in subagent_types)
 
     class SpawnSubagentSchema(BaseModel):
         subagent_type_id: str = Field(
-            description=(
-                "The ID of the subagent type to spawn. Must be one of the "
-                f"available subagent type IDs: {available_subagent_type_ids}."
-            )
+            description=SUBAGENT_TYPE_ID_PARAMETER_DESCRIPTION.format(available_subagent_type_ids=available_subagent_type_ids)
         )
         prompt: str = Field(
-            description=(
-                "The prompt to send to the spawned subagent. "
-                f"Must be no longer than {SUBAGENT_PROMPT_MAX_TOKENS} tokens "
-                "(longer prompts are rejected). "
-                "Specifies the subagent's subtask."
-            )
+            description=PROMPT_PARAMETER_DESCRIPTION.format(subagent_prompt_max_tokens=SUBAGENT_PROMPT_MAX_TOKENS)
         )
 
     return SpawnSubagentSchema
@@ -227,11 +186,7 @@ def _build_spawn_subagent_tool_description(
         f"| `{subagent_type_id}` | {subagent_type['description']} |"
         for subagent_type_id, subagent_type in subagent_types.items()
     )
-    return SPAWN_SUBAGENT_TOOL_DESCRIPTION_TEMPLATE.format(
-        subagent_prompt_max_tokens=SUBAGENT_PROMPT_MAX_TOKENS,
-        subagent_report_max_tokens=SUBAGENT_REPORT_MAX_TOKENS,
-        available_subagent_types=subagent_types_desc
-    )
+    return SPAWN_SUBAGENT_TOOL_DESCRIPTION.format(available_subagent_types=subagent_types_desc)
 
 
 def _build_spawn_subagent_tool(
@@ -262,6 +217,8 @@ def _build_spawn_subagent_tool(
             config={"recursion_limit": SUBAGENT_RECURSION_LIMIT},
         )
         subagent_run_id = run["run_id"]
+        if run["status"] in TERMINAL_STATUSES:
+            raise ValueError(f"`client.runs.create` returned a run `{subagent_run_id}` with terminal status `{run['status']}`.")
         subagent_run: SubagentRun = {
             "subagent_run_id": subagent_run_id,
             "subagent_type_id": subagent_type_id,
@@ -309,6 +266,8 @@ def _build_spawn_subagent_tool(
             config={"recursion_limit": SUBAGENT_RECURSION_LIMIT},
         )
         subagent_run_id = run["run_id"]
+        if run["status"] in TERMINAL_STATUSES:
+            raise ValueError(f"`client.runs.create` returned a run `{subagent_run_id}` with terminal status `{run['status']}`.")
         subagent_run: SubagentRun = {
             "subagent_run_id": subagent_run_id,
             "subagent_type_id": subagent_type_id,
@@ -349,7 +308,7 @@ def _build_wait_tool(
 
     def wait(runtime: ToolRuntime) -> str | Command:
         subagent_runs: dict[str, SubagentRun] = runtime.state.get("subagent_runs") or {}
-        current_runs = {k: v for k, v in subagent_runs.items() if v["status"] not in TERMINAL_STATUSES}
+        current_runs = _get_current_subagent_runs(subagent_runs)
         if not current_runs:
             return "No running subagents to wait for."
 
@@ -382,7 +341,7 @@ def _build_wait_tool(
                     if not history:
                         raise ValueError(f"No history found for run `{run['run_id']}`.")
                     if history[-1]["metadata"]["source"] != "input":
-                        raise ValueError(f"History is truncated; increase `HISTORY_LIMIT`.")
+                        raise ValueError("History is truncated; increase `HISTORY_LIMIT`.")
 
                     before_messages = history[-1]["values"]["messages"]
                     after_messages = history[0]["values"]["messages"]
@@ -439,7 +398,7 @@ def _build_wait_tool(
             update={
                 "messages": [
                     ToolMessage(
-                        f"No current subagent runs completed.",
+                        "No current subagent runs completed.",
                         tool_call_id=runtime.tool_call_id,
                     )
                 ],
@@ -449,7 +408,7 @@ def _build_wait_tool(
 
     async def await_(runtime: ToolRuntime) -> str | Command:
         subagent_runs: dict[str, SubagentRun] = runtime.state.get("subagent_runs") or {}
-        current_runs = {k: v for k, v in subagent_runs.items() if v["status"] not in TERMINAL_STATUSES}
+        current_runs = _get_current_subagent_runs(subagent_runs)
         if not current_runs:
             return "No running subagents to wait for."
 
@@ -532,7 +491,7 @@ def _build_wait_tool(
                 if not history:
                     raise ValueError(f"No history found for run `{run['run_id']}`.")
                 if history[-1]["metadata"]["source"] != "input":
-                    raise ValueError(f"History is truncated; increase `HISTORY_LIMIT`.")
+                    raise ValueError("History is truncated; increase `HISTORY_LIMIT`.")
 
                 before_messages = history[-1]["values"]["messages"]
                 after_messages = history[0]["values"]["messages"]
@@ -586,7 +545,8 @@ def _build_wait_tool(
         func=wait,
         coroutine=await_,
         name="wait",
-        description=WAIT_TOOL_DESCRIPTION,
+        description=WAIT_TOOL_DESCRIPTION.format(wait_timeout_seconds=WAIT_TIMEOUT_SECONDS,
+                                                 subagent_report_max_tokens=SUBAGENT_REPORT_MAX_TOKENS),
     )
 
 
@@ -629,6 +589,7 @@ def create_decomposer_agent(
     *,
     checkpointer: Checkpointer | None = None,
     middleware: Sequence[AgentMiddleware] | None = None,
+    context_schema: type[Any] | None = None,
 ) -> CompiledStateGraph:
     """
     Create a Decomposer agent.
@@ -653,7 +614,9 @@ def create_decomposer_agent(
         subagent_types: The available subagent types.
         checkpointer: The checkpointer for the Decomposer agent.
         middleware: Additional LangChain middleware for the Decomposer agent.
+        context_schema: Runtime context schema passed through to `create_agent`.
     """
+    system_prompt = DECOMPOSER_SYSTEM_PROMPT.format(subagent_report_max_tokens=SUBAGENT_REPORT_MAX_TOKENS)
     agent_middleware = [
         DecomposerAgentMiddleware(subagent_types),
         *(middleware or []),
@@ -661,7 +624,8 @@ def create_decomposer_agent(
     return create_agent(
         model=decomposer_model,
         tools=[],
-        system_prompt=DECOMPOSER_SYSTEM_PROMPT,
+        system_prompt=system_prompt,
         middleware=agent_middleware,
         checkpointer=checkpointer,
+        context_schema=context_schema,
     )

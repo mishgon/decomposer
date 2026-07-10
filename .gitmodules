@@ -6,7 +6,7 @@
 	url = https://github.com/microsoft/OdysseyBench
 [submodule "external/Gym"]
 	path = external/Gym
-	url = https://github.com/NVIDIA-NeMo/Gym
+	url = git@github.com:niksukhorukov/Gym.git
 [submodule "external/verifiers"]
 	path = external/verifiers
 	url = https://github.com/PrimeIntellect-ai/verifiers
