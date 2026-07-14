@@ -15,7 +15,7 @@ The current plan is:
 - [ ] Run Decomposer agent based on Qwen3.6-35B-A3B-FP8 or Gemma-4-26B-A4B-IT-QAT with subagents based on Qwen3.5-2B (thinking / non-thinking), Gemma-4-E2B (thinking / non-thinking), LFM2.5-1.2B-Instruct and LFM2.5-1.2B-Thinking (6 subagent types in total) on Reasoning Gym, and Calendar envs. Set thinking budget for subagents, but do not set it for the Decomposer.
 - [ ] Work on the Decomposer's system prompt and few-shot examples in order to achieve reasonable traces on the *train* splits.
 - [ ] Evaluate on the *train* splits in comparison to baselines based on individual subagents' models. 
-- Collect traces and run SFT of Qwen3.5-0.8B / 2B / 4B on them. Evaluate resulting Decomposer-0.8B / 2B / 4B on *test* splits.
+- [ ] Collect traces and run SFT of Qwen3.5-0.8B / 2B / 4B on them. Evaluate resulting Decomposer-0.8B / 2B / 4B on *test* splits.
 - [ ] Further train Decomposer-0.8B / 2B / 4B with RL and compare with SFT checkpoints.
 - [ ] At some moment, start scaling to larger models and harder benchmarks. Run Decomposer agent based on Qwen3.6-35B-A3B-FP8 or Gemma-4-26B-A4B-IT-QAT with subagents based on Qwen3.6-35B-A3B-FP8 (thinking / non-thinking), Gemma-4-26B-A4B-IT-QAT (thinking / non-thinking) (4 subagent types in total) on GPQA-Diamond, BrowseComp and Finance Sec Search envs.
 
