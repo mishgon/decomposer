@@ -52,7 +52,7 @@ SPAWN_SUBAGENT_TOOL_DESCRIPTION = """Spawns a fresh subagent of a certain type a
 
 Use this tool when you want to delegate a subtask to a fresh subagent of a certain type.
 
-Depending on the subtask, select the subagent type best suited to handle it. First optimize quality, then cost. If you are uncertain about the optimal type, pick one at random. Specify the type using the `subagent_type_id` argument. Available subagent types are listed in the table below:
+Depending on the subtask, select the subagent type best suited to handle it in terms of quality, cost and speed. If you are uncertain about the optimal type, pick one at random. Specify the type using the `subagent_type_id` argument. Available subagent types are listed in the table below:
 
 | Agent type ID | Description |
 | --- | --- |

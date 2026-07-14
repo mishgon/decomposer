@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-uv run vllm serve Qwen/Qwen3.6-27B \
+CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}" \
+uv run --group serve \
+  vllm serve Qwen/Qwen3.6-27B \
   --host 0.0.0.0 \
-  --port 8011 \
+  --port "${PORT:-8011}" \
   --max-model-len 65536 \
-  --gpu-memory-utilization 0.9 \
+  --gpu-memory-utilization "${GPU_MEMORY_UTILIZATION:-0.9}" \
+  --language-model-only \
   --trust-remote-code \
   --gdn-prefill-backend triton \
   --enable-auto-tool-choice \
