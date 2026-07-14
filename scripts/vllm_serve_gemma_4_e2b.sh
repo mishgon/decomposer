@@ -8,7 +8,7 @@ uv run --group serve \
   --port "${PORT:-8016}" \
   --max-model-len 65536 \
   --gpu-memory-utilization "${GPU_MEMORY_UTILIZATION:-0.9}" \
-  --limit-mm-per-prompt '{"image":0,"audio":0}' \
+  --language-model-only \
   --enable-auto-tool-choice \
   --tool-call-parser gemma4 \
   --reasoning-parser gemma4 \
