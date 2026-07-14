@@ -7,6 +7,3 @@
 [submodule "external/Gym"]
 	path = external/Gym
 	url = git@github.com:niksukhorukov/Gym.git
-[submodule "external/verifiers"]
-	path = external/verifiers
-	url = https://github.com/PrimeIntellect-ai/verifiers
