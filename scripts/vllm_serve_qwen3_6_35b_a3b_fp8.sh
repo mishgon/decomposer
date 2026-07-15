@@ -2,14 +2,15 @@
 set -euo pipefail
 
 CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}" \
+VLLM_USE_DEEP_GEMM="${VLLM_USE_DEEP_GEMM:-0}" \
 uv run --group models \
-  vllm serve google/gemma-4-E2B-it \
+  vllm serve Qwen/Qwen3.6-35B-A3B-FP8 \
   --host 0.0.0.0 \
-  --port "${PORT:-8016}" \
-  --max-model-len 32768 \
+  --port "${PORT:-8019}" \
+  --max-model-len 65536 \
   --gpu-memory-utilization "${GPU_MEMORY_UTILIZATION:-0.9}" \
   --language-model-only \
+  --gdn-prefill-backend triton \
   --enable-auto-tool-choice \
-  --tool-call-parser gemma4 \
-  --reasoning-parser gemma4 \
-  --default-chat-template-kwargs '{"enable_thinking":true}'
+  --tool-call-parser qwen3_coder \
+  --reasoning-parser qwen3
