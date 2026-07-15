@@ -2,7 +2,7 @@
 set -euo pipefail
 
 CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}" \
-uv run --group serve \
+uv run --group models \
   vllm serve LiquidAI/LFM2.5-1.2B-Instruct \
   --host 0.0.0.0 \
   --port "${PORT:-8017}" \

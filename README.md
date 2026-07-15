@@ -32,11 +32,16 @@ The current plan is:
 
 ## Development setup
 
-Use Python 3.12 and [uv](https://docs.astral.sh/uv/). The root project and Gym intentionally use separate environments and locks; do not combine them into a uv workspace.
+Clone `decomposer` repo with `Gym` as submodule and switch to the required branches in both `decomposer` and `Gym`:
+```
+git clone --recurse-submodules git@github.com:mishgon/decomposer.git
 
+git switch <decomposer-branch-name>
+git -C external/Gym switch <Gym-branch-name>
+```
+
+The root project and Gym intentionally use separate environments and locks; do not combine them into a uv workspace:
 ```bash
-git submodule update --init --recursive
-
 # Decomposer package: root .venv and uv.lock
 uv sync
 uv run pytest tests

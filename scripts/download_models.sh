@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
-
 models=(
   Qwen/Qwen3.5-0.8B
   Qwen/Qwen3.5-2B
@@ -15,5 +13,9 @@ models=(
 
 for model in "${models[@]}"; do
   printf '\nDownloading %s\n' "$model"
-  uv run --project "$repo_root" --group serve hf download "$model"
+  if [[ "$model" == LiquidAI/* ]]; then
+    HF_HUB_DISABLE_XET=1 uv tool run --from huggingface-hub hf download "$model"
+  else
+    uv tool run --from huggingface-hub hf download "$model"
+  fi
 done
