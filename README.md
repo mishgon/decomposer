@@ -8,6 +8,33 @@ The goal of this project is to build an agent, called Decomposer, that solves ta
 
 At a high level, idea is similar to [Sakana Fugu](https://arxiv.org/abs/2606.21228), however, there are substantial differences. Sakana's Conductor model does not work in a ReAct loop. It produces a static decomposition once, subagents complete the subtasks and the last subagent response is returned as the output. On the contrary, our Decomposer agent works in a standard tool-calling loop with two tools: `spawn_subagent` (spawns a new subagent and delegates a subtask to it) and `wait` (waits for subagents' reports). This enables a dynamic, adaptive decomposition. You could check out our design choices and implementation details in `src/decomposer/core.py` and `src/decomposer/core.py`.
 
+## Get started
+
+The minimal example runs Decomposer with GLM-5.2 through OpenRouter and one
+Qwen3.6-35B-A3B-FP8 subagent through a local vLLM and LangGraph server. From
+the repository root, install the development environment and start vLLM:
+
+```bash
+uv sync
+scripts/vllm_serve_qwen3_6_35b_a3b_fp8.sh
+```
+
+With `OPENROUTER_API_KEY` set, start the subagent server in another terminal:
+
+```bash
+cd examples/minimal
+uv run langgraph dev --no-browser
+```
+
+Then run Decomposer from the repository root:
+
+```bash
+uv run python examples/minimal/run.py
+```
+
+The final answer is printed and the complete message history is saved to
+`examples/minimal/messages.md`. See `examples/minimal/README.md` for details.
+
 ## Plan
 
 The current plan is:
@@ -22,6 +49,7 @@ The current plan is:
 ## Repo structure
 
 - `src/decomposer/`: core Decomposer package. This should stay benchmark- and training-agnostic.
+- `examples/`: runnable examples of configuring and using Decomposer.
 - `evals/`: evaluation runners and benchmark-specific adapters.
 - `training/`: training and finetuning workflows.
 - `data/`: source code for preparing datasets used by training or evals.
