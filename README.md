@@ -8,20 +8,48 @@ The goal of this project is to build an agent, called Decomposer, that solves ta
 
 At a high level, idea is similar to [Sakana Fugu](https://arxiv.org/abs/2606.21228), however, there are substantial differences. Sakana's Conductor model does not work in a ReAct loop. It produces a static decomposition once, subagents complete the subtasks and the last subagent's response is returned as the output. On the contrary, our Decomposer agent works in a standard tool-calling loop with two tools: `spawn_subagent` (spawns a new subagent and delegates a subtask to it) and `wait` (waits for subagents' reports). This enables a dynamic, adaptive decomposition. You could check out our design choices and implementation details in `src/decomposer/core.py` and `src/decomposer/core.py`.
 
+## Get started
+
+The minimal example runs Decomposer with GLM-5.2 through OpenRouter and one
+Qwen3.6-35B-A3B-FP8 subagent through a local vLLM and LangGraph server. From
+the repository root, install the development environment and start vLLM:
+
+```bash
+uv sync
+scripts/vllm_serve_qwen3_6_35b_a3b_fp8.sh
+```
+
+With `OPENROUTER_API_KEY` set, start the subagent server in another terminal:
+
+```bash
+cd examples/minimal
+uv run langgraph dev --no-browser
+```
+
+Then run Decomposer from the repository root:
+
+```bash
+uv run python examples/minimal/run.py
+```
+
+The final answer is printed and the complete message history is saved to
+`examples/minimal/messages.md`. See `examples/minimal/README.md` for details.
+
 ## Plan
 
 The current plan is:
 - [x] Use NeMo-Gym (installed as a git submodule under `external/Gym`) as a framework for Decomposer's evaluation and traces collection on different environments. See our integration of the Decomposer agent into NeMo-Gym framework in `external/Gym/responses_api_agents/decomposer_agent`.
-- [ ] Run Decomposer agent based on Qwen3.6-35B-A3B-FP8 or Gemma-4-26B-A4B-IT-QAT with subagents based on Qwen3.5-2B (thinking / non-thinking), Gemma-4-E2B (thinking / non-thinking), LFM2.5-1.2B-Instruct and LFM2.5-1.2B-Thinking (6 subagent types in total) on Reasoning Gym, and Calendar envs. Set thinking budget for subagents, but do not set it for the Decomposer.
+- [ ] Run Decomposer agent based on Qwen3.6-35B-A3B-FP8 or Gemma-4-26B-A4B-IT with subagents based on Gemma-4-E2B (thinking / non-thinking), LFM2.5-1.2B-Instruct and LFM2.5-1.2B-Thinking (4 subagent types in total) on Reasoning Gym, and Calendar envs. Set thinking subagents’ thinking budget to 8192 tokens; do not set one for Decomposer. Do not employ Qwen3.5-2B-based subagent because it overthinks heavily.
 - [ ] Work on the Decomposer's system prompt and few-shot examples in order to achieve reasonable traces on the *train* splits.
-- [ ] Evaluate on the *train* splits in comparison to baselines based on individual subagents' models. 
+- [ ] Evaluate on the *train* splits in comparison to baselines based on individual subagents' models.
 - [ ] Collect traces and run SFT of Qwen3.5-0.8B / 2B / 4B on them. Evaluate resulting Decomposer-0.8B / 2B / 4B on *test* splits.
 - [ ] Further train Decomposer-0.8B / 2B / 4B with RL and compare with SFT checkpoints.
-- [ ] At some moment, start scaling to larger models and harder benchmarks. Run Decomposer agent based on Qwen3.6-35B-A3B-FP8 or Gemma-4-26B-A4B-IT-QAT with subagents based on Qwen3.6-35B-A3B-FP8 (thinking / non-thinking), Gemma-4-26B-A4B-IT-QAT (thinking / non-thinking) (4 subagent types in total) on GPQA-Diamond, BrowseComp and Finance Sec Search envs.
+- [ ] At some moment, start scaling to larger models and harder benchmarks. Run Decomposer agent based on Qwen3.6-35B-A3B-FP8 or Gemma-4-26B-A4B-IT with subagents based on Qwen3.6-35B-A3B-FP8 (thinking / non-thinking), Gemma-4-26B-A4B-IT (thinking / non-thinking) (4 subagent types in total) on GPQA-Diamond, BrowseComp and Finance Sec Search envs.
 
 ## Repo structure
 
 - `src/decomposer/`: core Decomposer package. This should stay benchmark- and training-agnostic.
+- `examples/`: runnable examples of configuring and using Decomposer.
 - `evals/`: evaluation runners and benchmark-specific adapters.
 - `training/`: training and finetuning workflows.
 - `data/`: source code for preparing datasets used by training or evals.
