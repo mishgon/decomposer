@@ -1,0 +1,10 @@
+{
+  "dependencies": [
+    "../..",
+    "langchain-openai>=1.3.3"
+  ],
+  "graphs": {
+    "qwen3_6_35b_a3b_fp8_thinking": "./subagents.py:qwen3_6_35b_a3b_fp8_thinking"
+  },
+  "python_version": "3.12"
+}
