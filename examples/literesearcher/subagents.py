@@ -1,12 +1,18 @@
+import os
 from langchain.agents import create_agent
 from langchain_openai import ChatOpenAI
 
+from tools import search, fetch
+
 
 def literesearcher_4b():
+    with open("prompt.txt", "r") as f:
+        system_prompt = f.read()
+
     model = ChatOpenAI(
-        model="simplex-ai-inc/LiteResearcher-4B",
-        base_url="http://127.0.0.1:8019/v1",
-        api_key="EMPTY",
+        model="Qwen/Qwen3.6-35B-A3B-FP8",
+        base_url=os.environ["LLM_PROXY_URL"],
+        api_key=os.environ["LLM_PROXY_MASTER_KEY"],
         temperature=1.0,
         top_p=0.95,
         presence_penalty=1.5,
@@ -19,4 +25,4 @@ def literesearcher_4b():
             "chat_template_kwargs": {"enable_thinking": True},
         },
     )
-    return create_agent(model=model, tools=[], system_prompt="You are helpful assistant")
+    return create_agent(model=model, tools=[search, fetch], system_prompt=system_prompt).with_config({"recursion_limit": 10})
