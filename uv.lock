@@ -605,9 +605,6 @@ dev = [
     { name = "torchvision" },
     { name = "vllm" },
 ]
-models = [
-    { name = "vllm" },
-]
 
 [package.metadata]
 requires-dist = [
@@ -630,7 +627,7 @@ dev = [
     { name = "torchvision", specifier = "==0.26.0", index = "https://download.pytorch.org/whl/cu129" },
     { name = "vllm", url = "https://github.com/vllm-project/vllm/releases/download/v0.24.0/vllm-0.24.0%2Bcu129-cp38-abi3-manylinux_2_28_x86_64.whl" },
 ]
-models = [{ name = "vllm", url = "https://github.com/vllm-project/vllm/releases/download/v0.24.0/vllm-0.24.0%2Bcu129-cp38-abi3-manylinux_2_28_x86_64.whl" }]
+models = []
 
 [[package]]
 name = "depyf"

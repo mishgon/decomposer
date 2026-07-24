@@ -5,7 +5,7 @@ VLLM_USE_FLASHINFER_SAMPLER=0 \
 VLLM_ATTENTION_BACKEND=FLASH_ATTN \
 CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-7}" \
 VLLM_USE_DEEP_GEMM="${VLLM_USE_DEEP_GEMM:-0}" \
-uv run --group models \
+uv run --group dev \
   vllm serve simplex-ai-inc/LiteResearcher-4B \
   --host 0.0.0.0 \
   --port "${PORT:-8019}" \

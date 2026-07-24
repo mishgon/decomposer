@@ -2,7 +2,7 @@
 set -euo pipefail
 
 CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}" \
-uv run --group models \
+uv run --group dev \
   vllm serve google/gemma-4-26B-A4B-it \
   --host 0.0.0.0 \
   --port "${PORT:-8020}" \
