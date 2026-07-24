@@ -45,4 +45,3 @@ dev = [
     "torchvision==0.26.0",
     "vllm==0.24.0",
 ]
-models = []
