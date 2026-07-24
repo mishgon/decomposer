@@ -3,7 +3,7 @@ set -euo pipefail
 
 CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}" \
 VLLM_USE_DEEP_GEMM="${VLLM_USE_DEEP_GEMM:-0}" \
-uv run --group models \
+uv run --group dev \
   vllm serve Qwen/Qwen3.6-35B-A3B-FP8 \
   --host 0.0.0.0 \
   --port "${PORT:-8019}" \
