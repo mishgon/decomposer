@@ -2,7 +2,7 @@
 set -euo pipefail
 
 CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}" \
-uv run --group models \
+uv run --group dev \
   vllm serve Qwen/Qwen3.5-2B \
   --host 0.0.0.0 \
   --port "${PORT:-8015}" \
