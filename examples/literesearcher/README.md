@@ -43,3 +43,15 @@ and per-query verdicts to
 `artifacts/literesearcher/browsecomp_plus_eval.json`. An interrupted run resumes
 from that artifact. Use `--concurrency N` to change parallelism or `--no-resume`
 to start over.
+
+For the direct LiteResearcher baseline, which sends each complete question
+straight to the subagent without Decomposer, run:
+
+```bash
+uv run python examples/literesearcher/eval-direct.py
+```
+
+It uses the identical dataset, concurrency, matching, GLM-5.2 judge, error
+handling, and checkpointing pipeline. Its separate artifact is
+`artifacts/literesearcher/browsecomp_plus_eval_direct.json`, so its final
+accuracy can be compared directly with the Decomposer evaluation.
