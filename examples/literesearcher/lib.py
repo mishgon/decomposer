@@ -181,7 +181,7 @@ def build_score(
 ) -> dict[str, Any]:
     completed = len(results)
     correct = sum(result["correct"] for result in results)
-    errors = sum("error" in result for result in results)
+    errors = sum(result["match_method"] == "error" for result in results)
     return {
         **{key: value for key, value in evaluation_metadata(method).items() if key != "type"},
         "total": total,
@@ -233,20 +233,46 @@ def write_jsonl_checkpoint(
     results: list[dict[str, Any]],
 ) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    with output_path.open("w", encoding="utf-8") as output:
+    temporary_path = output_path.with_suffix(f"{output_path.suffix}.tmp")
+    with temporary_path.open("w", encoding="utf-8") as output:
         output.write(json.dumps(evaluation_metadata(method), ensure_ascii=False) + "\n")
         for result in results:
             output.write(
-                json.dumps({"type": "result", **result}, ensure_ascii=False) + "\n"
+                json.dumps(
+                    {"type": "result", **sanitize_checkpoint_result(result)},
+                    ensure_ascii=False,
+                )
+                + "\n"
             )
+    temporary_path.replace(output_path)
 
 
 def append_jsonl_result(output_path: Path, result: dict[str, Any]) -> None:
-    record = json.dumps({"type": "result", **result}, ensure_ascii=False) + "\n"
+    record = (
+        json.dumps(
+            {"type": "result", **sanitize_checkpoint_result(result)},
+            ensure_ascii=False,
+        )
+        + "\n"
+    )
     with output_path.open("a", encoding="utf-8") as output:
         output.write(record)
         output.flush()
         os.fsync(output.fileno())
+
+
+def sanitize_checkpoint_result(result: dict[str, Any]) -> dict[str, Any]:
+    sanitized = {
+        "query_id": str(result["query_id"]),
+        "correct": bool(result["correct"]),
+        "match_method": str(result["match_method"]),
+    }
+    if sanitized["match_method"] == "error":
+        error_type = result.get("error_type")
+        if error_type is None and result.get("error"):
+            error_type = str(result["error"]).split(":", 1)[0]
+        sanitized["error_type"] = str(error_type or "UnknownError")
+    return sanitized
 
 
 def load_jsonl_checkpoint(
@@ -255,7 +281,6 @@ def load_jsonl_checkpoint(
 ) -> dict[str, dict[str, Any]]:
     raw_lines = output_path.read_text(encoding="utf-8").splitlines()
     records: list[dict[str, Any]] = []
-    valid_lines: list[str] = []
     nonempty_lines = [line for line in raw_lines if line.strip()]
     for index, line in enumerate(nonempty_lines):
         try:
@@ -266,14 +291,10 @@ def load_jsonl_checkpoint(
             print(f"Ignoring incomplete final JSONL record in {output_path}")
             break
         records.append(record)
-        valid_lines.append(line)
 
     if not records or records[0].get("type") != "metadata":
         raise ValueError(f"Cannot resume {output_path}: missing metadata record")
     validate_metadata(records[0], output_path, method)
-
-    if len(valid_lines) != len(nonempty_lines):
-        output_path.write_text("\n".join(valid_lines) + "\n", encoding="utf-8")
 
     results_by_id: dict[str, dict[str, Any]] = {}
     for record in records[1:]:
@@ -282,8 +303,9 @@ def load_jsonl_checkpoint(
                 f"Cannot resume {output_path}: unknown record type "
                 f"{record.get('type')!r}"
             )
-        result = {key: value for key, value in record.items() if key != "type"}
+        result = sanitize_checkpoint_result(record)
         results_by_id[result["query_id"]] = result
+    write_jsonl_checkpoint(output_path, method, list(results_by_id.values()))
     return results_by_id
 
 
@@ -308,7 +330,7 @@ def load_legacy_json_artifact(
         "judge_model": artifact.get("judge_model"),
     }
     validate_metadata(legacy_metadata, legacy_path, method)
-    return artifact["results"]
+    return [sanitize_checkpoint_result(result) for result in artifact["results"]]
 
 
 def initialize_checkpoint(
@@ -346,13 +368,11 @@ async def evaluate_example(
             if inclusion_match(example["gold_answer"], generated_answer):
                 correct = True
                 match_method = "inclusion"
-                judge_raw = None
             elif not generated_answer.strip():
                 correct = False
                 match_method = "empty_answer"
-                judge_raw = None
             else:
-                correct, judge_raw = await judge_answer(
+                correct, _ = await judge_answer(
                     judge,
                     example["question"],
                     example["gold_answer"],
@@ -360,22 +380,17 @@ async def evaluate_example(
                 )
                 match_method = "llm_judge"
 
-            result = {
+            return {
                 "query_id": example["query_id"],
-                "generated_answer": generated_answer,
                 "correct": correct,
                 "match_method": match_method,
             }
-            if judge_raw is not None:
-                result["judge_raw"] = judge_raw
-            return result
         except Exception as error:
             return {
                 "query_id": example["query_id"],
-                "generated_answer": generated_answer,
                 "correct": False,
                 "match_method": "error",
-                "error": f"{type(error).__name__}: {error}",
+                "error_type": type(error).__name__,
             }
 
 
@@ -396,7 +411,7 @@ async def run_evaluation(
     completed_ids = {
         query_id
         for query_id, result in results_by_id.items()
-        if "error" not in result
+        if result["match_method"] != "error"
     }
     remaining_examples = [
         example for example in examples if example["query_id"] not in completed_ids

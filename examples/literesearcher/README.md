@@ -43,6 +43,9 @@ Decomposer and answer-equivalence judging. Each completed query is appended to
 resumes without repeating completed work. Aggregate accuracy is written
 separately to `artifacts/literesearcher/browsecomp_plus_eval_score.json`. Use
 `--concurrency N` to change parallelism or `--no-resume` to start over.
+Checkpoint rows contain only the query ID, correctness, match method, and
+sanitized exception type when a query fails; prompts, gold answers, generated
+answers, judge output, URLs, and exception messages are never persisted.
 
 For the direct LiteResearcher baseline, which sends each complete question
 straight to the subagent without Decomposer, run:
