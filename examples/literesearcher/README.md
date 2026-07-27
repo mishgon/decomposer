@@ -25,5 +25,6 @@ Then run Decomposer from the repository root:
 uv run python examples/literesearcher/run.py
 ```
 
-The run prints the final answer and saves the Decomposer message history as
-human-readable Markdown at `examples/literesearcher/messages.md`.
+The run loads the first three BrowseComp-Plus prompts, runs them concurrently,
+prints their final answers, and saves each Decomposer message history as
+human-readable Markdown under `examples/literesearcher/messages/`.
