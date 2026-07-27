@@ -36,7 +36,8 @@ async def main() -> None:
     final_states = await asyncio.gather(
         *(
             decomposer_agent.ainvoke(
-                {"messages": [{"role": "user", "content": example["question"]}]}
+                {"messages": [{"role": "user", "content": example["question"]}]},
+		config={"recursion_limit": 50},
             )
             for example in examples
         )

@@ -46,7 +46,8 @@ async def main() -> None:
 
     async def answer_question(question: str) -> str:
         final_state = await decomposer_agent.ainvoke(
-            {"messages": [{"role": "user", "content": question}]}
+            {"messages": [{"role": "user", "content": question}]},
+	    config={"recursion_limit": 45},
         )
         return message_text(final_state["messages"][-1])
 
