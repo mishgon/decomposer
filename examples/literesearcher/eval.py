@@ -14,7 +14,7 @@ from lib import (
 
 DECOMPOSER_MODEL_NAME = "z-ai/glm-5.2"
 METHOD = "decomposer"
-DEFAULT_OUTPUT_PATH = ARTIFACTS_DIR / "browsecomp_plus_eval.json"
+DEFAULT_OUTPUT_PATH = ARTIFACTS_DIR / "browsecomp_plus_eval.jsonl"
 
 
 def build_decomposer_agent():

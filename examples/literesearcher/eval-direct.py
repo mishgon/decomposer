@@ -12,7 +12,7 @@ from lib import (
 )
 
 METHOD = "direct"
-DEFAULT_OUTPUT_PATH = ARTIFACTS_DIR / "browsecomp_plus_eval_direct.json"
+DEFAULT_OUTPUT_PATH = ARTIFACTS_DIR / "browsecomp_plus_eval_direct.jsonl"
 HISTORY_LIMIT = 1000
 RECURSION_LIMIT = 200
 TERMINAL_STATUSES = frozenset({"success", "error", "timeout", "interrupted"})

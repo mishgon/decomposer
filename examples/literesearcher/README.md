@@ -37,12 +37,12 @@ Run the complete 830-query test split with:
 uv run python examples/literesearcher/eval.py
 ```
 
-The evaluator runs up to 10 samples concurrently, uses GLM-5.2 for both
-Decomposer and answer-equivalence judging, and incrementally writes accuracy
-and per-query verdicts to
-`artifacts/literesearcher/browsecomp_plus_eval.json`. An interrupted run resumes
-from that artifact. Use `--concurrency N` to change parallelism or `--no-resume`
-to start over.
+The evaluator runs up to 10 samples concurrently and uses GLM-5.2 for both
+Decomposer and answer-equivalence judging. Each completed query is appended to
+`artifacts/literesearcher/browsecomp_plus_eval.jsonl`, so an interrupted run
+resumes without repeating completed work. Aggregate accuracy is written
+separately to `artifacts/literesearcher/browsecomp_plus_eval_score.json`. Use
+`--concurrency N` to change parallelism or `--no-resume` to start over.
 
 For the direct LiteResearcher baseline, which sends each complete question
 straight to the subagent without Decomposer, run:
@@ -52,6 +52,8 @@ uv run python examples/literesearcher/eval-direct.py
 ```
 
 It uses the identical dataset, concurrency, matching, GLM-5.2 judge, error
-handling, and checkpointing pipeline. Its separate artifact is
-`artifacts/literesearcher/browsecomp_plus_eval_direct.json`, so its final
-accuracy can be compared directly with the Decomposer evaluation.
+handling, and checkpointing pipeline. Its result checkpoint is
+`artifacts/literesearcher/browsecomp_plus_eval_direct.jsonl`, with aggregate
+accuracy in `artifacts/literesearcher/browsecomp_plus_eval_direct_score.json`.
+Existing partial `.json` artifacts from the previous format are imported
+automatically when the corresponding evaluation is resumed.
