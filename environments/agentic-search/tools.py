@@ -17,8 +17,8 @@ _NOT_IN_SESSION_MSG = (
 
 _http_client = httpx.AsyncClient(
     limits=httpx.Limits(
-        max_connections=256,
-        max_keepalive_connections=128,
+        max_connections=1024,
+        max_keepalive_connections=1024,
     ),
 )
 
