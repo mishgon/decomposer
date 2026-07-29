@@ -1,4 +1,4 @@
-from decomposer.core import create_decomposer_agent
+from decomposer import create_decomposer_agent
 
 
 def test_package_imports() -> None:

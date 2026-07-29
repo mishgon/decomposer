@@ -40,7 +40,9 @@ def render_decomposer_messages(messages: Sequence[BaseMessage]) -> str:
 
         if message.content:
             if message.type == "tool":
-                lines.extend(["```json", _json(_tool_output(message.content)), "```", ""])
+                lines.extend(
+                    ["```json", _json(_tool_output(message.content)), "```", ""]
+                )
             else:
                 lines.extend([str(message.content), ""])
 

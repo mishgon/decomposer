@@ -5,6 +5,7 @@ Search and fetch make HTTP calls to the stateless retrieval server.
 The per-fetch character cap is enforced server-side from
 ``serve.yaml`` (``fetch_max_chars``).
 """
+
 import httpx
 
 _NOT_IN_SESSION_MSG = (
@@ -15,6 +16,7 @@ _NOT_IN_SESSION_MSG = (
 )
 
 page_ids = {}
+
 
 def search(query: str, limit: int = 10, source: str | None = None) -> dict:
     """Hybrid search over Wikipedia. Returns {results: [{url, title, snippet}]}."""
@@ -32,15 +34,18 @@ def search(query: str, limit: int = 10, source: str | None = None) -> dict:
     hits = r.json()["results"]
 
     pages = [
-        {"url": h["url"], "page_id": h["page_id"],
-         "title": h["title"], "snippet": h["snippet"]}
+        {
+            "url": h["url"],
+            "page_id": h["page_id"],
+            "title": h["title"],
+            "snippet": h["snippet"],
+        }
         for h in hits
     ]
     for page in pages:
         page_ids[page["url"]] = page["page_id"]
     public = [
-        {"url": h["url"], "title": h["title"], "snippet": h["snippet"]}
-        for h in hits
+        {"url": h["url"], "title": h["title"], "snippet": h["snippet"]} for h in hits
     ]
     return {"results": public}
 
@@ -53,7 +58,10 @@ def fetch(url: str, query: str, source: str | None = None) -> dict:
     base_url = "http://localhost:8000"
     source = "browsecomp_plus"
     if not (url in page_ids):
-        result = {"error": "url_not_in_session", "message": _NOT_IN_SESSION_MSG.format(url=url)}
+        result = {
+            "error": "url_not_in_session",
+            "message": _NOT_IN_SESSION_MSG.format(url=url),
+        }
         return result
     payload = {"page_id": page_ids[url]}
     if source:
