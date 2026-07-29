@@ -1,11 +1,16 @@
-import asyncio
 import json
-import logging
 import time
+import asyncio
+import logging
 from typing import Annotated, Any, NotRequired, Sequence
 
 from langchain.agents import create_agent
-from langchain.agents.middleware.types import AgentMiddleware, AgentState, ContextT, ResponseT
+from langchain.agents.middleware.types import (
+    AgentMiddleware,
+    AgentState,
+    ContextT,
+    ResponseT,
+)
 from langchain.tools import ToolRuntime
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import ToolMessage
@@ -19,9 +24,11 @@ from pydantic import BaseModel, Field
 from typing_extensions import TypedDict
 
 from .prompts import (
-    DECOMPOSER_SYSTEM_PROMPT, SPAWN_SUBAGENT_TOOL_DESCRIPTION,
-    PROMPT_PARAMETER_DESCRIPTION, SUBAGENT_TYPE_ID_PARAMETER_DESCRIPTION,
-    WAIT_TOOL_DESCRIPTION
+    DECOMPOSER_SYSTEM_PROMPT,
+    SPAWN_SUBAGENT_TOOL_DESCRIPTION,
+    PROMPT_PARAMETER_DESCRIPTION,
+    SUBAGENT_TYPE_ID_PARAMETER_DESCRIPTION,
+    WAIT_TOOL_DESCRIPTION,
 )
 
 logger = logging.getLogger(__name__)
@@ -32,7 +39,6 @@ SUBAGENT_REPORT_MAX_TOKENS = 1024
 WAIT_TIMEOUT_SECONDS = 60.0
 SYNC_WAIT_POLL_SECONDS = 5.0
 TERMINAL_STATUSES = frozenset({"success", "error", "timeout", "interrupted"})
-SUBAGENT_RECURSION_LIMIT = 200  # ~100 tool calls
 HISTORY_LIMIT = 1000
 
 
@@ -99,22 +105,30 @@ def _get_current_subagent_runs(
     }
 
 
-def _build_spawn_subagent_schema(subagent_types: dict[str, SubagentType]) -> type[BaseModel]:
+def _build_spawn_subagent_schema(
+    subagent_types: dict[str, SubagentType],
+) -> type[BaseModel]:
     available_subagent_type_ids = ", ".join(f"`{k}`" for k in subagent_types)
 
     class SpawnSubagentSchema(BaseModel):
         subagent_type_id: str = Field(
-            description=SUBAGENT_TYPE_ID_PARAMETER_DESCRIPTION.format(available_subagent_type_ids=available_subagent_type_ids)
+            description=SUBAGENT_TYPE_ID_PARAMETER_DESCRIPTION.format(
+                available_subagent_type_ids=available_subagent_type_ids
+            )
         )
         prompt: str = Field(
-            description=PROMPT_PARAMETER_DESCRIPTION.format(subagent_prompt_max_tokens=SUBAGENT_PROMPT_MAX_TOKENS)
+            description=PROMPT_PARAMETER_DESCRIPTION.format(
+                subagent_prompt_max_tokens=SUBAGENT_PROMPT_MAX_TOKENS
+            )
         )
 
     return SpawnSubagentSchema
 
 
 class DecomposerAgentState(AgentState[ResponseT]):
-    subagent_runs: Annotated[NotRequired[dict[str, SubagentRun]], _subagent_runs_reducer]
+    subagent_runs: Annotated[
+        NotRequired[dict[str, SubagentRun]], _subagent_runs_reducer
+    ]
 
 
 def _count_text_tokens(text: str) -> int:
@@ -149,11 +163,20 @@ class _ClientCache:
 
     def __init__(self, subagent_types: dict[str, SubagentType]) -> None:
         self._subagent_types = subagent_types
-        self._sync: dict[tuple[str | None, frozenset[tuple[str, str]]], SyncLangGraphClient] = {}
-        self._async: dict[tuple[str | None, frozenset[tuple[str, str]]], LangGraphClient] = {}
+        self._sync: dict[
+            tuple[str | None, frozenset[tuple[str, str]]], SyncLangGraphClient
+        ] = {}
+        self._async: dict[
+            tuple[str | None, frozenset[tuple[str, str]]], LangGraphClient
+        ] = {}
 
-    def _cache_key(self, subagent_type: SubagentType) -> tuple[str | None, frozenset[tuple[str, str]]]:
-        return (subagent_type.get("url"), frozenset(_resolve_headers(subagent_type).items()))
+    def _cache_key(
+        self, subagent_type: SubagentType
+    ) -> tuple[str | None, frozenset[tuple[str, str]]]:
+        return (
+            subagent_type.get("url"),
+            frozenset(_resolve_headers(subagent_type).items()),
+        )
 
     def get_sync(self, subagent_type_id: str) -> SyncLangGraphClient:
         subagent_type = self._subagent_types[subagent_type_id]
@@ -186,12 +209,15 @@ def _build_spawn_subagent_tool_description(
         f"| `{subagent_type_id}` | {subagent_type['description']} |"
         for subagent_type_id, subagent_type in subagent_types.items()
     )
-    return SPAWN_SUBAGENT_TOOL_DESCRIPTION.format(available_subagent_types=subagent_types_desc)
+    return SPAWN_SUBAGENT_TOOL_DESCRIPTION.format(
+        available_subagent_types=subagent_types_desc
+    )
 
 
 def _build_spawn_subagent_tool(
     subagent_types: dict[str, SubagentType],
     clients: _ClientCache,
+    recursion_limit: int,
 ) -> StructuredTool:
 
     def spawn_subagent(
@@ -214,11 +240,13 @@ def _build_spawn_subagent_tool(
             thread_id=thread["thread_id"],
             assistant_id=subagent_type["assistant_id"],
             input={"messages": [{"role": "user", "content": prompt}]},
-            config={"recursion_limit": SUBAGENT_RECURSION_LIMIT},
+            config={"recursion_limit": recursion_limit},
         )
         subagent_run_id = run["run_id"]
         if run["status"] in TERMINAL_STATUSES:
-            raise ValueError(f"`client.runs.create` returned a run `{subagent_run_id}` with terminal status `{run['status']}`.")
+            raise ValueError(
+                f"`client.runs.create` returned a run `{subagent_run_id}` with terminal status `{run['status']}`."
+            )
         subagent_run: SubagentRun = {
             "subagent_run_id": subagent_run_id,
             "subagent_type_id": subagent_type_id,
@@ -263,11 +291,13 @@ def _build_spawn_subagent_tool(
             thread_id=thread["thread_id"],
             assistant_id=subagent_type["assistant_id"],
             input={"messages": [{"role": "user", "content": prompt}]},
-            config={"recursion_limit": SUBAGENT_RECURSION_LIMIT},
+            config={"recursion_limit": recursion_limit},
         )
         subagent_run_id = run["run_id"]
         if run["status"] in TERMINAL_STATUSES:
-            raise ValueError(f"`client.runs.create` returned a run `{subagent_run_id}` with terminal status `{run['status']}`.")
+            raise ValueError(
+                f"`client.runs.create` returned a run `{subagent_run_id}` with terminal status `{run['status']}`."
+            )
         subagent_run: SubagentRun = {
             "subagent_run_id": subagent_run_id,
             "subagent_type_id": subagent_type_id,
@@ -319,7 +349,9 @@ def _build_wait_tool(
 
             for subagent_run_id, subagent_run in current_runs.items():
                 client = clients.get_sync(subagent_run["subagent_type_id"])
-                run = client.runs.get(thread_id=subagent_run["thread_id"], run_id=subagent_run["run_id"])
+                run = client.runs.get(
+                    thread_id=subagent_run["thread_id"], run_id=subagent_run["run_id"]
+                )
 
                 if run["status"] not in TERMINAL_STATUSES:
                     if run["status"] != subagent_run["status"]:
@@ -341,13 +373,17 @@ def _build_wait_tool(
                     if not history:
                         raise ValueError(f"No history found for run `{run['run_id']}`.")
                     if history[-1]["metadata"]["source"] != "input":
-                        raise ValueError("History is truncated; increase `HISTORY_LIMIT`.")
+                        raise ValueError(
+                            "History is truncated; increase `HISTORY_LIMIT`."
+                        )
 
                     before_messages = history[-1]["values"]["messages"]
                     after_messages = history[0]["values"]["messages"]
-                    run_messages = after_messages[len(before_messages):]
+                    run_messages = after_messages[len(before_messages) :]
                     if not run_messages:
-                        raise ValueError(f"No messages found for run `{run['run_id']}`.")
+                        raise ValueError(
+                            f"No messages found for run `{run['run_id']}`."
+                        )
 
                     tool_call_count = 0
                     for message in run_messages:
@@ -355,7 +391,9 @@ def _build_wait_tool(
                             tool_call_count += len(message.get("tool_calls") or [])
 
                     last_message = run_messages[-1]
-                    if last_message["type"] == "ai" and not last_message.get("tool_calls"):
+                    if last_message["type"] == "ai" and not last_message.get(
+                        "tool_calls"
+                    ):
                         content = last_message.get("content")
                         if content is not None and not isinstance(content, str):
                             content = json.dumps(content, ensure_ascii=False)
@@ -414,10 +452,14 @@ def _build_wait_tool(
 
         async def get_run_items(subagent_run_id: str, subagent_run: SubagentRun):
             client = clients.get_async(subagent_run["subagent_type_id"])
-            run = await client.runs.get(thread_id=subagent_run["thread_id"], run_id=subagent_run["run_id"])
+            run = await client.runs.get(
+                thread_id=subagent_run["thread_id"], run_id=subagent_run["run_id"]
+            )
             return subagent_run_id, subagent_run, run
 
-        run_items = await asyncio.gather(*(get_run_items(k, v) for k, v in current_runs.items()))
+        run_items = await asyncio.gather(
+            *(get_run_items(k, v) for k, v in current_runs.items())
+        )
         updated_runs: dict[str, SubagentRun] = {}
         finished_run_items = []
         for subagent_run_id, subagent_run, run in run_items:
@@ -430,13 +472,21 @@ def _build_wait_tool(
                 }
 
         if not finished_run_items:
+
             async def join_run_items(subagent_run_id: str, subagent_run: SubagentRun):
                 client = clients.get_async(subagent_run["subagent_type_id"])
-                await client.runs.join(thread_id=subagent_run["thread_id"], run_id=subagent_run["run_id"])
-                run = await client.runs.get(thread_id=subagent_run["thread_id"], run_id=subagent_run["run_id"])
+                await client.runs.join(
+                    thread_id=subagent_run["thread_id"], run_id=subagent_run["run_id"]
+                )
+                run = await client.runs.get(
+                    thread_id=subagent_run["thread_id"], run_id=subagent_run["run_id"]
+                )
                 return subagent_run_id, subagent_run, run
 
-            tasks = [asyncio.create_task(join_run_items(k, v)) for k, v in current_runs.items()]
+            tasks = [
+                asyncio.create_task(join_run_items(k, v))
+                for k, v in current_runs.items()
+            ]
             done, pending = await asyncio.wait(
                 tasks,
                 timeout=WAIT_TIMEOUT_SECONDS,
@@ -461,7 +511,9 @@ def _build_wait_tool(
                     }
                 )
 
-            run_items = await asyncio.gather(*(get_run_items(k, v) for k, v in current_runs.items()))
+            run_items = await asyncio.gather(
+                *(get_run_items(k, v) for k, v in current_runs.items())
+            )
             finished_run_items = []
             for subagent_run_id, subagent_run, run in run_items:
                 if run["status"] in TERMINAL_STATUSES:
@@ -473,8 +525,10 @@ def _build_wait_tool(
                     }
 
         if not finished_run_items:
-            raise ValueError("No subagent runs with terminal status found despite "
-                             "`client.runs.join` completing for some of them.")
+            raise ValueError(
+                "No subagent runs with terminal status found despite "
+                "`client.runs.join` completing for some of them."
+            )
 
         tool_output: list[dict[str, Any]] = []
         for subagent_run_id, subagent_run, run in finished_run_items:
@@ -495,7 +549,7 @@ def _build_wait_tool(
 
                 before_messages = history[-1]["values"]["messages"]
                 after_messages = history[0]["values"]["messages"]
-                run_messages = after_messages[len(before_messages):]
+                run_messages = after_messages[len(before_messages) :]
                 if not run_messages:
                     raise ValueError(f"No messages found for run `{run['run_id']}`.")
 
@@ -545,27 +599,33 @@ def _build_wait_tool(
         func=wait,
         coroutine=await_,
         name="wait",
-        description=WAIT_TOOL_DESCRIPTION.format(wait_timeout_seconds=WAIT_TIMEOUT_SECONDS,
-                                                 subagent_report_max_tokens=SUBAGENT_REPORT_MAX_TOKENS),
+        description=WAIT_TOOL_DESCRIPTION.format(
+            wait_timeout_seconds=WAIT_TIMEOUT_SECONDS,
+            subagent_report_max_tokens=SUBAGENT_REPORT_MAX_TOKENS,
+        ),
     )
 
 
 def _build_decomposer_agent_tools(
     subagent_types: dict[str, SubagentType],
+    subagent_recursion_limit: int,
 ) -> list[StructuredTool]:
     clients = _ClientCache(subagent_types)
     return [
-        _build_spawn_subagent_tool(subagent_types, clients),
+        _build_spawn_subagent_tool(subagent_types, clients, subagent_recursion_limit),
         _build_wait_tool(clients),
     ]
 
 
-class DecomposerAgentMiddleware(AgentMiddleware[DecomposerAgentState, ContextT, ResponseT]):
+class DecomposerAgentMiddleware(
+    AgentMiddleware[DecomposerAgentState, ContextT, ResponseT],
+):
     state_schema = DecomposerAgentState
 
     def __init__(
         self,
         subagent_types: Sequence[SubagentType],
+        subagent_recursion_limit: int,
     ) -> None:
         super().__init__()
 
@@ -574,13 +634,15 @@ class DecomposerAgentMiddleware(AgentMiddleware[DecomposerAgentState, ContextT, 
             raise ValueError(msg)
 
         ids = [a["subagent_type_id"] for a in subagent_types]
-        dupes = {id for id in ids if ids.count(id) > 1}
-        if dupes:
-            msg = f"Duplicate subagent type IDs: {dupes}"
-            raise ValueError(msg)
-
         subagent_types = {a["subagent_type_id"]: a for a in subagent_types}
-        self.tools = _build_decomposer_agent_tools(subagent_types)
+        if len(ids) > len(subagent_types):
+            seen = set()
+            dupes = {id for id in ids if id in seen or seen.add(id)}
+            raise ValueError(f"Duplicate subagent type IDs: {dupes}")
+
+        self.tools = _build_decomposer_agent_tools(
+            subagent_types, subagent_recursion_limit
+        )
 
 
 def create_decomposer_agent(
@@ -590,6 +652,7 @@ def create_decomposer_agent(
     checkpointer: Checkpointer | None = None,
     middleware: Sequence[AgentMiddleware] | None = None,
     context_schema: type[Any] | None = None,
+    subagent_recursion_limit: int = 200,  # ~100 tool calls
 ) -> CompiledStateGraph:
     """
     Create a Decomposer agent.
@@ -615,17 +678,23 @@ def create_decomposer_agent(
         checkpointer: The checkpointer for the Decomposer agent.
         middleware: Additional LangChain middleware for the Decomposer agent.
         context_schema: Runtime context schema passed through to `create_agent`.
+        subagent_recursion_limit: Recursion limit set for subagents
     """
-    system_prompt = DECOMPOSER_SYSTEM_PROMPT.format(subagent_report_max_tokens=SUBAGENT_REPORT_MAX_TOKENS)
-    agent_middleware = [
-        DecomposerAgentMiddleware(subagent_types),
-        *(middleware or []),
-    ]
-    return create_agent(
+    system_prompt = DECOMPOSER_SYSTEM_PROMPT.format(
+        subagent_report_max_tokens=SUBAGENT_REPORT_MAX_TOKENS
+    )
+    decomposer_middelware = DecomposerAgentMiddleware(
+        subagent_types, subagent_recursion_limit
+    )
+    agent = create_agent(
         model=decomposer_model,
         tools=[],
         system_prompt=system_prompt,
-        middleware=agent_middleware,
+        middleware=[
+            decomposer_middelware,
+            *(middleware or []),
+        ],
         checkpointer=checkpointer,
         context_schema=context_schema,
     )
+    return agent

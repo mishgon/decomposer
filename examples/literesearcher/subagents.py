@@ -25,4 +25,6 @@ def literesearcher_4b():
             "chat_template_kwargs": {"enable_thinking": True},
         },
     )
-    return create_agent(model=model, tools=[search, fetch], system_prompt=system_prompt).with_config({"recursion_limit": 10})
+    return create_agent(
+        model=model, tools=[search, fetch], system_prompt=system_prompt
+    ).with_config({"recursion_limit": 10})
