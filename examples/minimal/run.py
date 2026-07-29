@@ -1,21 +1,35 @@
+import os
 import asyncio
+import logging
 from pathlib import Path
 
-from langchain_openrouter import ChatOpenRouter
+from langchain_openai import ChatOpenAI
 
 from decomposer.core import create_decomposer_agent
 from render_messages import render_decomposer_messages
 
+logging.basicConfig(level=logging.INFO)
+
 
 async def main() -> None:
+    model = ChatOpenAI(
+        model="Qwen/Qwen3.6-35B-A3B-FP8",
+        base_url=os.environ["LLM_PROXY_URL"],
+        api_key=os.environ["LLM_PROXY_MASTER_KEY"],
+        temperature=1.0,
+        top_p=0.95,
+        presence_penalty=1.5,
+        max_tokens=16384,
+        use_responses_api=False,
+        extra_body={
+            "top_k": 20,
+            "min_p": 0.0,
+            "repetition_penalty": 1.0,
+            "chat_template_kwargs": {"enable_thinking": True},
+        },
+    )
     decomposer_agent = create_decomposer_agent(
-        decomposer_model=ChatOpenRouter(
-            model="z-ai/glm-5.2",
-            temperature=1.0,
-            top_p=0.95,
-            max_tokens=131072,
-            reasoning={"effort": "high"},
-        ),
+        decomposer_model=model,
         subagent_types=[
             {
                 "subagent_type_id": "qwen3_6_35b_a3b_fp8_thinking",
