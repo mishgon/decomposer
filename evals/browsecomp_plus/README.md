@@ -13,11 +13,11 @@ uv run langgraph dev --n-jobs-per-worker 1000
 With decomposer
 
 ```bash
-uv run -m bench.browsecomp_plus decomposer
+uv run -m evals.browsecomp_plus decomposer
 ```
 
 With just subagent
 
 ```bash
-uv run -m bench.browsecomp_plus direct
+uv run -m evals.browsecomp_plus direct
 ```
