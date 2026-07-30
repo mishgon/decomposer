@@ -21,3 +21,18 @@ With just subagent
 ```bash
 uv run -m evals.browsecomp_plus direct
 ```
+
+## Long runs
+
+launch environment with nohup:
+
+```bash
+nohup uv run langgraph dev --n-jobs-per-worker 1000 &
+```
+
+lauch eval with log file and nohup (you want PYTHONUNBUFFERED to stream logs):
+
+```bash
+nohup env PYTHONUNBUFFERED=1 uv run -m evals.browsecomp_plus direct \
+  > bench/browsecomp_plus/out.log 2>&1 &
+```
