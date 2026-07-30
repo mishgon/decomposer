@@ -17,9 +17,6 @@ from .verify import verify_answer
 logging.basicConfig(level=logging.INFO)
 
 
-def _get_message_content(message) -> str:
-
-
 @contextmanager
 def timed(name: str):
     start = time.perf_counter_ns()
@@ -44,7 +41,11 @@ async def query(client, semaphore, index, question, gt, mode):
             elif mode == "decomposer":
                 state = await client.ainvoke(lg_messages)
             message = state["messages"][-1]
-            content = message.get("content") if isinstance(message, dict) else getattr(message, "content", None)
+            content = (
+                message.get("content")
+                if isinstance(message, dict)
+                else getattr(message, "content", None)
+            )
             if not isinstance(content, str) and content is not None:
                 content = json.dumps(content, ensure_ascii=False)
             is_correct = await verify_answer(question, output, gt)
