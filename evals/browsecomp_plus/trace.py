@@ -61,8 +61,3 @@ def render_decomposer_messages(messages: Sequence[BaseMessage]) -> str:
             )
 
     return "\n".join(lines).rstrip() + "\n"
-
-def save_trace(index, messages):
-    string_content = render_decomposer_messages(messages)
-    with open(f"traces/{index}.md", "w") as f:
-        f.write(string_content)
