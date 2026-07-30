@@ -9,7 +9,8 @@ from langgraph_sdk import get_client
 from langchain_openai import ChatOpenAI
 
 from decomposer.core import create_decomposer_agent
-from .dataset import load
+from data.browsecomp_plus import load
+
 from .verify import verify_answer
 
 
