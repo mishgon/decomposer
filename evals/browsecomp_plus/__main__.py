@@ -16,6 +16,13 @@ from .verify import verify_answer
 
 logging.basicConfig(level=logging.INFO)
 
+DECOMPOSER_ADDITIONAL_PROMPT = """
+Final response should end with 
+
+```json
+{"final_answer": "<short answer: a named entity, number, or short phrase>", "gold_sources": ["https://example.org/<page>"]}
+```
+"""
 
 @contextmanager
 def timed(name: str):
@@ -31,6 +38,8 @@ async def query(client, semaphore, index, question, gt, mode):
     async with semaphore:
         is_correct = False
         try:
+            if mode == "decomposer":
+                question += DECOMPOSER_ADDITIONAL_PROMPT
             lg_messages = {"messages": [{"role": "user", "content": question}]}
             if mode == "direct":
                 state = await client.runs.wait(
