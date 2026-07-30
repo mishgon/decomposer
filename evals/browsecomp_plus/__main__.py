@@ -25,6 +25,7 @@ Final response should end with
 ```
 """
 
+
 @contextmanager
 def timed(name: str):
     start = time.perf_counter_ns()
@@ -76,7 +77,7 @@ async def main(mode, concurrency=10, limit=-1):
     semaphore = asyncio.Semaphore(concurrency)
 
     if mode == "decomposer":
-        os.mkdir("artifacts/browsecomp_plus")
+        os.makedirs("artifacts/browsecomp_plus", exist_ok=True)
         model = ChatOpenAI(
             model="Qwen/Qwen3.6-35B-A3B-FP8",
             base_url=os.environ["LLM_PROXY_URL"],
