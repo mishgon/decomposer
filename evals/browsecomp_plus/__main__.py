@@ -13,7 +13,7 @@ from decomposer.core import create_decomposer_agent
 from data.browsecomp_plus import load
 
 from .verify import verify_answer
-from .trace import save_trace
+from .trace import render_decomposer_messages
 
 # logging.basicConfig(level=logging.INFO)
 
@@ -50,7 +50,8 @@ async def query(client, semaphore, index, question, gt, mode):
                 )
             elif mode == "decomposer":
                 state = await client.ainvoke(lg_messages)
-                save_trace(index, state["messages"])
+                with open(f"artifacts/browsecomp_plus/{index}.md", "w") as f:
+                    f.write(render_decomposer_messages(state["messages"]))
             message = state["messages"][-1]
             output = (
                 message.get("content")
@@ -75,7 +76,7 @@ async def main(mode, concurrency=10, limit=-1):
     semaphore = asyncio.Semaphore(concurrency)
 
     if mode == "decomposer":
-        os.mkdir("traces")
+        os.mkdir("artifacts/browsecomp_plus")
         model = ChatOpenAI(
             model="Qwen/Qwen3.6-35B-A3B-FP8",
             base_url=os.environ["LLM_PROXY_URL"],
