@@ -27,7 +27,11 @@ def _content_text(content: Any) -> str:
         if isinstance(item, str):
             parts.append(item)
         elif isinstance(item, dict):
-            parts.append(item.get("text") or item.get("content") or json.dumps(item, ensure_ascii=False))
+            parts.append(
+                item.get("text")
+                or item.get("content")
+                or json.dumps(item, ensure_ascii=False)
+            )
         else:
             parts.append(str(item))
     return "\n\n".join(part.strip() for part in parts if part and part.strip())
@@ -35,7 +39,9 @@ def _content_text(content: Any) -> str:
 
 def _text_block(text: str) -> list[str]:
     text = text.strip()
-    longest_fence = max((len(match.group()) for match in re.finditer(r"`+", text)), default=0)
+    longest_fence = max(
+        (len(match.group()) for match in re.finditer(r"`+", text)), default=0
+    )
     fence = "`" * max(3, longest_fence + 1)
     return [f"{fence}text", text, fence]
 
@@ -70,15 +76,24 @@ def _render_rollout(row: dict[str, Any], number: int) -> list[str]:
     run_types: dict[str, str] = {}
     for item in output:
         if item.get("type") == "function_call":
-            calls[item.get("call_id") or item.get("id")] = (item.get("name", "tool"), _json(item.get("arguments", {})))
+            calls[item.get("call_id") or item.get("id")] = (
+                item.get("name", "tool"),
+                _json(item.get("arguments", {})),
+            )
         elif item.get("type") == "function_call_output":
             call_id = item.get("call_id")
             name, arguments = calls.get(call_id, ("", {}))
             result = _json(item.get("output"))
-            if name == "spawn_subagent" and isinstance(arguments, dict) and isinstance(result, dict):
+            if (
+                name == "spawn_subagent"
+                and isinstance(arguments, dict)
+                and isinstance(result, dict)
+            ):
                 run_id = result.get("subagent_run_id")
                 if run_id:
-                    run_types[run_id] = arguments.get("subagent_type_id", "unknown subagent")
+                    run_types[run_id] = arguments.get(
+                        "subagent_type_id", "unknown subagent"
+                    )
 
     lines.extend(["## Trace", ""])
     step = 0
@@ -89,7 +104,11 @@ def _render_rollout(row: dict[str, Any], number: int) -> list[str]:
             step += 1
             lines.extend([f"### {step}. Decomposer reasoning summary", ""])
             for summary in item.get("summary") or []:
-                text = summary.get("text", "") if isinstance(summary, dict) else str(summary)
+                text = (
+                    summary.get("text", "")
+                    if isinstance(summary, dict)
+                    else str(summary)
+                )
                 if text:
                     lines.extend(_text_block(text))
                     lines.append("")
@@ -100,13 +119,24 @@ def _render_rollout(row: dict[str, Any], number: int) -> list[str]:
             arguments = _json(item.get("arguments", {}))
             if name == "spawn_subagent" and isinstance(arguments, dict):
                 subagent_type = arguments.get("subagent_type_id", "unknown")
-                lines.extend([f"### {step}. Spawn `{subagent_type}`", "", "**Prompt**", ""])
+                lines.extend(
+                    [f"### {step}. Spawn `{subagent_type}`", "", "**Prompt**", ""]
+                )
                 lines.extend(_text_block(str(arguments.get("prompt", ""))))
                 lines.append("")
             elif name == "wait":
                 lines.extend([f"### {step}. Wait", ""])
             else:
-                lines.extend([f"### {step}. Call `{name}`", "", "```json", json.dumps(arguments, indent=2, ensure_ascii=False), "```", ""])
+                lines.extend(
+                    [
+                        f"### {step}. Call `{name}`",
+                        "",
+                        "```json",
+                        json.dumps(arguments, indent=2, ensure_ascii=False),
+                        "```",
+                        "",
+                    ]
+                )
 
         elif item_type == "function_call_output":
             call_id = item.get("call_id")
@@ -127,7 +157,16 @@ def _render_rollout(row: dict[str, Any], number: int) -> list[str]:
                     lines.extend(_text_block(str(report.get("content", ""))))
                     lines.append("")
             elif name not in {"spawn_subagent", "wait"}:
-                lines.extend(["**Tool output**", "", "```json", json.dumps(result, indent=2, ensure_ascii=False), "```", ""])
+                lines.extend(
+                    [
+                        "**Tool output**",
+                        "",
+                        "```json",
+                        json.dumps(result, indent=2, ensure_ascii=False),
+                        "```",
+                        "",
+                    ]
+                )
 
         elif item_type == "message":
             step += 1
@@ -143,8 +182,12 @@ def main() -> None:
         raise SystemExit(f"Usage: {Path(sys.argv[0]).name} INPUT.jsonl [OUTPUT.md]")
 
     input_path = Path(sys.argv[1])
-    output_path = Path(sys.argv[2]) if len(sys.argv) == 3 else input_path.with_suffix(".md")
-    rows = [json.loads(line) for line in input_path.read_text().splitlines() if line.strip()]
+    output_path = (
+        Path(sys.argv[2]) if len(sys.argv) == 3 else input_path.with_suffix(".md")
+    )
+    rows = [
+        json.loads(line) for line in input_path.read_text().splitlines() if line.strip()
+    ]
 
     rendered: list[str] = []
     for number, row in enumerate(rows, start=1):

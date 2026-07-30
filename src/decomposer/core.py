@@ -159,7 +159,9 @@ def _truncate_text(text: str | None, max_tokens: int) -> tuple[str | None, bool]
     return text[:lo].rstrip() + suffix, True
 
 
-def _extract_subagent_tool_calls(run_messages: list[dict[str, Any]]) -> list[SubagentToolCall]:
+def _extract_subagent_tool_calls(
+    run_messages: list[dict[str, Any]],
+) -> list[SubagentToolCall]:
     tool_calls: list[SubagentToolCall] = []
     for message in run_messages:
         if message["type"] != "ai":
@@ -168,8 +170,14 @@ def _extract_subagent_tool_calls(run_messages: list[dict[str, Any]]) -> list[Sub
             tool_call_id = tool_call.get("id")
             name = tool_call.get("name")
             args = tool_call.get("args")
-            if not isinstance(tool_call_id, str) or not isinstance(name, str) or not isinstance(args, dict):
-                raise ValueError(f"Invalid subagent tool call in run history: {tool_call!r}")
+            if (
+                not isinstance(tool_call_id, str)
+                or not isinstance(name, str)
+                or not isinstance(args, dict)
+            ):
+                raise ValueError(
+                    f"Invalid subagent tool call in run history: {tool_call!r}"
+                )
             tool_calls.append({"id": tool_call_id, "name": name, "args": args})
     return tool_calls
 
@@ -405,9 +413,7 @@ def _build_wait_tool(
                     run_messages = []
 
                 if run["status"] == "success" and not run_messages:
-                    raise ValueError(
-                            f"No messages found for run `{run['run_id']}`."
-                        )
+                    raise ValueError(f"No messages found for run `{run['run_id']}`.")
 
                 tool_calls = _extract_subagent_tool_calls(run_messages)
 
