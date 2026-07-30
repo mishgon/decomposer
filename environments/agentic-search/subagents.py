@@ -27,4 +27,4 @@ def researcher():
     )
     return create_agent(
         model=model, tools=[search, fetch], system_prompt=system_prompt
-    ).with_config({"recursion_limit": 10})
+    ).with_config({"recursion_limit": 50})
