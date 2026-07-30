@@ -3,6 +3,7 @@ import time
 import json
 import asyncio
 import argparse
+import logging
 from contextlib import contextmanager
 
 from langgraph_sdk import get_client
@@ -13,6 +14,7 @@ from data.browsecomp_plus import load
 
 from .verify import verify_answer
 
+logging.basicConfig(level=logging.INFO)
 
 @contextmanager
 def timed(name: str):
