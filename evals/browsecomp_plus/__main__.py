@@ -41,13 +41,13 @@ async def query(client, semaphore, index, question, gt, mode):
             elif mode == "decomposer":
                 state = await client.ainvoke(lg_messages)
             message = state["messages"][-1]
-            content = (
+            output = (
                 message.get("content")
                 if isinstance(message, dict)
                 else getattr(message, "content", None)
             )
-            if not isinstance(content, str) and content is not None:
-                content = json.dumps(content, ensure_ascii=False)
+            if not isinstance(output, str) and output is not None:
+                output = json.dumps(output, ensure_ascii=False)
             is_correct = await verify_answer(question, output, gt)
         except Exception as error:
             output = f"ERROR: {error}"
