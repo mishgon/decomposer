@@ -44,20 +44,16 @@ async def query(client, semaphore, index, question, gt, mode):
         return index, output, is_correct
 
 
-async def main():
-    parser = argparse.ArgumentParser(description="BrowseComp-Plus benchmark")
-    parser.add_argument("mode", choices=["decomposer", "direct"])
-    parser.add_argument("--concurrency", type=int, default=10)
-    parser.add_argument("--limit", type=int, default=-1)
-    args = parser.parse_args()
+async def main(mode, concurrency=10, limit=-1):
+    assert mode in ["decomposer", "direct"]
 
     tasks = load()
-    if args.limit != -1:
-        tasks = tasks[: args.limit]
+    if limit != -1:
+        tasks = tasks[:limit]
 
-    semaphore = asyncio.Semaphore(args.concurrency)
+    semaphore = asyncio.Semaphore(concurrency)
 
-    if args.mode == "decomposer":
+    if mode == "decomposer":
         model = ChatOpenAI(
             model="Qwen/Qwen3.6-35B-A3B-FP8",
             base_url=os.environ["LLM_PROXY_URL"],
@@ -85,11 +81,11 @@ async def main():
                 }
             ],
         )
-    elif args.mode == "direct":
+    elif mode == "direct":
         agent = get_client(url="http://127.0.0.1:2024")
 
     pending = [
-        query(agent, semaphore, index, question, answer, args.mode)
+        query(agent, semaphore, index, question, answer, mode)
         for index, (question, answer) in enumerate(tasks, 1)
     ]
 
@@ -105,4 +101,9 @@ async def main():
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    parser = argparse.ArgumentParser(description="BrowseComp-Plus benchmark")
+    parser.add_argument("mode", choices=["decomposer", "direct"])
+    parser.add_argument("--concurrency", type=int, default=10)
+    parser.add_argument("--limit", type=int, default=-1)
+    args = parser.parse_args()
+    asyncio.run(main(args.mode, args.concurrency, args.limit))
