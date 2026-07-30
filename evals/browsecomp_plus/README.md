@@ -34,5 +34,5 @@ lauch eval with log file and nohup (you want PYTHONUNBUFFERED to stream logs):
 
 ```bash
 nohup env PYTHONUNBUFFERED=1 uv run -m evals.browsecomp_plus direct \
-  > bench/browsecomp_plus/out.log 2>&1 &
+  > evals/browsecomp_plus/out.log 2>&1 &
 ```
