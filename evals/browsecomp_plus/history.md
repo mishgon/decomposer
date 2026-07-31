@@ -11,7 +11,7 @@ Date: 30-07-2026
 LLM: Qwen/Qwen3.6-35B-A3B-FP8
 Mode: decomposer
 Concurrency: 10
-Solved: TBA/830
+Solved: 28/46
 Acc: ~60.8%
 Time: TBA
 ---
