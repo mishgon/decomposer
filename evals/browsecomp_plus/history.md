@@ -12,6 +12,6 @@ LLM: Qwen/Qwen3.6-35B-A3B-FP8
 Mode: decomposer
 Concurrency: 10
 Solved: TBA/830
-Acc: TBA
+Acc: ~60.8%
 Time: TBA
 ---
