@@ -16,7 +16,6 @@ def literesearcher_4b():
         temperature=1.0,
         top_p=0.95,
         presence_penalty=1.5,
-        max_tokens=16384,
         use_responses_api=False,
         extra_body={
             "top_k": 20,

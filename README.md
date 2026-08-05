@@ -2,7 +2,7 @@
 
 ## Goal
 
-The goal of this project is to build an agent, called Decomposer, that solves tasks exclusively by decomposing them into subtasks and delegating them to subagents. Decomposer is based on a small language model trained with RL to optimize the quality, cost and speed of the whole system. Big dream is to build a real product: Decomposer orchestrating a pull of subagents based on [frontier open-weight models optimized for local usage](https://unsloth.ai/docs/models).
+The goal of this project is to build an agent, called Decomposer, that solves tasks exclusively by decomposing them into subtasks and delegating them to subagents. Decomposer is based on a small language model trained with RL to optimize the quality, cost and speed of the whole system.
 
 ## Methodology
 
@@ -11,12 +11,12 @@ At a high level, idea is similar to [Sakana Fugu](https://arxiv.org/abs/2606.212
 ## Get started
 
 The minimal example runs Decomposer with GLM-5.2 through OpenRouter and one
-Qwen3.6-35B-A3B-FP8 subagent through a local vLLM and LangGraph server. From
+Gemma-4-E4B-IT subagent through a local vLLM and LangGraph server. From
 the repository root, install the development environment and start vLLM:
 
 ```bash
 uv sync
-scripts/vllm_serve_qwen3_6_35b_a3b_fp8.sh
+scripts/vllm_serve_gemma_4_e4b.sh
 ```
 
 With `OPENROUTER_API_KEY` set, start the subagent server in another terminal:
@@ -37,14 +37,30 @@ The final answer is printed and the complete message history is saved to
 
 ## Plan
 
-The current plan is:
-- [x] Use NeMo-Gym (installed as a git submodule under `external/Gym`) as a framework for Decomposer's evaluation and traces collection on different environments. See our integration of the Decomposer agent into NeMo-Gym framework in `external/Gym/responses_api_agents/decomposer_agent`.
-- [ ] Run Decomposer agent based on Qwen3.6-35B-A3B-FP8 or Gemma-4-26B-A4B-IT with subagents based on Gemma-4-E2B (thinking / non-thinking), LFM2.5-1.2B-Instruct and LFM2.5-1.2B-Thinking (4 subagent types in total) on Reasoning Gym, and Calendar envs. Set thinking subagents’ thinking budget to 8192 tokens; do not set one for Decomposer. Do not employ Qwen3.5-2B-based subagent because it overthinks heavily.
-- [ ] Work on the Decomposer's system prompt and few-shot examples in order to achieve reasonable traces on the *train* splits.
-- [ ] Evaluate on the *train* splits in comparison to baselines based on individual subagents' models.
-- [ ] Collect traces and run SFT of Qwen3.5-0.8B / 2B / 4B on them. Evaluate resulting Decomposer-0.8B / 2B / 4B on *test* splits.
-- [ ] Further train Decomposer-0.8B / 2B / 4B with RL and compare with SFT checkpoints.
-- [ ] At some moment, start scaling to larger models and harder benchmarks. Run Decomposer agent based on Qwen3.6-35B-A3B-FP8 or Gemma-4-26B-A4B-IT with subagents based on Qwen3.6-35B-A3B-FP8 (thinking / non-thinking), Gemma-4-26B-A4B-IT (thinking / non-thinking) (4 subagent types in total) on GPQA-Diamond, BrowseComp and Finance Sec Search envs.
+Training envs:
+- [NeMo-Gym's Workplace assistant](https://github.com/NVIDIA-NeMo/Gym/tree/main/resources_servers/workplace_assistant)
+- [Toolathlon-Gym](https://github.com/eigent-ai/toolathlon_gym)
+- [NeMo-Gym's Finance Sec Search](https://github.com/NVIDIA-NeMo/Gym/tree/main/resources_servers/finance_sec_search)
+- [NeMo-Gym's Google Search](https://github.com/NVIDIA-NeMo/Gym/tree/main/resources_servers/google_search)
+- [Z.ai's DeepDive](https://huggingface.co/datasets/zai-org/DeepDive)
+- [WideSeek-R1](https://huggingface.co/collections/RLinf/wideseek-r1)
+
+Test envs:
+- [Gaia2](https://huggingface.co/datasets/meta-agents-research-environments/gaia2)
+- [Toolathlon](https://github.com/hkust-nlp/Toolathlon)
+- [BrowseComp-Plus](https://github.com/texttron/BrowseComp-Plus)
+- [GPQA Diamond](https://github.com/NVIDIA-NeMo/Gym/tree/main/resources_servers/gpqa_diamond)
+
+Subagent types: Gemma-4-E2B / -E4B / -12B / -26B-A4B (thinking / non-thinking), 8 types in total. We select Gemma-4 models family, because they are incredibly fast and laconic compared to Qwen models.
+
+The current plan:
+- [ ] Establish the system prompt, few-shot examples and teacher model(s) ([GLM-5.2](https://openrouter.ai/z-ai/glm-5.2), [GPT-5.6 Luna](https://openrouter.ai/openai/gpt-5.6-luna), [deepseek-4-flash](https://openrouter.ai/deepseek/deepseek-v4-flash-20260731)) by comparing their quality, speed and subagent types use on training envs.
+- [ ] Start generating SFT data and training SFT models (version and backup them on CDS and main NFS) on training envs.
+- [ ] Start evaluating SFT models on test envs.
+- [ ] Start setting up RL training on training envs.
+
+Ideas:
+- Train Decomposer to anonymize prompts based on [PII public data](https://huggingface.co/datasets/Pritesh-2711/pii-bench)
 
 ## Repo structure
 
@@ -61,6 +77,7 @@ The current plan is:
 ## Development setup
 
 Clone `decomposer` repo with `Gym` as submodule and switch to the required branches in both `decomposer` and `Gym`:
+
 ```
 git clone --recurse-submodules git@github.com:mishgon/decomposer.git
 
@@ -69,6 +86,7 @@ git -C external/Gym switch <Gym-branch-name>
 ```
 
 The root project and Gym intentionally use separate environments and locks; do not combine them into a uv workspace:
+
 ```bash
 # Decomposer package: root .venv and uv.lock
 uv sync

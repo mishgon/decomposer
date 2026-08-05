@@ -87,12 +87,11 @@ def _render_rollout(row: dict[str, Any], number: int) -> list[str]:
 
         if item_type == "reasoning":
             step += 1
-            lines.extend([f"### {step}. Decomposer reasoning summary", ""])
-            for summary in item.get("summary") or []:
-                text = summary.get("text", "") if isinstance(summary, dict) else str(summary)
-                if text:
-                    lines.extend(_text_block(text))
-                    lines.append("")
+            lines.extend([f"### {step}. Decomposer reasoning", ""])
+            reasoning = _content_text(item.get("summary") or item.get("content") or [])
+            if reasoning:
+                lines.extend(_text_block(reasoning))
+                lines.append("")
 
         elif item_type == "function_call":
             step += 1

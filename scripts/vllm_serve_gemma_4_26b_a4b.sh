@@ -5,8 +5,8 @@ CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}" \
 uv run --group dev \
   vllm serve google/gemma-4-26B-A4B-it \
   --host 0.0.0.0 \
-  --port "${PORT:-8020}" \
-  --max-model-len 65536 \
+  --port "${PORT:-8023}" \
+  --max-model-len 32768 \
   --gpu-memory-utilization "${GPU_MEMORY_UTILIZATION:-0.9}" \
   --language-model-only \
   --enable-auto-tool-choice \

@@ -6,7 +6,7 @@ uv run --group dev \
   vllm serve google/gemma-4-E4B-it \
   --host 0.0.0.0 \
   --port "${PORT:-8021}" \
-  --max-model-len 131072 \
+  --max-model-len 32768 \
   --gpu-memory-utilization "${GPU_MEMORY_UTILIZATION:-0.9}" \
   --language-model-only \
   --enable-auto-tool-choice \

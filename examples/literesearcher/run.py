@@ -13,7 +13,6 @@ async def main() -> None:
             model="z-ai/glm-5.2",
             temperature=1.0,
             top_p=0.95,
-            max_tokens=131072,
             reasoning={"effort": "high"},
         ),
         subagent_types=[

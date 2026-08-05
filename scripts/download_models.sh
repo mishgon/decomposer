@@ -6,9 +6,10 @@ models=(
   Qwen/Qwen3.5-2B
   Qwen/Qwen3.5-4B
   Qwen/Qwen3.6-35B-A3B-FP8
+  google/gemma-4-E2B-it
   google/gemma-4-E4B-it
+  google/gemma-4-12B-it
   google/gemma-4-26B-A4B-it
-  LiquidAI/LFM2.5-8B-A1B
 )
 
 for model in "${models[@]}"; do

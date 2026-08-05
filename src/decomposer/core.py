@@ -34,8 +34,8 @@ from .prompts import (
 logger = logging.getLogger(__name__)
 
 
-SUBAGENT_PROMPT_MAX_TOKENS = 1024
-SUBAGENT_REPORT_MAX_TOKENS = 1024
+# SUBAGENT_PROMPT_MAX_TOKENS = 1024
+# SUBAGENT_REPORT_MAX_TOKENS = 1024
 WAIT_TIMEOUT_SECONDS = 60.0
 SYNC_WAIT_POLL_SECONDS = 5.0
 TERMINAL_STATUSES = frozenset({"success", "error", "timeout", "interrupted"})
@@ -116,18 +116,18 @@ def _get_current_subagent_runs(
 def _build_spawn_subagent_schema(
     subagent_types: dict[str, SubagentType],
 ) -> type[BaseModel]:
-    available_subagent_type_ids = ", ".join(f"`{k}`" for k in subagent_types)
-
+    available_subagent_types = "\n".join(
+        f"| `{subagent_type_id}` | {subagent_type['description']} |"
+        for subagent_type_id, subagent_type in subagent_types.items()
+    )
     class SpawnSubagentSchema(BaseModel):
         subagent_type_id: str = Field(
             description=SUBAGENT_TYPE_ID_PARAMETER_DESCRIPTION.format(
-                available_subagent_type_ids=available_subagent_type_ids
+                available_subagent_types=available_subagent_types
             )
         )
         prompt: str = Field(
-            description=PROMPT_PARAMETER_DESCRIPTION.format(
-                subagent_prompt_max_tokens=SUBAGENT_PROMPT_MAX_TOKENS
-            )
+            description=PROMPT_PARAMETER_DESCRIPTION
         )
 
     return SpawnSubagentSchema
@@ -225,18 +225,6 @@ class _ClientCache:
         return self._async[key]
 
 
-def _build_spawn_subagent_tool_description(
-    subagent_types: dict[str, SubagentType],
-) -> str:
-    subagent_types_desc = "\n".join(
-        f"| `{subagent_type_id}` | {subagent_type['description']} |"
-        for subagent_type_id, subagent_type in subagent_types.items()
-    )
-    return SPAWN_SUBAGENT_TOOL_DESCRIPTION.format(
-        available_subagent_types=subagent_types_desc
-    )
-
-
 def _build_spawn_subagent_tool(
     subagent_types: dict[str, SubagentType],
     clients: _ClientCache,
@@ -252,9 +240,9 @@ def _build_spawn_subagent_tool(
             allowed = ", ".join(f"`{k}`" for k in subagent_types)
             return f"Unknown subagent type ID `{subagent_type_id}`. Available IDs: {allowed}."
 
-        prompt_token_count = _count_text_tokens(prompt)
-        if prompt_token_count > SUBAGENT_PROMPT_MAX_TOKENS:
-            return f"The prompt is too long (about {prompt_token_count} tokens) while the limit is {SUBAGENT_PROMPT_MAX_TOKENS} tokens."
+        # prompt_token_count = _count_text_tokens(prompt)
+        # if prompt_token_count > SUBAGENT_PROMPT_MAX_TOKENS:
+        #     return f"The prompt is too long (about {prompt_token_count} tokens) while the limit is {SUBAGENT_PROMPT_MAX_TOKENS} tokens."
 
         subagent_type = subagent_types[subagent_type_id]
         client = clients.get_sync(subagent_type_id)
@@ -304,9 +292,9 @@ def _build_spawn_subagent_tool(
             allowed = ", ".join(f"`{k}`" for k in subagent_types)
             return f"Unknown subagent type ID `{subagent_type_id}`. Available IDs: {allowed}."
 
-        prompt_token_count = _count_text_tokens(prompt)
-        if prompt_token_count > SUBAGENT_PROMPT_MAX_TOKENS:
-            return f"The prompt is too long (about {prompt_token_count} tokens) while the limit is {SUBAGENT_PROMPT_MAX_TOKENS} tokens."
+        # prompt_token_count = _count_text_tokens(prompt)
+        # if prompt_token_count > SUBAGENT_PROMPT_MAX_TOKENS:
+        #     return f"The prompt is too long (about {prompt_token_count} tokens) while the limit is {SUBAGENT_PROMPT_MAX_TOKENS} tokens."
 
         subagent_type = subagent_types[subagent_type_id]
         client = clients.get_async(subagent_type_id)
@@ -351,7 +339,7 @@ def _build_spawn_subagent_tool(
         func=spawn_subagent,
         coroutine=aspawn_subagent,
         name="spawn_subagent",
-        description=_build_spawn_subagent_tool_description(subagent_types),
+        description=SPAWN_SUBAGENT_TOOL_DESCRIPTION,
         infer_schema=False,
         args_schema=_build_spawn_subagent_schema(subagent_types),
     )
@@ -423,7 +411,7 @@ def _build_wait_tool(
                 elif run["status"] == "error":
                     error = run.get("error")
                     content = str(error) if error else None
-                content, _ = _truncate_text(content, SUBAGENT_REPORT_MAX_TOKENS)
+                # content, _ = _truncate_text(content, SUBAGENT_REPORT_MAX_TOKENS)
 
                 report: SubagentReport = {
                     "subagent_run_id": subagent_run_id,
@@ -587,7 +575,7 @@ def _build_wait_tool(
             elif run["status"] == "error":
                 error = run.get("error")
                 content = str(error) if error else None
-            content, _ = _truncate_text(content, SUBAGENT_REPORT_MAX_TOKENS)
+            # content, _ = _truncate_text(content, SUBAGENT_REPORT_MAX_TOKENS)
 
             report: SubagentReport = {
                 "subagent_run_id": subagent_run_id,
@@ -622,7 +610,7 @@ def _build_wait_tool(
         name="wait",
         description=WAIT_TOOL_DESCRIPTION.format(
             wait_timeout_seconds=WAIT_TIMEOUT_SECONDS,
-            subagent_report_max_tokens=SUBAGENT_REPORT_MAX_TOKENS,
+            # subagent_report_max_tokens=SUBAGENT_REPORT_MAX_TOKENS,
         ),
     )
 
@@ -702,9 +690,7 @@ def create_decomposer_agent(
             to `create_agent` and forwarded unchanged to every subagent run.
         subagent_recursion_limit: Recursion limit set for subagents
     """
-    system_prompt = DECOMPOSER_SYSTEM_PROMPT.format(
-        subagent_report_max_tokens=SUBAGENT_REPORT_MAX_TOKENS
-    )
+    system_prompt = DECOMPOSER_SYSTEM_PROMPT
     decomposer_middelware = DecomposerAgentMiddleware(
         subagent_types, subagent_recursion_limit
     )
