@@ -35,6 +35,12 @@ uv run python examples/minimal/run.py
 The final answer is printed and the complete message history is saved to
 `examples/minimal/messages.md`. See `examples/minimal/README.md` for details.
 
+`create_decomposer_agent` enforces the prompt's one-tool-call-per-message
+invariant. Set `max_tool_call_retries` to retry a violating generation from the
+same accepted conversation before the graph terminates with structured
+`decomposer_failure` state. The default is zero retries, so callers opt in to
+the additional sampling cost explicitly.
+
 ## Plan
 
 Training envs:

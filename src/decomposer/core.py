@@ -1,19 +1,24 @@
-import json
-import time
 import asyncio
+import json
 import logging
-from typing import Annotated, Any, NotRequired, Sequence
+import time
+from collections.abc import Awaitable, Callable, Sequence
+from typing import Annotated, Any, Literal, NotRequired
 
 from langchain.agents import create_agent
 from langchain.agents.middleware.types import (
     AgentMiddleware,
     AgentState,
     ContextT,
+    ExtendedModelResponse,
+    ModelRequest,
+    ModelResponse,
     ResponseT,
+    hook_config,
 )
 from langchain.tools import ToolRuntime
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import ToolMessage
+from langchain_core.messages import AIMessage, ToolMessage, UsageMetadata
 from langchain_core.messages.utils import count_tokens_approximately
 from langchain_core.tools import StructuredTool
 from langgraph.graph.state import CompiledStateGraph
@@ -78,6 +83,40 @@ class SubagentRun(TypedDict):
     report_sequence_number: NotRequired[int]
 
 
+class ToolCallRetryDiagnostic(TypedDict):
+    outcome: Literal["recovered", "exhausted"]
+    attempts: int
+    max_retries: int
+    discarded_attempts: int
+    discarded_tool_call_counts: list[int]
+    discarded_tool_names: list[list[str]]
+    discarded_usage: list[UsageMetadata | None]
+
+
+class SubagentCancellationFailure(TypedDict):
+    subagent_run_id: str
+    error_type: str
+    message: str
+
+
+class SubagentCancellationDiagnostic(TypedDict):
+    requested_run_ids: list[str]
+    failures: list[SubagentCancellationFailure]
+
+
+DecomposerFailure = TypedDict(
+    "DecomposerFailure",
+    {
+        "class": Literal["multiple_tool_calls_exhausted"],
+        "attempts": int,
+        "max_retries": int,
+        "tool_call_counts": list[int],
+        "tool_names": list[list[str]],
+        "subagent_cancellation": NotRequired[SubagentCancellationDiagnostic],
+    },
+)
+
+
 def _subagent_runs_reducer(
     existing: dict[str, SubagentRun] | None,
     update: dict[str, SubagentRun],
@@ -85,6 +124,13 @@ def _subagent_runs_reducer(
     merged = dict(existing or {})
     merged.update(update)
     return merged
+
+
+def _retry_diagnostics_reducer(
+    existing: list[ToolCallRetryDiagnostic] | None,
+    update: list[ToolCallRetryDiagnostic],
+) -> list[ToolCallRetryDiagnostic]:
+    return [*(existing or []), *update]
 
 
 def _get_current_subagent_runs(
@@ -137,6 +183,10 @@ class DecomposerAgentState(AgentState[ResponseT]):
     subagent_runs: Annotated[
         NotRequired[dict[str, SubagentRun]], _subagent_runs_reducer
     ]
+    decomposer_retry_diagnostics: Annotated[
+        NotRequired[list[ToolCallRetryDiagnostic]], _retry_diagnostics_reducer
+    ]
+    decomposer_failure: NotRequired[DecomposerFailure]
 
 
 def _count_text_tokens(text: str) -> int:
@@ -229,6 +279,7 @@ def _build_spawn_subagent_tool(
     subagent_types: dict[str, SubagentType],
     clients: _ClientCache,
     recursion_limit: int,
+    description: str = SPAWN_SUBAGENT_TOOL_DESCRIPTION,
 ) -> StructuredTool:
 
     def spawn_subagent(
@@ -339,7 +390,7 @@ def _build_spawn_subagent_tool(
         func=spawn_subagent,
         coroutine=aspawn_subagent,
         name="spawn_subagent",
-        description=SPAWN_SUBAGENT_TOOL_DESCRIPTION,
+        description=description,
         infer_schema=False,
         args_schema=_build_spawn_subagent_schema(subagent_types),
     )
@@ -347,6 +398,7 @@ def _build_spawn_subagent_tool(
 
 def _build_wait_tool(
     clients: _ClientCache,
+    description: str = WAIT_TOOL_DESCRIPTION,
 ) -> StructuredTool:
 
     def wait(runtime: ToolRuntime) -> str | Command:
@@ -608,7 +660,7 @@ def _build_wait_tool(
         func=wait,
         coroutine=await_,
         name="wait",
-        description=WAIT_TOOL_DESCRIPTION.format(
+        description=description.format(
             wait_timeout_seconds=WAIT_TIMEOUT_SECONDS,
             # subagent_report_max_tokens=SUBAGENT_REPORT_MAX_TOKENS,
         ),
@@ -618,12 +670,56 @@ def _build_wait_tool(
 def _build_decomposer_agent_tools(
     subagent_types: dict[str, SubagentType],
     subagent_recursion_limit: int,
+    clients: _ClientCache | None = None,
 ) -> list[StructuredTool]:
-    clients = _ClientCache(subagent_types)
+    clients = clients or _ClientCache(subagent_types)
+    spawn_description = SPAWN_SUBAGENT_TOOL_DESCRIPTION
+    wait_description = WAIT_TOOL_DESCRIPTION
     return [
-        _build_spawn_subagent_tool(subagent_types, clients, subagent_recursion_limit),
-        _build_wait_tool(clients),
+        _build_spawn_subagent_tool(
+            subagent_types,
+            clients,
+            subagent_recursion_limit,
+            description=spawn_description,
+        ),
+        _build_wait_tool(clients, description=wait_description),
     ]
+
+
+def _assistant_message(response: ModelResponse[Any]) -> AIMessage:
+    assistant_messages = [message for message in response.result if isinstance(message, AIMessage)]
+    if len(assistant_messages) != 1:
+        raise RuntimeError(
+            "Decomposer model middleware expected exactly one assistant message, "
+            f"received {len(assistant_messages)}."
+        )
+    return assistant_messages[0]
+
+
+def _tool_call_counts(messages: Sequence[AIMessage]) -> list[int]:
+    return [len(message.tool_calls) for message in messages]
+
+
+def _tool_names(messages: Sequence[AIMessage]) -> list[list[str]]:
+    return [[tool_call["name"] for tool_call in message.tool_calls] for message in messages]
+
+
+def _retry_diagnostic(
+    *,
+    outcome: Literal["recovered", "exhausted"],
+    attempts: int,
+    max_retries: int,
+    discarded_messages: Sequence[AIMessage],
+) -> ToolCallRetryDiagnostic:
+    return {
+        "outcome": outcome,
+        "attempts": attempts,
+        "max_retries": max_retries,
+        "discarded_attempts": len(discarded_messages),
+        "discarded_tool_call_counts": _tool_call_counts(discarded_messages),
+        "discarded_tool_names": _tool_names(discarded_messages),
+        "discarded_usage": [message.usage_metadata for message in discarded_messages],
+    }
 
 
 class DecomposerAgentMiddleware(
@@ -635,12 +731,19 @@ class DecomposerAgentMiddleware(
         self,
         subagent_types: Sequence[SubagentType],
         subagent_recursion_limit: int,
+        max_tool_call_retries: int = 0,
     ) -> None:
         super().__init__()
 
         if not subagent_types:
             msg = "At least one subagent must be specified"
             raise ValueError(msg)
+        if (
+            isinstance(max_tool_call_retries, bool)
+            or not isinstance(max_tool_call_retries, int)
+            or max_tool_call_retries < 0
+        ):
+            raise ValueError("`max_tool_call_retries` must be a non-negative integer.")
 
         ids = [a["subagent_type_id"] for a in subagent_types]
         subagent_types = {a["subagent_type_id"]: a for a in subagent_types}
@@ -649,9 +752,211 @@ class DecomposerAgentMiddleware(
             dupes = {id for id in ids if id in seen or seen.add(id)}
             raise ValueError(f"Duplicate subagent type IDs: {dupes}")
 
+        self.max_tool_call_retries = max_tool_call_retries
+        self._clients = _ClientCache(subagent_types)
         self.tools = _build_decomposer_agent_tools(
-            subagent_types, subagent_recursion_limit
+            subagent_types,
+            subagent_recursion_limit,
+            clients=self._clients,
         )
+
+    def _exhausted_response(
+        self,
+        response: ModelResponse[ResponseT],
+        invalid_messages: list[AIMessage],
+    ) -> ExtendedModelResponse[ResponseT]:
+        failure: DecomposerFailure = {
+            "class": "multiple_tool_calls_exhausted",
+            "attempts": len(invalid_messages),
+            "max_retries": self.max_tool_call_retries,
+            "tool_call_counts": _tool_call_counts(invalid_messages),
+            "tool_names": _tool_names(invalid_messages),
+        }
+        diagnostic = _retry_diagnostic(
+            outcome="exhausted",
+            attempts=len(invalid_messages),
+            max_retries=self.max_tool_call_retries,
+            discarded_messages=invalid_messages[:-1],
+        )
+        return ExtendedModelResponse(
+            model_response=response,
+            command=Command(
+                update={
+                    "decomposer_failure": failure,
+                    "decomposer_retry_diagnostics": [diagnostic],
+                }
+            ),
+        )
+
+    def wrap_model_call(
+        self,
+        request: ModelRequest[ContextT],
+        handler: Callable[[ModelRequest[ContextT]], ModelResponse[ResponseT]],
+    ) -> ModelResponse[ResponseT] | ExtendedModelResponse[ResponseT]:
+        invalid_messages: list[AIMessage] = []
+        for _ in range(self.max_tool_call_retries + 1):
+            response = handler(request)
+            message = _assistant_message(response)
+            if len(message.tool_calls) <= 1:
+                if not invalid_messages:
+                    return response
+                diagnostic = _retry_diagnostic(
+                    outcome="recovered",
+                    attempts=len(invalid_messages) + 1,
+                    max_retries=self.max_tool_call_retries,
+                    discarded_messages=invalid_messages,
+                )
+                return ExtendedModelResponse(
+                    model_response=response,
+                    command=Command(update={"decomposer_retry_diagnostics": [diagnostic]}),
+                )
+            invalid_messages.append(message)
+
+        return self._exhausted_response(response, invalid_messages)
+
+    async def awrap_model_call(
+        self,
+        request: ModelRequest[ContextT],
+        handler: Callable[
+            [ModelRequest[ContextT]], Awaitable[ModelResponse[ResponseT]]
+        ],
+    ) -> ModelResponse[ResponseT] | ExtendedModelResponse[ResponseT]:
+        invalid_messages: list[AIMessage] = []
+        for _ in range(self.max_tool_call_retries + 1):
+            response = await handler(request)
+            message = _assistant_message(response)
+            if len(message.tool_calls) <= 1:
+                if not invalid_messages:
+                    return response
+                diagnostic = _retry_diagnostic(
+                    outcome="recovered",
+                    attempts=len(invalid_messages) + 1,
+                    max_retries=self.max_tool_call_retries,
+                    discarded_messages=invalid_messages,
+                )
+                return ExtendedModelResponse(
+                    model_response=response,
+                    command=Command(update={"decomposer_retry_diagnostics": [diagnostic]}),
+                )
+            invalid_messages.append(message)
+
+        return self._exhausted_response(response, invalid_messages)
+
+    def _cancel_running_subagents(
+        self,
+        state: DecomposerAgentState[ResponseT],
+    ) -> SubagentCancellationDiagnostic:
+        subagent_runs = state.get("subagent_runs") or {}
+        current_runs = {
+            run_id: run
+            for run_id, run in subagent_runs.items()
+            if run["status"] not in TERMINAL_STATUSES
+        }
+        failures: list[SubagentCancellationFailure] = []
+        for subagent_run_id, subagent_run in current_runs.items():
+            try:
+                client = self._clients.get_sync(subagent_run["subagent_type_id"])
+                client.runs.cancel(
+                    thread_id=subagent_run["thread_id"],
+                    run_id=subagent_run["run_id"],
+                    wait=False,
+                    action="interrupt",
+                )
+            except Exception as error:
+                logger.warning(
+                    "Failed to request cancellation for subagent run %s: %s",
+                    subagent_run_id,
+                    error,
+                )
+                failures.append(
+                    {
+                        "subagent_run_id": subagent_run_id,
+                        "error_type": type(error).__name__,
+                        "message": str(error),
+                    }
+                )
+        return {
+            "requested_run_ids": list(current_runs),
+            "failures": failures,
+        }
+
+    async def _acancel_running_subagents(
+        self,
+        state: DecomposerAgentState[ResponseT],
+    ) -> SubagentCancellationDiagnostic:
+        subagent_runs = state.get("subagent_runs") or {}
+        current_runs = {
+            run_id: run
+            for run_id, run in subagent_runs.items()
+            if run["status"] not in TERMINAL_STATUSES
+        }
+
+        async def cancel(
+            subagent_run_id: str,
+            subagent_run: SubagentRun,
+        ) -> SubagentCancellationFailure | None:
+            try:
+                client = self._clients.get_async(subagent_run["subagent_type_id"])
+                await client.runs.cancel(
+                    thread_id=subagent_run["thread_id"],
+                    run_id=subagent_run["run_id"],
+                    wait=False,
+                    action="interrupt",
+                )
+            except Exception as error:
+                logger.warning(
+                    "Failed to request cancellation for subagent run %s: %s",
+                    subagent_run_id,
+                    error,
+                )
+                return {
+                    "subagent_run_id": subagent_run_id,
+                    "error_type": type(error).__name__,
+                    "message": str(error),
+                }
+            return None
+
+        cancellation_results = await asyncio.gather(
+            *(cancel(run_id, run) for run_id, run in current_runs.items())
+        )
+        return {
+            "requested_run_ids": list(current_runs),
+            "failures": [result for result in cancellation_results if result is not None],
+        }
+
+    @hook_config(can_jump_to=["end"])
+    def after_model(
+        self,
+        state: DecomposerAgentState[ResponseT],
+        runtime: Any,
+    ) -> dict[str, Any] | None:
+        failure = state.get("decomposer_failure")
+        if failure is None:
+            return None
+        return {
+            "decomposer_failure": {
+                **failure,
+                "subagent_cancellation": self._cancel_running_subagents(state),
+            },
+            "jump_to": "end",
+        }
+
+    @hook_config(can_jump_to=["end"])
+    async def aafter_model(
+        self,
+        state: DecomposerAgentState[ResponseT],
+        runtime: Any,
+    ) -> dict[str, Any] | None:
+        failure = state.get("decomposer_failure")
+        if failure is None:
+            return None
+        return {
+            "decomposer_failure": {
+                **failure,
+                "subagent_cancellation": await self._acancel_running_subagents(state),
+            },
+            "jump_to": "end",
+        }
 
 
 def create_decomposer_agent(
@@ -662,6 +967,7 @@ def create_decomposer_agent(
     middleware: Sequence[AgentMiddleware] | None = None,
     context_schema: type[Any] | None = None,
     subagent_recursion_limit: int = 200,  # ~100 tool calls
+    max_tool_call_retries: int = 0,
 ) -> CompiledStateGraph:
     """
     Create a Decomposer agent.
@@ -689,17 +995,22 @@ def create_decomposer_agent(
         context_schema: JSON-serializable runtime context schema passed through
             to `create_agent` and forwarded unchanged to every subagent run.
         subagent_recursion_limit: Recursion limit set for subagents
+        max_tool_call_retries: Number of times to retry a model response that
+            violates Decomposer's one-tool-call-per-message invariant. Zero
+            retries means one total model attempt before structured failure.
     """
     system_prompt = DECOMPOSER_SYSTEM_PROMPT
-    decomposer_middelware = DecomposerAgentMiddleware(
-        subagent_types, subagent_recursion_limit
+    decomposer_middleware = DecomposerAgentMiddleware(
+        subagent_types,
+        subagent_recursion_limit,
+        max_tool_call_retries=max_tool_call_retries,
     )
     agent = create_agent(
         model=decomposer_model,
         tools=[],
         system_prompt=system_prompt,
         middleware=[
-            decomposer_middelware,
+            decomposer_middleware,
             *(middleware or []),
         ],
         checkpointer=checkpointer,

@@ -23,6 +23,7 @@ def test_spawn_subagent_passes_context_to_sync_run() -> None:
     tool = _build_spawn_subagent_tool(
         {"test": SUBAGENT_TYPE},
         _ClientCacheStub(sync_client=client),
+        200,
     )
 
     assert tool.func is not None
@@ -40,6 +41,7 @@ def test_spawn_subagent_passes_context_to_async_run() -> None:
     tool = _build_spawn_subagent_tool(
         {"test": SUBAGENT_TYPE},
         _ClientCacheStub(async_client=client),
+        200,
     )
 
     assert tool.coroutine is not None
