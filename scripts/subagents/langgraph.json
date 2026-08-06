@@ -1,0 +1,16 @@
+{
+  "dependencies": [
+    "."
+  ],
+  "graphs": {
+    "gemma_4_2b_thinking": "./graphs.py:gemma_4_2b_thinking",
+    "gemma_4_2b_non_thinking": "./graphs.py:gemma_4_2b_non_thinking",
+    "gemma_4_4b_thinking": "./graphs.py:gemma_4_4b_thinking",
+    "gemma_4_4b_non_thinking": "./graphs.py:gemma_4_4b_non_thinking",
+    "gemma_4_12b_thinking": "./graphs.py:gemma_4_12b_thinking",
+    "gemma_4_12b_non_thinking": "./graphs.py:gemma_4_12b_non_thinking",
+    "gemma_4_26b_a4b_thinking": "./graphs.py:gemma_4_26b_a4b_thinking",
+    "gemma_4_26b_a4b_non_thinking": "./graphs.py:gemma_4_26b_a4b_non_thinking"
+  },
+  "python_version": "3.12"
+}

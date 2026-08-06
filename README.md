@@ -16,14 +16,13 @@ the repository root, install the development environment and start vLLM:
 
 ```bash
 uv sync
-scripts/vllm_serve_gemma_4_e4b.sh
+scripts/vllm/serve_gemma_4_e4b.sh
 ```
 
 With `OPENROUTER_API_KEY` set, start the subagent server in another terminal:
 
 ```bash
-cd examples/minimal
-uv run langgraph dev --no-browser
+scripts/subagents/serve.sh
 ```
 
 Then run Decomposer from the repository root:

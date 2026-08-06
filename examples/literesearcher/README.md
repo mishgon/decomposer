@@ -9,14 +9,13 @@ Set `OPENROUTER_API_KEY` in the environment before running the example.
 From the repository root, start vLLM for the subagent:
 
 ```bash
-scripts/vllm_serve_literesearcher_4b.sh
+scripts/vllm/serve_literesearcher_4b.sh
 ```
 
-In another terminal, start the subagent server:
+In another terminal, start the subagent server from the repository root:
 
 ```bash
-cd examples/literesearcher
-uv run langgraph dev --no-browser
+examples/literesearcher/subagents/serve.sh
 ```
 
 Then run Decomposer from the repository root:
