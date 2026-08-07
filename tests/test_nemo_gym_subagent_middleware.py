@@ -17,8 +17,8 @@ SUBAGENTS_DIR = (
 sys.path.insert(0, str(GYM_DIR))
 sys.path.insert(0, str(SUBAGENTS_DIR))
 
-import graphs  # noqa: E402
-from graphs import (  # noqa: E402
+import graph  # noqa: E402
+from graph import (  # noqa: E402
     NeMoGymSubagentMiddleware,
     _to_chat_completions_tool,
     _to_chat_completions_tool_choice,
@@ -139,7 +139,7 @@ def test_tool_hook_calls_resource_server(monkeypatch) -> None:
         fake_client.timeout = kwargs["timeout"]
         return fake_client
 
-    monkeypatch.setattr(graphs, "AsyncClient", client_factory)
+    monkeypatch.setattr(graph, "AsyncClient", client_factory)
     context = _context()
     request = SimpleNamespace(
         runtime=SimpleNamespace(context=context),
@@ -176,7 +176,7 @@ def test_tool_hook_rejects_unknown_tool_without_http_request(monkeypatch) -> Non
     def unexpected_client(**kwargs: Any) -> Any:
         raise AssertionError("HTTP client must not be created for unknown tools")
 
-    monkeypatch.setattr(graphs, "AsyncClient", unexpected_client)
+    monkeypatch.setattr(graph, "AsyncClient", unexpected_client)
     request = SimpleNamespace(
         runtime=SimpleNamespace(context=_context()),
         tool_call={"name": "delete_everything", "args": {}, "id": "call_2"},

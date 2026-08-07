@@ -1,0 +1,15 @@
+**
+!README.md
+!pyproject.toml
+!src/
+src/**
+!src/decomposer/
+!src/decomposer/**
+src/decomposer/**/__pycache__/
+src/decomposer/**/*.py[cod]
+!gyms/
+gyms/**
+!gyms/toolathlon_gym/
+!gyms/toolathlon_gym/**
+gyms/toolathlon_gym/**/__pycache__/
+gyms/toolathlon_gym/**/*.py[cod]

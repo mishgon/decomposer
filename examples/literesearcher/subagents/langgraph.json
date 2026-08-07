@@ -3,7 +3,7 @@
     "."
   ],
   "graphs": {
-    "literesearcher_4b": "./graphs.py:literesearcher_4b"
+    "literesearcher_4b": "./graph.py:literesearcher_4b"
   },
   "python_version": "3.12"
 }

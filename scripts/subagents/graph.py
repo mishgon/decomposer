@@ -1,7 +1,6 @@
+from decomposer.chat_vllm import ChatVLLM
 from langchain.agents import create_agent
 from langgraph.graph.state import CompiledStateGraph
-
-from chat_vllm import ChatVLLM
 
 
 SYSTEM_PROMPT = "You are a helpful assistant."
