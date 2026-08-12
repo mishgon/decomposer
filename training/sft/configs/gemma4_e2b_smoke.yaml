@@ -1,0 +1,78 @@
+model:
+  name_or_path: google/gemma-4-E2B-it
+  revision: main
+  dtype: bfloat16
+  attn_implementation: sdpa
+  trust_remote_code: false
+
+data:
+  train_file: /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/datasets/sft/decomposer-workplace-all/v3/train.jsonl
+  validation_file: /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/datasets/sft/decomposer-workplace-all/v3/validation.jsonl
+  manifest_file: /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/datasets/sft/decomposer-workplace-all/v3/manifest.json
+  include_reasoning: false
+  error_on_truncation: true
+  num_proc: 2
+  max_train_samples: 2
+  max_eval_samples: 2
+
+training:
+  output_dir: /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/training/sft/smoke/gemma4-e2b-two-gpu-one-step
+  run_name: gemma4-e2b-decomposer-sft-smoke
+  max_length: 32768
+  max_steps: 1
+  per_device_train_batch_size: 1
+  per_device_eval_batch_size: 1
+  # Two ranks at batch one derive gradient accumulation one.
+  global_batch_size: 2
+  learning_rate: 2.0e-5
+  lr_scheduler_type: constant
+  warmup_ratio: 0.0
+  weight_decay: 0.0
+  max_grad_norm: 1.0
+  optim: adamw_torch_fused
+  loss_type: chunked_nll
+  use_liger_kernel: false
+  bf16: true
+  tf32: true
+  use_cache: false
+  gradient_checkpointing: false
+  packing: false
+  eval_strategy: steps
+  eval_steps: 1
+  save_strategy: "no"
+  logging_strategy: steps
+  logging_steps: 1
+  logging_first_step: true
+  include_num_input_tokens_seen: true
+  seed: 42
+  data_seed: 42
+  dataloader_num_workers: 0
+  dataloader_pin_memory: true
+  fsdp: true
+  fsdp_config:
+    auto_wrap_policy: TRANSFORMER_BASED_WRAP
+    reshard_after_forward: true
+    cpu_offload: false
+    activation_checkpointing: true
+    state_dict_type: SHARDED_STATE_DICT
+    # Accelerate 1.14's efficient FSDP2 loader assumes every state-dict value is
+    # a DTensor; Gemma-4 has persistent buffer tensors, so that path crashes.
+    cpu_ram_efficient_loading: false
+    sync_module_states: true
+
+clearml:
+  enabled: false
+  weight_norm_interval_steps: 10
+  project: decomposer
+  task: Gemma-4-E2B Decomposer SFT smoke
+  tags:
+    - sft
+    - gemma-4-E2B-it
+    - workplace-assistant
+  log_model: false
+  output_uri: null
+
+run:
+  expected_world_size: 2
+  resume_from_checkpoint: null
+  overwrite_output_dir: false

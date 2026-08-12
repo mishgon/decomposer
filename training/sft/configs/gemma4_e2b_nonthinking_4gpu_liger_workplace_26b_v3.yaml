@@ -1,0 +1,97 @@
+model:
+  name_or_path: google/gemma-4-E2B-it
+  revision: main
+  dtype: bfloat16
+  attn_implementation: sdpa
+  trust_remote_code: false
+
+data:
+  train_file: /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/datasets/sft/decomposer-workplace-26b-a4b-nonthinking/v3/train.jsonl
+  validation_file: /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/datasets/sft/decomposer-workplace-26b-a4b-nonthinking/v3/validation.jsonl
+  manifest_file: /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/datasets/sft/decomposer-workplace-26b-a4b-nonthinking/v3/manifest.json
+  include_reasoning: false
+  error_on_truncation: true
+  # The frozen 26B-source dataset has one 35,044-token training trace. Exclude
+  # it explicitly rather than truncating or increasing the proven 32K envelope.
+  exclude_overlength: true
+  num_proc: 8
+  max_train_samples: null
+  max_eval_samples: null
+
+training:
+  output_dir: /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/training/sft/checkpoints/gemma4-e2b-nonthinking-4gpu-liger-workplace-26b-v3
+  run_name: gemma4-e2b-decomposer-sft-nonthinking-4gpu-liger-workplace-26b-v3
+  max_length: 32768
+  per_device_train_batch_size: 1
+  per_device_eval_batch_size: 1
+  # Four ranks at batch one derive accumulation two, preserving the successful
+  # E2B global batch while halving the two-GPU accumulation depth.
+  global_batch_size: 8
+  num_train_epochs: 5
+  learning_rate: 2.0e-5
+  lr_scheduler_type: cosine
+  warmup_ratio: 0.03
+  weight_decay: 0.1
+  max_grad_norm: 1.0
+  optim: adamw_torch_fused
+  loss_type: chunked_nll
+  # Use only the dominant Liger optimization. Norms, MLP activations, RoPE,
+  # attention, and all other model operations stay on the native path.
+  use_liger_kernel: true
+  liger_kernel_config:
+    fused_linear_cross_entropy: true
+    cross_entropy: false
+    rms_norm: false
+    geglu: false
+    rope: false
+    layer_norm: false
+  bf16: true
+  tf32: true
+  use_cache: false
+  gradient_checkpointing: false
+  packing: false
+  eval_strategy: epoch
+  save_strategy: epoch
+  save_total_limit: 2
+  load_best_model_at_end: true
+  metric_for_best_model: eval_loss
+  greater_is_better: false
+  logging_strategy: steps
+  logging_steps: 1
+  logging_first_step: true
+  include_num_input_tokens_seen: true
+  prediction_loss_only: true
+  seed: 42
+  data_seed: 42
+  dataloader_num_workers: 4
+  dataloader_pin_memory: true
+  fsdp: true
+  fsdp_config:
+    auto_wrap_policy: TRANSFORMER_BASED_WRAP
+    reshard_after_forward: true
+    cpu_offload: false
+    activation_checkpointing: true
+    state_dict_type: SHARDED_STATE_DICT
+    cpu_ram_efficient_loading: false
+    sync_module_states: true
+
+clearml:
+  enabled: false
+  weight_norm_interval_steps: 10
+  project: decomposer
+  task: Gemma-4-E2B Decomposer SFT non-thinking 4GPU Liger Workplace 26B v3
+  tags:
+    - sft
+    - gemma-4-E2B-it
+    - workplace-assistant
+  log_model: false
+  output_uri: null
+
+run:
+  expected_world_size: 4
+  disable_cudnn_sdpa: true
+  resume_from_checkpoint: null
+  overwrite_output_dir: false
+  early_stopping:
+    patience: 2
+    threshold: 0.0
