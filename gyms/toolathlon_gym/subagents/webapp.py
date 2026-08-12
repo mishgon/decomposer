@@ -9,10 +9,35 @@ from typing import Any
 
 import yaml
 from fastapi import FastAPI
+from langchain.agents.middleware import wrap_tool_call
+from langchain_core.messages import ToolMessage
 from langchain_core.tools import BaseTool, tool
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langchain_mcp_adapters.sessions import StdioConnection
 from langchain_mcp_adapters.tools import load_mcp_tools
+
+
+MAX_TOOL_OUTPUT_CHARS = 8000
+
+
+@wrap_tool_call
+async def truncate_mcp_tool_output(request, handler):
+    response = await handler(request)
+    metadata = request.tool.metadata if request.tool else None
+    if isinstance(response, ToolMessage) and metadata and metadata.get("toolathlon_mcp"):
+        content = (
+            response.content
+            if isinstance(response.content, str)
+            else str(response.content)
+        )
+        if len(content) > MAX_TOOL_OUTPUT_CHARS:
+            response = response.model_copy(
+                update={
+                    "content": content[:MAX_TOOL_OUTPUT_CHARS]
+                    + f"\n...[truncated, total {len(content)} chars]"
+                }
+            )
+    return response
 
 
 def _resolve(value: Any, replacements: dict[str, str]) -> Any:
@@ -111,7 +136,25 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             from utils.aux_tools.python_interpretor import make_python_execute
 
         if "python_execute" in needed_local_tools:
-            tools.append(tool(make_python_execute(task_config["agent_workspace"])))
+            native_python_execute = make_python_execute(
+                task_config["agent_workspace"]
+            )
+
+            def python_execute(
+                code: str,
+                filename: str = "",
+                timeout: int = 30,
+            ) -> str:
+                """Execute Python code in the Toolathlon task workspace."""
+                coroutine = native_python_execute(code, filename, timeout)
+                try:
+                    coroutine.send(None)
+                except StopIteration as result:
+                    return result.value
+                coroutine.close()
+                raise RuntimeError("Toolathlon python_execute unexpectedly awaited")
+
+            tools.append(tool(python_execute))
         if "handle_overlong_tool_outputs" in needed_local_tools:
             tools.extend(
                 tool(fn)
@@ -119,7 +162,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             )
         for server_name in connections:
             session = await stack.enter_async_context(client.session(server_name))
-            tools.extend(await load_mcp_tools(session, server_name=server_name))
+            mcp_tools = await load_mcp_tools(session, server_name=server_name)
+            for mcp_tool in mcp_tools:
+                mcp_tool.metadata = {
+                    **(mcp_tool.metadata or {}),
+                    "toolathlon_mcp": True,
+                }
+            tools.extend(mcp_tools)
         app.state.tools = tools
         try:
             yield

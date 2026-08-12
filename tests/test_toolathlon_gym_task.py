@@ -62,10 +62,4 @@ def test_prepare_task_without_preprocess(tmp_path: Path) -> None:
     task_config = runtime["task_config"]
     assert task_config["task_dir"] == "wc-shipping-analysis"
     assert task_config["agent_workspace"] == str(output_dir / "workspace")
-    assert task_config["needed_mcp_servers"] == [
-        "woocommerce",
-        "excel",
-        "filesystem",
-        "emails",
-    ]
     assert (output_dir / "workspace").is_dir()

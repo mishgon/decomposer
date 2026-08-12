@@ -3,14 +3,7 @@
     "."
   ],
   "graphs": {
-    "gemma_4_2b_thinking": "./graph.py:gemma_4_2b_thinking",
-    "gemma_4_2b_non_thinking": "./graph.py:gemma_4_2b_non_thinking",
-    "gemma_4_4b_thinking": "./graph.py:gemma_4_4b_thinking",
-    "gemma_4_4b_non_thinking": "./graph.py:gemma_4_4b_non_thinking",
-    "gemma_4_12b_thinking": "./graph.py:gemma_4_12b_thinking",
-    "gemma_4_12b_non_thinking": "./graph.py:gemma_4_12b_non_thinking",
-    "gemma_4_26b_a4b_thinking": "./graph.py:gemma_4_26b_a4b_thinking",
-    "gemma_4_26b_a4b_non_thinking": "./graph.py:gemma_4_26b_a4b_non_thinking"
+    "gemma_4_26b_a4b_thinking": "./graph.py:gemma_4_26b_a4b_thinking"
   },
   "http": {
     "app": "webapp:app"

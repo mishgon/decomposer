@@ -13,9 +13,9 @@ logging.basicConfig(level=logging.INFO)
 async def main() -> None:
     decomposer_agent = create_decomposer_agent(
         decomposer_model=ChatOpenRouter(
-            model="z-ai/glm-5.2",
+            model="deepseek/deepseek-v4-flash-0731",
             temperature=1.0,
-            top_p=0.95,
+            top_p=1.0,
             reasoning={"effort": "high"},
         ),
         subagent_types=[

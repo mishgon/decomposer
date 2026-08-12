@@ -10,7 +10,7 @@ At a high level, idea is similar to [Sakana Fugu](https://arxiv.org/abs/2606.212
 
 ## Get started
 
-The minimal example runs Decomposer with GLM-5.2 through OpenRouter and one
+The minimal example runs Decomposer with DeepSeek V4 Flash 0731 through OpenRouter and one
 Gemma-4-E4B-IT subagent through a local vLLM and LangGraph server. From
 the repository root, install the development environment and start vLLM:
 
@@ -50,10 +50,9 @@ Test envs:
 - [BrowseComp-Plus](https://github.com/texttron/BrowseComp-Plus)
 - [GPQA Diamond](https://github.com/NVIDIA-NeMo/Gym/tree/main/resources_servers/gpqa_diamond)
 
-Subagent types: Gemma-4-E2B / -E4B / -12B / -26B-A4B (thinking / non-thinking), 8 types in total. We select Gemma-4 models family, because they are incredibly fast and laconic compared to Qwen models.
+Subagent types: Gemma-4-E2B / -E4B / -12B / -26B-A4B (thinking / non-thinking), 8 types in total. We select Gemma-4 models family, because they are incredibly fast and laconic compared to Qwen models. In the first version we use only Gemma-4-26B-A4B non-thinking model.
 
 The current plan:
-- [ ] Establish the system prompt, few-shot examples and teacher model(s) ([GLM-5.2](https://openrouter.ai/z-ai/glm-5.2), [GPT-5.6 Luna](https://openrouter.ai/openai/gpt-5.6-luna), [deepseek-4-flash](https://openrouter.ai/deepseek/deepseek-v4-flash-20260731)) by comparing their quality, speed and subagent types use on training envs.
 - [ ] Start generating SFT data and training SFT models (version and backup them on CDS and main NFS) on training envs.
 - [ ] Start evaluating SFT models on test envs.
 - [ ] Start setting up RL training on training envs.

@@ -1,7 +1,7 @@
 # Minimal example
 
 This example runs Decomposer directly and exposes one general-purpose subagent
-through a local LangGraph server. Decomposer uses GLM-5.2 through OpenRouter;
+through a local LangGraph server. Decomposer uses DeepSeek V4 Flash 0731 through OpenRouter;
 the subagent uses Gemma-4-E4B through a local vLLM server.
 
 Set `OPENROUTER_API_KEY` in the environment before running the example.

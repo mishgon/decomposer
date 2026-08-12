@@ -23,7 +23,7 @@ TOOLATHLON_ROOT = REPO_ROOT / "external" / "toolathlon_gym"
 DEFAULT_ARTIFACTS_DIR = REPO_ROOT / "artifacts" / "data" / "toolathlon_gym"
 DEFAULT_EVALS_DIR = REPO_ROOT / "artifacts" / "evals" / "toolathlon_gym"
 DEFAULT_IMAGE = "decomposer-toolathlon:latest"
-DEFAULT_MODEL = "z-ai/glm-5.2"
+DEFAULT_MODEL = "deepseek/deepseek-v4-flash-0731"
 POSTGRES_IMAGE = "postgres:15"
 POSTGRES_ENV = {
     "PGHOST": "postgres",
@@ -34,25 +34,21 @@ POSTGRES_ENV = {
     "PGDATABASE": "toolathlon_gym",
 }
 VLLM_MODELS = {
-    8020: "google/gemma-4-E2B-it",
-    8021: "google/gemma-4-E4B-it",
-    8022: "google/gemma-4-12B-it",
+    # 8020: "google/gemma-4-E2B-it",
+    # 8021: "google/gemma-4-E4B-it",
+    # 8022: "google/gemma-4-12B-it",
     8023: "google/gemma-4-26B-A4B-it",
 }
 SUBAGENT_TYPES = (
     # subagent_type_id, assistant_id, model_description
-    ("tiny_thinking", "gemma_4_2b_thinking", "tiny thinking"),
-    ("tiny_non_thinking", "gemma_4_2b_non_thinking", "tiny non-thinking"),
-    ("small_thinking", "gemma_4_4b_thinking", "small thinking"),
-    ("small_non_thinking", "gemma_4_4b_non_thinking", "small non-thinking"),
-    ("medium_thinking", "gemma_4_12b_thinking", "medium thinking"),
-    ("medium_non_thinking", "gemma_4_12b_non_thinking", "medium non-thinking"),
-    ("large_thinking", "gemma_4_26b_a4b_thinking", "large thinking"),
-    (
-        "large_non_thinking",
-        "gemma_4_26b_a4b_non_thinking",
-        "large non-thinking",
-    ),
+    # ("gemma_4_2b_thinking", "gemma_4_2b_thinking", "Gemma-4-2B thinking"),
+    # ("gemma_4_2b_non_thinking", "gemma_4_2b_non_thinking", "Gemma-4-2B non-thinking"),
+    # ("gemma_4_4b_thinking", "gemma_4_4b_thinking", "Gemma-4-4B thinking"),
+    # ("gemma_4_4b_non_thinking", "gemma_4_4b_non_thinking", "Gemma-4-4B non-thinking"),
+    # ("gemma_4_12b_thinking", "gemma_4_12b_thinking", "Gemma-4-12B thinking"),
+    # ("gemma_4_12b_non_thinking", "gemma_4_12b_non_thinking", "Gemma-4-12B non-thinking"),
+    ("gemma_4_26b_a4b_thinking", "gemma_4_26b_a4b_thinking", "Gemma-4-26B-A4B thinking"),
+    # ("gemma_4_26b_a4b_non_thinking", "gemma_4_26b_a4b_non_thinking", "Gemma-4-26B-A4B non-thinking"),
 )
 
 
@@ -146,7 +142,18 @@ def main() -> None:
                 pg_container,
                 check=False,
             ).stdout.strip()
-            if status == "healthy":
+            logs = _docker(
+                "logs",
+                "--tail",
+                "50",
+                pg_container,
+                check=False,
+            )
+            initialized = (
+                "PostgreSQL init process complete; ready for start up."
+                in logs.stdout + logs.stderr
+            )
+            if status == "healthy" and initialized:
                 break
             time.sleep(1)
         else:
@@ -205,6 +212,20 @@ def main() -> None:
                         break
             except OSError:
                 pass
+            status = _docker(
+                "inspect",
+                "--format",
+                "{{.State.Status}}",
+                task_container,
+                check=False,
+            ).stdout.strip()
+            if status in {"dead", "exited"}:
+                logs = _docker("logs", task_container, check=False)
+                raise RuntimeError(
+                    "Task container exited before becoming ready:\n"
+                    + logs.stdout
+                    + logs.stderr
+                )
             time.sleep(1)
         else:
             raise TimeoutError(
@@ -218,7 +239,7 @@ def main() -> None:
             decomposer_model=ChatOpenRouter(
                 model=args.model,
                 temperature=1.0,
-                top_p=0.95,
+                top_p=1.0,
                 reasoning={"effort": "high"},
             ),
             subagent_types=[

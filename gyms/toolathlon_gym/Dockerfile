@@ -5,6 +5,15 @@ ARG PYTHON_VERSION=3.12
 ENV SUBAGENT_VENV=/opt/subagents
 ENV LOCAL_SERVERS_PATH=/opt/local_servers
 
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends \
+        ffmpeg \
+        fonts-liberation \
+        fonts-noto-cjk \
+        libreoffice-impress \
+        libreoffice-writer \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN set -e; for server in mcp-canvas-lms notion-mcp-server woocommerce-mcp; do \
         path="/opt/local_servers/$server"; \
         npm install --ignore-scripts --prefix "$path" pg; \
@@ -12,6 +21,10 @@ RUN set -e; for server in mcp-canvas-lms notion-mcp-server woocommerce-mcp; do \
     done; \
     npm install --omit=dev --ignore-scripts \
         --prefix /opt/local_servers/filesystem
+
+COPY gyms/toolathlon_gym/patches/mcp-canvas-lms-postgres.patch /tmp/
+RUN cd /opt/local_servers/mcp-canvas-lms \
+    && git apply --no-index /tmp/mcp-canvas-lms-postgres.patch
 
 RUN set -e; for server in \
         12306-mcp \
@@ -32,6 +45,18 @@ RUN set -e; for server in \
     done
 
 RUN uv sync --directory /opt/local_servers/mcp-google-sheets
+RUN uv pip install \
+    --python /opt/local_servers/yahoo-finance-mcp/.venv/bin/python \
+    psycopg2-binary
+RUN uv add \
+    --directory /opt/local_servers/mcp-snowflake-server \
+    "mcp==1.29.0"
+RUN uv pip install \
+    --python /opt/venv/bin/python \
+    "matplotlib==3.10.3" \
+    "pandas==2.2.3" \
+    "PyPDF2==3.0.1" \
+    "reportlab>=4.4.3"
 
 COPY gyms/toolathlon_gym/subagents/requirements.txt /tmp/subagent-requirements.txt
 COPY pyproject.toml README.md /tmp/decomposer/

@@ -1,12 +1,12 @@
 import os
 
+from decomposer.prompts import SUBAGENT_SYSTEM_PROMPT
 from decomposer.chat_vllm import ChatVLLM
 from langchain.agents import create_agent
 from langgraph.graph.state import CompiledStateGraph
-from webapp import get_tools
+from webapp import get_tools, truncate_mcp_tool_output
 
 
-SYSTEM_PROMPT = "Complete the delegated Toolathlon subtask independently."
 REQUEST_TIMEOUT_SECONDS = 300.0
 
 
@@ -46,7 +46,8 @@ def _create_subagent(
     return create_agent(
         model=model,
         tools=get_tools(),
-        system_prompt=SYSTEM_PROMPT,
+        system_prompt=SUBAGENT_SYSTEM_PROMPT,
+        middleware=[truncate_mcp_tool_output],
     )
 
 

@@ -1,9 +1,9 @@
 from decomposer.chat_vllm import ChatVLLM
+from decomposer.prompts import SUBAGENT_SYSTEM_PROMPT
 from langchain.agents import create_agent
 from langgraph.graph.state import CompiledStateGraph
 
 
-SYSTEM_PROMPT = "You are a helpful assistant."
 REQUEST_TIMEOUT_SECONDS = 300.0
 
 
@@ -30,7 +30,7 @@ def _create_subagent(model_id: str, port: int, *, thinking: bool) -> CompiledSta
         preserve_reasoning=thinking,
         extra_body=extra_body,
     )
-    return create_agent(model=model, tools=[], system_prompt=SYSTEM_PROMPT)
+    return create_agent(model=model, tools=[], system_prompt=SUBAGENT_SYSTEM_PROMPT)
 
 
 def gemma_4_2b_thinking() -> CompiledStateGraph:

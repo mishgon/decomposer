@@ -661,7 +661,7 @@ def create_decomposer_agent(
     checkpointer: Checkpointer | None = None,
     middleware: Sequence[AgentMiddleware] | None = None,
     context_schema: type[Any] | None = None,
-    subagent_recursion_limit: int = 200,  # ~100 tool calls
+    subagent_recursion_limit: int = 100,  # ~50 tool calls
 ) -> CompiledStateGraph:
     """
     Create a Decomposer agent.

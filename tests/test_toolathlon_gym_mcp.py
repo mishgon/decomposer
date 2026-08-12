@@ -1,11 +1,14 @@
 import asyncio
 import json
 import sys
+import threading
 from contextlib import asynccontextmanager
 from datetime import timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
+from langchain_core.messages import ToolMessage
 
 
 SUBAGENTS_DIR = Path(__file__).parents[1] / "gyms" / "toolathlon_gym" / "subagents"
@@ -84,7 +87,7 @@ def test_webapp_keeps_sessions_open(tmp_path: Path, monkeypatch) -> None:
     async def fake_load_tools(session, *, server_name):
         assert session == server_name
         events.append(f"load:{server_name}")
-        return [f"{server_name}_tool"]
+        return [SimpleNamespace(name=f"{server_name}_tool", metadata=None)]
 
     data_dir = tmp_path / "data"
     data_dir.mkdir()
@@ -111,7 +114,9 @@ def test_webapp_keeps_sessions_open(tmp_path: Path, monkeypatch) -> None:
 
     async def run() -> None:
         async with webapp.lifespan(webapp.app):
-            assert webapp.get_tools() == ["first_tool", "second_tool"]
+            tools = webapp.get_tools()
+            assert [tool.name for tool in tools] == ["first_tool", "second_tool"]
+            assert all(tool.metadata == {"toolathlon_mcp": True} for tool in tools)
             assert events == [
                 "open:first",
                 "load:first",
@@ -122,6 +127,36 @@ def test_webapp_keeps_sessions_open(tmp_path: Path, monkeypatch) -> None:
         assert events[-2:] == ["close:second", "close:first"]
         with pytest.raises(RuntimeError, match="have not started"):
             webapp.get_tools()
+
+    asyncio.run(run())
+
+
+def test_mcp_tool_outputs_are_truncated() -> None:
+    async def run() -> None:
+        output = "x" * (webapp.MAX_TOOL_OUTPUT_CHARS + 1)
+
+        async def handler(request):
+            return ToolMessage(content=output, tool_call_id="call")
+
+        request = SimpleNamespace(
+            tool=SimpleNamespace(metadata={"toolathlon_mcp": True})
+        )
+        response = await webapp.truncate_mcp_tool_output.awrap_tool_call(
+            request,
+            handler,
+        )
+
+        assert response.content == (
+            output[:webapp.MAX_TOOL_OUTPUT_CHARS]
+            + f"\n...[truncated, total {len(output)} chars]"
+        )
+
+        request.tool.metadata = None
+        response = await webapp.truncate_mcp_tool_output.awrap_tool_call(
+            request,
+            handler,
+        )
+        assert response.content == output
 
     asyncio.run(run())
 
@@ -150,13 +185,34 @@ def test_webapp_loads_native_local_tools(tmp_path: Path, monkeypatch) -> None:
         "load_connections",
         lambda task_config, toolathlon_root: {},
     )
+    sys.path.insert(0, str(TOOLATHLON_ROOT))
+    from utils.aux_tools import python_interpretor
+
+    def make_python_execute(workspace):
+        async def python_execute(
+            code: str,
+            filename: str = "",
+            timeout: int = 30,
+        ) -> str:
+            return str(threading.get_ident())
+
+        return python_execute
+
+    monkeypatch.setattr(
+        python_interpretor,
+        "make_python_execute",
+        make_python_execute,
+    )
+    event_loop_thread = str(threading.get_ident())
 
     async def run() -> None:
         async with webapp.lifespan(webapp.app):
-            assert [tool.name for tool in webapp.get_tools()] == [
+            tools = webapp.get_tools()
+            assert [tool.name for tool in tools] == [
                 "python_execute",
                 "save_overlong_output",
                 "view_overlong_output",
             ]
+            assert await tools[0].ainvoke({"code": "pass"}) != event_loop_thread
 
     asyncio.run(run())

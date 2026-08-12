@@ -1,24 +1,21 @@
+import json
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
 from gyms.toolathlon_gym import run
 
 
-def test_subagent_types() -> None:
-    type_ids = [subagent_type_id for subagent_type_id, _, _ in run.SUBAGENT_TYPES]
+def test_configured_subagents_are_registered() -> None:
+    registered = json.loads(
+        (Path(run.__file__).parent / "subagents" / "langgraph.json").read_text()
+    )["graphs"]
 
-    assert type_ids == [
-        "tiny_thinking",
-        "tiny_non_thinking",
-        "small_thinking",
-        "small_non_thinking",
-        "medium_thinking",
-        "medium_non_thinking",
-        "large_thinking",
-        "large_non_thinking",
-    ]
+    assert {
+        assistant_id for _, assistant_id, _ in run.SUBAGENT_TYPES
+    } <= registered.keys()
 
 
 def test_docker(monkeypatch) -> None:
