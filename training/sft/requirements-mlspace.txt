@@ -1,0 +1,3 @@
+# Keep the submitter separate from the training environment: mls pins Click
+# 8.1.8, while the Hugging Face stack currently resolves Click 8.4.2.
+mls @ git+https://gitverse.ru/mrsndmn/mls@5652a9899693685ac00f7022f2e471b3f79b6b99

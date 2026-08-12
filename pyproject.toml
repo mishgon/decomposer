@@ -23,6 +23,9 @@ where = ["src"]
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
+markers = [
+    "integration: checks that use downloaded model tokenizers or other external artifacts",
+]
 
 [tool.uv]
 environments = ["sys_platform == 'linux'"]
@@ -48,4 +51,12 @@ dev = [
     "torchaudio==2.11.0",
     "torchvision==0.26.0",
     "vllm==0.24.0",
+]
+train = [
+    "accelerate>=1.14,<2",
+    "clearml>=2.1.11,<3",
+    "datasets>=5,<6",
+    "liger-kernel==0.8.1",
+    "pyyaml>=6,<7",
+    "trl>=1.9.2,<2",
 ]
