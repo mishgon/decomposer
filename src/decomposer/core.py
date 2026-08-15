@@ -13,7 +13,7 @@ from langchain.agents.middleware.types import (
 )
 from langchain.tools import ToolRuntime
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import ToolMessage
+from langchain_core.messages import SystemMessage, ToolMessage
 from langchain_core.messages.utils import count_tokens_approximately
 from langchain_core.tools import StructuredTool
 from langgraph.graph.state import CompiledStateGraph
@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 # SUBAGENT_PROMPT_MAX_TOKENS = 1024
 # SUBAGENT_REPORT_MAX_TOKENS = 1024
 WAIT_TIMEOUT_SECONDS = 60.0
-SYNC_WAIT_POLL_SECONDS = 5.0
+WAIT_POLL_SECONDS = 5.0
 TERMINAL_STATUSES = frozenset({"success", "error", "timeout", "interrupted"})
 HISTORY_LIMIT = 1000
 
@@ -357,7 +357,7 @@ def _build_wait_tool(
         next_report_sequence_number = len(subagent_runs) - len(current_runs)
 
         deadline = time.monotonic() + WAIT_TIMEOUT_SECONDS
-        while time.monotonic() < deadline:
+        while True:
             tool_output: list[dict[str, Any]] = []
             updated_runs: dict[str, SubagentRun] = {}
 
@@ -394,17 +394,15 @@ def _build_wait_tool(
 
                 if run["status"] == "success" and not run_messages:
                     raise ValueError(
-                            f"No messages found for run `{run['run_id']}`."
-                        )
+                        f"No messages found for run `{run['run_id']}`."
+                    )
 
                 tool_calls = _extract_subagent_tool_calls(run_messages)
 
                 content = None
                 if run["status"] == "success":
                     last_message = run_messages[-1]
-                    if last_message["type"] == "ai" and not last_message.get(
-                        "tool_calls"
-                    ):
+                    if last_message["type"] == "ai" and not last_message.get("tool_calls"):
                         content = last_message.get("content")
                         if content is not None and not isinstance(content, str):
                             content = json.dumps(content, ensure_ascii=False)
@@ -441,76 +439,8 @@ def _build_wait_tool(
                     }
                 )
 
-            time.sleep(SYNC_WAIT_POLL_SECONDS)
-
-        return Command(
-            update={
-                "messages": [
-                    ToolMessage(
-                        "No current subagent runs completed.",
-                        tool_call_id=runtime.tool_call_id,
-                    )
-                ],
-                "subagent_runs": updated_runs,
-            }
-        )
-
-    async def await_(runtime: ToolRuntime) -> str | Command:
-        subagent_runs: dict[str, SubagentRun] = runtime.state.get("subagent_runs") or {}
-        current_runs = _get_current_subagent_runs(subagent_runs)
-        if not current_runs:
-            return "No running subagents to wait for."
-        next_report_sequence_number = len(subagent_runs) - len(current_runs)
-
-        async def get_run_items(subagent_run_id: str, subagent_run: SubagentRun):
-            client = clients.get_async(subagent_run["subagent_type_id"])
-            run = await client.runs.get(
-                thread_id=subagent_run["thread_id"], run_id=subagent_run["run_id"]
-            )
-            return subagent_run_id, subagent_run, run
-
-        run_items = await asyncio.gather(
-            *(get_run_items(k, v) for k, v in current_runs.items())
-        )
-        updated_runs: dict[str, SubagentRun] = {}
-        finished_run_items = []
-        for subagent_run_id, subagent_run, run in run_items:
-            if run["status"] in TERMINAL_STATUSES:
-                finished_run_items.append((subagent_run_id, subagent_run, run))
-            elif run["status"] != subagent_run["status"]:
-                updated_runs[subagent_run_id] = {
-                    **subagent_run,
-                    "status": run["status"],
-                }
-
-        if not finished_run_items:
-
-            async def join_run_items(subagent_run_id: str, subagent_run: SubagentRun):
-                client = clients.get_async(subagent_run["subagent_type_id"])
-                await client.runs.join(
-                    thread_id=subagent_run["thread_id"], run_id=subagent_run["run_id"]
-                )
-                run = await client.runs.get(
-                    thread_id=subagent_run["thread_id"], run_id=subagent_run["run_id"]
-                )
-                return subagent_run_id, subagent_run, run
-
-            tasks = [
-                asyncio.create_task(join_run_items(k, v))
-                for k, v in current_runs.items()
-            ]
-            done, pending = await asyncio.wait(
-                tasks,
-                timeout=WAIT_TIMEOUT_SECONDS,
-                return_when=asyncio.FIRST_COMPLETED,
-            )
-            for task in pending:
-                task.cancel()
-            await asyncio.gather(*pending, return_exceptions=True)
-            for task in done:
-                task.result()
-
-            if not done:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
                 return Command(
                     update={
                         "messages": [
@@ -523,86 +453,118 @@ def _build_wait_tool(
                     }
                 )
 
-            run_items = await asyncio.gather(
-                *(get_run_items(k, v) for k, v in current_runs.items())
-            )
-            finished_run_items = []
-            for subagent_run_id, subagent_run, run in run_items:
-                if run["status"] in TERMINAL_STATUSES:
-                    finished_run_items.append((subagent_run_id, subagent_run, run))
-                elif run["status"] != subagent_run["status"]:
-                    updated_runs[subagent_run_id] = {
-                        **subagent_run,
-                        "status": run["status"],
-                    }
+            time.sleep(min(WAIT_POLL_SECONDS, remaining))
 
-        if not finished_run_items:
-            raise ValueError(
-                "No subagent runs with terminal status found despite "
-                "`client.runs.join` completing for some of them."
-            )
+    async def await_(runtime: ToolRuntime) -> str | Command:
+        subagent_runs: dict[str, SubagentRun] = runtime.state.get("subagent_runs") or {}
+        current_runs = _get_current_subagent_runs(subagent_runs)
+        if not current_runs:
+            return "No running subagents to wait for."
+        next_report_sequence_number = len(subagent_runs) - len(current_runs)
 
-        tool_output: list[dict[str, Any]] = []
-        for subagent_run_id, subagent_run, run in finished_run_items:
-            client = clients.get_async(subagent_run["subagent_type_id"])
-            history = await client.threads.get_history(
-                thread_id=run["thread_id"],
-                limit=HISTORY_LIMIT,
-                metadata={"run_id": run["run_id"]},
-            )
-            if history:
-                if history[-1]["metadata"]["source"] != "input":
-                    raise ValueError("History is truncated; increase `HISTORY_LIMIT`.")
+        deadline = asyncio.get_running_loop().time() + WAIT_TIMEOUT_SECONDS
+        while True:
+            tool_output: list[dict[str, Any]] = []
+            updated_runs: dict[str, SubagentRun] = {}
 
-                before_messages = history[-1]["values"]["messages"]
-                after_messages = history[0]["values"]["messages"]
-                run_messages = after_messages[len(before_messages) :]
-            else:
-                run_messages = []
-
-            if run["status"] == "success" and not run_messages:
-                raise ValueError(f"No messages found for run `{run['run_id']}`.")
-
-            tool_calls = _extract_subagent_tool_calls(run_messages)
-
-            content = None
-            if run["status"] == "success":
-                last_message = run_messages[-1]
-                if last_message["type"] == "ai" and not last_message.get("tool_calls"):
-                    content = last_message.get("content")
-                    if content is not None and not isinstance(content, str):
-                        content = json.dumps(content, ensure_ascii=False)
-            elif run["status"] == "error":
-                error = run.get("error")
-                content = str(error) if error else None
-            # content, _ = _truncate_text(content, SUBAGENT_REPORT_MAX_TOKENS)
-
-            report: SubagentReport = {
-                "subagent_run_id": subagent_run_id,
-                "status": run["status"],
-                "content": content,
-            }
-            report_sequence_number = next_report_sequence_number + len(tool_output)
-            tool_output.append(report)
-            updated_runs[subagent_run_id] = {
-                **subagent_run,
-                "status": run["status"],
-                "tool_calls": tool_calls,
-                "report": report,
-                "report_sequence_number": report_sequence_number,
-            }
-
-        return Command(
-            update={
-                "messages": [
-                    ToolMessage(
-                        json.dumps(tool_output, ensure_ascii=False),
-                        tool_call_id=runtime.tool_call_id,
+            runs = await asyncio.gather(
+                *(
+                    clients.get_async(subagent_run["subagent_type_id"]).runs.get(
+                        thread_id=subagent_run["thread_id"],
+                        run_id=subagent_run["run_id"],
                     )
-                ],
-                "subagent_runs": updated_runs,
-            }
-        )
+                    for _, subagent_run in current_runs.items()
+                )
+            )
+            for (subagent_run_id, subagent_run), run in zip(
+                current_runs.items(), runs, strict=True
+            ):
+                if run["status"] not in TERMINAL_STATUSES:
+                    if run["status"] != subagent_run["status"]:
+                        updated_runs[subagent_run_id] = {
+                            **subagent_run,
+                            "status": run["status"],
+                        }
+                    continue
+
+                client = clients.get_async(subagent_run["subagent_type_id"])
+                history = await client.threads.get_history(
+                    thread_id=run["thread_id"],
+                    limit=HISTORY_LIMIT,
+                    metadata={"run_id": run["run_id"]},
+                )
+                if history:
+                    if history[-1]["metadata"]["source"] != "input":
+                        raise ValueError(
+                            "History is truncated; increase `HISTORY_LIMIT`."
+                        )
+
+                    before_messages = history[-1]["values"]["messages"]
+                    after_messages = history[0]["values"]["messages"]
+                    run_messages = after_messages[len(before_messages) :]
+                else:
+                    run_messages = []
+
+                if run["status"] == "success" and not run_messages:
+                    raise ValueError(f"No messages found for run `{run['run_id']}`.")
+
+                tool_calls = _extract_subagent_tool_calls(run_messages)
+
+                content = None
+                if run["status"] == "success":
+                    last_message = run_messages[-1]
+                    if last_message["type"] == "ai" and not last_message.get("tool_calls"):
+                        content = last_message.get("content")
+                        if content is not None and not isinstance(content, str):
+                            content = json.dumps(content, ensure_ascii=False)
+                elif run["status"] == "error":
+                    error = run.get("error")
+                    content = str(error) if error else None
+                # content, _ = _truncate_text(content, SUBAGENT_REPORT_MAX_TOKENS)
+
+                report: SubagentReport = {
+                    "subagent_run_id": subagent_run_id,
+                    "status": run["status"],
+                    "content": content,
+                }
+                report_sequence_number = next_report_sequence_number + len(tool_output)
+                tool_output.append(report)
+                updated_runs[subagent_run_id] = {
+                    **subagent_run,
+                    "status": run["status"],
+                    "tool_calls": tool_calls,
+                    "report": report,
+                    "report_sequence_number": report_sequence_number,
+                }
+
+            if tool_output:
+                return Command(
+                    update={
+                        "messages": [
+                            ToolMessage(
+                                json.dumps(tool_output, ensure_ascii=False),
+                                tool_call_id=runtime.tool_call_id,
+                            )
+                        ],
+                        "subagent_runs": updated_runs,
+                    }
+                )
+
+            remaining = deadline - asyncio.get_running_loop().time()
+            if remaining <= 0:
+                return Command(
+                    update={
+                        "messages": [
+                            ToolMessage(
+                                "No current subagent runs completed.",
+                                tool_call_id=runtime.tool_call_id,
+                            )
+                        ],
+                        "subagent_runs": updated_runs,
+                    }
+                )
+
+            await asyncio.sleep(min(WAIT_POLL_SECONDS, remaining))
 
     return StructuredTool.from_function(
         func=wait,
@@ -658,9 +620,10 @@ def create_decomposer_agent(
     decomposer_model: str | BaseChatModel,
     subagent_types: Sequence[SubagentType],
     *,
-    checkpointer: Checkpointer | None = None,
+    decomposer_system_prompt: str | SystemMessage | None = DECOMPOSER_SYSTEM_PROMPT,
     middleware: Sequence[AgentMiddleware] | None = None,
     context_schema: type[Any] | None = None,
+    checkpointer: Checkpointer | None = None,
     subagent_recursion_limit: int = 100,  # ~50 tool calls
 ) -> CompiledStateGraph:
     """
@@ -684,25 +647,25 @@ def create_decomposer_agent(
     Args:
         decomposer_model: The language model for the Decomposer agent.
         subagent_types: The available subagent types.
-        checkpointer: The checkpointer for the Decomposer agent.
+        decomposer_system_prompt: The system prompt for the Decomposer agent.
         middleware: Additional LangChain middleware for the Decomposer agent.
         context_schema: JSON-serializable runtime context schema passed through
             to `create_agent` and forwarded unchanged to every subagent run.
+        checkpointer: The checkpointer for the Decomposer agent.
         subagent_recursion_limit: Recursion limit set for subagents
     """
-    system_prompt = DECOMPOSER_SYSTEM_PROMPT
     decomposer_middelware = DecomposerAgentMiddleware(
         subagent_types, subagent_recursion_limit
     )
     agent = create_agent(
         model=decomposer_model,
         tools=[],
-        system_prompt=system_prompt,
+        system_prompt=decomposer_system_prompt,
         middleware=[
             decomposer_middelware,
             *(middleware or []),
         ],
-        checkpointer=checkpointer,
         context_schema=context_schema,
+        checkpointer=checkpointer,
     )
     return agent

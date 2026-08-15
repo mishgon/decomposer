@@ -16,6 +16,7 @@ from langchain_core.messages import message_to_dict
 from langchain_openrouter import ChatOpenRouter
 
 from decomposer.core import create_decomposer_agent
+from decomposer.prompts import DECOMPOSER_TEACHER_SYSTEM_PROMPT
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -254,6 +255,7 @@ def main() -> None:
                 }
                 for subagent_type_id, assistant_id, model_description in SUBAGENT_TYPES
             ],
+            decomposer_system_prompt=DECOMPOSER_TEACHER_SYSTEM_PROMPT,
         )
         state = asyncio.run(
             agent.ainvoke(

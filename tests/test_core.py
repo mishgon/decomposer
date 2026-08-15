@@ -1,7 +1,9 @@
 import asyncio
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import AsyncMock
 
+import decomposer.core as core
 from decomposer.core import (
     SubagentType,
     _build_spawn_subagent_tool,
@@ -151,6 +153,50 @@ def test_await_wait_stores_tool_calls_from_error_run() -> None:
         {"id": "run_a_call", "name": "resource_tool", "args": {"run": "run_a"}},
     ]
     assert subagent_run["report"]["content"] == "subagent failed"
+
+
+def test_await_wait_polls_until_a_run_completes(monkeypatch) -> None:
+    monkeypatch.setattr(core, "WAIT_POLL_SECONDS", 0.0)
+    client = SimpleNamespace(
+        runs=SimpleNamespace(
+            get=AsyncMock(
+                side_effect=[
+                    {
+                        "thread_id": "run_a_thread",
+                        "run_id": "run_a",
+                        "status": "running",
+                    },
+                    {
+                        "thread_id": "run_a_thread",
+                        "run_id": "run_a",
+                        "status": "success",
+                    },
+                ]
+            )
+        ),
+        threads=SimpleNamespace(
+            get_history=AsyncMock(
+                return_value=_CompletedThreads().get_history(
+                    thread_id="run_a_thread",
+                    limit=core.HISTORY_LIMIT,
+                    metadata={"run_id": "run_a"},
+                )
+            )
+        ),
+    )
+    tool = _build_wait_tool(_ClientCacheStub(async_client=client))
+    runtime = SimpleNamespace(
+        state={"subagent_runs": {"run_a": _subagent_run("run_a")}},
+        tool_call_id="wait_1",
+    )
+
+    assert tool.coroutine is not None
+    command = asyncio.run(tool.coroutine(runtime=runtime))
+
+    assert client.runs.get.await_count == 2
+    assert command.update["subagent_runs"]["run_a"]["report"]["content"] == (
+        "report from run_a"
+    )
 
 
 def _subagent_run(run_id: str) -> dict[str, Any]:
