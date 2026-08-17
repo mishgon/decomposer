@@ -73,8 +73,8 @@ class SubagentRun(TypedDict):
     thread_id: str
     run_id: str
     status: str
-    tool_calls: NotRequired[list[SubagentToolCall]]
     prompt: str
+    tool_calls: NotRequired[list[SubagentToolCall]]
     report: NotRequired[SubagentReport | None]
     # Zero-based order in which wait() returned this run's report.
     report_sequence_number: NotRequired[int]
