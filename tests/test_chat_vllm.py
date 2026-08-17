@@ -1,4 +1,5 @@
 import pytest
+from langchain_core.messages import AIMessage
 
 from decomposer.chat_vllm import ChatVLLM
 
@@ -33,10 +34,31 @@ def test_reasoning_round_trip() -> None:
 
     result = model._create_chat_result(_response())
     message = result.generations[0].message
-    assert message.additional_kwargs["reasoning"] == "reasoning"
+    assert message.additional_kwargs["reasoning_content"] == "reasoning"
+    assert message.content_blocks[0] == {
+        "type": "reasoning",
+        "reasoning": "reasoning",
+    }
 
     payload = model._get_request_payload([message])
     assert payload["messages"][0]["reasoning"] == "reasoning"
+
+
+def test_legacy_reasoning_round_trip() -> None:
+    model = ChatVLLM(
+        model="test",
+        api_key="test",
+        preserve_reasoning=True,
+        use_responses_api=False,
+    )
+    message = AIMessage(
+        content="answer",
+        additional_kwargs={"reasoning": "legacy reasoning"},
+    )
+
+    payload = model._get_request_payload([message])
+
+    assert payload["messages"][0]["reasoning"] == "legacy reasoning"
 
 
 def test_length_limit_is_an_error() -> None:

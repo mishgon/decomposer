@@ -49,7 +49,7 @@ class ChatVLLM(ChatOpenAI):
                 and isinstance(reasoning, str)
                 and reasoning
             ):
-                message.additional_kwargs["reasoning"] = reasoning
+                message.additional_kwargs["reasoning_content"] = reasoning
 
         return result
 
@@ -74,7 +74,9 @@ class ChatVLLM(ChatOpenAI):
             request_messages,
             strict=True,
         ):
-            reasoning = message.additional_kwargs.get("reasoning")
+            reasoning = message.additional_kwargs.get("reasoning_content")
+            if reasoning is None:
+                reasoning = message.additional_kwargs.get("reasoning")
             if (
                 isinstance(message, AIMessage)
                 and isinstance(reasoning, str)

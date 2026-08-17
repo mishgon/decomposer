@@ -35,6 +35,27 @@ def test_decomposer_delegates(monkeypatch) -> None:
         "run_id": "dummy-run",
         "status": "pending",
     }
+    client.runs.get.return_value = {
+        "thread_id": "dummy-thread",
+        "run_id": "dummy-run",
+        "status": "success",
+    }
+    input_message = {"type": "human", "content": "Say hello."}
+    client.threads.get_history.return_value = [
+        {
+            "metadata": {"source": "loop"},
+            "values": {
+                "messages": [
+                    input_message,
+                    {"type": "ai", "content": "hello", "tool_calls": []},
+                ]
+            },
+        },
+        {
+            "metadata": {"source": "input"},
+            "values": {"messages": [input_message]},
+        },
+    ]
     monkeypatch.setattr(
         "decomposer.core.get_sync_client",
         lambda **kwargs: client,
@@ -60,4 +81,41 @@ def test_decomposer_delegates(monkeypatch) -> None:
 
     client.runs.create.assert_called_once()
     assert result["subagent_runs"]["dummy-run"]["prompt"] == "Say hello."
+    assert result["subagent_runs"]["dummy-run"]["report"]["content"] == "hello"
+    assert result["messages"][-1].content == "dummy"
+
+
+def test_decomposer_allows_early_response(monkeypatch) -> None:
+    client = MagicMock()
+    client.threads.create.return_value = {"thread_id": "dummy-thread"}
+    client.runs.create.return_value = {
+        "run_id": "dummy-run",
+        "status": "pending",
+    }
+    monkeypatch.setattr(
+        "decomposer.core.get_sync_client",
+        lambda **kwargs: client,
+    )
+    agent = create_decomposer_agent(
+        DummyModel(
+            tool_calls=[
+                {
+                    "name": "spawn_subagent",
+                    "args": {
+                        "subagent_type_id": "dummy",
+                        "prompt": "Say hello.",
+                    },
+                    "id": "dummy-tool-call",
+                    "type": "tool_call",
+                }
+            ]
+        ),
+        SUBAGENT_TYPES,
+        allow_early_response=True,
+    )
+
+    result = agent.invoke({"messages": [{"role": "user", "content": "Hello"}]})
+
+    client.runs.get.assert_not_called()
+    assert result["subagent_runs"]["dummy-run"].get("report") is None
     assert result["messages"][-1].content == "dummy"

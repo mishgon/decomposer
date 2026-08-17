@@ -2,6 +2,7 @@ import json
 import time
 import asyncio
 import logging
+import uuid
 from typing import Annotated, Any, NotRequired, Sequence
 
 from langchain.agents import create_agent
@@ -13,10 +14,11 @@ from langchain.agents.middleware.types import (
 )
 from langchain.tools import ToolRuntime
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import SystemMessage, ToolMessage
+from langchain_core.messages import AIMessage, SystemMessage, ToolMessage
 from langchain_core.messages.utils import count_tokens_approximately
 from langchain_core.tools import StructuredTool
 from langgraph.graph.state import CompiledStateGraph
+from langgraph.runtime import Runtime
 from langgraph.types import Checkpointer, Command
 from langgraph_sdk import get_client, get_sync_client
 from langgraph_sdk.client import LangGraphClient, SyncLangGraphClient
@@ -597,6 +599,7 @@ class DecomposerAgentMiddleware(
         self,
         subagent_types: Sequence[SubagentType],
         subagent_recursion_limit: int,
+        allow_early_response: bool = False,
     ) -> None:
         super().__init__()
 
@@ -614,6 +617,48 @@ class DecomposerAgentMiddleware(
         self.tools = _build_decomposer_agent_tools(
             subagent_types, subagent_recursion_limit
         )
+        self.allow_early_response = allow_early_response
+
+    def after_model(
+        self,
+        state: DecomposerAgentState,
+        runtime: Runtime[ContextT],
+    ) -> dict[str, Any] | None:
+        message = state["messages"][-1]
+        subagent_runs = state.get("subagent_runs") or {}
+        if (
+            self.allow_early_response
+            or not isinstance(message, AIMessage)
+            or message.tool_calls
+            or all(run.get("report") is not None for run in subagent_runs.values())
+        ):
+            return None
+
+        wait_message = message.model_copy(
+            update={
+                "content": "",
+                "additional_kwargs": {
+                    "reasoning_content": "Let me wait for the remaining subagents.",
+                },
+                "tool_calls": [
+                    {
+                        "name": "wait",
+                        "args": {},
+                        "id": f"call_{uuid.uuid4().hex}",
+                        "type": "tool_call",
+                    }
+                ],
+                "invalid_tool_calls": [],
+            }
+        )
+        return {"messages": [wait_message]}
+
+    async def aafter_model(
+        self,
+        state: DecomposerAgentState,
+        runtime: Runtime[ContextT],
+    ) -> dict[str, Any] | None:
+        return self.after_model(state, runtime)
 
 
 def create_decomposer_agent(
@@ -625,6 +670,7 @@ def create_decomposer_agent(
     context_schema: type[Any] | None = None,
     checkpointer: Checkpointer | None = None,
     subagent_recursion_limit: int = 100,  # ~50 tool calls
+    allow_early_response: bool = False,
 ) -> CompiledStateGraph:
     """
     Create a Decomposer agent.
@@ -653,9 +699,11 @@ def create_decomposer_agent(
             to `create_agent` and forwarded unchanged to every subagent run.
         checkpointer: The checkpointer for the Decomposer agent.
         subagent_recursion_limit: Recursion limit set for subagents
+        allow_early_response: Whether the Decomposer may respond before collecting
+            reports from all spawned subagents.
     """
     decomposer_middelware = DecomposerAgentMiddleware(
-        subagent_types, subagent_recursion_limit
+        subagent_types, subagent_recursion_limit, allow_early_response
     )
     agent = create_agent(
         model=decomposer_model,

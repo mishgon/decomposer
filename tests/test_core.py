@@ -4,7 +4,9 @@ from typing import Any
 from unittest.mock import AsyncMock
 
 import decomposer.core as core
+from langchain_core.messages import AIMessage
 from decomposer.core import (
+    DecomposerAgentMiddleware,
     SubagentType,
     _build_spawn_subagent_tool,
     _build_wait_tool,
@@ -196,6 +198,70 @@ def test_await_wait_polls_until_a_run_completes(monkeypatch) -> None:
     assert client.runs.get.await_count == 2
     assert command.update["subagent_runs"]["run_a"]["report"]["content"] == (
         "report from run_a"
+    )
+
+
+def test_after_model_replaces_early_answer_and_reasoning_with_wait() -> None:
+    middleware = DecomposerAgentMiddleware([SUBAGENT_TYPE], 1, False)
+    message = AIMessage(
+        content="early answer",
+        additional_kwargs={"reasoning": "unfinished reasoning", "other": "value"},
+        id="message_1",
+    )
+
+    update = middleware.after_model(
+        {
+            "messages": [message],
+            "subagent_runs": {"run_a": _subagent_run("run_a")},
+        },
+        SimpleNamespace(),
+    )
+
+    wait_message = update["messages"][0]
+    assert wait_message.id == message.id
+    assert wait_message.content == ""
+    assert wait_message.tool_calls[0]["name"] == "wait"
+    assert wait_message.tool_calls[0]["args"] == {}
+    assert wait_message.additional_kwargs == {
+        "reasoning_content": "Let me wait for the remaining subagents.",
+    }
+
+
+def test_after_model_allows_answer_after_all_reports_are_collected() -> None:
+    middleware = DecomposerAgentMiddleware([SUBAGENT_TYPE], 1, False)
+    run = {
+        **_subagent_run("run_a"),
+        "report": {
+            "subagent_run_id": "run_a",
+            "status": "success",
+            "content": "done",
+        },
+    }
+
+    assert (
+        middleware.after_model(
+            {
+                "messages": [AIMessage(content="answer")],
+                "subagent_runs": {"run_a": run},
+            },
+            SimpleNamespace(),
+        )
+        is None
+    )
+
+
+def test_after_model_allows_early_response_when_configured() -> None:
+    middleware = DecomposerAgentMiddleware([SUBAGENT_TYPE], 1, True)
+
+    assert (
+        middleware.after_model(
+            {
+                "messages": [AIMessage(content="early answer")],
+                "subagent_runs": {"run_a": _subagent_run("run_a")},
+            },
+            SimpleNamespace(),
+        )
+        is None
     )
 
 
