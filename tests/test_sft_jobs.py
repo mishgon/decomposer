@@ -29,6 +29,7 @@ from training.sft.train import (
     _has_existing_run_output,
     _resolve_train_batch_config,
     _save_final_configuration,
+    _select_longest_by_token_length,
     _summarize_trainer_state,
 )
 
@@ -80,7 +81,7 @@ def test_sft_experiments_are_unique_and_register_retained_configs() -> None:
         False,
         True,
     }
-    assert len(experiments) == 4
+    assert len(experiments) == 6
     e2b_four_gpu = experiments[2]
     assert e2b_four_gpu.num_gpus == 4
     assert e2b_four_gpu.use_liger_kernel is True
@@ -89,10 +90,16 @@ def test_sft_experiments_are_unique_and_register_retained_configs() -> None:
     assert e4b_gb4.num_gpus == 4
     assert e4b_gb4.use_liger_kernel is True
     assert e4b_gb4.pytorch_cuda_alloc_conf == "expandable_segments:True"
-    assert {experiment.name for experiment in experiments[-2:]} == {
+    assert {experiment.name for experiment in experiments[2:]} == {
         "gemma4-e2b-nonthinking-4gpu-liger-workplace-26b-v3",
         "gemma4-e4b-nonthinking-4gpu-liger-workplace-26b-v3",
+        "gemma4-e4b-nonthinking-deepseek-e4b-v1-8k-smoke-4gpu",
+        "gemma4-e4b-nonthinking-deepseek-e4b-v1-8k-full-4gpu",
     }
+    for experiment in experiments[4:]:
+        assert experiment.num_gpus == 4
+        assert experiment.use_liger_kernel is True
+        assert experiment.pytorch_cuda_alloc_conf == "expandable_segments:True"
 
 
 def test_build_train_command_uses_torchrun_and_explicit_liger_mode() -> None:
@@ -347,6 +354,20 @@ def test_overlength_policy_refuses_to_empty_split() -> None:
         )
 
 
+def test_longest_sample_selection_happens_after_tokenization() -> None:
+    dataset = _tokenized_dataset(100, 400, 200, 400, 300)
+    selected = _select_longest_by_token_length(dataset, 4)
+    assert selected["id"] == ["example-1", "example-3", "example-4", "example-2"]
+    assert selected["_token_length"] == [400, 400, 300, 200]
+    assert _select_longest_by_token_length(dataset, None) is dataset
+
+
+@pytest.mark.parametrize("limit", [0, -1, True, 1.5])
+def test_longest_sample_selection_requires_positive_integer(limit: object) -> None:
+    with pytest.raises(ValueError, match="positive integer"):
+        _select_longest_by_token_length(_tokenized_dataset(100), limit)  # type: ignore[arg-type]
+
+
 def test_configure_sdpa_backends_disables_only_cudnn(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -509,6 +530,16 @@ def test_training_state_summary_reports_early_stop_and_best_checkpoint() -> None
             "gemma4_e4b_nonthinking_4gpu_liger_workplace_26b_v3.yaml",
             "gemma-4-E4B-it",
         ),
+        (
+            "gemma4_e4b_nonthinking_4gpu_liger_workplace_"
+            "deepseek_e4b_v1_8k_smoke.yaml",
+            "gemma-4-E4B-it",
+        ),
+        (
+            "gemma4_e4b_nonthinking_4gpu_liger_workplace_"
+            "deepseek_e4b_v1_8k.yaml",
+            "gemma-4-E4B-it",
+        ),
     ],
 )
 def test_sft_configs_have_clearml_project_and_model_tags(
@@ -532,6 +563,50 @@ def test_smoke_config_evaluates_clearml_metrics_after_one_step() -> None:
     assert config["training"]["eval_steps"] == 1
     assert config["training"]["global_batch_size"] == 2
     assert "gradient_accumulation_steps" not in config["training"]
+
+
+def test_e4b_deepseek_v1_8k_configs_are_oom_safe_and_non_thinking() -> None:
+    root = Path("training/sft/configs")
+    filenames = (
+        "gemma4_e4b_nonthinking_4gpu_liger_workplace_"
+        "deepseek_e4b_v1_8k_smoke.yaml",
+        "gemma4_e4b_nonthinking_4gpu_liger_workplace_deepseek_e4b_v1_8k.yaml",
+    )
+    smoke, full = [yaml.safe_load((root / filename).read_text()) for filename in filenames]
+
+    for config in (smoke, full):
+        data = config["data"]
+        training = config["training"]
+        assert "decomposer-workplace-deepseek-e4b-thinking/v1" in data["train_file"]
+        assert data["include_reasoning"] is False
+        assert data["exclude_overlength"] is True
+        assert data["error_on_truncation"] is True
+        assert data["max_train_samples"] is None
+        assert data["max_eval_samples"] is None
+        assert training["max_length"] == 8192
+        assert training["global_batch_size"] == 4
+        assert training["per_device_train_batch_size"] == 1
+        assert training["packing"] is False
+        assert training["use_liger_kernel"] is True
+        assert training["fsdp_config"]["activation_checkpointing"] is True
+        assert config["run"]["expected_world_size"] == 4
+        resolved, _ = _resolve_train_batch_config(training, world_size=4)
+        assert resolved["gradient_accumulation_steps"] == 1
+
+    assert smoke["training"]["max_steps"] == 1
+    assert smoke["data"]["longest_train_samples"] == 4
+    assert smoke["training"]["eval_strategy"] == "steps"
+    assert smoke["training"]["eval_steps"] == 1
+    assert smoke["training"]["save_strategy"] == "no"
+    assert full["training"]["num_train_epochs"] == 5
+    assert full["training"]["learning_rate"] == 1.0e-5
+    assert full["training"]["eval_strategy"] == "epoch"
+    assert full["training"]["save_strategy"] == "epoch"
+    assert full["training"]["load_best_model_at_end"] is True
+    assert full["run"]["early_stopping"] == {
+        "patience": 2,
+        "threshold": 0.0,
+    }
 
 
 def test_training_completion_requires_summary_and_final_weights(tmp_path: Path) -> None:

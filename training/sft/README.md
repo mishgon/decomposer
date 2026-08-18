@@ -67,6 +67,12 @@ One v3 training trace has 35,044 Gemma tokens. The v3 training configs set
 the dataset. The effective 32K split is therefore 1,885 train and 216
 validation traces; no trace is truncated.
 
+The partial DeepSeek-manager/E4B-thinking-subagent v1 release contains 934
+successful traces: 839 train and 95 validation. With teacher reasoning removed,
+the longest traces have 23,132 train tokens and 13,906 validation tokens. The
+8K E4B configs retain 827 train and 92 validation traces, explicitly record the
+12 train and three validation exclusions, and never truncate a trace.
+
 The output manifest records source hashes, reason-coded filtering counts,
 split keys, the system-prompt hash, the tool-schema hash, and generated-file
 hashes, canonical schema version, preparation Git revision, and portable
@@ -92,6 +98,31 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 uv run --group train \
   -m training.sft.train \
   --config training/sft/configs/gemma4_e4b_nonthinking_4gpu_liger_workplace_26b_v3.yaml
 ```
+
+For the 8K DeepSeek/E4B v1 run, first launch the one-step smoke experiment into
+the separate sanity artifact root:
+
+```bash
+uv run --with-requirements training/sft/requirements-mlspace.txt \
+  python -m training.sft.run_train_jobs \
+  --sanity-check \
+  --filter gemma4-e4b-nonthinking-deepseek-e4b-v1-8k-smoke-4gpu
+```
+
+After the smoke run succeeds, launch the full experiment:
+
+```bash
+uv run --with-requirements training/sft/requirements-mlspace.txt \
+  python -m training.sft.run_train_jobs \
+  --filter gemma4-e4b-nonthinking-deepseek-e4b-v1-8k-full-4gpu
+```
+
+Both use the student prompt, omit teacher reasoning, exclude traces longer than
+8,192 tokens, and train with four GPUs at global batch four without gradient
+accumulation. The smoke run tokenizes the complete release, selects the four
+longest retained train traces so every rank exercises one in the first global
+batch, evaluates after its single optimizer step, and exports a complete final
+checkpoint.
 
 The retained full-run configs are:
 

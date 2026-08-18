@@ -148,6 +148,22 @@ def _limit_dataset(dataset: Dataset, limit: int | None) -> Dataset:
     return dataset.select(range(min(limit, len(dataset))))
 
 
+def _select_longest_by_token_length(
+    dataset: Dataset,
+    limit: int | None,
+) -> Dataset:
+    """Select the longest examples after full tokenization and length filtering."""
+    if limit is None:
+        return dataset
+    if not isinstance(limit, int) or isinstance(limit, bool) or limit <= 0:
+        raise ValueError("data.longest_train_samples must be a positive integer.")
+    indices = sorted(
+        range(len(dataset)),
+        key=lambda index: (-int(dataset[index]["_token_length"]), index),
+    )
+    return dataset.select(indices[: min(limit, len(indices))])
+
+
 def _load_prepared_split(
     path: Path,
     *,
@@ -883,9 +899,14 @@ def main(argv: Sequence[str] | None = None) -> None:
         *train_overlength_exclusions,
         *validation_overlength_exclusions,
     ]
+    longest_train_samples = data_config.get("longest_train_samples")
+    train_dataset = _select_longest_by_token_length(
+        train_dataset,
+        longest_train_samples,
+    )
     train_token_stats = (
         _summarize_tokenization(train_dataset)
-        if train_overlength_exclusions
+        if train_overlength_exclusions or longest_train_samples is not None
         else raw_train_token_stats
     )
     validation_token_stats = (
