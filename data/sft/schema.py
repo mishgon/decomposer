@@ -279,6 +279,101 @@ def normalize_response_tools(tools: Any) -> list[JsonObject]:
     return normalized
 
 
+def sequentialize_parallel_spawn_calls(
+    messages: list[JsonObject],
+) -> tuple[list[JsonObject], int, int]:
+    """Convert parallel spawn batches into single-call assistant/tool turns.
+
+    Decomposer may emit several asynchronous ``spawn_subagent`` calls in one
+    assistant message. The canonical SFT format intentionally keeps one tool
+    call per assistant message, so each parallel batch is paired with its tool
+    results by call ID and emitted in the teacher's original call order.
+
+    Shared assistant content and teacher reasoning belong to the original
+    completion and are retained only on the first sequentialized turn.
+    """
+    normalized: list[JsonObject] = []
+    normalized_messages = 0
+    normalized_calls = 0
+    index = 0
+    while index < len(messages):
+        message = messages[index]
+        raw_calls = message.get("tool_calls") or []
+        if message.get("role") != "assistant" or not isinstance(raw_calls, list):
+            normalized.append(message)
+            index += 1
+            continue
+        if len(raw_calls) <= 1:
+            normalized.append(message)
+            index += 1
+            continue
+
+        calls: list[Mapping[str, Any]] = []
+        call_ids: list[str] = []
+        for raw_call in raw_calls:
+            call = require_mapping(
+                raw_call,
+                f"assistant message {index} tool call",
+                "excluded_invalid_tool_calls",
+            )
+            function = require_mapping(
+                call.get("function"),
+                f"assistant message {index} tool-call function",
+                "excluded_invalid_tool_calls",
+            )
+            call_id = call.get("id")
+            if (
+                call.get("type") != "function"
+                or function.get("name") != "spawn_subagent"
+                or not isinstance(call_id, str)
+                or not call_id
+            ):
+                raise TraceValidationError(
+                    "excluded_invalid_tool_calls",
+                    "Only valid spawn_subagent calls may share an assistant message; "
+                    "wait must be emitted alone.",
+                )
+            calls.append(call)
+            call_ids.append(call_id)
+        if len(call_ids) != len(set(call_ids)):
+            raise TraceValidationError(
+                "excluded_invalid_tool_calls",
+                f"Assistant message {index} contains duplicate tool-call IDs.",
+            )
+
+        result_end = index + 1
+        while result_end < len(messages) and messages[result_end].get("role") == "tool":
+            result_end += 1
+        results = messages[index + 1 : result_end]
+        result_ids = [result.get("tool_call_id") for result in results]
+        if (
+            len(results) != len(calls)
+            or not all(isinstance(result_id, str) for result_id in result_ids)
+            or len(result_ids) != len(set(result_ids))
+            or set(result_ids) != set(call_ids)
+        ):
+            raise TraceValidationError(
+                "excluded_invalid_tool_calls",
+                f"Parallel assistant message {index} must be followed by exactly one "
+                "matching tool result for every call.",
+            )
+        results_by_id = {str(result["tool_call_id"]): result for result in results}
+
+        for call_index, (call, call_id) in enumerate(zip(calls, call_ids)):
+            split_message = dict(message)
+            split_message["tool_calls"] = [dict(call)]
+            if call_index:
+                split_message["content"] = ""
+                split_message.pop("teacher_reasoning", None)
+            normalized.extend((split_message, results_by_id[call_id]))
+
+        normalized_messages += 1
+        normalized_calls += len(calls)
+        index = result_end
+
+    return normalized, normalized_messages, normalized_calls
+
+
 def validate_decomposer_messages(messages: list[JsonObject]) -> None:
     """Validate the benchmark-neutral Decomposer tool-calling trajectory."""
     if len(messages) < 3 or messages[0].get("role") != "system":

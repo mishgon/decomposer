@@ -22,12 +22,13 @@ from ..schema import (
     canonical_json,
     normalize_response_tools,
     require_mapping,
+    sequentialize_parallel_spawn_calls,
     sha256_file,
     sha256_text,
     validate_decomposer_messages,
 )
 
-ADAPTER_VERSION = 1
+ADAPTER_VERSION = 2
 
 
 @dataclass(frozen=True)
@@ -170,11 +171,6 @@ def _convert_message(message: Mapping[str, Any], index: int) -> JsonObject:
             "excluded_invalid_tool_calls",
             f"Assistant message {index} tool_calls must be a list.",
         )
-    if len(raw_tool_calls) > 1:
-        raise TraceValidationError(
-            "excluded_multiple_tool_calls",
-            f"Assistant message {index} contains {len(raw_tool_calls)} tool calls.",
-        )
     tool_calls = [
         _convert_tool_call(
             require_mapping(
@@ -194,7 +190,9 @@ def _convert_message(message: Mapping[str, Any], index: int) -> JsonObject:
     }
 
 
-def _convert_messages(messages: Any, system_prompt: str) -> list[JsonObject]:
+def _convert_messages(
+    messages: Any, system_prompt: str
+) -> tuple[list[JsonObject], int, int]:
     if not isinstance(messages, list) or not messages:
         raise TraceValidationError(
             "excluded_missing_final_state",
@@ -217,8 +215,11 @@ def _convert_messages(messages: Any, system_prompt: str) -> list[JsonObject]:
         {"role": "system", "content": system_prompt},
         *[_convert_message(message, index) for index, message in enumerate(messages)],
     ]
-    validate_decomposer_messages(converted)
-    return converted
+    normalized, normalized_messages, normalized_calls = (
+        sequentialize_parallel_spawn_calls(converted)
+    )
+    validate_decomposer_messages(normalized)
+    return normalized, normalized_messages, normalized_calls
 
 
 def _materialized_inputs(path: Path) -> dict[tuple[int, int], JsonObject]:
@@ -356,7 +357,9 @@ def read_nemo_gym_source(
                 response = require_mapping(
                     rollout.get("response"), "response", "excluded_invalid_tool_schema"
                 )
-                messages = _convert_messages(final_state.get("messages"), system_prompt)
+                messages, normalized_messages, normalized_calls = _convert_messages(
+                    final_state.get("messages"), system_prompt
+                )
                 tools = normalize_response_tools(response.get("tools"))
                 category = materialized_input.get("category")
                 environment = materialized_input.get("environment_name")
@@ -395,7 +398,19 @@ def read_nemo_gym_source(
                             reward=numeric_reward,
                             metrics={"reward": numeric_reward},
                         ),
-                        attributes={"category": category},
+                        attributes={
+                            "category": category,
+                            **(
+                                {
+                                    "parallel_spawn_normalization": {
+                                        "messages": normalized_messages,
+                                        "tool_calls": normalized_calls,
+                                    }
+                                }
+                                if normalized_messages
+                                else {}
+                            ),
+                        },
                     )
                 )
                 counts["eligible"] += 1

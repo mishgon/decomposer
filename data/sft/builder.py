@@ -162,6 +162,39 @@ def _record_category(record: CanonicalRollout) -> str:
     return category if isinstance(category, str) and category else "uncategorized"
 
 
+def _parallel_spawn_normalization_counts(
+    records: Sequence[CanonicalRollout],
+) -> JsonObject:
+    traces = 0
+    messages = 0
+    tool_calls = 0
+    for record in records:
+        value = record.attributes.get("parallel_spawn_normalization")
+        if value is None:
+            continue
+        if not isinstance(value, Mapping):
+            raise ValueError(
+                f"Rollout {record.id} has invalid parallel-spawn normalization metadata."
+            )
+        record_messages = value.get("messages")
+        record_tool_calls = value.get("tool_calls")
+        if (
+            not isinstance(record_messages, int)
+            or isinstance(record_messages, bool)
+            or record_messages <= 0
+            or not isinstance(record_tool_calls, int)
+            or isinstance(record_tool_calls, bool)
+            or record_tool_calls < 2 * record_messages
+        ):
+            raise ValueError(
+                f"Rollout {record.id} has invalid parallel-spawn normalization counts."
+            )
+        traces += 1
+        messages += record_messages
+        tool_calls += record_tool_calls
+    return {"traces": traces, "messages": messages, "tool_calls": tool_calls}
+
+
 def _allocate_prompt_fixed_split(
     records: Sequence[CanonicalRollout],
     *,
@@ -383,12 +416,16 @@ def prepare_dataset(
     for source_manifest in source_manifests:
         source_id = str(source_manifest["id"])
         counts = counts_by_source[source_id]
+        source_records = [
+            record for record in retained if record.source.source_id == source_id
+        ]
         counts["excluded_prompt_teacher_cap"] += cap_exclusions[source_id]
-        counts["included"] = sum(
-            record.source.source_id == source_id for record in retained
-        )
+        counts["included"] = len(source_records)
         _assert_filter_counts(counts, source_id)
         source_manifest["counts"] = _serialized_counts(counts)
+        source_manifest["normalization"] = _parallel_spawn_normalization_counts(
+            source_records
+        )
     if not retained:
         raise ValueError("No usable rollout traces were found.")
 
@@ -446,6 +483,10 @@ def prepare_dataset(
             "sidecar_failure_records": sum(
                 int(source["sidecar_failure_records"]) for source in source_manifests
             ),
+        },
+        "normalization": {
+            "strategy": "parallel_spawn_calls_to_single_call_turns",
+            **_parallel_spawn_normalization_counts(retained),
         },
         "split": split_manifest,
         "records": {

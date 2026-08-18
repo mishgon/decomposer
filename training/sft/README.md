@@ -39,19 +39,28 @@ Both specifications use exact reward `1.0`, prompt-fixed validation fraction
 same split. The builder requires a clean Git worktree and refuses to replace an
 existing `<dataset-id>/<version>` directory.
 
-The all-subagent source pair contains 2,497 rollouts. Canonical validation
-excludes 467 non-success rewards, 13 invalid tool-call traces, and seven traces
-with multiple calls in one assistant message. Its v3 release therefore has
-1,815 train and 195 validation traces. This intentionally drops 20 malformed
-traces that the original permissive dataset included.
+NeMo-Gym adapter version 2 preserves valid parallel delegation turns. When a
+teacher emits several `spawn_subagent` calls in one message, preparation pairs
+each call with its result by call ID and writes ordered assistant/tool pairs
+with one call per assistant message. Shared visible content and hidden teacher
+reasoning are retained only on the first pair. The manifest records the number
+of traces, messages, and calls normalized this way. Mixed `wait`/spawn batches
+remain invalid because `wait` must be emitted alone.
 
-The frozen 26B-A4B source pair contains 2,508 rollouts. Preparation excludes 398
-non-success rewards, two invalid tool-call traces, and six traces that emit
-multiple calls in one assistant message. The resulting prompt-fixed split has
-1,886 train and 216 validation traces. The GLM source ended terminally failed
-after 1,253 of 1,255 rollouts with two sidecar failures; its valid traces are
-included intentionally, and the v3 manifest pins the exact source hashes and
-counts. A completed GLM rerun must produce a new dataset version.
+The historical adapter-v1 all-subagent source pair contains 2,497 rollouts.
+Canonical validation excludes 467 non-success rewards, 13 invalid tool-call
+traces, and seven traces with multiple calls in one assistant message. Its v3
+release therefore has 1,815 train and 195 validation traces. This intentionally
+drops 20 malformed traces that the original permissive dataset included.
+
+The historical adapter-v1 frozen 26B-A4B source pair contains 2,508 rollouts.
+Preparation excludes 398 non-success rewards, two invalid tool-call traces, and
+six traces that emit multiple calls in one assistant message. The resulting
+prompt-fixed split has 1,886 train and 216 validation traces. The GLM source
+ended terminally failed after 1,253 of 1,255 rollouts with two sidecar failures;
+its valid traces are included intentionally, and the v3 manifest pins the exact
+source hashes and counts. A completed GLM rerun must produce a new dataset
+version.
 
 One v3 training trace has 35,044 Gemma tokens. The v3 training configs set
 `data.exclude_overlength: true`, so it is recorded and excluded before TRL sees

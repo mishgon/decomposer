@@ -275,12 +275,104 @@ def test_prepare_groups_teacher_variants_and_writes_manifest_v3(tmp_path: Path) 
     assert example["messages"][-1]["teacher_reasoning"] == "Report success."
     assert example["tools"][0]["function"]["name"] == "spawn_subagent"
     assert example["source"]["adapter"] == "nemo_gym"
+    assert example["source"]["adapter_version"] == 2
     assert example["source"]["benchmark"] == "workplace_assistant"
     assert example["outcome"]["success"] is True
     for filename in ("train.jsonl", "validation.jsonl"):
         metadata = prepared.manifest["prepared_files"][filename]
         assert len(metadata["sha256"]) == 64
         assert metadata["bytes"] > 0
+
+
+@pytest.mark.parametrize("call_count", [2, 3, 7])
+def test_prepare_sequentializes_parallel_spawn_calls(
+    tmp_path: Path, call_count: int
+) -> None:
+    rollout = _rollout(0)
+    messages = rollout["final_state"]["messages"]
+    first_call = messages[1]["tool_calls"][0]
+    calls = [
+        first_call,
+        *[
+            {
+                "name": "spawn_subagent",
+                "args": {
+                    "subagent_type_id": "small",
+                    "prompt": f"Do independent subtask {index}.",
+                },
+                "id": f"spawn-{index}",
+            }
+            for index in range(2, call_count + 1)
+        ],
+    ]
+    messages[1] = _ai(
+        "Delegate these in parallel.",
+        reasoning="These subtasks are independent.",
+        tool_calls=calls,
+    )
+    first_result = messages[2]
+    results = [
+        first_result,
+        *[
+            {
+                "type": "tool",
+                "content": json.dumps({"subagent_run_id": f"run-{index}"}),
+                "tool_call_id": f"spawn-{index}",
+                "name": "spawn_subagent",
+            }
+            for index in range(2, call_count + 1)
+        ],
+    ]
+    # Exercise ID-based matching: native results need not use call order.
+    messages[2:3] = list(reversed(results))
+
+    source = _source(tmp_path, "teacher", [rollout], [_materialized(0)])
+    prepared = _prepare_fixture_dataset([source], tmp_path / "prepared")
+    records = _read_jsonl(prepared.train_path) + _read_jsonl(prepared.validation_path)
+    assert len(records) == 1
+    record = records[0]
+    spawn_assistant_indices = [
+        index
+        for index, message in enumerate(record["messages"])
+        if message["role"] == "assistant"
+        and message.get("tool_calls")
+        and message["tool_calls"][0]["function"]["name"] == "spawn_subagent"
+    ]
+    assert len(spawn_assistant_indices) == call_count
+    spawn_messages = [record["messages"][index] for index in spawn_assistant_indices]
+    expected_ids = [call["id"] for call in calls]
+    assert [
+        message["tool_calls"][0]["id"] for message in spawn_messages
+    ] == expected_ids
+    assert [
+        record["messages"][index + 1]["tool_call_id"]
+        for index in spawn_assistant_indices
+    ] == expected_ids
+    assert spawn_messages[0]["content"] == "Delegate these in parallel."
+    assert spawn_messages[0]["teacher_reasoning"] == ("These subtasks are independent.")
+    assert [message["content"] for message in spawn_messages[1:]] == [""] * (
+        call_count - 1
+    )
+    assert all("teacher_reasoning" not in message for message in spawn_messages[1:])
+    assert record["attributes"]["parallel_spawn_normalization"] == {
+        "messages": 1,
+        "tool_calls": call_count,
+    }
+
+    assert prepared.manifest["preparation"]["adapter_versions"]["nemo_gym"] == 2
+    assert prepared.manifest["normalization"] == {
+        "strategy": "parallel_spawn_calls_to_single_call_turns",
+        "traces": 1,
+        "messages": 1,
+        "tool_calls": call_count,
+    }
+    assert prepared.manifest["sources"][0]["normalization"] == {
+        "traces": 1,
+        "messages": 1,
+        "tool_calls": call_count,
+    }
+    assert prepared.manifest["filtering"]["included"] == 1
+    assert prepared.manifest["filtering"]["excluded_multiple_tool_calls"] == 0
 
 
 def test_prepare_is_reproducible(tmp_path: Path) -> None:
@@ -522,8 +614,8 @@ def test_prepare_excludes_malformed_successful_traces_by_reason(tmp_path: Path) 
     assert filtering["excluded_invalid_agent_ref"] == 1
     assert filtering["excluded_missing_final_state"] == 1
     assert filtering["excluded_empty_training_target"] == 1
-    assert filtering["excluded_invalid_tool_calls"] == 1
-    assert filtering["excluded_multiple_tool_calls"] == 1
+    assert filtering["excluded_invalid_tool_calls"] == 2
+    assert filtering["excluded_multiple_tool_calls"] == 0
     assert filtering["excluded_prompt_mismatch"] == 1
     assert filtering["excluded_invalid_tool_schema"] == 1
     assert filtering["excluded_reward"] == 1
@@ -679,6 +771,19 @@ def test_prepare_refuses_overwrite_and_bad_materialized_source(tmp_path: Path) -
                 0
             ].update({"name": "spinvoke"}),
             "invalid name or arguments",
+        ),
+        (
+            lambda rollout: rollout["final_state"]["messages"][1]["tool_calls"].append(
+                {
+                    "name": "spawn_subagent",
+                    "args": {
+                        "subagent_type_id": "small",
+                        "prompt": "Missing result.",
+                    },
+                    "id": "missing-result",
+                }
+            ),
+            "exactly one matching tool result",
         ),
     ],
 )

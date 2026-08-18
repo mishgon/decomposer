@@ -49,6 +49,20 @@ def test_gemma4_training_template_preserves_render_and_masks_assistant(
     }
     if include_reasoning:
         assistant_call["reasoning"] = "ASSISTANT_PRIVATE_REASONING"
+    second_assistant_call = {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [
+            {
+                "type": "function",
+                "id": "call-2",
+                "function": {
+                    "name": "spawn_subagent",
+                    "arguments": {"prompt": "SECOND_ASSISTANT_TOOL_ARGUMENT"},
+                },
+            }
+        ],
+    }
     messages = [
         {"role": "system", "content": "SYSTEM_SECRET"},
         {"role": "user", "content": "USER_SECRET"},
@@ -58,6 +72,13 @@ def test_gemma4_training_template_preserves_render_and_masks_assistant(
             "name": "spawn_subagent",
             "tool_call_id": "call-1",
             "content": "TOOL_REPORT_SECRET",
+        },
+        second_assistant_call,
+        {
+            "role": "tool",
+            "name": "spawn_subagent",
+            "tool_call_id": "call-2",
+            "content": "SECOND_TOOL_REPORT_SECRET",
         },
         {"role": "assistant", "content": "ASSISTANT_FINAL", "tool_calls": []},
     ]
@@ -93,14 +114,20 @@ def test_gemma4_training_template_preserves_render_and_masks_assistant(
     )
     mask = encoded["assistant_masks"]
     supervised = tokenizer.decode(
-        [token for token, is_assistant in zip(encoded["input_ids"], mask) if is_assistant]
+        [
+            token
+            for token, is_assistant in zip(encoded["input_ids"], mask)
+            if is_assistant
+        ]
     )
     assert "ASSISTANT_TOOL_ARGUMENT" in supervised
+    assert "SECOND_ASSISTANT_TOOL_ARGUMENT" in supervised
     assert "ASSISTANT_NARRATION" in supervised
     assert "ASSISTANT_FINAL" in supervised
     assert "SYSTEM_SECRET" not in supervised
     assert "USER_SECRET" not in supervised
     assert "TOOL_REPORT_SECRET" not in supervised
+    assert "SECOND_TOOL_REPORT_SECRET" not in supervised
     assert ("ASSISTANT_PRIVATE_REASONING" in supervised) is include_reasoning
 
 
