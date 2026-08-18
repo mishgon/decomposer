@@ -5,6 +5,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+import yaml
 
 from gyms.workplace_assistant import experiments
 from gyms.workplace_assistant import prepare as prepare_module
@@ -33,6 +34,22 @@ def test_registry_is_global_and_unique() -> None:
         "decomposer",
         "simple",
     }
+
+
+def test_decomposer_generation_profiles_use_teacher_prompt() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    for experiment in DECOMPOSER_EXPERIMENTS:
+        config = yaml.safe_load(
+            (
+                repo_root
+                / "gyms"
+                / "workplace_assistant"
+                / "configs"
+                / experiment.gym_config_filename
+            ).read_text()
+        )
+        agent = config["decomposer"]["responses_api_agents"]["decomposer_agent"]
+        assert agent["decomposer_system_prompt_profile"] == "teacher"
 
 
 def test_selectors_form_a_deduplicated_registry_ordered_union() -> None:

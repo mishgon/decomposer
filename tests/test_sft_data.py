@@ -8,6 +8,10 @@ from pathlib import Path
 import pytest
 import yaml
 from datasets import Dataset
+from decomposer.prompts import (
+    DECOMPOSER_SYSTEM_PROMPT,
+    DECOMPOSER_TEACHER_SYSTEM_PROMPT,
+)
 from pydantic import ValidationError
 
 from data.sft.builder import LoadedBuildSpec, load_build_spec, prepare_dataset
@@ -265,6 +269,8 @@ def test_prepare_groups_teacher_variants_and_writes_manifest_v3(tmp_path: Path) 
 
     example = train[0]
     assert example["messages"][0]["role"] == "system"
+    assert example["messages"][0]["content"] == DECOMPOSER_SYSTEM_PROMPT
+    assert example["messages"][0]["content"] != DECOMPOSER_TEACHER_SYSTEM_PROMPT
     assert example["messages"][1]["role"] == "user"
     assert example["messages"][-1]["teacher_reasoning"] == "Report success."
     assert example["tools"][0]["function"]["name"] == "spawn_subagent"

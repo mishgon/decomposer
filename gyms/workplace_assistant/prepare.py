@@ -26,7 +26,6 @@ from gyms.workplace_assistant.experiments import (  # noqa: E402
     SPLIT_ROWS,
     UV_BIN,
     UV_CACHE,
-    DecomposerExperiment,
     Experiment,
     SimpleExperiment,
     collect_experiments,

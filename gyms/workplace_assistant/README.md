@@ -33,6 +33,10 @@ The local runner does not submit an MLSpace job. It starts the selected model
 services, agent service, and Gym servers on the current machine, performs one
 Gym evaluation, validates the output, and stops every child process.
 
+Decomposer generation profiles select the long teacher system prompt validated
+by Toolathlon Gym. Canonical SFT releases replace it with the short student
+prompt used by trained Decomposer models; simple-agent runs are unaffected.
+
 ```bash
 # Simple agent backed by one local policy vLLM.
 .venv/bin/python -m gyms.workplace_assistant.run \
