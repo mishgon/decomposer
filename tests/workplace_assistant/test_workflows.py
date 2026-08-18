@@ -592,5 +592,6 @@ def test_named_sft_specs_are_gym_owned() -> None:
     assert set(prepare_module.SFT_SPECS) == {
         "workplace-all-v3",
         "workplace-26b-nonthinking-v3",
+        "workplace-deepseek-e4b-thinking-v1",
     }
     assert all((spec_root / filename).is_file() for filename in prepare_module.SFT_SPECS.values())

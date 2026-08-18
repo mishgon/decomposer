@@ -115,6 +115,9 @@ uv run --group train python -m gyms.workplace_assistant.prepare sft \
 
 uv run --group train python -m gyms.workplace_assistant.prepare sft \
   --dataset workplace-26b-nonthinking-v3
+
+uv run --group train python -m gyms.workplace_assistant.prepare sft \
+  --dataset workplace-deepseek-e4b-thinking-v1
 ```
 
 ## Artifact layout

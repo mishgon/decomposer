@@ -42,6 +42,7 @@ AGENT_REF = {"type": "responses_api_agents", "name": "decomposer"}
 SFT_SPECS = {
     "workplace-all-v3": "workplace_all_v3.yaml",
     "workplace-26b-nonthinking-v3": "workplace_26b_nonthinking_v3.yaml",
+    "workplace-deepseek-e4b-thinking-v1": "workplace_deepseek_e4b_thinking_v1.yaml",
 }
 
 
