@@ -19,7 +19,9 @@ from gyms.workplace_assistant.experiments import (
     SimpleExperiment,
     collect_experiments,
     completion_marker,
+    decomposer_prompt_profile,
     get_experiment,
+    job_description,
     models_for_experiment,
     output_dir,
     run_name,
@@ -36,7 +38,7 @@ def test_registry_is_global_and_unique() -> None:
     }
 
 
-def test_decomposer_generation_profiles_use_teacher_prompt() -> None:
+def test_decomposer_base_profiles_use_student_prompt() -> None:
     repo_root = Path(__file__).resolve().parents[2]
     for experiment in DECOMPOSER_EXPERIMENTS:
         config = yaml.safe_load(
@@ -49,7 +51,7 @@ def test_decomposer_generation_profiles_use_teacher_prompt() -> None:
             ).read_text()
         )
         agent = config["decomposer"]["responses_api_agents"]["decomposer_agent"]
-        assert agent["decomposer_system_prompt_profile"] == "teacher"
+        assert agent["decomposer_system_prompt_profile"] == "student"
 
 
 def test_selectors_form_a_deduplicated_registry_ordered_union() -> None:
@@ -67,15 +69,56 @@ def test_selectors_form_a_deduplicated_registry_ordered_union() -> None:
 
 
 def test_split_repeat_and_smoke_paths_are_isolated() -> None:
-    experiment = get_experiment("qwen35-2b-base-non-thinking")
-    assert run_name(experiment) == experiment.name
-    assert run_name(experiment, 5) == f"{experiment.name}-n5"
-    assert output_dir(experiment, "train", 5).parts[-2:] == (
+    simple = get_experiment("qwen35-2b-base-non-thinking")
+    decomposer = get_experiment("glm-5-2-gemma4-26b-a4b-non-thinking")
+    assert run_name(simple) == simple.name
+    assert run_name(simple, 5) == f"{simple.name}-n5"
+    assert output_dir(simple, "train", 5, purpose="evaluation").parts[-2:] == (
         "train",
-        f"{experiment.name}-n5",
+        f"{simple.name}-n5",
     )
-    assert output_dir(experiment, "validation", 5, 2).name == "smoke_2"
-    assert completion_marker(experiment, "validation", 5, 2).name == ".eval_done.json"
+    teacher = output_dir(decomposer, "train", 3, purpose="trace-generation")
+    student = output_dir(decomposer, "train", 3, purpose="evaluation")
+    assert teacher.parts[-2:] == ("train", f"{decomposer.name}-n3")
+    assert student.parts[-3:] == (
+        "train",
+        "evaluation",
+        f"{decomposer.name}-n3",
+    )
+    assert (
+        completion_marker(
+            decomposer,
+            "validation",
+            5,
+            2,
+            purpose="evaluation",
+        ).name
+        == ".eval_done.json"
+    )
+
+
+def test_run_purpose_controls_prompt_and_preserves_teacher_job_identity() -> None:
+    decomposer = get_experiment("glm-5-2-gemma4-26b-a4b-non-thinking")
+    simple = get_experiment("gemma4-e2b-it-non-thinking")
+    assert decomposer_prompt_profile("trace-generation") == "teacher"
+    assert decomposer_prompt_profile("evaluation") == "student"
+    assert job_description(
+        decomposer,
+        "train",
+        3,
+        purpose="trace-generation",
+    ) == (
+        "workplace-assistant-train decomposer-agent "
+        "glm-5-2-gemma4-26b-a4b-non-thinking-n3"
+    )
+    assert "train-evaluation" in job_description(
+        decomposer,
+        "train",
+        3,
+        purpose="evaluation",
+    )
+    with pytest.raises(ValueError, match="only supported for Decomposer"):
+        output_dir(simple, "train", purpose="trace-generation")
 
 
 def test_live_allocation_instance_types_are_single_source_of_truth() -> None:
@@ -135,6 +178,7 @@ def test_deepseek_e4b_thinking_profile_is_single_type_and_single_gpu() -> None:
     payload = run_eval.build_payload(
         experiment,
         repo_root,
+        purpose="trace-generation",
         split="train",
         num_repeats=3,
         limit=None,
@@ -146,10 +190,15 @@ def test_deepseek_e4b_thinking_profile_is_single_type_and_single_gpu() -> None:
         openrouter_key="secret",
     )
     assert payload["instance_type"] == INSTANCE_TYPES_BY_NUM_GPUS[1]
+    assert "--purpose trace-generation" in payload["script"]
     assert "--num-repeats 3" in payload["script"]
     assert "deepseek-v4-flash-0731-gemma4-e4b-thinking-n3" in payload[
         "job_desc"
     ]
+    assert payload["job_desc"] == (
+        "workplace-assistant-train decomposer-agent "
+        "deepseek-v4-flash-0731-gemma4-e4b-thinking-n3 #alice"
+    )
 
 
 def test_simple_command_uses_local_python_supervisor_not_external_shell() -> None:
@@ -164,6 +213,7 @@ def test_simple_command_uses_local_python_supervisor_not_external_shell() -> Non
     start = run_module.gym_start_command(
         repo_root,
         experiment,
+        purpose="evaluation",
         gym_bin=Path("/gym"),
         component_root=Path("/components"),
         logs=Path("/logs"),
@@ -171,6 +221,30 @@ def test_simple_command_uses_local_python_supervisor_not_external_shell() -> Non
     assert start[:4] == ["/gym", "env", "start", "--environment"]
     assert "run_gym_baseline_job.sh" not in " ".join(start)
     assert "workplace_assistant" in start
+
+
+def test_decomposer_gym_start_overrides_prompt_for_run_purpose() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    experiment = get_experiment("glm-5-2-gemma4-26b-a4b-non-thinking")
+    commands = {
+        purpose: run_module.gym_start_command(
+            repo_root,
+            experiment,
+            purpose=purpose,
+            gym_bin=Path("/gym"),
+            component_root=Path("/components"),
+            logs=Path("/logs"),
+        )
+        for purpose in ("trace-generation", "evaluation")
+    }
+    assert any(
+        argument.endswith("decomposer_system_prompt_profile=teacher")
+        for argument in commands["trace-generation"]
+    )
+    assert any(
+        argument.endswith("decomposer_system_prompt_profile=student")
+        for argument in commands["evaluation"]
+    )
 
 
 def test_agent_profiles_share_one_gym_eval_builder() -> None:
@@ -250,6 +324,7 @@ def test_local_dry_plan_routes_every_output_and_reports_gpu(
     plan = run_module._dry_plan(
         repo_root,
         experiment,
+        "trace-generation",
         "train",
         3,
         1,
@@ -257,6 +332,8 @@ def test_local_dry_plan_routes_every_output_and_reports_gpu(
         ("2",),
     )
     assert plan["output_dir"] == str(tmp_path)
+    assert plan["purpose"] == "trace-generation"
+    assert plan["decomposer_system_prompt_profile"] == "teacher"
     assert plan["gpu_assignments"] == {"subagent_vllm_8021": "2"}
     assert str(tmp_path / "rollouts.jsonl") in plan["gym_eval"]
     assert str(tmp_path / "logs" / "gym_components") in plan["gym_start"]
@@ -390,16 +467,67 @@ def test_force_archives_previous_attempt(tmp_path: Path) -> None:
     assert not (output / "run_status.json").exists()
 
 
+def test_run_commands_require_explicit_purpose() -> None:
+    with pytest.raises(SystemExit):
+        run_module.build_parser().parse_args(["--experiment", "example"])
+    with pytest.raises(SystemExit):
+        run_eval.build_parser().parse_args(
+            ["--experiment", "example", "--author-name", "alice"]
+        )
+
+
+def test_legacy_teacher_output_cannot_be_reused_for_student_evaluation(
+    tmp_path: Path,
+) -> None:
+    experiment = get_experiment("glm-5-2-gemma4-26b-a4b-non-thinking")
+    (tmp_path / ".eval_done.json").write_text("{}")
+    with pytest.raises(RuntimeError, match="purpose='trace-generation'"):
+        run_module.validate_existing_attempt_identity(
+            tmp_path,
+            experiment,
+            purpose="evaluation",
+            split="train",
+            num_repeats=1,
+            limit=None,
+            force=False,
+        )
+    run_module.validate_existing_attempt_identity(
+        tmp_path,
+        experiment,
+        purpose="trace-generation",
+        split="train",
+        num_repeats=1,
+        limit=None,
+        force=False,
+    )
+    run_module.validate_existing_attempt_identity(
+        tmp_path,
+        experiment,
+        purpose="evaluation",
+        split="train",
+        num_repeats=1,
+        limit=None,
+        force=True,
+    )
+
+
 def test_existing_completion_marker_skips_without_new_manifest(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     monkeypatch.setattr(experiments, "RESULTS_ROOT", tmp_path)
     experiment = get_experiment("gemma4-e2b-it-non-thinking")
-    marker = completion_marker(experiment, "train")
+    marker = completion_marker(experiment, "train", purpose="evaluation")
     marker.parent.mkdir(parents=True)
     marker.write_text("{}")
     args = run_module.build_parser().parse_args(
-        ["--experiment", experiment.name, "--split", "train"]
+        [
+            "--experiment",
+            experiment.name,
+            "--purpose",
+            "evaluation",
+            "--split",
+            "train",
+        ]
     )
     assert run_module.execute(Path(__file__).resolve().parents[2], args) == 0
     assert "Skip (completed)" in capsys.readouterr().out
@@ -416,6 +544,8 @@ def test_custom_output_completion_marker_is_isolated(
         [
             "--experiment",
             experiment.name,
+            "--purpose",
+            "evaluation",
             "--split",
             "train",
             "--output-dir",
@@ -435,6 +565,7 @@ def test_job_payload_uses_shared_runner_and_redacts_decomposer_secrets(
     payload = run_eval.build_payload(
         experiment,
         repo_root,
+        purpose="evaluation",
         split="train",
         num_repeats=1,
         limit=1,
@@ -446,8 +577,10 @@ def test_job_payload_uses_shared_runner_and_redacts_decomposer_secrets(
         openrouter_key="secret",
     )
     assert "gyms/workplace_assistant/run.py" in payload["script"]
+    assert "--purpose evaluation" in payload["script"]
     assert "--output-dir" not in payload["script"]
     assert payload["instance_type"] == INSTANCE_TYPES_BY_NUM_GPUS[1]
+    assert "workplace-assistant-train-evaluation" in payload["job_desc"]
     assert payload["job_desc"].endswith("#alice")
     redacted = run_eval.redact_payload(payload)
     assert redacted["env_variables"]["OPENROUTER_API_KEY_DECOMPOSER"] == "<redacted>"

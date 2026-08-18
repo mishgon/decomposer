@@ -33,13 +33,16 @@ The local runner does not submit an MLSpace job. It starts the selected model
 services, agent service, and Gym servers on the current machine, performs one
 Gym evaluation, validates the output, and stops every child process.
 
-Decomposer generation profiles select the long teacher system prompt validated
-by Toolathlon Gym. Canonical SFT releases replace it with the short student
-prompt used by trained Decomposer models; simple-agent runs are unaffected.
+Every run declares its intent explicitly. `--purpose trace-generation` selects
+the long teacher prompt and is available only for Decomposer experiments;
+`--purpose evaluation` selects the short student prompt. Canonical SFT releases
+also replace the teacher prompt with the student prompt. Simple-agent
+evaluations are unaffected by prompt selection.
 
 ```bash
 # Simple agent backed by one local policy vLLM.
 .venv/bin/python -m gyms.workplace_assistant.run \
+  --purpose evaluation \
   --experiment gemma4-e2b-it-non-thinking \
   --split train
 
@@ -47,17 +50,20 @@ prompt used by trained Decomposer models; simple-agent runs are unaffected.
 OPENROUTER_API_KEY_DECOMPOSER=... \
 HTTPS_PROXY=... \
 .venv/bin/python -m gyms.workplace_assistant.run \
+  --purpose trace-generation \
   --experiment glm-5-2-gemma4-26b-a4b-non-thinking \
   --split train
 
 # One-task local smoke run. There is no automatic smoke pass.
 .venv/bin/python -m gyms.workplace_assistant.run \
+  --purpose evaluation \
   --experiment gemma4-e2b-it-non-thinking \
   --split validation \
   --limit 1
 
 # Isolate a local run from shared MLSpace outputs and select physical GPU 2.
 .venv/bin/python -m gyms.workplace_assistant.run \
+  --purpose trace-generation \
   --experiment deepseek-v4-flash-0731-gemma4-e4b-thinking \
   --split train \
   --num-repeats 3 \
@@ -80,12 +86,14 @@ inside each worker. Run it with the Python environment that provides `mls`:
 MLSPY=/mnt/shared_ru.ml.SZ-5_000264/sukhorukov/.venv-mls/bin/python
 
 $MLSPY -m gyms.workplace_assistant.run_eval \
+  --purpose evaluation \
   --experiment gemma4-e2b-it-non-thinking \
   --split train \
   --author-name sukhorukov \
   --dry
 
 $MLSPY -m gyms.workplace_assistant.run_eval \
+  --purpose evaluation \
   --filter qwen35 \
   --split validation \
   --author-name sukhorukov
@@ -116,7 +124,8 @@ All generated data is outside the worktree under
 
 ```text
 evaluation/data/workplace_assistant/       source files and preparation manifests
-evaluation/results/<split>/<run-name>/     rollouts, logs, status, completion marker
+evaluation/results/<split>/<run-name>/     teacher traces and simple-agent evaluations
+evaluation/results/<split>/evaluation/     student-prompt Decomposer evaluations
 datasets/sft/<dataset-id>/<version>/        immutable canonical SFT releases
 venvs/gym/<lock-hash>/                      shared Gym CLI runtime
 venvs/workplace-assistant/<lock-hash>/      shared Gym component runtimes

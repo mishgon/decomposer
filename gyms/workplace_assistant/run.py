@@ -29,6 +29,7 @@ from gyms.workplace_assistant.experiments import (  # noqa: E402
     ARTIFACTS_ROOT,
     HF_HOME,
     PROJECT_VENV,
+    RUN_PURPOSES,
     SPLITS,
     SPLIT_ROWS,
     UV_BIN,
@@ -36,8 +37,10 @@ from gyms.workplace_assistant.experiments import (  # noqa: E402
     DecomposerExperiment,
     Experiment,
     ModelServer,
+    RunPurpose,
     SimpleExperiment,
     component_venv_root,
+    decomposer_prompt_profile,
     decomposer_dataset,
     get_experiment,
     gym_venv,
@@ -47,6 +50,7 @@ from gyms.workplace_assistant.experiments import (  # noqa: E402
     run_name,
     source_dataset,
     validate_num_repeats,
+    validate_purpose_for_experiment,
 )
 
 
@@ -252,10 +256,12 @@ def gym_start_command(
     local_repo: Path,
     experiment: Experiment,
     *,
+    purpose: RunPurpose,
     gym_bin: Path,
     component_root: Path,
     logs: Path,
 ) -> list[str]:
+    validate_purpose_for_experiment(experiment, purpose)
     common = [
         "+head_server.host=127.0.0.1",
         "+head_server.port=11000",
@@ -274,7 +280,20 @@ def gym_start_command(
             / "configs"
             / experiment.gym_config_filename
         )
-        return [str(gym_bin), "env", "start", "--config", str(config), *common]
+        prompt_profile = decomposer_prompt_profile(purpose)
+        prompt_override = (
+            "++decomposer.responses_api_agents.decomposer_agent."
+            f"decomposer_system_prompt_profile={prompt_profile}"
+        )
+        return [
+            str(gym_bin),
+            "env",
+            "start",
+            "--config",
+            str(config),
+            prompt_override,
+            *common,
+        ]
     return [
         str(gym_bin),
         "env",
@@ -482,6 +501,85 @@ def archive_attempt(directory: Path) -> Path | None:
     return archive
 
 
+def _legacy_purpose(experiment: Experiment) -> RunPurpose:
+    if isinstance(experiment, DecomposerExperiment):
+        return "trace-generation"
+    return "evaluation"
+
+
+def _attempt_metadata(directory: Path) -> dict[str, Any] | None:
+    for filename in (".eval_done.json", "run_status.json"):
+        path = directory / filename
+        if not path.is_file():
+            continue
+        try:
+            value = json.loads(path.read_text())
+        except json.JSONDecodeError as error:
+            raise RuntimeError(f"Invalid existing run metadata: {path}") from error
+        if not isinstance(value, dict):
+            raise RuntimeError(f"Existing run metadata must be an object: {path}")
+        return value
+    return None
+
+
+def validate_existing_attempt_identity(
+    directory: Path,
+    experiment: Experiment,
+    *,
+    purpose: RunPurpose,
+    split: str,
+    num_repeats: int,
+    limit: int | None,
+    force: bool,
+) -> None:
+    if not directory.is_dir() or force:
+        return
+    entries = [path for path in directory.iterdir() if path.name != "attempts"]
+    if not entries:
+        return
+    metadata = _attempt_metadata(directory)
+    if metadata is None:
+        raise RuntimeError(
+            f"Existing output has no run identity metadata: {directory}. "
+            "Use a different --output-dir or pass --force to archive it."
+        )
+
+    existing_purpose = metadata.get("purpose", _legacy_purpose(experiment))
+    mismatches: list[str] = []
+    expected = {
+        "experiment": experiment.name,
+        "split": split,
+        "num_repeats": num_repeats,
+        "limit": limit,
+        "purpose": purpose,
+    }
+    observed = {**metadata, "purpose": existing_purpose}
+    for field, expected_value in expected.items():
+        if field in observed and observed[field] != expected_value:
+            mismatches.append(
+                f"{field}={observed[field]!r} (requested {expected_value!r})"
+            )
+
+    if isinstance(experiment, DecomposerExperiment):
+        existing_profile = metadata.get(
+            "decomposer_system_prompt_profile",
+            "teacher" if "purpose" not in metadata else None,
+        )
+        expected_profile = decomposer_prompt_profile(purpose)
+        if existing_profile != expected_profile:
+            mismatches.append(
+                "decomposer_system_prompt_profile="
+                f"{existing_profile!r} (requested {expected_profile!r})"
+            )
+
+    if mismatches:
+        raise RuntimeError(
+            f"Existing output identity does not match this run: {directory}: "
+            + "; ".join(mismatches)
+            + ". Use a different --output-dir or pass --force to archive it."
+        )
+
+
 def _base_environment(
     local_repo: Path, experiment: Experiment, run_identity: str
 ) -> dict[str, str]:
@@ -546,12 +644,14 @@ def _base_environment(
 def _dry_plan(
     local_repo: Path,
     experiment: Experiment,
+    purpose: RunPurpose,
     split: str,
     num_repeats: int,
     limit: int | None,
     directory: Path,
     visible_devices: tuple[str, ...],
 ) -> dict[str, Any]:
+    validate_purpose_for_experiment(experiment, purpose)
     logs = directory / "logs"
     gym_bin = gym_venv(local_repo) / "bin" / "gym"
     if isinstance(experiment, SimpleExperiment):
@@ -570,15 +670,22 @@ def _dry_plan(
         }
     rollout_path = directory / "rollouts.jsonl"
     return {
+        "decomposer_system_prompt_profile": (
+            decomposer_prompt_profile(purpose)
+            if isinstance(experiment, DecomposerExperiment)
+            else None
+        ),
         "experiment": experiment.name,
         "gpu_assignments": gpu_assignments,
         "kind": experiment.kind,
+        "purpose": purpose,
         "split": split,
         "services": [shlex.join(command) for command in services],
         "gym_start": shlex.join(
             gym_start_command(
                 local_repo,
                 experiment,
+                purpose=purpose,
                 gym_bin=gym_bin,
                 component_root=component_venv_root(local_repo),
                 logs=logs,
@@ -625,12 +732,19 @@ def selected_cuda_devices(
 def selected_output_dir(experiment: Experiment, args: argparse.Namespace) -> Path:
     if args.output_dir is not None:
         return args.output_dir.expanduser().resolve()
-    return output_dir(experiment, args.split, args.num_repeats, args.limit)
+    return output_dir(
+        experiment,
+        args.split,
+        args.num_repeats,
+        args.limit,
+        purpose=args.purpose,
+    )
 
 
 def execute(local_repo: Path, args: argparse.Namespace) -> int:
     experiment = get_experiment(args.experiment)
     validate_num_repeats(args.num_repeats)
+    purpose = validate_purpose_for_experiment(experiment, args.purpose)
     directory = selected_output_dir(experiment, args)
     visible_devices = selected_cuda_devices(experiment, args.cuda_visible_devices)
     if args.dry:
@@ -642,6 +756,7 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
                 _dry_plan(
                     local_repo,
                     experiment,
+                    purpose,
                     args.split,
                     args.num_repeats,
                     args.limit,
@@ -654,6 +769,15 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
         )
         return 0
 
+    validate_existing_attempt_identity(
+        directory,
+        experiment,
+        purpose=purpose,
+        split=args.split,
+        num_repeats=args.num_repeats,
+        limit=args.limit,
+        force=args.force,
+    )
     marker = directory / ".eval_done.json"
     if marker.is_file() and not args.force:
         print(f"Skip (completed): {marker}")
@@ -674,10 +798,16 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
     status_path = directory / "run_status.json"
     started = time.monotonic()
     status: dict[str, Any] = {
-        "schema_version": 2,
+        "schema_version": 3,
         "state": "starting",
         "experiment": experiment.name,
         "kind": experiment.kind,
+        "purpose": purpose,
+        "decomposer_system_prompt_profile": (
+            decomposer_prompt_profile(purpose)
+            if isinstance(experiment, DecomposerExperiment)
+            else None
+        ),
         "run_name": run_name(experiment, args.num_repeats),
         "split": args.split,
         "num_repeats": args.num_repeats,
@@ -771,6 +901,7 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
                 gym_start_command(
                     local_repo,
                     experiment,
+                    purpose=purpose,
                     gym_bin=gym_bin,
                     component_root=component_root,
                     logs=logs,
@@ -892,6 +1023,7 @@ def positive_int(value: str) -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--experiment", required=True)
+    parser.add_argument("--purpose", choices=RUN_PURPOSES, required=True)
     parser.add_argument("--split", choices=SPLITS, default="train")
     parser.add_argument("--num-repeats", type=positive_int, default=1)
     parser.add_argument("--limit", type=positive_int)

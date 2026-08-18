@@ -33,7 +33,7 @@ decomposer:
         type: responses_api_models
         name: policy_model
       join_gym_system_and_user_prompts: true
-      decomposer_system_prompt_profile: teacher
+      decomposer_system_prompt_profile: student
       response_for_verifier_factory: responses_api_agents.decomposer_agent.app:_subagent_tool_calls_and_final_message
       subagent_types:
         - subagent_type_id: gemma_4_2b_thinking

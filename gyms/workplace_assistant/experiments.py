@@ -7,7 +7,7 @@ import hashlib
 import json
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 
 ARTIFACTS_ROOT = Path(
     "/mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts"
@@ -35,6 +35,9 @@ INSTANCE_TYPES_BY_NUM_GPUS = {
 }
 SPLIT_ROWS = {"train": 1255, "validation": 545}
 SPLITS = tuple(SPLIT_ROWS)
+RUN_PURPOSES = ("trace-generation", "evaluation")
+RunPurpose = Literal["trace-generation", "evaluation"]
+DecomposerPromptProfile = Literal["teacher", "student"]
 
 
 def source_dataset(split: str) -> Path:
@@ -151,6 +154,30 @@ class SimpleExperiment:
 
 
 Experiment = DecomposerExperiment | SimpleExperiment
+
+
+def validate_run_purpose(purpose: str) -> RunPurpose:
+    if purpose not in RUN_PURPOSES:
+        expected = ", ".join(RUN_PURPOSES)
+        raise ValueError(
+            f"Unknown run purpose {purpose!r}; expected one of: {expected}"
+        )
+    return cast(RunPurpose, purpose)
+
+
+def validate_purpose_for_experiment(experiment: Experiment, purpose: str) -> RunPurpose:
+    validated = validate_run_purpose(purpose)
+    if validated == "trace-generation" and isinstance(experiment, SimpleExperiment):
+        raise ValueError(
+            "trace-generation is only supported for Decomposer experiments; "
+            "simple-agent traces are not accepted by the SFT adapter"
+        )
+    return validated
+
+
+def decomposer_prompt_profile(purpose: str) -> DecomposerPromptProfile:
+    validated = validate_run_purpose(purpose)
+    return "teacher" if validated == "trace-generation" else "student"
 
 
 MODELS = (
@@ -409,9 +436,15 @@ def output_dir(
     split: str,
     num_repeats: int = 1,
     limit: int | None = None,
+    *,
+    purpose: RunPurpose,
 ) -> Path:
     validate_split(split)
-    base = RESULTS_ROOT / split / run_name(experiment, num_repeats)
+    validate_purpose_for_experiment(experiment, purpose)
+    base = RESULTS_ROOT / split
+    if purpose == "evaluation" and isinstance(experiment, DecomposerExperiment):
+        base /= "evaluation"
+    base /= run_name(experiment, num_repeats)
     return base if limit is None else base / f"smoke_{limit}"
 
 
@@ -420,8 +453,19 @@ def completion_marker(
     split: str,
     num_repeats: int = 1,
     limit: int | None = None,
+    *,
+    purpose: RunPurpose,
 ) -> Path:
-    return output_dir(experiment, split, num_repeats, limit) / ".eval_done.json"
+    return (
+        output_dir(
+            experiment,
+            split,
+            num_repeats,
+            limit,
+            purpose=purpose,
+        )
+        / ".eval_done.json"
+    )
 
 
 def job_description(
@@ -429,8 +473,14 @@ def job_description(
     split: str,
     num_repeats: int = 1,
     limit: int | None = None,
+    *,
+    purpose: RunPurpose,
 ) -> str:
+    validate_purpose_for_experiment(experiment, purpose)
     identity = run_name(experiment, num_repeats)
     if limit is not None:
         identity = f"{identity}-smoke-{limit}"
-    return f"workplace-assistant-{split} {experiment.kind}-agent {identity}"
+    prefix = f"workplace-assistant-{split}"
+    if purpose == "evaluation" and isinstance(experiment, DecomposerExperiment):
+        prefix += "-evaluation"
+    return f"{prefix} {experiment.kind}-agent {identity}"

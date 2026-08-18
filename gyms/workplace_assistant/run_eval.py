@@ -22,14 +22,18 @@ from gyms.workplace_assistant.experiments import (  # noqa: E402
     HF_HOME,
     INSTANCE_TYPES_BY_NUM_GPUS,
     PROJECT_VENV,
+    RUN_PURPOSES,
     SPLITS,
     STAGING_ROOT,
     Experiment,
+    RunPurpose,
     collect_experiments,
     completion_marker,
+    decomposer_prompt_profile,
     gym_venv,
     job_description,
     run_name,
+    validate_purpose_for_experiment,
 )
 from gyms.workplace_assistant.run import positive_int, validate_preparation  # noqa: E402
 
@@ -141,8 +145,13 @@ def build_job_desc(
     num_repeats: int,
     limit: int | None,
     author: str,
+    *,
+    purpose: RunPurpose,
 ) -> str:
-    return f"{job_description(experiment, split, num_repeats, limit)} #{author}"
+    return (
+        f"{job_description(experiment, split, num_repeats, limit, purpose=purpose)} "
+        f"#{author}"
+    )
 
 
 def build_job_script(
@@ -152,6 +161,7 @@ def build_job_script(
     num_repeats: int,
     limit: int | None,
     *,
+    purpose: RunPurpose,
     force: bool,
 ) -> str:
     command = [
@@ -161,6 +171,8 @@ def build_job_script(
         str(staged_workdir),
         "--experiment",
         experiment.name,
+        "--purpose",
+        purpose,
         "--split",
         split,
         "--num-repeats",
@@ -177,6 +189,7 @@ def build_payload(
     experiment: Experiment,
     staged_workdir: Path,
     *,
+    purpose: RunPurpose,
     split: str,
     num_repeats: int,
     limit: int | None,
@@ -205,10 +218,16 @@ def build_payload(
             split,
             num_repeats,
             limit,
+            purpose=purpose,
             force=force,
         ),
         "job_desc": build_job_desc(
-            experiment, split, num_repeats, limit, author
+            experiment,
+            split,
+            num_repeats,
+            limit,
+            author,
+            purpose=purpose,
         ),
         "env_variables": env_variables,
         "instance_type": INSTANCE_TYPES_BY_NUM_GPUS[experiment.num_gpus],
@@ -225,20 +244,21 @@ def build_payload(
 
 def print_parameter_table(
     experiments: Sequence[Experiment],
+    purpose: RunPurpose,
     split: str,
     num_repeats: int,
     limit: int | None,
 ) -> None:
     print("\nSelected jobs:")
-    print("| # | Run | Agent | Split | GPUs |")
-    print("| ---: | --- | --- | --- | ---: |")
+    print("| # | Run | Purpose | Agent | Split | GPUs |")
+    print("| ---: | --- | --- | --- | --- | ---: |")
     for index, experiment in enumerate(experiments, start=1):
         identity = run_name(experiment, num_repeats)
         if limit is not None:
             identity += f"/smoke_{limit}"
         print(
-            f"| {index} | `{identity}` | {experiment.kind} | {split} | "
-            f"{experiment.num_gpus} |"
+            f"| {index} | `{identity}` | {purpose} | {experiment.kind} | "
+            f"{split} | {experiment.num_gpus} |"
         )
 
 
@@ -246,6 +266,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--experiment", action="append")
     parser.add_argument("--filter", action="append")
+    parser.add_argument("--purpose", choices=RUN_PURPOSES, required=True)
     parser.add_argument("--split", choices=SPLITS, default="train")
     parser.add_argument("--num-repeats", type=positive_int, default=1)
     parser.add_argument("--limit", type=positive_int)
@@ -275,6 +296,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.error(str(error))
     if not experiments:
         parser.error("experiment selectors matched no registered experiments")
+    try:
+        for experiment in experiments:
+            validate_purpose_for_experiment(experiment, args.purpose)
+    except ValueError as error:
+        parser.error(str(error))
 
     repo_root = Path(git(Path.cwd(), "rev-parse", "--show-toplevel"))
     selected_count = len(experiments)
@@ -282,7 +308,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     skipped_completed = 0
     for experiment in experiments:
         marker = completion_marker(
-            experiment, args.split, args.num_repeats, args.limit
+            experiment,
+            args.split,
+            args.num_repeats,
+            args.limit,
+            purpose=args.purpose,
         )
         if marker.is_file() and not args.force:
             skipped_completed += 1
@@ -294,6 +324,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         summary = {
             "selected": selected_count,
             "planned": 0,
+            "purpose": args.purpose,
             "split": args.split,
             "num_repeats": args.num_repeats,
             "limit": args.limit,
@@ -353,6 +384,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         payload = build_payload(
             experiment,
             staged_workdir,
+            purpose=args.purpose,
             split=args.split,
             num_repeats=args.num_repeats,
             limit=args.limit,
@@ -373,6 +405,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.dry:
         print_parameter_table(
             [experiment for experiment, _ in planned],
+            args.purpose,
             args.split,
             args.num_repeats,
             args.limit,
@@ -393,6 +426,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "job_name": job_name,
                     "experiment": experiment.name,
                     "kind": experiment.kind,
+                    "purpose": args.purpose,
+                    "decomposer_system_prompt_profile": (
+                        decomposer_prompt_profile(args.purpose)
+                        if experiment.kind == "decomposer"
+                        else None
+                    ),
                     "run_name": run_name(experiment, args.num_repeats),
                     "split": args.split,
                 }
@@ -402,6 +441,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     summary = {
         "selected": selected_count,
         "planned": len(planned),
+        "purpose": args.purpose,
         "split": args.split,
         "num_repeats": args.num_repeats,
         "limit": args.limit,
