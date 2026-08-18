@@ -26,6 +26,7 @@ from gyms.workplace_assistant.experiments import (  # noqa: E402
     SPLIT_ROWS,
     UV_BIN,
     UV_CACHE,
+    DecomposerExperiment,
     Experiment,
     SimpleExperiment,
     collect_experiments,
@@ -174,13 +175,17 @@ def components_for_experiments(experiments: Sequence[Experiment]) -> tuple[str, 
                 "responses_api_models/vllm_model",
             }
         )
-    if any(experiment.kind == "decomposer" for experiment in experiments):
-        components.update(
-            {
-                "responses_api_agents/decomposer_agent",
-                "responses_api_models/openai_model",
-            }
-        )
+    decomposer_experiments = tuple(
+        experiment
+        for experiment in experiments
+        if isinstance(experiment, DecomposerExperiment)
+    )
+    if decomposer_experiments:
+        components.add("responses_api_agents/decomposer_agent")
+    if any(experiment.requires_openrouter for experiment in decomposer_experiments):
+        components.add("responses_api_models/openai_model")
+    if any(not experiment.requires_openrouter for experiment in decomposer_experiments):
+        components.add("responses_api_models/vllm_model")
     return tuple(sorted(components))
 
 

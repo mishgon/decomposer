@@ -784,7 +784,7 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
         return 0
 
     manifest = validate_preparation(local_repo, experiment, args.split)
-    if experiment.kind == "decomposer":
+    if isinstance(experiment, DecomposerExperiment) and experiment.requires_openrouter:
         if not os.environ.get("OPENROUTER_API_KEY_DECOMPOSER"):
             raise RuntimeError("OPENROUTER_API_KEY_DECOMPOSER is not set")
         if not (os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy")):
@@ -892,7 +892,10 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
                 wait_http("http://127.0.0.1:2024/docs", [langgraph], 300)
 
         with phase("gym_startup"):
-            if experiment.kind == "decomposer":
+            if (
+                isinstance(experiment, DecomposerExperiment)
+                and experiment.requires_openrouter
+            ):
                 key = os.environ["OPENROUTER_API_KEY_DECOMPOSER"]
                 gym_env_path.write_text(f"policy_api_key: {json.dumps(key)}\n")
                 gym_env_path.chmod(0o600)

@@ -99,6 +99,23 @@ $MLSPY -m gyms.workplace_assistant.run_eval \
   --author-name sukhorukov
 ```
 
+Run the one-GPU E4B comparison on the complete validation split with three
+rollouts per task:
+
+```bash
+$MLSPY -m gyms.workplace_assistant.run_eval \
+  --purpose evaluation \
+  --experiment gemma4-e4b-it-non-thinking-gemma4-e4b-thinking \
+  --experiment gemma4-e4b-it-thinking \
+  --split validation \
+  --num-repeats 3 \
+  --author-name sukhorukov
+```
+
+The Decomposer profile shares one E4B vLLM server between its non-thinking
+manager requests and thinking subagent requests, so both comparison jobs use
+one GPU each.
+
 Dry runs do not stage code or submit jobs and redact credentials from printed
 payloads. The live allocation's selected instance types are kept in
 `experiments.py` as the single source of truth.

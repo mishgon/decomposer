@@ -38,6 +38,7 @@ SPLITS = tuple(SPLIT_ROWS)
 RUN_PURPOSES = ("trace-generation", "evaluation")
 RunPurpose = Literal["trace-generation", "evaluation"]
 DecomposerPromptProfile = Literal["teacher", "student"]
+DecomposerManagerBackend = Literal["openrouter", "local_vllm"]
 
 
 def source_dataset(split: str) -> Path:
@@ -96,6 +97,7 @@ class ModelServer:
 class DecomposerExperiment:
     name: str
     gym_config_filename: str
+    manager_backend: DecomposerManagerBackend = "openrouter"
     concurrency: int = 8
     max_model_len: int = 32768
     max_num_seqs: int = 32
@@ -103,6 +105,10 @@ class DecomposerExperiment:
     num_gpus: int = 3
     model_ids: tuple[str, ...] | None = None
     kind: Literal["decomposer"] = field(init=False, default="decomposer")
+
+    @property
+    def requires_openrouter(self) -> bool:
+        return self.manager_backend == "openrouter"
 
 
 @dataclass(frozen=True)
@@ -228,6 +234,15 @@ MODELS = (
 )
 
 DECOMPOSER_EXPERIMENTS = (
+    DecomposerExperiment(
+        name="gemma4-e4b-it-non-thinking-gemma4-e4b-thinking",
+        gym_config_filename=(
+            "workplace_assistant_gemma4_e4b_non_thinking_gemma4_e4b_thinking.yaml"
+        ),
+        manager_backend="local_vllm",
+        num_gpus=1,
+        model_ids=("google/gemma-4-E4B-it",),
+    ),
     DecomposerExperiment(
         name="deepseek-v4-flash-0731-gemma4-all",
         gym_config_filename="workplace_assistant_deepseek_v4_flash_0731.yaml",
