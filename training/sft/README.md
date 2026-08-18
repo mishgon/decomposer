@@ -21,16 +21,16 @@ Dataset releases are defined by strict, checked-in build specifications. Build
 the original all-subagent Workplace source pair with:
 
 ```bash
-uv run --group train python -m data.sft.prepare \
-  --spec data/sft/specs/workplace_all_v3.yaml \
+uv run --group train python -m gyms.workplace_assistant.prepare sft \
+  --dataset workplace-all-v3 \
   --output-root /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/datasets/sft
 ```
 
 Build the 26B-A4B non-thinking source pair with:
 
 ```bash
-uv run --group train python -m data.sft.prepare \
-  --spec data/sft/specs/workplace_26b_nonthinking_v3.yaml \
+uv run --group train python -m gyms.workplace_assistant.prepare sft \
+  --dataset workplace-26b-nonthinking-v3 \
   --output-root /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/datasets/sft
 ```
 

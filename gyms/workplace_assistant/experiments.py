@@ -1,0 +1,436 @@
+"""Experiments-as-code registry for Workplace Assistant runs."""
+
+from __future__ import annotations
+
+import base64
+import hashlib
+import json
+from dataclasses import dataclass, field, replace
+from pathlib import Path
+from typing import Literal
+
+ARTIFACTS_ROOT = Path(
+    "/mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts"
+)
+PROJECT_VENV = Path(
+    "/mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_sft/.venv"
+)
+HF_HUB_ROOT = Path("/mnt/shared_ru.ml.SZ-5_000264/.cache/huggingface/hub")
+CHECKPOINTS_ROOT = Path("/mnt/shared_ru.ml.SZ-5_000264/sukhorukov/checkpoints")
+
+DATA_DIR = ARTIFACTS_ROOT / "evaluation" / "data" / "workplace_assistant"
+RESULTS_ROOT = ARTIFACTS_ROOT / "evaluation" / "results"
+STAGING_ROOT = ARTIFACTS_ROOT / "code"
+GYM_VENV_ROOT = ARTIFACTS_ROOT / "venvs" / "gym"
+COMPONENT_VENV_ROOT = ARTIFACTS_ROOT / "venvs" / "workplace-assistant"
+UV_CACHE = ARTIFACTS_ROOT / "cache" / "uv"
+UV_BIN = ARTIFACTS_ROOT / "tools" / "uv"
+HF_HOME = ARTIFACTS_ROOT / "cache" / "huggingface"
+SFT_OUTPUT_ROOT = ARTIFACTS_ROOT / "datasets" / "sft"
+
+BASE_IMAGE = "cr.ai.cloud.ru/aicloud-base-images/py3.12-torch2.7.0:0.0.41"
+INSTANCE_TYPES_BY_NUM_GPUS = {
+    1: "a100plus.1gpu.80vG.12C.244G",
+    3: "a100plus.3gpu.80vG.36C.546G",
+}
+SPLIT_ROWS = {"train": 1255, "validation": 545}
+SPLITS = tuple(SPLIT_ROWS)
+
+
+def source_dataset(split: str) -> Path:
+    validate_split(split)
+    return DATA_DIR / f"{split}.jsonl"
+
+
+def decomposer_dataset(split: str) -> Path:
+    validate_split(split)
+    return DATA_DIR / f"{split}.decomposer.jsonl"
+
+
+def preparation_manifest(split: str, experiment_name: str) -> Path:
+    validate_split(split)
+    return DATA_DIR / "manifests" / split / f"{experiment_name}.json"
+
+
+def validate_split(split: str) -> str:
+    if split not in SPLIT_ROWS:
+        expected = ", ".join(SPLITS)
+        raise ValueError(f"Unknown split {split!r}; expected one of: {expected}")
+    return split
+
+
+def gym_lock_hash(repo_root: Path) -> str:
+    lock = repo_root / "external" / "Gym" / "uv.lock"
+    return hashlib.sha256(lock.read_bytes()).hexdigest()[:16]
+
+
+def gym_venv(repo_root: Path) -> Path:
+    return GYM_VENV_ROOT / gym_lock_hash(repo_root)
+
+
+def component_runtime_key(repo_root: Path) -> str:
+    digest = hashlib.sha256()
+    for path in (repo_root / "uv.lock", repo_root / "external" / "Gym" / "uv.lock"):
+        digest.update(path.read_bytes())
+    return digest.hexdigest()[:16]
+
+
+def component_venv_root(repo_root: Path) -> Path:
+    return COMPONENT_VENV_ROOT / component_runtime_key(repo_root)
+
+
+@dataclass(frozen=True)
+class ModelServer:
+    model_id: str
+    snapshot: Path
+    port: int
+    gpu: int
+    gpu_memory_utilization: float
+    startup_wave: int
+
+
+@dataclass(frozen=True)
+class DecomposerExperiment:
+    name: str
+    gym_config_filename: str
+    concurrency: int = 8
+    max_model_len: int = 32768
+    max_num_seqs: int = 32
+    langgraph_jobs: int = 16
+    num_gpus: int = 3
+    model_ids: tuple[str, ...] | None = None
+    kind: Literal["decomposer"] = field(init=False, default="decomposer")
+
+
+@dataclass(frozen=True)
+class SimpleExperiment:
+    name: str
+    checkpoint: Path
+    thinking: bool = False
+    num_gpus: int = 1
+    temperature: float = 0.6
+    top_p: float = 1.0
+    top_k: int = 20
+    min_p: float = 0.0
+    presence_penalty: float = 0.0
+    repetition_penalty: float = 1.0
+    concurrency: int = 32
+    max_model_len: int = 131072
+    max_output_tokens: int = 32768
+    gpu_memory_utilization: float = 0.90
+    max_steps: int = 6
+    gym_wait_timeout: int = 360
+    tool_call_parser: str = "qwen3_xml"
+    reasoning_parser: str | None = None
+    gdn_prefill_backend: str | None = "triton"
+    kind: Literal["simple"] = field(init=False, default="simple")
+
+    @property
+    def extra_body(self) -> dict[str, int | float]:
+        return {
+            "top_k": self.top_k,
+            "min_p": self.min_p,
+            "presence_penalty": self.presence_penalty,
+            "repetition_penalty": self.repetition_penalty,
+        }
+
+    @property
+    def chat_template_kwargs(self) -> dict[str, bool]:
+        return {"enable_thinking": self.thinking}
+
+    @property
+    def chat_template_kwargs_b64(self) -> str:
+        payload = json.dumps(self.chat_template_kwargs, separators=(",", ":"))
+        return base64.b64encode(payload.encode()).decode()
+
+    @property
+    def effective_reasoning_parser(self) -> str | None:
+        if self.reasoning_parser is not None:
+            return self.reasoning_parser
+        return "qwen3" if self.thinking else None
+
+
+Experiment = DecomposerExperiment | SimpleExperiment
+
+
+MODELS = (
+    ModelServer(
+        "google/gemma-4-E2B-it",
+        HF_HUB_ROOT
+        / "models--google--gemma-4-E2B-it"
+        / "snapshots"
+        / "9dbdf8a839e4e9e0eb56ed80cc8886661d3817cf",
+        8020,
+        0,
+        0.30,
+        0,
+    ),
+    ModelServer(
+        "google/gemma-4-E4B-it",
+        HF_HUB_ROOT
+        / "models--google--gemma-4-E4B-it"
+        / "snapshots"
+        / "ee0ef6023621cff504d758262d4e04895a5af4a2",
+        8021,
+        0,
+        0.60,
+        1,
+    ),
+    ModelServer(
+        "google/gemma-4-12B-it",
+        HF_HUB_ROOT
+        / "models--google--gemma-4-12B-it"
+        / "snapshots"
+        / "707f0a3b8a3c7ad586ed01e27eafbad8a27dd0f7",
+        8022,
+        1,
+        0.88,
+        0,
+    ),
+    ModelServer(
+        "google/gemma-4-26B-A4B-it",
+        HF_HUB_ROOT
+        / "models--google--gemma-4-26B-A4B-it"
+        / "snapshots"
+        / "5305c1e72ea29c01f31a81230d52b375ba88b409",
+        8023,
+        2,
+        0.88,
+        0,
+    ),
+)
+
+DECOMPOSER_EXPERIMENTS = (
+    DecomposerExperiment(
+        name="deepseek-v4-flash-0731-gemma4-all",
+        gym_config_filename="workplace_assistant_deepseek_v4_flash_0731.yaml",
+    ),
+    DecomposerExperiment(
+        name="glm-5-2-gemma4-all",
+        gym_config_filename="workplace_assistant_glm_5_2.yaml",
+    ),
+    DecomposerExperiment(
+        name="deepseek-v4-flash-0731-gemma4-26b-a4b-non-thinking",
+        gym_config_filename=(
+            "workplace_assistant_deepseek_v4_flash_0731_"
+            "gemma4_26b_a4b_non_thinking.yaml"
+        ),
+        num_gpus=1,
+        model_ids=("google/gemma-4-26B-A4B-it",),
+    ),
+    DecomposerExperiment(
+        name="deepseek-v4-flash-0731-gemma4-e4b-thinking",
+        gym_config_filename=(
+            "workplace_assistant_deepseek_v4_flash_0731_gemma4_e4b_thinking.yaml"
+        ),
+        num_gpus=1,
+        model_ids=("google/gemma-4-E4B-it",),
+    ),
+    DecomposerExperiment(
+        name="glm-5-2-gemma4-26b-a4b-non-thinking",
+        gym_config_filename=(
+            "workplace_assistant_glm_5_2_gemma4_26b_a4b_non_thinking.yaml"
+        ),
+        num_gpus=1,
+        model_ids=("google/gemma-4-26B-A4B-it",),
+    ),
+)
+
+QWEN35_08B_BASE = (
+    HF_HUB_ROOT
+    / "models--Qwen--Qwen3.5-0.8B"
+    / "snapshots"
+    / "2fc06364715b967f1860aea9cf38778875588b17"
+)
+QWEN35_2B_BASE = (
+    HF_HUB_ROOT
+    / "models--Qwen--Qwen3.5-2B"
+    / "snapshots"
+    / "15852e8c16360a2fea060d615a32b45270f8a8fc"
+)
+QWEN35_4B_BASE = (
+    HF_HUB_ROOT
+    / "models--Qwen--Qwen3.5-4B"
+    / "snapshots"
+    / "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a"
+)
+GEMMA4_E2B_BASE = MODELS[0].snapshot
+GEMMA4_E4B_BASE = MODELS[1].snapshot
+GEMMA4_12B_BASE = MODELS[2].snapshot
+GEMMA4_26B_A4B_BASE = MODELS[3].snapshot
+
+
+def _gemma4_simple_experiments() -> list[SimpleExperiment]:
+    checkpoints = (
+        ("e2b", GEMMA4_E2B_BASE),
+        ("e4b", GEMMA4_E4B_BASE),
+        ("12b", GEMMA4_12B_BASE),
+        ("26b-a4b", GEMMA4_26B_A4B_BASE),
+    )
+    return [
+        SimpleExperiment(
+            name=f"gemma4-{size}-it-{mode}",
+            checkpoint=checkpoint,
+            thinking=thinking,
+            temperature=1.0,
+            top_p=0.95,
+            top_k=64,
+            tool_call_parser="gemma4",
+            reasoning_parser="gemma4",
+            gdn_prefill_backend=None,
+        )
+        for size, checkpoint in checkpoints
+        for mode, thinking in (("non-thinking", False), ("thinking", True))
+    ]
+
+
+def _simple_experiments() -> tuple[SimpleExperiment, ...]:
+    checkpoint_profiles = (
+        "q35-2b-grpo-nightly-step55",
+        "q35-4b-gaia2-grpo-base-inband-t09-s21-0895",
+        "q35-4b-gaia2-grpo-v23-binres-s15",
+        "q35-4b-gaia2-grpo-v23-binres-s27",
+        "q35-4b-gaia2-grpo-v23-binres-s45",
+    )
+    experiments = [
+        SimpleExperiment(
+            name=f"{name}{suffix}",
+            checkpoint=CHECKPOINTS_ROOT / name,
+            thinking=thinking,
+        )
+        for name in checkpoint_profiles
+        for suffix, thinking in (("", False), ("-thinking", True))
+    ]
+    experiments.extend(
+        SimpleExperiment(name=name, checkpoint=CHECKPOINTS_ROOT / name)
+        for name in (
+            "q35-4b-gaia2-grpo-v32-kl0temp1-s30",
+            "q35-4b-gaia2-grpo-v32-kl0temp1-s45",
+        )
+    )
+    experiments.extend(
+        (
+            SimpleExperiment("qwen35-0.8b-base-non-thinking", QWEN35_08B_BASE),
+            SimpleExperiment(
+                "qwen35-0.8b-base-thinking", QWEN35_08B_BASE, thinking=True
+            ),
+            SimpleExperiment("qwen35-2b-base-non-thinking", QWEN35_2B_BASE),
+            SimpleExperiment(
+                "qwen35-2b-base-thinking", QWEN35_2B_BASE, thinking=True
+            ),
+            SimpleExperiment("qwen35-4b-base-non-thinking", QWEN35_4B_BASE),
+            SimpleExperiment(
+                "qwen35-4b-base-thinking", QWEN35_4B_BASE, thinking=True
+            ),
+        )
+    )
+    return tuple([*experiments, *_gemma4_simple_experiments()])
+
+
+SIMPLE_EXPERIMENTS = _simple_experiments()
+ALL_EXPERIMENTS: tuple[Experiment, ...] = (
+    *DECOMPOSER_EXPERIMENTS,
+    *SIMPLE_EXPERIMENTS,
+)
+EXPERIMENTS = {experiment.name: experiment for experiment in ALL_EXPERIMENTS}
+if len(EXPERIMENTS) != len(ALL_EXPERIMENTS):
+    raise ValueError("Workplace Assistant experiment names must be globally unique")
+
+
+def get_experiment(name: str) -> Experiment:
+    try:
+        return EXPERIMENTS[name]
+    except KeyError as error:
+        expected = ", ".join(EXPERIMENTS)
+        raise ValueError(
+            f"Unknown Workplace Assistant experiment {name!r}; expected: {expected}"
+        ) from error
+
+
+def collect_experiments(
+    names: tuple[str, ...] = (),
+    filters: tuple[str, ...] = (),
+    *,
+    default_all: bool = True,
+) -> list[Experiment]:
+    unknown = [name for name in names if name not in EXPERIMENTS]
+    if unknown:
+        raise ValueError(f"Unknown Workplace Assistant experiments: {unknown}")
+    if not names and not filters:
+        return list(ALL_EXPERIMENTS) if default_all else []
+    selected_names = set(names)
+    selected_names.update(
+        experiment.name
+        for experiment in ALL_EXPERIMENTS
+        if any(pattern in experiment.name for pattern in filters)
+    )
+    return [
+        experiment
+        for experiment in ALL_EXPERIMENTS
+        if experiment.name in selected_names
+    ]
+
+
+def models_for_experiment(
+    experiment: DecomposerExperiment,
+) -> tuple[ModelServer, ...]:
+    if experiment.model_ids is None:
+        selected = MODELS
+    else:
+        by_id = {model.model_id: model for model in MODELS}
+        missing = [model_id for model_id in experiment.model_ids if model_id not in by_id]
+        if missing:
+            raise ValueError(f"Unknown model IDs for {experiment.name}: {missing}")
+        selected = tuple(by_id[model_id] for model_id in experiment.model_ids)
+    if len(selected) == 1 and experiment.num_gpus == 1:
+        selected = (replace(selected[0], gpu=0, startup_wave=0),)
+    invalid = [model.model_id for model in selected if model.gpu >= experiment.num_gpus]
+    if invalid:
+        raise ValueError(
+            f"Models assigned outside {experiment.num_gpus} GPUs for "
+            f"{experiment.name}: {invalid}"
+        )
+    return selected
+
+
+def validate_num_repeats(value: int) -> int:
+    if value < 1:
+        raise ValueError("num_repeats must be at least 1")
+    return value
+
+
+def run_name(experiment: Experiment, num_repeats: int = 1) -> str:
+    validate_num_repeats(num_repeats)
+    return experiment.name if num_repeats == 1 else f"{experiment.name}-n{num_repeats}"
+
+
+def output_dir(
+    experiment: Experiment,
+    split: str,
+    num_repeats: int = 1,
+    limit: int | None = None,
+) -> Path:
+    validate_split(split)
+    base = RESULTS_ROOT / split / run_name(experiment, num_repeats)
+    return base if limit is None else base / f"smoke_{limit}"
+
+
+def completion_marker(
+    experiment: Experiment,
+    split: str,
+    num_repeats: int = 1,
+    limit: int | None = None,
+) -> Path:
+    return output_dir(experiment, split, num_repeats, limit) / ".eval_done.json"
+
+
+def job_description(
+    experiment: Experiment,
+    split: str,
+    num_repeats: int = 1,
+    limit: int | None = None,
+) -> str:
+    identity = run_name(experiment, num_repeats)
+    if limit is not None:
+        identity = f"{identity}-smoke-{limit}"
+    return f"workplace-assistant-{split} {experiment.kind}-agent {identity}"

@@ -64,8 +64,9 @@ Ideas:
 
 - `src/decomposer/`: core Decomposer package. This should stay benchmark- and training-agnostic.
 - `examples/`: runnable examples of configuring and using Decomposer.
-- `gyms/`: environment integrations that collect traces and run native evaluation.
+- `gyms/`: environment-owned preparation, trace collection, local execution, and evaluation launchers.
 - `training/`: training and finetuning workflows.
+- `data/`: benchmark-neutral dataset schemas, builders, and adapters.
 - `artifacts/data/`: collected trajectories and episode workspaces ignored by git.
 - `artifacts/evals/`: evaluation results and aggregate metrics ignored by git.
 - `artifacts/training/`: model checkpoints and training logs ignored by git.
