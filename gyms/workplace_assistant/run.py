@@ -37,7 +37,6 @@ from gyms.workplace_assistant.experiments import (  # noqa: E402
     Experiment,
     ModelServer,
     SimpleExperiment,
-    completion_marker,
     component_venv_root,
     decomposer_dataset,
     get_experiment,
@@ -550,20 +549,29 @@ def _dry_plan(
     split: str,
     num_repeats: int,
     limit: int | None,
+    directory: Path,
+    visible_devices: tuple[str, ...],
 ) -> dict[str, Any]:
-    logs = output_dir(experiment, split, num_repeats, limit) / "logs"
+    logs = directory / "logs"
     gym_bin = gym_venv(local_repo) / "bin" / "gym"
     if isinstance(experiment, SimpleExperiment):
         services = [simple_vllm_command(experiment)]
+        gpu_assignments = {"policy_vllm": ",".join(visible_devices)}
     else:
+        models = models_for_experiment(experiment)
         services = [
             decomposer_vllm_command(model, experiment)
-            for model in models_for_experiment(experiment)
+            for model in models
         ]
         services.append(langgraph_command(local_repo, experiment)[0])
-    rollout_path = output_dir(experiment, split, num_repeats, limit) / "rollouts.jsonl"
+        gpu_assignments = {
+            f"subagent_vllm_{model.port}": visible_devices[model.gpu]
+            for model in models
+        }
+    rollout_path = directory / "rollouts.jsonl"
     return {
         "experiment": experiment.name,
+        "gpu_assignments": gpu_assignments,
         "kind": experiment.kind,
         "split": split,
         "services": [shlex.join(command) for command in services],
@@ -587,13 +595,44 @@ def _dry_plan(
                 resume=rollout_path.exists(),
             )
         ),
-        "output_dir": str(output_dir(experiment, split, num_repeats, limit)),
+        "output_dir": str(directory),
     }
+
+
+def parse_cuda_visible_devices(value: str) -> tuple[str, ...]:
+    devices = tuple(device.strip() for device in value.split(","))
+    if not devices or any(not device for device in devices):
+        raise argparse.ArgumentTypeError(
+            "CUDA devices must be a comma-separated list without empty entries"
+        )
+    if len(set(devices)) != len(devices):
+        raise argparse.ArgumentTypeError("CUDA devices must be unique")
+    return devices
+
+
+def selected_cuda_devices(
+    experiment: Experiment, requested: tuple[str, ...] | None
+) -> tuple[str, ...]:
+    devices = requested or tuple(str(index) for index in range(experiment.num_gpus))
+    if len(devices) != experiment.num_gpus:
+        raise ValueError(
+            f"{experiment.name} requires {experiment.num_gpus} CUDA device(s), "
+            f"but {len(devices)} were selected"
+        )
+    return devices
+
+
+def selected_output_dir(experiment: Experiment, args: argparse.Namespace) -> Path:
+    if args.output_dir is not None:
+        return args.output_dir.expanduser().resolve()
+    return output_dir(experiment, args.split, args.num_repeats, args.limit)
 
 
 def execute(local_repo: Path, args: argparse.Namespace) -> int:
     experiment = get_experiment(args.experiment)
     validate_num_repeats(args.num_repeats)
+    directory = selected_output_dir(experiment, args)
+    visible_devices = selected_cuda_devices(experiment, args.cuda_visible_devices)
     if args.dry:
         manifest = preparation_manifest(args.split, experiment.name)
         if not manifest.is_file():
@@ -606,6 +645,8 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
                     args.split,
                     args.num_repeats,
                     args.limit,
+                    directory,
+                    visible_devices,
                 ),
                 indent=2,
                 sort_keys=True,
@@ -613,12 +654,7 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
         )
         return 0
 
-    directory = output_dir(
-        experiment, args.split, args.num_repeats, args.limit
-    )
-    marker = completion_marker(
-        experiment, args.split, args.num_repeats, args.limit
-    )
+    marker = directory / ".eval_done.json"
     if marker.is_file() and not args.force:
         print(f"Skip (completed): {marker}")
         return 0
@@ -646,6 +682,8 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
         "split": args.split,
         "num_repeats": args.num_repeats,
         "limit": args.limit,
+        "output_dir": str(directory),
+        "cuda_visible_devices": list(visible_devices),
         "started_at": utc_now(),
         "timings_seconds": {},
         "preparation_manifest": str(
@@ -684,14 +722,11 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
     try:
         with phase("agent_services_startup"):
             if isinstance(experiment, SimpleExperiment):
-                visible_devices = args.cuda_visible_devices or ",".join(
-                    str(index) for index in range(experiment.num_gpus)
-                )
                 model_process = supervisor.start(
                     "policy_vllm",
                     simple_vllm_command(experiment),
                     cwd=local_repo,
-                    env={"CUDA_VISIBLE_DEVICES": visible_devices},
+                    env={"CUDA_VISIBLE_DEVICES": ",".join(visible_devices)},
                 )
                 wait_http("http://127.0.0.1:8000/v1/models", [model_process], 1800)
             else:
@@ -707,7 +742,9 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
                                 f"subagent_vllm_{model.port}",
                                 decomposer_vllm_command(model, experiment),
                                 cwd=local_repo,
-                                env={"CUDA_VISIBLE_DEVICES": str(model.gpu)},
+                                env={
+                                    "CUDA_VISIBLE_DEVICES": visible_devices[model.gpu]
+                                },
                             )
                         )
                     for model in wave:
@@ -860,7 +897,19 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--limit", type=positive_int)
     parser.add_argument("--dry", "--dry-run", action="store_true")
     parser.add_argument("--force", action="store_true")
-    parser.add_argument("--cuda-visible-devices")
+    parser.add_argument(
+        "--cuda-visible-devices",
+        type=parse_cuda_visible_devices,
+        help=(
+            "comma-separated physical GPU IDs mapped to the experiment's logical "
+            "GPU slots"
+        ),
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        help="override the directory containing rollouts, logs, status, and marker",
+    )
     parser.add_argument("--workdir", type=Path, help=argparse.SUPPRESS)
     return parser
 

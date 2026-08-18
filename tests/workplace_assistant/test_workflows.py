@@ -200,6 +200,51 @@ def test_decomposer_service_topology_has_subagent_vllm_and_langgraph() -> None:
     assert cwd.name == "subagents"
 
 
+def test_local_cuda_devices_remap_decomposer_logical_slots() -> None:
+    experiment = get_experiment("glm-5-2-gemma4-all")
+    requested = run_module.parse_cuda_visible_devices("3, 5,7")
+    devices = run_module.selected_cuda_devices(experiment, requested)
+    assert devices == ("3", "5", "7")
+    assert {
+        model.model_id: devices[model.gpu]
+        for model in models_for_experiment(experiment)
+    } == {
+        "google/gemma-4-E2B-it": "3",
+        "google/gemma-4-E4B-it": "3",
+        "google/gemma-4-12B-it": "5",
+        "google/gemma-4-26B-A4B-it": "7",
+    }
+
+    one_gpu = get_experiment("deepseek-v4-flash-0731-gemma4-e4b-thinking")
+    assert run_module.selected_cuda_devices(one_gpu, ("2",)) == ("2",)
+    with pytest.raises(ValueError, match="requires 1 CUDA device"):
+        run_module.selected_cuda_devices(one_gpu, ("2", "3"))
+    with pytest.raises(
+        run_module.argparse.ArgumentTypeError, match="must be unique"
+    ):
+        run_module.parse_cuda_visible_devices("2,2")
+
+
+def test_local_dry_plan_routes_every_output_and_reports_gpu(
+    tmp_path: Path,
+) -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    experiment = get_experiment("deepseek-v4-flash-0731-gemma4-e4b-thinking")
+    plan = run_module._dry_plan(
+        repo_root,
+        experiment,
+        "train",
+        3,
+        1,
+        tmp_path,
+        ("2",),
+    )
+    assert plan["output_dir"] == str(tmp_path)
+    assert plan["gpu_assignments"] == {"subagent_vllm_8021": "2"}
+    assert str(tmp_path / "rollouts.jsonl") in plan["gym_eval"]
+    assert str(tmp_path / "logs" / "gym_components") in plan["gym_start"]
+
+
 def test_prepare_decomposer_dataset_sets_agent_ref(tmp_path: Path) -> None:
     source = tmp_path / "source.jsonl"
     destination = tmp_path / "prepared.jsonl"
@@ -343,6 +388,29 @@ def test_existing_completion_marker_skips_without_new_manifest(
     assert "Skip (completed)" in capsys.readouterr().out
 
 
+def test_custom_output_completion_marker_is_isolated(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    experiment = get_experiment("gemma4-e2b-it-non-thinking")
+    custom_output = tmp_path / "local" / experiment.name
+    custom_output.mkdir(parents=True)
+    (custom_output / ".eval_done.json").write_text("{}")
+    args = run_module.build_parser().parse_args(
+        [
+            "--experiment",
+            experiment.name,
+            "--split",
+            "train",
+            "--output-dir",
+            str(custom_output),
+        ]
+    )
+    assert run_module.execute(Path(__file__).resolve().parents[2], args) == 0
+    assert f"Skip (completed): {custom_output / '.eval_done.json'}" in (
+        capsys.readouterr().out
+    )
+
+
 def test_job_payload_uses_shared_runner_and_redacts_decomposer_secrets(
 ) -> None:
     repo_root = Path(__file__).resolve().parents[2]
@@ -361,6 +429,7 @@ def test_job_payload_uses_shared_runner_and_redacts_decomposer_secrets(
         openrouter_key="secret",
     )
     assert "gyms/workplace_assistant/run.py" in payload["script"]
+    assert "--output-dir" not in payload["script"]
     assert payload["instance_type"] == INSTANCE_TYPES_BY_NUM_GPUS[1]
     assert payload["job_desc"].endswith("#alice")
     redacted = run_eval.redact_payload(payload)

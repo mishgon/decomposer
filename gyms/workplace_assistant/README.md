@@ -51,11 +51,20 @@ HTTPS_PROXY=... \
   --experiment gemma4-e2b-it-non-thinking \
   --split validation \
   --limit 1
+
+# Isolate a local run from shared MLSpace outputs and select physical GPU 2.
+.venv/bin/python -m gyms.workplace_assistant.run \
+  --experiment deepseek-v4-flash-0731-gemma4-e4b-thinking \
+  --split train \
+  --num-repeats 3 \
+  --cuda-visible-devices 2 \
+  --output-dir /path/to/local-results
 ```
 
 Use `--dry` to print the complete service and Gym commands without starting
-processes. Partial outputs resume by default. `--force` archives the previous
-attempt before starting fresh.
+processes. `--output-dir` routes every result, log, status file, and completion
+marker beneath an explicit directory. Partial outputs resume by default.
+`--force` archives the previous attempt before starting fresh.
 
 ## Submit MLSpace jobs
 
