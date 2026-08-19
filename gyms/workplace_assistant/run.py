@@ -218,7 +218,7 @@ def decomposer_vllm_command(
         "--reasoning-parser",
         "gemma4",
         "--default-chat-template-kwargs",
-        '{"enable_thinking":true}',
+        json.dumps({"enable_thinking": model.thinking}, separators=(",", ":")),
     ]
 
 

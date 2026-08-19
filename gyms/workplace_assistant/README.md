@@ -116,6 +116,28 @@ The Decomposer profile shares one E4B vLLM server between its non-thinking
 manager requests and thinking subagent requests, so both comparison jobs use
 one GPU each.
 
+After the Workplace E4B SFT run has exported its merged `final/` checkpoint,
+evaluate the tuned non-thinking manager and vanilla thinking E4B subagent on
+dedicated GPUs:
+
+```bash
+.venv/bin/python -m gyms.workplace_assistant.prepare eval \
+  --split validation \
+  --experiment gemma4-e4b-sft-deepseek-e4b-v1-8k-non-thinking-gemma4-e4b-thinking \
+  --reuse-source
+
+$MLSPY -m gyms.workplace_assistant.run_eval \
+  --purpose evaluation \
+  --experiment gemma4-e4b-sft-deepseek-e4b-v1-8k-non-thinking-gemma4-e4b-thinking \
+  --split validation \
+  --num-repeats 3 \
+  --author-name sukhorukov
+```
+
+Logical GPU 0 serves the SFT manager and logical GPU 1 serves the vanilla E4B
+thinking subagent. The full run writes 1,635 rollouts under the student-prompt
+Decomposer evaluation root.
+
 Dry runs do not stage code or submit jobs and redact credentials from printed
 payloads. The live allocation's selected instance types are kept in
 `experiments.py` as the single source of truth.

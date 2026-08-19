@@ -15,6 +15,8 @@ from gyms.workplace_assistant.experiments import (
     DECOMPOSER_EXPERIMENTS,
     INSTANCE_TYPES_BY_NUM_GPUS,
     SIMPLE_EXPERIMENTS,
+    WORKPLACE_E4B_SFT_FINAL,
+    WORKPLACE_E4B_SFT_MODEL_ID,
     DecomposerExperiment,
     SimpleExperiment,
     collect_experiments,
@@ -29,9 +31,9 @@ from gyms.workplace_assistant.experiments import (
 
 
 def test_registry_is_global_and_unique() -> None:
-    assert len(DECOMPOSER_EXPERIMENTS) == 6
+    assert len(DECOMPOSER_EXPERIMENTS) == 7
     assert len(SIMPLE_EXPERIMENTS) == 26
-    assert len(experiments.EXPERIMENTS) == 32
+    assert len(experiments.EXPERIMENTS) == 33
     assert {experiment.kind for experiment in experiments.ALL_EXPERIMENTS} == {
         "decomposer",
         "simple",
@@ -124,6 +126,7 @@ def test_run_purpose_controls_prompt_and_preserves_teacher_job_identity() -> Non
 def test_live_allocation_instance_types_are_single_source_of_truth() -> None:
     assert INSTANCE_TYPES_BY_NUM_GPUS == {
         1: "a100plus.1gpu.80vG.12C.244G",
+        2: "a100plus.2gpu.80vG.24C.488G",
         3: "a100plus.3gpu.80vG.36C.546G",
     }
 
@@ -266,6 +269,102 @@ def test_local_e4b_manager_shares_thinking_subagent_server() -> None:
     assert "--limit" not in payload["script"]
     assert "OPENROUTER_API_KEY_DECOMPOSER" not in payload["env_variables"]
     assert "HTTPS_PROXY" not in payload["env_variables"]
+    assert payload["job_desc"] == (
+        f"workplace-assistant-validation-evaluation decomposer-agent {name}-n3 #alice"
+    )
+
+
+def test_sft_e4b_manager_and_vanilla_subagent_use_dedicated_gpus() -> None:
+    name = (
+        "gemma4-e4b-sft-deepseek-e4b-v1-8k-non-thinking-"
+        "gemma4-e4b-thinking"
+    )
+    experiment = get_experiment(name)
+    assert isinstance(experiment, DecomposerExperiment)
+    assert experiment.manager_backend == "local_vllm"
+    assert experiment.num_gpus == 2
+
+    selected = models_for_experiment(experiment)
+    assert [model.model_id for model in selected] == [
+        WORKPLACE_E4B_SFT_MODEL_ID,
+        "google/gemma-4-E4B-it",
+    ]
+    assert [model.snapshot for model in selected] == [
+        WORKPLACE_E4B_SFT_FINAL,
+        experiments.GEMMA4_E4B_BASE,
+    ]
+    assert [model.gpu for model in selected] == [0, 1]
+    assert [model.port for model in selected] == [8024, 8021]
+    assert [model.gpu_memory_utilization for model in selected] == [0.9, 0.9]
+    assert [model.thinking for model in selected] == [False, True]
+
+    manager_server = run_module.decomposer_vllm_command(selected[0], experiment)
+    subagent_server = run_module.decomposer_vllm_command(selected[1], experiment)
+    assert manager_server[manager_server.index("--default-chat-template-kwargs") + 1] == (
+        '{"enable_thinking":false}'
+    )
+    assert subagent_server[subagent_server.index("--default-chat-template-kwargs") + 1] == (
+        '{"enable_thinking":true}'
+    )
+
+    repo_root = Path(__file__).resolve().parents[2]
+    config = yaml.safe_load(
+        (
+            repo_root
+            / "gyms"
+            / "workplace_assistant"
+            / "configs"
+            / experiment.gym_config_filename
+        ).read_text()
+    )
+    policy = config["policy_model"]["responses_api_models"]["vllm_model"]
+    assert policy["base_url"] == "http://127.0.0.1:8024/v1"
+    assert policy["model"] == WORKPLACE_E4B_SFT_MODEL_ID
+    assert policy["chat_template_kwargs"] == {
+        "enable_thinking": False,
+        "preserve_thinking": False,
+    }
+    agent = config["decomposer"]["responses_api_agents"]["decomposer_agent"]
+    assert agent["decomposer_system_prompt_profile"] == "student"
+    assert [item["assistant_id"] for item in agent["subagent_types"]] == [
+        "gemma_4_4b_thinking"
+    ]
+
+    plan = run_module._dry_plan(
+        repo_root,
+        experiment,
+        "evaluation",
+        "validation",
+        3,
+        None,
+        Path("/tmp/workplace-sft-eval"),
+        ("0", "1"),
+    )
+    assert plan["gpu_assignments"] == {
+        "subagent_vllm_8024": "0",
+        "subagent_vllm_8021": "1",
+    }
+    assert "--num-repeats 3" in plan["gym_eval"]
+    assert "validation.decomposer.jsonl" in plan["gym_eval"]
+
+    payload = run_eval.build_payload(
+        experiment,
+        repo_root,
+        purpose="evaluation",
+        split="validation",
+        num_repeats=3,
+        limit=None,
+        author="alice",
+        base_image=experiments.BASE_IMAGE,
+        priority=None,
+        force=False,
+        proxy_env={},
+        openrouter_key="",
+    )
+    assert payload["instance_type"] == INSTANCE_TYPES_BY_NUM_GPUS[2]
+    assert "--split validation" in payload["script"]
+    assert "--num-repeats 3" in payload["script"]
+    assert "OPENROUTER_API_KEY_DECOMPOSER" not in payload["env_variables"]
     assert payload["job_desc"] == (
         f"workplace-assistant-validation-evaluation decomposer-agent {name}-n3 #alice"
     )

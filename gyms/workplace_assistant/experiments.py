@@ -31,6 +31,7 @@ SFT_OUTPUT_ROOT = ARTIFACTS_ROOT / "datasets" / "sft"
 BASE_IMAGE = "cr.ai.cloud.ru/aicloud-base-images/py3.12-torch2.7.0:0.0.41"
 INSTANCE_TYPES_BY_NUM_GPUS = {
     1: "a100plus.1gpu.80vG.12C.244G",
+    2: "a100plus.2gpu.80vG.24C.488G",
     3: "a100plus.3gpu.80vG.36C.546G",
 }
 SPLIT_ROWS = {"train": 1255, "validation": 545}
@@ -91,6 +92,7 @@ class ModelServer:
     gpu: int
     gpu_memory_utilization: float
     startup_wave: int
+    thinking: bool = True
 
 
 @dataclass(frozen=True)
@@ -104,6 +106,7 @@ class DecomposerExperiment:
     langgraph_jobs: int = 16
     num_gpus: int = 3
     model_ids: tuple[str, ...] | None = None
+    model_servers: tuple[ModelServer, ...] | None = None
     kind: Literal["decomposer"] = field(init=False, default="decomposer")
 
     @property
@@ -233,7 +236,48 @@ MODELS = (
     ),
 )
 
+WORKPLACE_E4B_SFT_MODEL_ID = (
+    "decomposer/gemma4-e4b-sft-deepseek-e4b-v1-8k"
+)
+WORKPLACE_E4B_SFT_FINAL = (
+    ARTIFACTS_ROOT
+    / "training"
+    / "sft"
+    / "jobs"
+    / "gemma4-e4b-nonthinking-deepseek-e4b-v1-8k-full-4gpu"
+    / "final"
+)
+
 DECOMPOSER_EXPERIMENTS = (
+    DecomposerExperiment(
+        name=(
+            "gemma4-e4b-sft-deepseek-e4b-v1-8k-non-thinking-"
+            "gemma4-e4b-thinking"
+        ),
+        gym_config_filename=(
+            "workplace_assistant_gemma4_e4b_sft_deepseek_e4b_v1_8k_"
+            "non_thinking_gemma4_e4b_thinking.yaml"
+        ),
+        manager_backend="local_vllm",
+        num_gpus=2,
+        model_servers=(
+            ModelServer(
+                WORKPLACE_E4B_SFT_MODEL_ID,
+                WORKPLACE_E4B_SFT_FINAL,
+                8024,
+                0,
+                0.90,
+                0,
+                thinking=False,
+            ),
+            replace(
+                MODELS[1],
+                gpu=1,
+                gpu_memory_utilization=0.90,
+                startup_wave=0,
+            ),
+        ),
+    ),
     DecomposerExperiment(
         name="gemma4-e4b-it-non-thinking-gemma4-e4b-thinking",
         gym_config_filename=(
@@ -416,7 +460,13 @@ def collect_experiments(
 def models_for_experiment(
     experiment: DecomposerExperiment,
 ) -> tuple[ModelServer, ...]:
-    if experiment.model_ids is None:
+    if experiment.model_ids is not None and experiment.model_servers is not None:
+        raise ValueError(
+            f"{experiment.name} cannot set both model_ids and model_servers"
+        )
+    if experiment.model_servers is not None:
+        selected = experiment.model_servers
+    elif experiment.model_ids is None:
         selected = MODELS
     else:
         by_id = {model.model_id: model for model in MODELS}
@@ -424,6 +474,12 @@ def models_for_experiment(
         if missing:
             raise ValueError(f"Unknown model IDs for {experiment.name}: {missing}")
         selected = tuple(by_id[model_id] for model_id in experiment.model_ids)
+    model_ids = [model.model_id for model in selected]
+    if len(model_ids) != len(set(model_ids)):
+        raise ValueError(f"Duplicate model IDs for {experiment.name}: {model_ids}")
+    ports = [model.port for model in selected]
+    if len(ports) != len(set(ports)):
+        raise ValueError(f"Duplicate model ports for {experiment.name}: {ports}")
     if len(selected) == 1 and experiment.num_gpus == 1:
         selected = (replace(selected[0], gpu=0, startup_wave=0),)
     invalid = [model.model_id for model in selected if model.gpu >= experiment.num_gpus]
