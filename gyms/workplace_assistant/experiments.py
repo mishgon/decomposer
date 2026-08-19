@@ -247,6 +247,7 @@ WORKPLACE_E4B_SFT_FINAL = (
     / "gemma4-e4b-nonthinking-deepseek-e4b-v1-8k-full-4gpu"
     / "final"
 )
+WORKPLACE_E4B_SFT_VLLM = WORKPLACE_E4B_SFT_FINAL.with_name("final-vllm")
 
 DECOMPOSER_EXPERIMENTS = (
     DecomposerExperiment(
@@ -263,7 +264,7 @@ DECOMPOSER_EXPERIMENTS = (
         model_servers=(
             ModelServer(
                 WORKPLACE_E4B_SFT_MODEL_ID,
-                WORKPLACE_E4B_SFT_FINAL,
+                WORKPLACE_E4B_SFT_VLLM,
                 8024,
                 0,
                 0.90,

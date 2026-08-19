@@ -202,6 +202,20 @@ serving runtimes. `training_summary.json` records the completed epoch and step,
 best validation loss and checkpoint, resolved batch settings, exported stop
 IDs, and whether early stopping fired.
 
+Gemma-4 KV-shared layers intentionally omit unused `k_norm` weights after SFT,
+but vLLM 0.24 still requires those parameters during checkpoint validation.
+Create a zero-copy compatibility view for vLLM without changing `final/`:
+
+```bash
+uv run --group train python -m training.sft.vllm_compat \
+  --source /path/to/run/final \
+  --output /path/to/run/final-vllm
+```
+
+The derived directory symlinks the original model tensor and adds identity
+`k_norm` tensors only for the KV-shared layers. Transformers consumers should
+continue to use `final/`; vLLM consumers should use `final-vllm/`.
+
 ## ClearML
 
 ClearML is disabled by default. Configure the self-hosted server without adding

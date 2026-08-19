@@ -17,6 +17,7 @@ from gyms.workplace_assistant.experiments import (
     SIMPLE_EXPERIMENTS,
     WORKPLACE_E4B_SFT_FINAL,
     WORKPLACE_E4B_SFT_MODEL_ID,
+    WORKPLACE_E4B_SFT_VLLM,
     DecomposerExperiment,
     SimpleExperiment,
     collect_experiments,
@@ -290,9 +291,12 @@ def test_sft_e4b_manager_and_vanilla_subagent_use_dedicated_gpus() -> None:
         "google/gemma-4-E4B-it",
     ]
     assert [model.snapshot for model in selected] == [
-        WORKPLACE_E4B_SFT_FINAL,
+        WORKPLACE_E4B_SFT_VLLM,
         experiments.GEMMA4_E4B_BASE,
     ]
+    assert WORKPLACE_E4B_SFT_VLLM == WORKPLACE_E4B_SFT_FINAL.with_name(
+        "final-vllm"
+    )
     assert [model.gpu for model in selected] == [0, 1]
     assert [model.port for model in selected] == [8024, 8021]
     assert [model.gpu_memory_utilization for model in selected] == [0.9, 0.9]

@@ -121,6 +121,10 @@ evaluate the tuned non-thinking manager and vanilla thinking E4B subagent on
 dedicated GPUs:
 
 ```bash
+uv run --group train python -m training.sft.vllm_compat \
+  --source /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/training/sft/jobs/gemma4-e4b-nonthinking-deepseek-e4b-v1-8k-full-4gpu/final \
+  --output /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/training/sft/jobs/gemma4-e4b-nonthinking-deepseek-e4b-v1-8k-full-4gpu/final-vllm
+
 .venv/bin/python -m gyms.workplace_assistant.prepare eval \
   --split validation \
   --experiment gemma4-e4b-sft-deepseek-e4b-v1-8k-non-thinking-gemma4-e4b-thinking \
