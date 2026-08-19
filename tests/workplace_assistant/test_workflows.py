@@ -7,10 +7,9 @@ from pathlib import Path
 import pytest
 import yaml
 
-from gyms.workplace_assistant import experiments
+from gyms.workplace_assistant import experiments, run_eval
 from gyms.workplace_assistant import prepare as prepare_module
 from gyms.workplace_assistant import run as run_module
-from gyms.workplace_assistant import run_eval
 from gyms.workplace_assistant.experiments import (
     DECOMPOSER_EXPERIMENTS,
     INSTANCE_TYPES_BY_NUM_GPUS,
@@ -766,5 +765,7 @@ def test_named_sft_specs_are_gym_owned() -> None:
         "workplace-all-v3",
         "workplace-26b-nonthinking-v3",
         "workplace-deepseek-e4b-thinking-v1",
+        "workplace-deepseek-e4b-thinking-v2-8k",
+        "workplace-deepseek-e4b-thinking-v2-32k",
     }
     assert all((spec_root / filename).is_file() for filename in prepare_module.SFT_SPECS.values())

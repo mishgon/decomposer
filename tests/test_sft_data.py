@@ -8,12 +8,9 @@ from pathlib import Path
 import pytest
 import yaml
 from datasets import Dataset
-from decomposer.prompts import (
-    DECOMPOSER_SYSTEM_PROMPT,
-    DECOMPOSER_TEACHER_SYSTEM_PROMPT,
-)
 from pydantic import ValidationError
 
+from data.sft import builder as builder_module
 from data.sft.builder import LoadedBuildSpec, load_build_spec, prepare_dataset
 from data.sft.schema import (
     EXCLUSION_REASONS,
@@ -23,6 +20,11 @@ from data.sft.schema import (
     SelectionSpec,
     SourceSpec,
     SplitSpec,
+    TokenizationSpec,
+)
+from decomposer.prompts import (
+    DECOMPOSER_SYSTEM_PROMPT,
+    DECOMPOSER_TEACHER_SYSTEM_PROMPT,
 )
 from training.sft.train import _validate_manifest
 
@@ -200,11 +202,13 @@ def _prepare_fixture_dataset(
     success_reward: float = 1.0,
     invalid_policy: str = "exclude",
     max_traces_per_prompt_per_teacher: int | None = None,
+    version: str = "v3",
+    tokenization: TokenizationSpec | None = None,
 ):
     """Test helper that exercises the new canonical builder without Git state."""
     spec = BuildSpec(
         spec_version=1,
-        dataset=DatasetIdentity(id=output_dir.name, version="v3"),
+        dataset=DatasetIdentity(id=output_dir.name, version=version),
         policy=PolicySpec(id="decomposer-default"),
         sources=tuple(
             SourceSpec(
@@ -228,6 +232,7 @@ def _prepare_fixture_dataset(
             validation_fraction=validation_fraction,
             seed=seed,
         ),
+        tokenization=tokenization,
     )
     return prepare_dataset(
         LoadedBuildSpec(
@@ -282,6 +287,86 @@ def test_prepare_groups_teacher_variants_and_writes_manifest_v3(tmp_path: Path) 
         metadata = prepared.manifest["prepared_files"][filename]
         assert len(metadata["sha256"]) == 64
         assert metadata["bytes"] > 0
+
+
+class _LengthFixtureTokenizer:
+    init_kwargs = {"_commit_hash": "fixture-revision"}
+
+    def apply_chat_template(self, messages, **kwargs):
+        prompt = next(
+            message["content"] for message in messages if message["role"] == "user"
+        )
+        token_length = 12 if prompt.endswith("Task 0.") else 6
+        return {
+            "input_ids": list(range(token_length)),
+            "assistant_masks": [1] * token_length,
+        }
+
+
+def test_versioned_token_limits_produce_stable_strict_subset(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fake_runtime(spec: TokenizationSpec):
+        return (
+            _LengthFixtureTokenizer(),
+            "fixture-template",
+            {
+                "profile": spec.profile,
+                "tokenizer": spec.tokenizer,
+                "requested_revision": spec.revision,
+                "resolved_revision": "fixture-revision",
+                "tokenizer_class": "_LengthFixtureTokenizer",
+                "canonical_template_sha256": "1" * 64,
+                "training_template_sha256": "2" * 64,
+                "include_reasoning": False,
+                "max_tokens": spec.max_tokens,
+            },
+        )
+
+    monkeypatch.setattr(builder_module, "_load_tokenization_runtime", fake_runtime)
+    source = _source(tmp_path, "teacher")
+    common = {
+        "profile": "gemma4_sft_non_thinking",
+        "tokenizer": "google/gemma-4-E4B-it",
+        "revision": "main",
+    }
+    prepared_8k = _prepare_fixture_dataset(
+        [source],
+        tmp_path / "prepared-8k",
+        version="v2-8k",
+        tokenization=TokenizationSpec(**common, max_tokens=8),
+    )
+    prepared_32k = _prepare_fixture_dataset(
+        [source],
+        tmp_path / "prepared-32k",
+        version="v2-32k",
+        tokenization=TokenizationSpec(**common, max_tokens=32),
+    )
+
+    rows_8k = {
+        row["id"]: split
+        for split, path in (
+            ("train", prepared_8k.train_path),
+            ("validation", prepared_8k.validation_path),
+        )
+        for row in _read_jsonl(path)
+    }
+    rows_32k = {
+        row["id"]: (split, row)
+        for split, path in (
+            ("train", prepared_32k.train_path),
+            ("validation", prepared_32k.validation_path),
+        )
+        for row in _read_jsonl(path)
+    }
+    assert set(rows_8k) < set(rows_32k)
+    assert all(rows_32k[row_id][0] == split for row_id, split in rows_8k.items())
+    assert prepared_8k.manifest["filtering"]["excluded_token_length"] == 1
+    assert prepared_32k.manifest["filtering"]["excluded_token_length"] == 0
+    for _, row in rows_32k.values():
+        metadata = row["attributes"]["prepared_tokenization"]
+        assert metadata["profile"] == "gemma4_sft_non_thinking"
+        assert metadata["tokens"] in {6, 12}
 
 
 @pytest.mark.parametrize("call_count", [2, 3, 7])

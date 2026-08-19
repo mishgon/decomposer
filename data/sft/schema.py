@@ -138,6 +138,28 @@ class SplitSpec(StrictModel):
         return self
 
 
+class TokenizationSpec(StrictModel):
+    profile: Literal["gemma4_sft_non_thinking"]
+    tokenizer: str
+    revision: str = "main"
+    max_tokens: int = 32768
+    trust_remote_code: bool = False
+
+    @field_validator("tokenizer", "revision")
+    @classmethod
+    def validate_nonempty(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("tokenization string fields must be non-empty")
+        return value
+
+    @field_validator("max_tokens")
+    @classmethod
+    def validate_max_tokens(cls, value: int) -> int:
+        if isinstance(value, bool) or not 0 < value <= 32768:
+            raise ValueError("tokenization.max_tokens must be between 1 and 32768")
+        return value
+
+
 class BuildSpec(StrictModel):
     spec_version: Literal[1]
     dataset: DatasetIdentity
@@ -145,6 +167,7 @@ class BuildSpec(StrictModel):
     sources: tuple[SourceSpec, ...]
     selection: SelectionSpec
     split: SplitSpec
+    tokenization: TokenizationSpec | None = None
 
     @model_validator(mode="after")
     def validate_sources(self) -> "BuildSpec":

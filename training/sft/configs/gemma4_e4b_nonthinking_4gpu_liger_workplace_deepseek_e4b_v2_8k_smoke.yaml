@@ -1,0 +1,89 @@
+model:
+  name_or_path: google/gemma-4-E4B-it
+  revision: main
+  dtype: bfloat16
+  attn_implementation: sdpa
+  trust_remote_code: false
+
+data:
+  train_file: /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/datasets/sft/decomposer-workplace-deepseek-e4b-thinking/v2-8k/train.jsonl
+  validation_file: /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/datasets/sft/decomposer-workplace-deepseek-e4b-thinking/v2-8k/validation.jsonl
+  manifest_file: /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/datasets/sft/decomposer-workplace-deepseek-e4b-thinking/v2-8k/manifest.json
+  include_reasoning: false
+  require_prepared_tokenization: true
+  error_on_truncation: true
+  exclude_overlength: true
+  num_proc: 8
+  # Tokenize the full release so the smoke run validates the real 8K policy.
+  max_train_samples: null
+  max_eval_samples: null
+  # Four ranks consume all four longest retained traces in the single train step.
+  longest_train_samples: 4
+
+training:
+  output_dir: /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/training/sft/smoke/gemma4-e4b-nonthinking-deepseek-e4b-v2-8k-4gpu
+  run_name: gemma4-e4b-decomposer-sft-nonthinking-deepseek-e4b-v2-8k-smoke-4gpu
+  max_length: 8192
+  max_steps: 1
+  per_device_train_batch_size: 1
+  per_device_eval_batch_size: 1
+  global_batch_size: 4
+  learning_rate: 1.0e-5
+  lr_scheduler_type: constant
+  warmup_ratio: 0.0
+  weight_decay: 0.0
+  max_grad_norm: 1.0
+  optim: adamw_torch_fused
+  loss_type: chunked_nll
+  use_liger_kernel: true
+  liger_kernel_config:
+    fused_linear_cross_entropy: true
+    cross_entropy: false
+    rms_norm: false
+    geglu: false
+    rope: false
+    layer_norm: false
+  bf16: true
+  tf32: true
+  use_cache: false
+  gradient_checkpointing: false
+  packing: false
+  eval_strategy: steps
+  eval_steps: 1
+  save_strategy: "no"
+  logging_strategy: steps
+  logging_steps: 1
+  logging_first_step: true
+  include_num_input_tokens_seen: true
+  prediction_loss_only: true
+  seed: 42
+  data_seed: 42
+  dataloader_num_workers: 4
+  dataloader_pin_memory: true
+  fsdp: true
+  fsdp_config:
+    auto_wrap_policy: TRANSFORMER_BASED_WRAP
+    reshard_after_forward: true
+    cpu_offload: false
+    activation_checkpointing: true
+    state_dict_type: SHARDED_STATE_DICT
+    cpu_ram_efficient_loading: false
+    sync_module_states: true
+
+clearml:
+  enabled: false
+  weight_norm_interval_steps: 10
+  project: decomposer
+  task: Gemma-4-E4B Decomposer SFT non-thinking 8K Workplace smoke
+  tags:
+    - sft
+    - gemma-4-E4B-it
+    - workplace-assistant
+  log_model: false
+  output_uri: null
+
+run:
+  expected_world_size: 4
+  disable_cudnn_sdpa: true
+  resume_from_checkpoint: null
+  overwrite_output_dir: false

@@ -28,6 +28,16 @@ from .clearml_logging import (
 )
 from .gemma4_template import build_gemma4_training_template
 from .liger import configure_liger_for_model, liger_compatible_loss_type
+from .preprocessing import (
+    PREPARED_TOKENIZATION_ATTRIBUTE,
+    PREPARED_TOKENIZATION_PROFILE,
+)
+from .preprocessing import (
+    configure_example as _configure_example,
+)
+from .preprocessing import (
+    tokenization_stats as _tokenization_stats,
+)
 
 JsonObject = dict[str, Any]
 _LAUNCHER_LOG_FILENAMES = frozenset({"console.log", "mlspace.log"})
@@ -47,66 +57,6 @@ def _nested_mapping(config: Mapping[str, Any], key: str) -> JsonObject:
     if not isinstance(value, Mapping):
         raise ValueError(f"Config section {key!r} must be an object.")
     return dict(value)
-
-
-def _clean_message(
-    message: Mapping[str, Any], *, include_reasoning: bool
-) -> JsonObject:
-    clean = {key: value for key, value in message.items() if value is not None}
-    teacher_reasoning = clean.pop("teacher_reasoning", None)
-    clean.pop("reasoning", None)
-    clean.pop("reasoning_content", None)
-    if include_reasoning and isinstance(teacher_reasoning, str) and teacher_reasoning:
-        clean["reasoning"] = teacher_reasoning
-    return clean
-
-
-def _configure_example(example: JsonObject, include_reasoning: bool) -> JsonObject:
-    messages = example.get("messages")
-    if not isinstance(messages, list):
-        raise ValueError("Prepared example has no messages list.")
-    return {
-        "messages": [
-            _clean_message(message, include_reasoning=include_reasoning)
-            for message in messages
-        ],
-        "chat_template_kwargs": {
-            "enable_thinking": include_reasoning,
-            "preserve_thinking": include_reasoning,
-        },
-    }
-
-
-def _tokenization_stats(
-    example: JsonObject,
-    *,
-    tokenizer: Any,
-    training_template: str,
-) -> JsonObject:
-    kwargs = dict(example.get("chat_template_kwargs") or {})
-    encoded = tokenizer.apply_chat_template(
-        example["messages"],
-        tools=example.get("tools"),
-        chat_template=training_template,
-        tokenize=True,
-        return_dict=True,
-        return_assistant_tokens_mask=True,
-        **kwargs,
-    )
-    assistant_mask = encoded.get("assistant_masks")
-    if assistant_mask is None:
-        raise RuntimeError(
-            "Gemma-4 training template did not produce an assistant mask."
-        )
-    supervised_tokens = sum(assistant_mask)
-    if supervised_tokens <= 0:
-        raise RuntimeError(
-            f"Prepared example {example.get('id')} has no supervised tokens."
-        )
-    return {
-        "_token_length": len(encoded["input_ids"]),
-        "_supervised_tokens": supervised_tokens,
-    }
 
 
 def _percentile(values: Sequence[int], fraction: float) -> int:
@@ -324,6 +274,116 @@ def _validate_manifest(
                 + ", ".join(map(str, sorted(invalid_versions, key=str)))
             )
     return manifest
+
+
+def _validate_prepared_tokenization(
+    manifest: Mapping[str, Any],
+    *,
+    train_dataset: Dataset,
+    validation_dataset: Dataset,
+    tokenizer: Any,
+    training_template: str,
+    model_name_or_path: str,
+    model_revision: str,
+    include_reasoning: bool,
+    max_length: int | None,
+    required: bool,
+) -> JsonObject | None:
+    if not isinstance(required, bool):
+        raise ValueError("data.require_prepared_tokenization must be a boolean.")
+    prepared = manifest.get("tokenization")
+    if prepared is None:
+        if required:
+            raise ValueError(
+                "The selected dataset has no mandatory prepared-tokenization metadata."
+            )
+        return None
+    if not isinstance(prepared, Mapping):
+        raise ValueError("Prepared-data manifest tokenization must be an object.")
+    prepared = dict(prepared)
+    if prepared.get("profile") != PREPARED_TOKENIZATION_PROFILE:
+        raise ValueError("Prepared-data tokenization profile is unsupported.")
+    if prepared.get("tokenizer") != model_name_or_path:
+        raise ValueError(
+            "Prepared-data tokenizer does not match model.name_or_path: "
+            f"{prepared.get('tokenizer')!r} != {model_name_or_path!r}."
+        )
+    if prepared.get("requested_revision") != model_revision:
+        raise ValueError(
+            "Prepared-data tokenizer revision does not match model.revision."
+        )
+    if prepared.get("include_reasoning") is not include_reasoning:
+        raise ValueError(
+            "Prepared-data reasoning policy does not match data.include_reasoning."
+        )
+    prepared_max = prepared.get("max_tokens")
+    if (
+        isinstance(prepared_max, bool)
+        or not isinstance(prepared_max, int)
+        or prepared_max <= 0
+    ):
+        raise ValueError("Prepared-data tokenization has an invalid max_tokens.")
+    if max_length is None:
+        raise ValueError(
+            "Prepared-tokenized datasets require training.max_length to be set."
+        )
+    if int(max_length) > prepared_max:
+        raise ValueError(
+            f"training.max_length={max_length} exceeds the prepared dataset ceiling "
+            f"of {prepared_max} tokens."
+        )
+    expected_template_hash = hashlib.sha256(
+        training_template.encode("utf-8")
+    ).hexdigest()
+    if prepared.get("training_template_sha256") != expected_template_hash:
+        raise ValueError(
+            "Prepared-data Gemma training template does not match the runtime template."
+        )
+    init_kwargs = getattr(tokenizer, "init_kwargs", {})
+    runtime_revision = (
+        init_kwargs.get("_commit_hash") if isinstance(init_kwargs, Mapping) else None
+    )
+    prepared_revision = prepared.get("resolved_revision")
+    if prepared_revision != runtime_revision:
+        raise ValueError(
+            "Prepared-data resolved tokenizer revision does not match the runtime "
+            "tokenizer revision."
+        )
+
+    for split, dataset in (
+        ("train", train_dataset),
+        ("validation", validation_dataset),
+    ):
+        for index, example in enumerate(dataset):
+            attributes = example.get("attributes")
+            metadata = (
+                attributes.get(PREPARED_TOKENIZATION_ATTRIBUTE)
+                if isinstance(attributes, Mapping)
+                else None
+            )
+            if not isinstance(metadata, Mapping):
+                raise ValueError(
+                    f"Prepared {split} example {example.get('id', index)} has no "
+                    "mandatory token metadata."
+                )
+            if metadata.get("profile") != PREPARED_TOKENIZATION_PROFILE:
+                raise ValueError(
+                    f"Prepared {split} example {example.get('id', index)} has an "
+                    "unsupported tokenization profile."
+                )
+            if metadata.get("tokens") != int(example["_token_length"]):
+                raise ValueError(
+                    f"Prepared {split} example {example.get('id', index)} token count "
+                    "does not match fresh tokenization."
+                )
+            if metadata.get("supervised_tokens") != int(
+                example["_supervised_tokens"]
+            ):
+                raise ValueError(
+                    f"Prepared {split} example {example.get('id', index)} supervised "
+                    "token count does not match fresh tokenization."
+                )
+    return prepared
 
 
 def _apply_overlength_policy(
@@ -879,6 +939,18 @@ def main(argv: Sequence[str] | None = None) -> None:
         num_proc=num_proc,
     )
     max_length = training_config.get("max_length")
+    prepared_tokenization = _validate_prepared_tokenization(
+        manifest,
+        train_dataset=train_dataset,
+        validation_dataset=validation_dataset,
+        tokenizer=tokenizer,
+        training_template=training_template,
+        model_name_or_path=model_name_or_path,
+        model_revision=str(model_config.get("revision", "main")),
+        include_reasoning=include_reasoning,
+        max_length=max_length,
+        required=data_config.get("require_prepared_tokenization", False),
+    )
     exclude_overlength = data_config.get("exclude_overlength", False)
     error_on_truncation = data_config.get("error_on_truncation", True)
     train_dataset, train_overlength_exclusions = _apply_overlength_policy(
@@ -973,6 +1045,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             "sdpa_backends": sdpa_backends,
             "liger_kernel": liger_runtime,
             "include_reasoning": include_reasoning,
+            "prepared_tokenization": prepared_tokenization,
             "raw_train_token_stats": raw_train_token_stats,
             "raw_validation_token_stats": raw_validation_token_stats,
             "train_token_stats": train_token_stats,

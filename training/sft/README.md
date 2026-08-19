@@ -73,6 +73,40 @@ the longest traces have 23,132 train tokens and 13,906 validation tokens. The
 8K E4B configs retain 827 train and 92 validation traces, explicitly record the
 12 train and three validation exclusions, and never truncate a trace.
 
+The new `v2-8k` and `v2-32k` releases materialize those length policies during
+preparation. They require Gemma-4 E4B non-thinking token metadata on every row;
+there is no fallback for a missing count, tokenizer revision, or template hash.
+Training freshly tokenizes each row to construct assistant masks, verifies the
+stored counts exactly, filters against `training.max_length` before TRL is
+constructed, and keeps TRL's `max_length` at the same value. It never uses
+truncation to repair an overlength conversation.
+
+Prepare both releases before selecting a v2 training experiment:
+
+```bash
+uv run --group train python -m gyms.workplace_assistant.prepare sft \
+  --dataset workplace-deepseek-e4b-thinking-v2-8k
+uv run --group train python -m gyms.workplace_assistant.prepare sft \
+  --dataset workplace-deepseek-e4b-thinking-v2-32k
+```
+
+The default v2 run remains 8K. Its smoke and full MLSpace experiments are:
+
+```bash
+uv run --with-requirements training/sft/requirements-mlspace.txt \
+  python -m training.sft.run_train_jobs --sanity-check \
+  --filter gemma4-e4b-nonthinking-deepseek-e4b-v2-8k-smoke-4gpu
+
+uv run --with-requirements training/sft/requirements-mlspace.txt \
+  python -m training.sft.run_train_jobs \
+  --filter gemma4-e4b-nonthinking-deepseek-e4b-v2-8k-full-4gpu
+```
+
+The registered `v2-32k` experiment uses the 32K release and
+`training.max_length: 32768`. It is available for local or MLSpace execution,
+but its four-GPU memory envelope has not been smoke-tested and should not be
+submitted as a full run until a dedicated 32K smoke configuration succeeds.
+
 The output manifest records source hashes, reason-coded filtering counts,
 split keys, the system-prompt hash, the tool-schema hash, and generated-file
 hashes, canonical schema version, preparation Git revision, and portable

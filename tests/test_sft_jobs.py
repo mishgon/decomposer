@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -31,6 +32,7 @@ from training.sft.train import (
     _save_final_configuration,
     _select_longest_by_token_length,
     _summarize_trainer_state,
+    _validate_prepared_tokenization,
 )
 
 EARLY_STOPPING_TRAINING_CONFIG = {
@@ -81,7 +83,7 @@ def test_sft_experiments_are_unique_and_register_retained_configs() -> None:
         False,
         True,
     }
-    assert len(experiments) == 6
+    assert len(experiments) == 9
     e2b_four_gpu = experiments[2]
     assert e2b_four_gpu.num_gpus == 4
     assert e2b_four_gpu.use_liger_kernel is True
@@ -95,6 +97,9 @@ def test_sft_experiments_are_unique_and_register_retained_configs() -> None:
         "gemma4-e4b-nonthinking-4gpu-liger-workplace-26b-v3",
         "gemma4-e4b-nonthinking-deepseek-e4b-v1-8k-smoke-4gpu",
         "gemma4-e4b-nonthinking-deepseek-e4b-v1-8k-full-4gpu",
+        "gemma4-e4b-nonthinking-deepseek-e4b-v2-8k-smoke-4gpu",
+        "gemma4-e4b-nonthinking-deepseek-e4b-v2-8k-full-4gpu",
+        "gemma4-e4b-nonthinking-deepseek-e4b-v2-32k-full-4gpu",
     }
     for experiment in experiments[4:]:
         assert experiment.num_gpus == 4
@@ -354,6 +359,87 @@ def test_overlength_policy_refuses_to_empty_split() -> None:
         )
 
 
+def _prepared_tokenized_dataset(*, stored_tokens: int = 8) -> Dataset:
+    return Dataset.from_dict(
+        {
+            "id": ["example"],
+            "_token_length": [8],
+            "_supervised_tokens": [3],
+            "attributes": [
+                {
+                    "prepared_tokenization": {
+                        "profile": "gemma4_sft_non_thinking",
+                        "tokens": stored_tokens,
+                        "supervised_tokens": 3,
+                    }
+                }
+            ],
+        }
+    )
+
+
+def _prepared_tokenization_manifest(template: str = "template") -> dict:
+    return {
+        "tokenization": {
+            "profile": "gemma4_sft_non_thinking",
+            "tokenizer": "google/gemma-4-E4B-it",
+            "requested_revision": "main",
+            "resolved_revision": "fixture-revision",
+            "training_template_sha256": hashlib.sha256(
+                template.encode("utf-8")
+            ).hexdigest(),
+            "include_reasoning": False,
+            "max_tokens": 8192,
+        }
+    }
+
+
+def test_trainer_requires_and_verifies_prepared_token_metadata() -> None:
+    dataset = _prepared_tokenized_dataset()
+    prepared = _validate_prepared_tokenization(
+        _prepared_tokenization_manifest(),
+        train_dataset=dataset,
+        validation_dataset=dataset,
+        tokenizer=SimpleNamespace(init_kwargs={"_commit_hash": "fixture-revision"}),
+        training_template="template",
+        model_name_or_path="google/gemma-4-E4B-it",
+        model_revision="main",
+        include_reasoning=False,
+        max_length=8192,
+        required=True,
+    )
+    assert prepared is not None
+    assert prepared["max_tokens"] == 8192
+
+    with pytest.raises(ValueError, match="no mandatory prepared-tokenization"):
+        _validate_prepared_tokenization(
+            {},
+            train_dataset=dataset,
+            validation_dataset=dataset,
+            tokenizer=SimpleNamespace(init_kwargs={"_commit_hash": "fixture-revision"}),
+            training_template="template",
+            model_name_or_path="google/gemma-4-E4B-it",
+            model_revision="main",
+            include_reasoning=False,
+            max_length=8192,
+            required=True,
+        )
+
+    with pytest.raises(ValueError, match="does not match fresh tokenization"):
+        _validate_prepared_tokenization(
+            _prepared_tokenization_manifest(),
+            train_dataset=_prepared_tokenized_dataset(stored_tokens=7),
+            validation_dataset=dataset,
+            tokenizer=SimpleNamespace(init_kwargs={"_commit_hash": "fixture-revision"}),
+            training_template="template",
+            model_name_or_path="google/gemma-4-E4B-it",
+            model_revision="main",
+            include_reasoning=False,
+            max_length=8192,
+            required=True,
+        )
+
+
 def test_longest_sample_selection_happens_after_tokenization() -> None:
     dataset = _tokenized_dataset(100, 400, 200, 400, 300)
     selected = _select_longest_by_token_length(dataset, 4)
@@ -540,6 +626,21 @@ def test_training_state_summary_reports_early_stop_and_best_checkpoint() -> None
             "deepseek_e4b_v1_8k.yaml",
             "gemma-4-E4B-it",
         ),
+        (
+            "gemma4_e4b_nonthinking_4gpu_liger_workplace_"
+            "deepseek_e4b_v2_8k_smoke.yaml",
+            "gemma-4-E4B-it",
+        ),
+        (
+            "gemma4_e4b_nonthinking_4gpu_liger_workplace_"
+            "deepseek_e4b_v2_8k.yaml",
+            "gemma-4-E4B-it",
+        ),
+        (
+            "gemma4_e4b_nonthinking_4gpu_liger_workplace_"
+            "deepseek_e4b_v2_32k.yaml",
+            "gemma-4-E4B-it",
+        ),
     ],
 )
 def test_sft_configs_have_clearml_project_and_model_tags(
@@ -607,6 +708,32 @@ def test_e4b_deepseek_v1_8k_configs_are_oom_safe_and_non_thinking() -> None:
         "patience": 2,
         "threshold": 0.0,
     }
+
+
+def test_e4b_deepseek_v2_configs_require_matching_prepared_releases() -> None:
+    root = Path("training/sft/configs")
+    variants = {
+        "deepseek_e4b_v2_8k.yaml": ("v2-8k", 8192),
+        "deepseek_e4b_v2_8k_smoke.yaml": ("v2-8k", 8192),
+        "deepseek_e4b_v2_32k.yaml": ("v2-32k", 32768),
+    }
+    for suffix, (version, max_length) in variants.items():
+        config = yaml.safe_load(
+            (
+                root
+                / (
+                    "gemma4_e4b_nonthinking_4gpu_liger_workplace_" + suffix
+                )
+            ).read_text()
+        )
+        data = config["data"]
+        assert f"/{version}/" in data["train_file"]
+        assert f"/{version}/" in data["validation_file"]
+        assert f"/{version}/" in data["manifest_file"]
+        assert data["require_prepared_tokenization"] is True
+        assert data["include_reasoning"] is False
+        assert data["exclude_overlength"] is True
+        assert config["training"]["max_length"] == max_length
 
 
 def test_training_completion_requires_summary_and_final_weights(tmp_path: Path) -> None:

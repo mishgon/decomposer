@@ -103,6 +103,60 @@ def sft_experiments() -> list[ExperimentConfig]:
             use_liger_kernel=True,
             pytorch_cuda_alloc_conf="expandable_segments:True",
         ),
+        ExperimentConfig(
+            name=(
+                "gemma4-e4b-nonthinking-deepseek-e4b-v2-8k-smoke-4gpu"
+            ),
+            config_path=(
+                "training/sft/configs/"
+                "gemma4_e4b_nonthinking_4gpu_liger_workplace_"
+                "deepseek_e4b_v2_8k_smoke.yaml"
+            ),
+            description=(
+                "Gemma-4 E4B Decomposer SFT smoke "
+                "(non-thinking, Workplace DeepSeek/E4B v2-8k, 4 GPU, "
+                "Liger fused CE, one step)"
+            ),
+            num_gpus=4,
+            use_liger_kernel=True,
+            pytorch_cuda_alloc_conf="expandable_segments:True",
+        ),
+        ExperimentConfig(
+            name=(
+                "gemma4-e4b-nonthinking-deepseek-e4b-v2-8k-full-4gpu"
+            ),
+            config_path=(
+                "training/sft/configs/"
+                "gemma4_e4b_nonthinking_4gpu_liger_workplace_"
+                "deepseek_e4b_v2_8k.yaml"
+            ),
+            description=(
+                "Gemma-4 E4B Decomposer SFT "
+                "(non-thinking, Workplace DeepSeek/E4B v2-8k, 4 GPU, "
+                "Liger fused CE, global batch 4)"
+            ),
+            num_gpus=4,
+            use_liger_kernel=True,
+            pytorch_cuda_alloc_conf="expandable_segments:True",
+        ),
+        ExperimentConfig(
+            name=(
+                "gemma4-e4b-nonthinking-deepseek-e4b-v2-32k-full-4gpu"
+            ),
+            config_path=(
+                "training/sft/configs/"
+                "gemma4_e4b_nonthinking_4gpu_liger_workplace_"
+                "deepseek_e4b_v2_32k.yaml"
+            ),
+            description=(
+                "Gemma-4 E4B Decomposer SFT "
+                "(non-thinking, Workplace DeepSeek/E4B v2-32k, 4 GPU, "
+                "Liger fused CE, experimental 32K memory envelope)"
+            ),
+            num_gpus=4,
+            use_liger_kernel=True,
+            pytorch_cuda_alloc_conf="expandable_segments:True",
+        ),
     ]
 
 

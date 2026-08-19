@@ -22,8 +22,8 @@ from gyms.workplace_assistant.experiments import (  # noqa: E402
     DATA_DIR,
     PROJECT_VENV,
     SFT_OUTPUT_ROOT,
-    SPLITS,
     SPLIT_ROWS,
+    SPLITS,
     UV_BIN,
     UV_CACHE,
     DecomposerExperiment,
@@ -44,6 +44,12 @@ SFT_SPECS = {
     "workplace-all-v3": "workplace_all_v3.yaml",
     "workplace-26b-nonthinking-v3": "workplace_26b_nonthinking_v3.yaml",
     "workplace-deepseek-e4b-thinking-v1": "workplace_deepseek_e4b_thinking_v1.yaml",
+    "workplace-deepseek-e4b-thinking-v2-8k": (
+        "workplace_deepseek_e4b_thinking_v2_8k.yaml"
+    ),
+    "workplace-deepseek-e4b-thinking-v2-32k": (
+        "workplace_deepseek_e4b_thinking_v2_32k.yaml"
+    ),
 }
 
 
@@ -498,6 +504,7 @@ def prepare_sft(args: argparse.Namespace) -> int:
                 "release_dir": str(prepared.release_dir),
                 "manifest_path": str(prepared.manifest_path),
                 "filtering": prepared.manifest["filtering"],
+                "tokenization": prepared.manifest.get("tokenization"),
                 "records": prepared.manifest["records"],
             },
             indent=2,
