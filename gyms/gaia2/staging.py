@@ -42,7 +42,28 @@ def stage_revision(repo: Path, revision: str, target: Path) -> Path:
         shutil.rmtree(temporary)
     temporary.mkdir()
     try:
-        subprocess.run(["cp", "-a", str(repo / ".git"), str(temporary)], check=True)
+        git_metadata = repo / ".git"
+        if git_metadata.is_file():
+            # A submodule worktree stores only a relative gitdir pointer in
+            # ``.git``. Copying that file would leave a broken pointer once
+            # the checkout is moved under the artifact root, so materialize a
+            # standalone local clone instead.
+            subprocess.run(
+                [
+                    "git",
+                    "clone",
+                    "--local",
+                    "--no-hardlinks",
+                    "--no-checkout",
+                    str(repo),
+                    str(temporary),
+                ],
+                check=True,
+            )
+        else:
+            subprocess.run(
+                ["cp", "-a", str(git_metadata), str(temporary)], check=True
+            )
         subprocess.run(
             ["git", "-C", str(temporary), "reset", "--hard", commit], check=True
         )

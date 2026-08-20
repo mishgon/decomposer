@@ -4,3 +4,6 @@
 [submodule "external/toolathlon_gym"]
 	path = external/toolathlon_gym
 	url = https://github.com/eigent-ai/toolathlon_gym
+[submodule "external/gaia2"]
+	path = external/gaia2
+	url = https://gitlab.2a2i.org/Ionov/gaia2.git

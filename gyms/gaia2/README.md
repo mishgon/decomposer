@@ -5,11 +5,10 @@ agent adapter, local execution, and MLSpace submission. It supports the
 `validation` split of the `execution` domain only; Gaia2 is not used for trace
 generation or SFT data.
 
-The current integration uses Gaia commit
-`3bee736488864e028231755ce2ee32a7065e8648`. Until that commit can be published
-and added as `external/gaia2`, preparation reads it from the existing local Gaia
-repository and materializes a clean, immutable checkout under Decomposer
-artifacts. Every preparation and run manifest records both repository commits.
+The Gaia runtime is pinned through `external/gaia2` at commit
+`3bee736488864e028231755ce2ee32a7065e8648`. Preparation materializes a
+clean, immutable checkout under Decomposer artifacts. Every preparation and
+run manifest records both repository commits.
 
 ## Prepare data and runtimes
 

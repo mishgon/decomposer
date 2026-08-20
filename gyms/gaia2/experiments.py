@@ -10,7 +10,7 @@ from typing import Literal
 ARTIFACTS_ROOT = Path("/mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts")
 PROJECT_ROOT = Path("/mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_sft")
 PROJECT_VENV = PROJECT_ROOT / ".venv"
-DEFAULT_GAIA2_REPO = Path("/mnt/shared_ru.ml.SZ-5_000264/sukhorukov/gaia2")
+DEFAULT_GAIA2_REPO = PROJECT_ROOT / "external" / "gaia2"
 
 DATASET_ID = "meta-agents-research-environments/gaia2"
 DATASET_REVISION = "78ea3bdbdeec2bdcd6afa5420915d8a22f23ed99"
