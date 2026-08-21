@@ -49,7 +49,7 @@ NO_RUNNING_SUBAGENTS_ERROR = "No running subagents to wait for."
 NO_COMPLETED_SUBAGENT_RUNS_ERROR = "No current subagent runs completed."
 
 
-PARALLEL_WAIT_CALL_ERROR = """Parallel tool calls with `wait` tool are not supported. This tool call was not executed."""
+PARALLEL_WAIT_CALL_ERROR = """A `wait` call must be the only tool call in the message. This `wait` call was not executed."""
 
 
 EARLY_REPORT_ERROR = """Wait for the reports of all spawned subagents. If everything is OK, respond with a final report again; otherwise, continue the orchestration until reports of *all* spawned subagents collectively establish completion of the user task."""
