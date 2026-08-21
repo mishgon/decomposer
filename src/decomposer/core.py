@@ -2,9 +2,9 @@ import json
 import time
 import asyncio
 import logging
-import uuid
 from typing import Annotated, Any, NotRequired, Sequence
 
+from httpx import ReadError, RemoteProtocolError
 from langchain.agents import create_agent
 from langchain.agents.middleware.types import (
     AgentMiddleware,
@@ -14,7 +14,7 @@ from langchain.agents.middleware.types import (
 )
 from langchain.tools import ToolRuntime
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import AIMessage, SystemMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.messages.utils import count_tokens_approximately
 from langchain_core.tools import StructuredTool
 from langgraph.graph.state import CompiledStateGraph
@@ -27,8 +27,13 @@ from typing_extensions import TypedDict
 
 from .prompts import (
     DECOMPOSER_SYSTEM_PROMPT,
-    SPAWN_SUBAGENT_TOOL_DESCRIPTION,
+    EARLY_REPORT_ERROR,
+    EMPTY_REPORT_ERROR,
+    NO_COMPLETED_SUBAGENT_RUNS_ERROR,
+    NO_RUNNING_SUBAGENTS_ERROR,
+    PARALLEL_WAIT_CALL_ERROR,
     PROMPT_PARAMETER_DESCRIPTION,
+    SPAWN_SUBAGENT_TOOL_DESCRIPTION,
     SUBAGENT_TYPE_ID_PARAMETER_DESCRIPTION,
     WAIT_TOOL_DESCRIPTION,
 )
@@ -355,7 +360,7 @@ def _build_wait_tool(
         subagent_runs: dict[str, SubagentRun] = runtime.state.get("subagent_runs") or {}
         current_runs = _get_current_subagent_runs(subagent_runs)
         if not current_runs:
-            return "No running subagents to wait for."
+            return NO_RUNNING_SUBAGENTS_ERROR
         next_report_sequence_number = len(subagent_runs) - len(current_runs)
 
         deadline = time.monotonic() + WAIT_TIMEOUT_SECONDS
@@ -447,7 +452,7 @@ def _build_wait_tool(
                     update={
                         "messages": [
                             ToolMessage(
-                                "No current subagent runs completed.",
+                                NO_COMPLETED_SUBAGENT_RUNS_ERROR,
                                 tool_call_id=runtime.tool_call_id,
                             )
                         ],
@@ -461,7 +466,7 @@ def _build_wait_tool(
         subagent_runs: dict[str, SubagentRun] = runtime.state.get("subagent_runs") or {}
         current_runs = _get_current_subagent_runs(subagent_runs)
         if not current_runs:
-            return "No running subagents to wait for."
+            return NO_RUNNING_SUBAGENTS_ERROR
         next_report_sequence_number = len(subagent_runs) - len(current_runs)
 
         deadline = asyncio.get_running_loop().time() + WAIT_TIMEOUT_SECONDS
@@ -476,11 +481,17 @@ def _build_wait_tool(
                         run_id=subagent_run["run_id"],
                     )
                     for _, subagent_run in current_runs.items()
-                )
+                ),
+                return_exceptions=True,
             )
             for (subagent_run_id, subagent_run), run in zip(
                 current_runs.items(), runs, strict=True
             ):
+                if isinstance(run, (ReadError, RemoteProtocolError)):
+                    continue
+                if isinstance(run, BaseException):
+                    raise run
+
                 if run["status"] not in TERMINAL_STATUSES:
                     if run["status"] != subagent_run["status"]:
                         updated_runs[subagent_run_id] = {
@@ -558,7 +569,7 @@ def _build_wait_tool(
                     update={
                         "messages": [
                             ToolMessage(
-                                "No current subagent runs completed.",
+                                NO_COMPLETED_SUBAGENT_RUNS_ERROR,
                                 tool_call_id=runtime.tool_call_id,
                             )
                         ],
@@ -574,6 +585,8 @@ def _build_wait_tool(
         name="wait",
         description=WAIT_TOOL_DESCRIPTION.format(
             wait_timeout_seconds=WAIT_TIMEOUT_SECONDS,
+            no_running_subagents_error=NO_RUNNING_SUBAGENTS_ERROR,
+            no_completed_subagent_runs_error=NO_COMPLETED_SUBAGENT_RUNS_ERROR,
             # subagent_report_max_tokens=SUBAGENT_REPORT_MAX_TOKENS,
         ),
     )
@@ -599,7 +612,6 @@ class DecomposerAgentMiddleware(
         self,
         subagent_types: Sequence[SubagentType],
         subagent_recursion_limit: int,
-        allow_early_response: bool = False,
     ) -> None:
         super().__init__()
 
@@ -617,48 +629,52 @@ class DecomposerAgentMiddleware(
         self.tools = _build_decomposer_agent_tools(
             subagent_types, subagent_recursion_limit
         )
-        self.allow_early_response = allow_early_response
 
     def after_model(
         self,
         state: DecomposerAgentState,
         runtime: Runtime[ContextT],
     ) -> dict[str, Any] | None:
-        message = state["messages"][-1]
-        subagent_runs = state.get("subagent_runs") or {}
-        if (
-            self.allow_early_response
-            or not isinstance(message, AIMessage)
-            or message.tool_calls
-            or all(run.get("report") is not None for run in subagent_runs.values())
-        ):
+        ai_message = next(
+            (
+                message
+                for message in reversed(state["messages"])
+                if isinstance(message, AIMessage)
+            ),
+            None,
+        )
+        if ai_message is None:
+            raise RuntimeError("Expected the state to contain an AIMessage.")
+
+        tool_calls = ai_message.tool_calls
+        if len(tool_calls) > 1 and any(call["name"] == "wait" for call in tool_calls):
+            return {
+                "messages": [
+                    ToolMessage(
+                        content=PARALLEL_WAIT_CALL_ERROR,
+                        tool_call_id=tool_call["id"],
+                        name=tool_call["name"],
+                    )
+                    for tool_call in tool_calls
+                    if tool_call["name"] == "wait"
+                ],
+            }
+
+        if tool_calls:
             return None
 
-        wait_message = message.model_copy(
-            update={
-                "content": "",
-                "additional_kwargs": {
-                    "reasoning_content": "Let me wait for the remaining subagents.",
-                },
-                "tool_calls": [
-                    {
-                        "name": "wait",
-                        "args": {},
-                        "id": f"call_{uuid.uuid4().hex}",
-                        "type": "tool_call",
-                    }
-                ],
-                "invalid_tool_calls": [],
-            }
-        )
-        return {"messages": [wait_message]}
+        subagent_runs = state.get("subagent_runs") or {}
+        if any(run.get("report") is None for run in subagent_runs.values()):
+            error = EARLY_REPORT_ERROR
+        elif not ai_message.text.strip():
+            error = EMPTY_REPORT_ERROR
+        else:
+            return None
 
-    async def aafter_model(
-        self,
-        state: DecomposerAgentState,
-        runtime: Runtime[ContextT],
-    ) -> dict[str, Any] | None:
-        return self.after_model(state, runtime)
+        return {
+            "messages": [HumanMessage(content=error)],
+            "jump_to": "model",
+        }
 
 
 def create_decomposer_agent(
@@ -670,7 +686,6 @@ def create_decomposer_agent(
     context_schema: type[Any] | None = None,
     checkpointer: Checkpointer | None = None,
     subagent_recursion_limit: int = 100,  # ~50 tool calls
-    allow_early_response: bool = False,
 ) -> CompiledStateGraph:
     """
     Create a Decomposer agent.
@@ -688,7 +703,7 @@ def create_decomposer_agent(
     - `wait` with no args. This tool waits for at least one new subagent report
       and returns all new subagent reports that have been produced since the
       last `wait` call. If there are no new reports and no running subagents,
-      it returns "No running subagents to wait for."
+      it immediately returns a message about this status.
 
     Args:
         decomposer_model: The language model for the Decomposer agent.
@@ -698,12 +713,10 @@ def create_decomposer_agent(
         context_schema: JSON-serializable runtime context schema passed through
             to `create_agent` and forwarded unchanged to every subagent run.
         checkpointer: The checkpointer for the Decomposer agent.
-        subagent_recursion_limit: Recursion limit set for subagents
-        allow_early_response: Whether the Decomposer may respond before collecting
-            reports from all spawned subagents.
+        subagent_recursion_limit: Recursion limit set for subagents.
     """
     decomposer_middelware = DecomposerAgentMiddleware(
-        subagent_types, subagent_recursion_limit, allow_early_response
+        subagent_types, subagent_recursion_limit
     )
     agent = create_agent(
         model=decomposer_model,

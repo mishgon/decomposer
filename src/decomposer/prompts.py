@@ -34,7 +34,7 @@ WAIT_TOOL_DESCRIPTION = """Waits for at least one new report to become available
 
 Use this tool when you have already spawned subagents for all the necessary unblocked subtasks, and you want to wait for updates.
 
-This tool takes no arguments. If there are no new reports and no running subagents, it returns immediately with "No running subagents to wait for." If any subagents have completed since the last `wait` call, it immediately returns their reports. Otherwise, it waits up to {wait_timeout_seconds} seconds for at least one running subagent to complete, then returns all newly available reports. On timeout, it returns "No current subagent runs completed."
+This tool takes no arguments. If there are no new reports and no running subagents, it returns immediately with "{no_running_subagents_error}" If any subagents have completed since the last `wait` call, it immediately returns their reports. Otherwise, it waits up to {wait_timeout_seconds} seconds for at least one running subagent to complete, then returns all newly available reports. On timeout, it returns "{no_completed_subagent_runs_error}"
 
 The reports are formatted as a JSON list. Each report contains `subagent_run_id`, `status`, and `content` fields. Use the `subagent_run_id` field to identify the subagent run that produced the report. Note that the `status` field only reflects the mechanical status of the run, but does not reflect whether the subagent completed the subtask successfully. If status is `"success"`, the `content` field contains the subagent's final response. If status is `"error"`, the `content` field contains the error message, if available.
 
@@ -43,4 +43,19 @@ Do not use the `wait` tool when there are no running subagents to wait for.
 Never emit multiple `wait` calls in the same message. Never call `wait` with other tools in the same message. A `wait` call must be the only tool call in the message."""
 
 
-SUBAGENT_SYSTEM_PROMPT = """You are a helpful assistant. Complete user tasks using provided tools. Always respond to every user prompt. If you fail to fully complete a task, report what was accomplished and state the failure reason. Keep your responses as concise as possible (but always not empty) while satisfying these guardrails and user prompt constraints."""
+NO_RUNNING_SUBAGENTS_ERROR = "No running subagents to wait for."
+
+
+NO_COMPLETED_SUBAGENT_RUNS_ERROR = "No current subagent runs completed."
+
+
+PARALLEL_WAIT_CALL_ERROR = """Parallel tool calls with `wait` tool are not supported. This tool call was not executed."""
+
+
+EARLY_REPORT_ERROR = """Wait for the reports of all spawned subagents. If everything is OK, respond with a final report again; otherwise, continue the orchestration until reports of *all* spawned subagents collectively establish completion of the user task."""
+
+
+EMPTY_REPORT_ERROR = """Respond again with a non-empty final report."""
+
+
+SUBAGENT_SYSTEM_PROMPT = """You are a helpful assistant. Complete user tasks using provided tools. Always respond to the user with a final report upon task completion. If you fail to fully complete a task, report what was accomplished and state the failure reason. Keep your reports as concise as possible (but always not empty) while satisfying these guardrails and user prompt constraints."""
