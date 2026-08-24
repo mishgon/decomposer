@@ -111,8 +111,10 @@ vLLM replicas and expose them through dedicated SSH reverse tunnels bound to
 Hertz-2 loopback. This avoids requiring Docker inside MLSpace.
 
 The reproducible service definitions are in `mlspace_experiments.py`. The live
-SR008 mapping uses one H100 for the connectivity pilot and two eight-H100 jobs
-for the full pool. Artifacts, staged code, service logs, and dedicated tunnel
+SR008 mapping uses one H100 for the connectivity pilot and sixteen high-priority
+single-H100 jobs for the full pool. Independent jobs avoid waiting for scarce
+eight-GPU shapes and keep one eviction from taking out half the pool. Artifacts,
+staged code, service logs, and dedicated tunnel
 credentials live outside the checkout at:
 
 ```text
@@ -131,7 +133,7 @@ conda run -n decomposer_jobs python \
 ```
 
 Submit `--pilot` first and verify port 18099 from Hertz-2. Submit `--full` only
-after that succeeds; the two full jobs forward ports 18100 through 18115.
+after that succeeds; the sixteen full jobs forward ports 18100 through 18115.
 
 ## Artifacts and resume behavior
 
