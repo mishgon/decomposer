@@ -38,11 +38,20 @@ def parse_args() -> argparse.Namespace:
     return args
 
 
-def wait_for_model(port: int, expected_model: str, timeout: float) -> None:
+def wait_for_model(
+    port: int,
+    expected_model: str,
+    timeout: float,
+    process: subprocess.Popen[bytes] | None = None,
+) -> None:
     url = f"http://127.0.0.1:{port}/v1/models"
     deadline = time.monotonic() + timeout
     last_error: BaseException | None = None
     while time.monotonic() < deadline:
+        if process is not None and process.poll() is not None:
+            raise RuntimeError(
+                f"vLLM exited with code {process.returncode} while starting port {port}"
+            )
         try:
             with urllib.request.urlopen(url, timeout=3) as response:
                 models = json.load(response)["data"]
@@ -149,7 +158,13 @@ def main() -> None:
         for offset in range(args.gpu_count):
             port = args.local_port_start + offset
             log = (args.output_dir / f"vllm-gpu-{offset}.log").open("ab")
-            environment = {**os.environ, "CUDA_VISIBLE_DEVICES": str(offset)}
+            environment = {
+                **os.environ,
+                "CUDA_VISIBLE_DEVICES": str(offset),
+                # MLSpace's runtime image has the CUDA libraries but not nvcc.
+                # FlashInfer sampling otherwise attempts a JIT build at warmup.
+                "VLLM_USE_FLASHINFER_SAMPLER": "0",
+            }
             process = subprocess.Popen(
                 vllm_command(args, port),
                 env=environment,
@@ -167,6 +182,7 @@ def main() -> None:
                 args.local_port_start + offset,
                 SERVED_MODEL,
                 args.startup_timeout,
+                process,
             )
 
         tunnel_log = (args.output_dir / "tunnel.log").open("ab")

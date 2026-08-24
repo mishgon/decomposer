@@ -369,6 +369,13 @@ def test_mlspace_serve_builds_one_replica_and_reverse_forward_per_gpu() -> None:
     ]
 
 
+def test_mlspace_wait_fails_immediately_when_vllm_exits() -> None:
+    process = SimpleNamespace(poll=lambda: 1, returncode=1)
+
+    with pytest.raises(RuntimeError, match="vLLM exited with code 1"):
+        mlspace_serve.wait_for_model(8023, mlspace_serve.SERVED_MODEL, 30, process)
+
+
 def test_cleanup_continues_when_log_capture_fails(tmp_path, monkeypatch) -> None:
     calls = []
 
