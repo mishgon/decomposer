@@ -67,26 +67,6 @@ def test_spawn_subagent_passes_context_to_async_run() -> None:
     assert client.runs.create_kwargs["context"] == {"value": 42}
 
 
-def test_spawn_subagent_rejects_prompt_over_limit() -> None:
-    client = _SyncClient()
-    tool = _build_spawn_subagent_tool(
-        {"test": SUBAGENT_TYPE},
-        _ClientCacheStub(sync_client=client),
-        1,
-    )
-
-    assert tool.func is not None
-    result = tool.func(
-        subagent_type_id="test",
-        prompt="word " * (core.SUBAGENT_PROMPT_MAX_TOKENS + 100),
-        runtime=SimpleNamespace(context={}, tool_call_id="call_1"),
-    )
-
-    assert isinstance(result, str)
-    assert f"limit is {core.SUBAGENT_PROMPT_MAX_TOKENS} tokens" in result
-    assert client.runs.create_kwargs == {}
-
-
 def test_extract_subagent_tool_calls_preserves_message_and_call_order() -> None:
     assert _extract_subagent_tool_calls(
         [
@@ -164,31 +144,6 @@ def test_wait_stores_tool_calls_from_error_run() -> None:
         {"id": "run_a_call", "name": "resource_tool", "args": {"run": "run_a"}},
     ]
     assert subagent_run["report"]["content"] == "subagent failed"
-
-
-def test_wait_truncates_long_report(monkeypatch) -> None:
-    monkeypatch.setattr(core, "SUBAGENT_REPORT_MAX_TOKENS", 8)
-    client = _CompletedRunsClient()
-    history = client.threads.get_history(
-        thread_id="run_a_thread",
-        limit=core.HISTORY_LIMIT,
-        metadata={"run_id": "run_a"},
-    )
-    history[0]["values"]["messages"][-1]["content"] = "word " * 100
-    client.threads = SimpleNamespace(get_history=lambda **kwargs: history)
-    tool = _build_wait_tool(_ClientCacheStub(sync_client=client))
-
-    assert tool.func is not None
-    command = tool.func(
-        runtime=SimpleNamespace(
-            state={"subagent_runs": {"run_a": _subagent_run("run_a")}},
-            tool_call_id="wait_1",
-        )
-    )
-    content = command.update["subagent_runs"]["run_a"]["report"]["content"]
-
-    assert core._count_text_tokens(content) <= 8
-    assert "[truncated to approximately 8 tokens]" in content
 
 
 def test_await_wait_stores_tool_calls_from_error_run() -> None:

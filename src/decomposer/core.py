@@ -41,8 +41,8 @@ from .prompts import (
 logger = logging.getLogger(__name__)
 
 
-SUBAGENT_PROMPT_MAX_TOKENS = 1024
-SUBAGENT_REPORT_MAX_TOKENS = 1024
+# SUBAGENT_PROMPT_MAX_TOKENS = 1024
+# SUBAGENT_REPORT_MAX_TOKENS = 1024
 WAIT_TIMEOUT_SECONDS = 60.0
 WAIT_POLL_SECONDS = 5.0
 TERMINAL_STATUSES = frozenset({"success", "error", "timeout", "interrupted"})
@@ -134,9 +134,7 @@ def _build_spawn_subagent_schema(
             )
         )
         prompt: str = Field(
-            description=PROMPT_PARAMETER_DESCRIPTION.format(
-                subagent_prompt_max_tokens=SUBAGENT_PROMPT_MAX_TOKENS
-            )
+            description=PROMPT_PARAMETER_DESCRIPTION
         )
 
     return SpawnSubagentSchema
@@ -249,9 +247,9 @@ def _build_spawn_subagent_tool(
             allowed = ", ".join(f"`{k}`" for k in subagent_types)
             return f"Unknown subagent type ID `{subagent_type_id}`. Available IDs: {allowed}."
 
-        prompt_token_count = _count_text_tokens(prompt)
-        if prompt_token_count > SUBAGENT_PROMPT_MAX_TOKENS:
-            return f"The prompt is too long (about {prompt_token_count} tokens) while the limit is {SUBAGENT_PROMPT_MAX_TOKENS} tokens."
+        # prompt_token_count = _count_text_tokens(prompt)
+        # if prompt_token_count > SUBAGENT_PROMPT_MAX_TOKENS:
+        #     return f"The prompt is too long (about {prompt_token_count} tokens) while the limit is {SUBAGENT_PROMPT_MAX_TOKENS} tokens."
 
         subagent_type = subagent_types[subagent_type_id]
         client = clients.get_sync(subagent_type_id)
@@ -301,9 +299,9 @@ def _build_spawn_subagent_tool(
             allowed = ", ".join(f"`{k}`" for k in subagent_types)
             return f"Unknown subagent type ID `{subagent_type_id}`. Available IDs: {allowed}."
 
-        prompt_token_count = _count_text_tokens(prompt)
-        if prompt_token_count > SUBAGENT_PROMPT_MAX_TOKENS:
-            return f"The prompt is too long (about {prompt_token_count} tokens) while the limit is {SUBAGENT_PROMPT_MAX_TOKENS} tokens."
+        # prompt_token_count = _count_text_tokens(prompt)
+        # if prompt_token_count > SUBAGENT_PROMPT_MAX_TOKENS:
+        #     return f"The prompt is too long (about {prompt_token_count} tokens) while the limit is {SUBAGENT_PROMPT_MAX_TOKENS} tokens."
 
         subagent_type = subagent_types[subagent_type_id]
         client = clients.get_async(subagent_type_id)
@@ -418,7 +416,7 @@ def _build_wait_tool(
                 elif run["status"] == "error":
                     error = run.get("error")
                     content = str(error) if error else None
-                content, _ = _truncate_text(content, SUBAGENT_REPORT_MAX_TOKENS)
+                # content, _ = _truncate_text(content, SUBAGENT_REPORT_MAX_TOKENS)
 
                 report: SubagentReport = {
                     "subagent_run_id": subagent_run_id,
@@ -535,7 +533,7 @@ def _build_wait_tool(
                 elif run["status"] == "error":
                     error = run.get("error")
                     content = str(error) if error else None
-                content, _ = _truncate_text(content, SUBAGENT_REPORT_MAX_TOKENS)
+                # content, _ = _truncate_text(content, SUBAGENT_REPORT_MAX_TOKENS)
 
                 report: SubagentReport = {
                     "subagent_run_id": subagent_run_id,
@@ -589,7 +587,7 @@ def _build_wait_tool(
             wait_timeout_seconds=WAIT_TIMEOUT_SECONDS,
             no_running_subagents_error=NO_RUNNING_SUBAGENTS_ERROR,
             no_completed_subagent_runs_error=NO_COMPLETED_SUBAGENT_RUNS_ERROR,
-            subagent_report_max_tokens=SUBAGENT_REPORT_MAX_TOKENS,
+            # subagent_report_max_tokens=SUBAGENT_REPORT_MAX_TOKENS,
         ),
     )
 
