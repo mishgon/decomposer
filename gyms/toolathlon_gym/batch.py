@@ -224,6 +224,7 @@ def episode_command(
         "--evals-dir", str(root / "evals"),
         "--startup-timeout", str(args.startup_timeout),
         "--n-jobs-per-worker", str(args.n_jobs_per_worker),
+        "--container-lock-file", str(root / "runs" / run_id / "container.lock"),
     ]
 
 
@@ -264,7 +265,7 @@ def execute_episode(
             if process.poll() is None:
                 process.send_signal(signal.SIGINT)
                 try:
-                    process.wait(timeout=30)
+                    process.wait(timeout=120)
                 except subprocess.TimeoutExpired:
                     process.kill()
                     process.wait()
