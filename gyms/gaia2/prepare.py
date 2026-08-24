@@ -156,14 +156,23 @@ def experiment_models(experiment: Experiment, *, full_hashes: bool) -> dict[str,
                 experiment.checkpoint, full_hashes=full_hashes
             )
         }
-    return {
-        "manager": validate_checkpoint(
-            experiment.manager_checkpoint, full_hashes=full_hashes
-        ),
+    models = {
         "worker": validate_checkpoint(
             experiment.worker_checkpoint, full_hashes=full_hashes
-        ),
+        )
     }
+    if experiment.requires_local_manager:
+        if experiment.manager_checkpoint is None:
+            raise ValueError("Local manager requires manager_checkpoint")
+        models["manager"] = validate_checkpoint(
+            experiment.manager_checkpoint, full_hashes=full_hashes
+        )
+    else:
+        models["manager"] = {
+            "backend": experiment.manager_backend,
+            "model": experiment.manager_served_name,
+        }
+    return models
 
 
 def _prepare_dataset(*, reuse_source: bool, gaia2_revision: str) -> dict[str, Any]:

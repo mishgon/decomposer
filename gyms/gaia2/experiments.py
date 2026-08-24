@@ -55,6 +55,16 @@ GEMMA4_E4B_SFT = (
     / "gemma4-e4b-nonthinking-deepseek-e4b-v1-8k-full-4gpu"
     / "final-vllm"
 )
+QWEN35_4B_BASE = (
+    HF_HOME
+    / "hub"
+    / "models--Qwen--Qwen3.5-4B"
+    / "snapshots"
+    / "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a"
+)
+
+DecomposerManagerBackend = Literal["local_vllm", "openrouter"]
+DecomposerPromptProfile = Literal["student", "teacher"]
 
 
 def gaia2_lock_hash(gaia2_root: Path) -> str:
@@ -98,8 +108,10 @@ def filesystem_manifest() -> Path:
 @dataclass(frozen=True)
 class DecomposerExperiment:
     name: str
-    manager_checkpoint: Path
     worker_checkpoint: Path
+    manager_checkpoint: Path | None = None
+    manager_backend: DecomposerManagerBackend = "local_vllm"
+    prompt_profile: DecomposerPromptProfile = "student"
     num_gpus: int = 2
     manager_served_name: str = "decomposer/gemma4-e4b-sft-deepseek-e4b-v1-8k"
     worker_served_name: str = "google/gemma-4-E4B-it"
@@ -117,7 +129,29 @@ class DecomposerExperiment:
     concurrency: int = 4
     manager_thinking: bool = False
     worker_thinking: bool = True
+    worker_tool_call_parser: str = "gemma4"
+    worker_reasoning_parser: str | None = "gemma4"
+    worker_language_model_only: bool = True
+    worker_trust_remote_code: bool = False
+    worker_gdn_prefill_backend: str | None = None
     kind: Literal["decomposer"] = field(init=False, default="decomposer")
+
+    def __post_init__(self) -> None:
+        if self.manager_backend == "local_vllm" and self.manager_checkpoint is None:
+            raise ValueError("A local_vllm manager requires manager_checkpoint")
+        expected_gpus = 2 if self.manager_backend == "local_vllm" else 1
+        if self.num_gpus != expected_gpus:
+            raise ValueError(
+                f"{self.manager_backend} Decomposer requires {expected_gpus} GPU(s)"
+            )
+
+    @property
+    def requires_local_manager(self) -> bool:
+        return self.manager_backend == "local_vllm"
+
+    @property
+    def requires_openrouter(self) -> bool:
+        return self.manager_backend == "openrouter"
 
 
 @dataclass(frozen=True)
@@ -143,8 +177,37 @@ Experiment = DecomposerExperiment | SimpleExperiment
 
 DECOMPOSER_EXPERIMENT = DecomposerExperiment(
     name=("gemma4-e4b-sft-deepseek-e4b-v1-8k-non-thinking-gemma4-e4b-thinking"),
-    manager_checkpoint=GEMMA4_E4B_SFT,
     worker_checkpoint=GEMMA4_E4B_BASE,
+    manager_checkpoint=GEMMA4_E4B_SFT,
+)
+DEEPSEEK_GEMMA_EXPERIMENT = DecomposerExperiment(
+    name="deepseek-v4-flash-0731-teacher-gemma4-e4b-thinking",
+    worker_checkpoint=GEMMA4_E4B_BASE,
+    manager_backend="openrouter",
+    prompt_profile="teacher",
+    num_gpus=1,
+    manager_served_name="deepseek/deepseek-v4-flash-0731",
+    manager_thinking=True,
+)
+DEEPSEEK_QWEN_EXPERIMENT = DecomposerExperiment(
+    name="deepseek-v4-flash-0731-teacher-qwen35-4b-non-thinking",
+    worker_checkpoint=QWEN35_4B_BASE,
+    manager_backend="openrouter",
+    prompt_profile="teacher",
+    num_gpus=1,
+    manager_served_name="deepseek/deepseek-v4-flash-0731",
+    manager_thinking=True,
+    worker_served_name="Qwen/Qwen3.5-4B",
+    worker_port=8031,
+    service_port=8134,
+    subagent_port=2034,
+    max_model_len=131072,
+    worker_thinking=False,
+    worker_tool_call_parser="qwen3_xml",
+    worker_reasoning_parser=None,
+    worker_language_model_only=False,
+    worker_trust_remote_code=True,
+    worker_gdn_prefill_backend="triton",
 )
 SIMPLE_EXPERIMENT = SimpleExperiment(
     name="gemma4-e4b-it-thinking",
@@ -152,6 +215,8 @@ SIMPLE_EXPERIMENT = SimpleExperiment(
 )
 ALL_EXPERIMENTS: tuple[Experiment, ...] = (
     DECOMPOSER_EXPERIMENT,
+    DEEPSEEK_GEMMA_EXPERIMENT,
+    DEEPSEEK_QWEN_EXPERIMENT,
     SIMPLE_EXPERIMENT,
 )
 EXPERIMENTS = {experiment.name: experiment for experiment in ALL_EXPERIMENTS}

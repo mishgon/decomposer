@@ -23,6 +23,7 @@ from gyms.gaia2.experiments import (  # noqa: E402
     INSTANCE_TYPES_BY_NUM_GPUS,
     PROJECT_VENV,
     SPLIT,
+    DecomposerExperiment,
     Experiment,
     collect_experiments,
     completion_marker,
@@ -34,6 +35,20 @@ from gyms.gaia2.staging import git, stage_revision  # noqa: E402
 
 _TAG_RE = re.compile(r"[#@]\S+")
 _AUTHOR_RE = re.compile(r"[A-Za-z0-9_.-]+")
+_PROXY_ENV_VARIABLES = (
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "http_proxy",
+    "https_proxy",
+    "NO_PROXY",
+    "no_proxy",
+)
+_SENSITIVE_PROXY_ENV_VARIABLES = {
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "http_proxy",
+    "https_proxy",
+}
 
 
 def normalize_job_desc(description: str) -> str:
@@ -52,6 +67,17 @@ def worktree_dirty(repo_root: Path) -> list[str]:
     return git(repo_root, "status", "--porcelain").splitlines()
 
 
+def configured_proxy_environment(environ: Mapping[str, str]) -> dict[str, str]:
+    proxy_env = {
+        name: environ[name] for name in _PROXY_ENV_VARIABLES if environ.get(name)
+    }
+    if not (proxy_env.get("HTTPS_PROXY") or proxy_env.get("https_proxy")):
+        raise RuntimeError(
+            "HTTPS_PROXY or https_proxy is not set; the Gaia2 job cannot reach OpenRouter"
+        )
+    return proxy_env
+
+
 def redact_payload(payload: dict[str, Any]) -> dict[str, Any]:
     try:
         from mls.manager.job.redact import redact_payload as mls_redact_payload
@@ -60,7 +86,9 @@ def redact_payload(payload: dict[str, Any]) -> dict[str, Any]:
     except ImportError:
         redacted = {**payload, "env_variables": dict(payload["env_variables"])}
     for key in redacted.get("env_variables", {}):
-        if any(hint in key.upper() for hint in ("KEY", "TOKEN", "SECRET", "PASSWORD")):
+        if key in _SENSITIVE_PROXY_ENV_VARIABLES or any(
+            hint in key.upper() for hint in ("KEY", "TOKEN", "SECRET", "PASSWORD")
+        ):
             redacted["env_variables"][key] = "<redacted>"
     return redacted
 
@@ -116,7 +144,22 @@ def build_payload(
     priority: str | None,
     force: bool,
     judge_environment: Mapping[str, str],
+    proxy_environment: Mapping[str, str],
+    openrouter_key: str,
 ) -> dict[str, Any]:
+    env_variables = {
+        "WORKDIR": str(staged_workdir),
+        "HF_HOME": str(HF_HOME),
+        "PROJECT_VENV": str(PROJECT_VENV),
+        "PYTHONPATH": os.pathsep.join(
+            (str(staged_workdir), str(staged_workdir / "src"))
+        ),
+        "PYTHONDONTWRITEBYTECODE": "1",
+        **judge_environment,
+    }
+    if isinstance(experiment, DecomposerExperiment) and experiment.requires_openrouter:
+        env_variables.update(proxy_environment)
+        env_variables["OPENROUTER_API_KEY_DECOMPOSER"] = openrouter_key
     payload: dict[str, Any] = {
         "script": build_job_script(
             staged_workdir,
@@ -126,16 +169,7 @@ def build_payload(
             force=force,
         ),
         "job_desc": build_job_desc(experiment, num_repeats, limit, author),
-        "env_variables": {
-            "WORKDIR": str(staged_workdir),
-            "HF_HOME": str(HF_HOME),
-            "PROJECT_VENV": str(PROJECT_VENV),
-            "PYTHONPATH": os.pathsep.join(
-                (str(staged_workdir), str(staged_workdir / "src"))
-            ),
-            "PYTHONDONTWRITEBYTECODE": "1",
-            **judge_environment,
-        },
+        "env_variables": env_variables,
         "instance_type": INSTANCE_TYPES_BY_NUM_GPUS[experiment.num_gpus],
         "type": "binary_exp",
         "shm_size_class": "large",
@@ -250,6 +284,22 @@ def main(argv: Sequence[str] | None = None) -> int:
         "LLM_PROXY_URL": judge_url or "<not-set>",
         "LLM_PROXY_MASTER_KEY": judge_key or "<not-set>",
     }
+    openrouter_key = os.environ.get("OPENROUTER_API_KEY_DECOMPOSER", "")
+    needs_openrouter = any(
+        isinstance(experiment, DecomposerExperiment)
+        and experiment.requires_openrouter
+        for experiment in experiments
+    )
+    if needs_openrouter and not args.dry:
+        if not openrouter_key:
+            raise RuntimeError("OPENROUTER_API_KEY_DECOMPOSER is required")
+        proxy_environment = configured_proxy_environment(os.environ)
+    else:
+        proxy_environment = {
+            name: os.environ[name]
+            for name in _PROXY_ENV_VARIABLES
+            if os.environ.get(name)
+        }
 
     from mls.manager.job.utils import (
         get_in_progress_jobs,
@@ -275,6 +325,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             priority=args.priority,
             force=args.force,
             judge_environment=judge_environment,
+            proxy_environment=proxy_environment,
+            openrouter_key=openrouter_key or "<not-set>",
         )
         payload["region"] = options["region"]
         if normalize_job_desc(payload["job_desc"]) in in_progress:

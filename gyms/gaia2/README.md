@@ -50,7 +50,12 @@ The registered experiments are:
 
 - `gemma4-e4b-sft-deepseek-e4b-v1-8k-non-thinking-gemma4-e4b-thinking`:
   tuned non-thinking E4B manager on the first GPU and vanilla thinking E4B
-  worker on the second GPU.
+  worker on the second GPU, using the student prompt.
+- `deepseek-v4-flash-0731-teacher-gemma4-e4b-thinking`: OpenRouter DeepSeek
+  manager with high reasoning and the teacher prompt, plus a local thinking
+  E4B worker on one GPU.
+- `deepseek-v4-flash-0731-teacher-qwen35-4b-non-thinking`: the same remote
+  teacher manager with a local non-thinking Qwen3.5-4B worker on one GPU.
 - `gemma4-e4b-it-thinking`: vanilla thinking E4B simple agent on one GPU.
 
 ```bash
@@ -66,6 +71,15 @@ The registered experiments are:
   --num-repeats 1 \
   --limit 1 \
   --cuda-visible-devices 7
+
+# OpenRouter teacher one-scenario smoke. HTTPS_PROXY (or https_proxy) and
+# OPENROUTER_API_KEY_DECOMPOSER must also be exported.
+.venv/bin/python -m gyms.gaia2.run \
+  --experiment deepseek-v4-flash-0731-teacher-gemma4-e4b-thinking \
+  --num-repeats 1 \
+  --limit 1 \
+  --cuda-visible-devices 6 \
+  --output-dir "$HOME/decomposer_artifacts/evaluation/gaia2/corrected-smoke-gemma"
 ```
 
 `LLM_PROXY_URL` and `LLM_PROXY_MASTER_KEY` must point to the canonical proxy
@@ -73,10 +87,18 @@ judge. Use `--dry` to print every service and ARE command without starting
 processes. `--output-dir` isolates an ad-hoc run. A rerun skips a completed
 marker; `--force` archives the previous attempt before starting again.
 
-Decomposer evaluation always uses the current student prompt. Its workers see
-the original scenario-bound ARE tools through an authenticated loopback broker;
-the final user-interface tools remain manager-only. Multiple tool calls are
-valid and each is executed once under the scenario lock.
+Each Decomposer experiment declares its student or teacher prompt profile.
+Workers see strict JSON schemas generated from the original scenario-bound ARE
+tools through an authenticated loopback broker; defaulted parameters are
+optional and variadic Python parameters are not exposed. The final
+user-interface tools remain manager-only. Multiple tool calls are valid and
+each is executed once under the scenario lock. Invalid argument types are
+returned to the worker as correctable tool feedback and are never silently
+coerced.
+
+OpenRouter Responses API reasoning blocks remain available in the sidecar
+manager trace, but only visible text blocks are sent to the Gaia2 user
+interface.
 
 ARE emits one `output.jsonl` row per attempted rollout. Missing/empty manager
 answers, uncollected subagents, recursion limits, and scenario timeouts remain

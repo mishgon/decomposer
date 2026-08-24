@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+from types import NoneType
 from typing import Any, TypedDict
 
 import httpx
@@ -12,7 +13,7 @@ from langchain_core.tools import StructuredTool
 from langchain_openai import ChatOpenAI
 from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.runtime import Runtime
-from pydantic import Field, create_model
+from pydantic import ConfigDict, Field, ValidationError, create_model
 
 HIDDEN_AUI_TOOLS = frozenset(
     {
@@ -36,14 +37,38 @@ class EpisodeContext(TypedDict):
 
 
 def _annotation(schema: dict[str, Any]) -> Any:
-    return {
+    if "anyOf" in schema:
+        members = [_annotation(item) for item in schema["anyOf"]]
+        if not members:
+            return Any
+        annotation = members[0]
+        for member in members[1:]:
+            annotation = annotation | member
+        return annotation
+    if "enum" in schema:
+        from typing import Literal
+
+        return Literal.__getitem__(tuple(schema["enum"]))
+
+    simple = {
         "string": str,
         "integer": int,
         "number": float,
         "boolean": bool,
-        "array": list[Any],
-        "object": dict[str, Any],
-    }.get(schema.get("type"), Any)
+        "null": NoneType,
+    }
+    schema_type = schema.get("type")
+    if schema_type in simple:
+        return simple[schema_type]
+    if schema_type == "array":
+        return list[_annotation(schema.get("items") or {})]
+    if schema_type == "object":
+        additional = schema.get("additionalProperties", {})
+        value_type = _annotation(additional) if isinstance(additional, dict) else Any
+        return dict[str, value_type]
+    if schema_type is None:
+        return Any
+    raise TypeError(f"Unsupported Gaia2 JSON schema: {schema!r}")
 
 
 def _arguments_model(name: str, parameters: dict[str, Any]):
@@ -56,7 +81,20 @@ def _arguments_model(name: str, parameters: dict[str, Any]):
             annotation,
             Field(default=default, description=schema.get("description")),
         )
-    return create_model(f"{name}Arguments", **fields)
+    return create_model(
+        f"{name}Arguments",
+        __config__=ConfigDict(strict=True, extra="forbid"),
+        **fields,
+    )
+
+
+def _validation_error(error: ValidationError) -> str:
+    return _serialize_tool_result(
+        {
+            "error": "Invalid tool arguments",
+            "details": error.errors(include_url=False),
+        }
+    )
 
 
 def _serialize_tool_result(result: Any) -> str:
@@ -110,6 +148,7 @@ def _tool_from_schema(schema: dict[str, Any], context: EpisodeContext):
         description=function.get("description") or "",
         args_schema=_arguments_model(name, function.get("parameters") or {}),
         infer_schema=False,
+        handle_validation_error=_validation_error,
     )
 
 

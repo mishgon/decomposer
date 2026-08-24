@@ -7,6 +7,7 @@ service processes.
 
 from __future__ import annotations
 
+import inspect
 import json
 import secrets
 import threading
@@ -16,7 +17,8 @@ from dataclasses import asdict, dataclass, field
 from datetime import timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any
+from types import NoneType, UnionType
+from typing import Any, Literal, Union, get_args, get_origin
 from urllib.parse import parse_qs, urlparse
 
 from are.simulation.notification_system import Message, MessageType
@@ -33,12 +35,141 @@ HIDDEN_AUI_TOOLS = frozenset(
 )
 
 
-def app_tool_schema(tool: AppTool) -> dict[str, Any]:
-    """Convert an AppTool to the exact public OpenAI schema exposed by ARE."""
+def _legacy_type(type_name: str) -> Any:
+    """Resolve the small legacy type vocabulary used by hand-built AppTools."""
 
-    # Keep one source of truth for public names, descriptions, parameter types,
-    # and ARE's required-field convention.
-    return _jsonable(tool.to_open_ai())
+    scalar_types = {
+        "Any": Any,
+        "str": str,
+        "string": str,
+        "int": int,
+        "integer": int,
+        "float": float,
+        "number": float,
+        "bool": bool,
+        "boolean": bool,
+        "None": NoneType,
+    }
+    if type_name in scalar_types:
+        return scalar_types[type_name]
+    if " | " in type_name:
+        members = [_legacy_type(item) for item in type_name.split(" | ")]
+        result = members[0]
+        for member in members[1:]:
+            result = result | member
+        return result
+    if type_name.startswith("list[") and type_name.endswith("]"):
+        return list[_legacy_type(type_name[5:-1])]
+    if type_name.startswith("dict[") and type_name.endswith("]"):
+        key_name, separator, value_name = type_name[5:-1].partition(", ")
+        if not separator:
+            raise TypeError(f"Unsupported ARE argument type {type_name!r}")
+        return dict[_legacy_type(key_name), _legacy_type(value_name)]
+    if type_name == "dict":
+        return dict[str, Any]
+    raise TypeError(f"Unsupported ARE argument type {type_name!r}")
+
+
+def _json_schema_for_type(type_obj: Any) -> dict[str, Any]:
+    """Convert one runtime Python annotation into strict JSON Schema."""
+
+    if type_obj is Any:
+        return {}
+    if type_obj in {None, NoneType}:
+        return {"type": "null"}
+    primitive_types = {
+        str: "string",
+        int: "integer",
+        float: "number",
+        bool: "boolean",
+    }
+    if type_obj in primitive_types:
+        return {"type": primitive_types[type_obj]}
+    if type_obj is list:
+        return {"type": "array", "items": {}}
+    if type_obj is dict:
+        return {"type": "object", "additionalProperties": {}}
+
+    origin = get_origin(type_obj)
+    arguments = get_args(type_obj)
+    if origin in {Union, UnionType}:
+        return {"anyOf": [_json_schema_for_type(item) for item in arguments]}
+    if origin is list:
+        item_type = arguments[0] if arguments else Any
+        return {"type": "array", "items": _json_schema_for_type(item_type)}
+    if origin is dict:
+        key_type, value_type = arguments if arguments else (str, Any)
+        if key_type not in {str, Any}:
+            raise TypeError(
+                f"JSON object keys must be strings, received {key_type!r}"
+            )
+        return {
+            "type": "object",
+            "additionalProperties": _json_schema_for_type(value_type),
+        }
+    if origin is Literal:
+        values = list(arguments)
+        schema: dict[str, Any] = {"enum": _jsonable(values)}
+        non_null = [item for item in values if item is not None]
+        value_types = {type(item) for item in non_null}
+        if len(value_types) == 1:
+            schema.update(_json_schema_for_type(value_types.pop()))
+        return schema
+    raise TypeError(f"Unsupported ARE argument annotation {type_obj!r}")
+
+
+def app_tool_schema(tool: AppTool) -> dict[str, Any]:
+    """Build a standards-compliant public schema from an ARE AppTool."""
+
+    parameter_kinds: dict[str, inspect._ParameterKind] = {}
+    if tool.function is not None:
+        parameter_kinds = {
+            name: parameter.kind
+            for name, parameter in inspect.signature(tool.function).parameters.items()
+        }
+
+    properties: dict[str, Any] = {}
+    required: list[str] = []
+    for argument in tool.args:
+        if parameter_kinds.get(argument.name) in {
+            inspect.Parameter.VAR_POSITIONAL,
+            inspect.Parameter.VAR_KEYWORD,
+        }:
+            continue
+        type_obj = argument.type_obj
+        if type_obj in {None, "Any"}:
+            type_obj = _legacy_type(argument.arg_type)
+        try:
+            property_schema = _json_schema_for_type(type_obj)
+        except TypeError as error:
+            public_name = tool._public_name or tool.name
+            raise TypeError(
+                f"Cannot expose Gaia2 tool {public_name!r} argument "
+                f"{argument.name!r}: {error}"
+            ) from error
+        if argument.description:
+            property_schema["description"] = argument.description
+        if argument.has_default:
+            property_schema["default"] = _jsonable(argument.default)
+        else:
+            required.append(argument.name)
+        properties[argument.name] = property_schema
+
+    parameters: dict[str, Any] = {
+        "type": "object",
+        "properties": properties,
+        "additionalProperties": False,
+    }
+    if required:
+        parameters["required"] = required
+    return {
+        "type": "function",
+        "function": {
+            "name": tool._public_name or tool.name,
+            "description": tool._public_description or tool.function_description or "",
+            "parameters": parameters,
+        },
+    }
 
 
 def _jsonable(value: Any) -> Any:

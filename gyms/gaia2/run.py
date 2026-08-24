@@ -206,8 +206,13 @@ def _common_vllm_command(
     max_model_len: int,
     max_num_seqs: int,
     gpu_memory_utilization: float,
+    tool_call_parser: str = "gemma4",
+    reasoning_parser: str | None = "gemma4",
+    language_model_only: bool = True,
+    trust_remote_code: bool = False,
+    gdn_prefill_backend: str | None = None,
 ) -> list[str]:
-    return [
+    command = [
         str(PROJECT_VENV / "bin" / "vllm"),
         "serve",
         str(checkpoint),
@@ -225,15 +230,21 @@ def _common_vllm_command(
         str(max_num_seqs),
         "--gpu-memory-utilization",
         str(gpu_memory_utilization),
-        "--language-model-only",
         "--enable-auto-tool-choice",
         "--tool-call-parser",
-        "gemma4",
-        "--reasoning-parser",
-        "gemma4",
+        tool_call_parser,
         "--default-chat-template-kwargs",
         json.dumps({"enable_thinking": thinking}, separators=(",", ":")),
     ]
+    if reasoning_parser is not None:
+        command.extend(["--reasoning-parser", reasoning_parser])
+    if language_model_only:
+        command.append("--language-model-only")
+    if trust_remote_code:
+        command.append("--trust-remote-code")
+    if gdn_prefill_backend is not None:
+        command.extend(["--gdn-prefill-backend", gdn_prefill_backend])
+    return command
 
 
 def simple_vllm_command(experiment: SimpleExperiment) -> list[str]:
@@ -250,16 +261,20 @@ def simple_vllm_command(experiment: SimpleExperiment) -> list[str]:
 
 def decomposer_vllm_commands(
     experiment: DecomposerExperiment,
-) -> tuple[list[str], list[str]]:
-    manager = _common_vllm_command(
-        experiment.manager_checkpoint,
-        experiment.manager_served_name,
-        experiment.manager_port,
-        thinking=experiment.manager_thinking,
-        max_model_len=experiment.max_model_len,
-        max_num_seqs=experiment.max_num_seqs,
-        gpu_memory_utilization=experiment.gpu_memory_utilization,
-    )
+) -> tuple[list[str] | None, list[str]]:
+    manager = None
+    if experiment.requires_local_manager:
+        if experiment.manager_checkpoint is None:
+            raise ValueError("Local manager requires manager_checkpoint")
+        manager = _common_vllm_command(
+            experiment.manager_checkpoint,
+            experiment.manager_served_name,
+            experiment.manager_port,
+            thinking=experiment.manager_thinking,
+            max_model_len=experiment.max_model_len,
+            max_num_seqs=experiment.max_num_seqs,
+            gpu_memory_utilization=experiment.gpu_memory_utilization,
+        )
     worker = _common_vllm_command(
         experiment.worker_checkpoint,
         experiment.worker_served_name,
@@ -268,6 +283,11 @@ def decomposer_vllm_commands(
         max_model_len=experiment.max_model_len,
         max_num_seqs=experiment.max_num_seqs,
         gpu_memory_utilization=experiment.gpu_memory_utilization,
+        tool_call_parser=experiment.worker_tool_call_parser,
+        reasoning_parser=experiment.worker_reasoning_parser,
+        language_model_only=experiment.worker_language_model_only,
+        trust_remote_code=experiment.worker_trust_remote_code,
+        gdn_prefill_backend=experiment.worker_gdn_prefill_backend,
     )
     return manager, worker
 
@@ -444,12 +464,20 @@ def validate_preparation(experiment: Experiment) -> dict[str, Any]:
     else:
         manager = models.get("manager") or {}
         worker = models.get("worker") or {}
-        if Path(manager.get("path", "")) != experiment.manager_checkpoint:
-            raise ValueError("Preparation manifest points at an unexpected manager")
         if Path(worker.get("path", "")) != experiment.worker_checkpoint:
             raise ValueError("Preparation manifest points at an unexpected worker")
-        _validate_file_manifest(experiment.manager_checkpoint, manager)
         _validate_file_manifest(experiment.worker_checkpoint, worker)
+        if experiment.requires_local_manager:
+            if experiment.manager_checkpoint is None:
+                raise ValueError("Local manager requires manager_checkpoint")
+            if Path(manager.get("path", "")) != experiment.manager_checkpoint:
+                raise ValueError("Preparation manifest points at an unexpected manager")
+            _validate_file_manifest(experiment.manager_checkpoint, manager)
+        elif manager != {
+            "backend": experiment.manager_backend,
+            "model": experiment.manager_served_name,
+        }:
+            raise ValueError("Preparation manifest points at an unexpected manager")
     return manifest
 
 
@@ -536,8 +564,20 @@ def _runtime_configs(
     config_dir = directory / "configuration"
     service_path = config_dir / "service.json"
     plugin_path = config_dir / "are_plugin.json"
-    service = {
-        "manager": {
+    if experiment.requires_openrouter:
+        manager = {
+            "model": experiment.manager_served_name,
+            "base_url": "https://openrouter.ai/api/v1",
+            "api_key_env": "OPENROUTER_API_KEY_DECOMPOSER",
+            "temperature": 1.0,
+            "top_p": 1.0,
+            "use_responses_api": True,
+            "reasoning": {"effort": "high"},
+            "timeout": 3300,
+            "max_retries": 2,
+        }
+    else:
+        manager = {
             "model": experiment.manager_served_name,
             "base_url": f"http://127.0.0.1:{experiment.manager_port}/v1",
             "api_key": "EMPTY",
@@ -552,12 +592,15 @@ def _runtime_configs(
                     "enable_thinking": experiment.manager_thinking
                 },
             },
-        },
+        }
+    service = {
+        "manager": manager,
+        "decomposer_system_prompt_profile": experiment.prompt_profile,
         "subagent_types": [
             {
                 "subagent_type_id": "gaia2_worker",
                 "description": (
-                    "Thinking Gemma-4 E4B worker with authenticated access to "
+                    f"{experiment.worker_served_name} worker with authenticated access to "
                     "the current Gaia2 execution scenario tools."
                 ),
                 "assistant_id": "gaia2_worker",
@@ -580,9 +623,14 @@ def _runtime_configs(
         "service_configuration": service,
         "model_configuration": {
             "manager": {
-                "path": str(experiment.manager_checkpoint),
+                "backend": experiment.manager_backend,
                 "served_name": experiment.manager_served_name,
                 "thinking": experiment.manager_thinking,
+                **(
+                    {"path": str(experiment.manager_checkpoint)}
+                    if experiment.manager_checkpoint is not None
+                    else {}
+                ),
             },
             "subagent": {
                 "path": str(experiment.worker_checkpoint),
@@ -672,15 +720,21 @@ def _dry_plan(
         services.append(simple_vllm_command(experiment))
         gpu_assignments = {"policy_vllm": visible_devices[0]}
     else:
-        services.extend(decomposer_vllm_commands(experiment))
+        manager_command, worker_command = decomposer_vllm_commands(experiment)
+        if manager_command is not None:
+            services.append(manager_command)
+        services.append(worker_command)
         service_config = directory / "configuration" / "service.json"
         plugin_config = directory / "configuration" / "are_plugin.json"
         services.append(langgraph_command(local_repo, experiment)[0])
         services.append(service_command(experiment, service_config))
-        gpu_assignments = {
-            "manager_vllm": visible_devices[0],
-            "worker_vllm": visible_devices[1],
-        }
+        if experiment.requires_local_manager:
+            gpu_assignments = {
+                "manager_vllm": visible_devices[0],
+                "worker_vllm": visible_devices[1],
+            }
+        else:
+            gpu_assignments = {"worker_vllm": visible_devices[0]}
     return {
         "experiment": experiment.name,
         "kind": experiment.kind,
@@ -688,7 +742,11 @@ def _dry_plan(
         "domain": DOMAIN,
         "num_repeats": num_repeats,
         "limit": limit,
-        "student_prompt": isinstance(experiment, DecomposerExperiment),
+        "decomposer_system_prompt_profile": (
+            experiment.prompt_profile
+            if isinstance(experiment, DecomposerExperiment)
+            else None
+        ),
         "gpu_assignments": gpu_assignments,
         "preparation_manifest": str(manifest_path),
         "services": [shlex.join(command) for command in services],
@@ -742,6 +800,11 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
     judge_key = os.environ.get("LLM_PROXY_MASTER_KEY", "")
     if not judge_endpoint or not judge_key:
         raise RuntimeError("LLM_PROXY_URL and LLM_PROXY_MASTER_KEY are required")
+    if isinstance(experiment, DecomposerExperiment) and experiment.requires_openrouter:
+        if not os.environ.get("OPENROUTER_API_KEY_DECOMPOSER"):
+            raise RuntimeError("OPENROUTER_API_KEY_DECOMPOSER is required")
+        if not (os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy")):
+            raise RuntimeError("HTTPS_PROXY or https_proxy is required for OpenRouter")
     check_judge(judge_endpoint, judge_key)
 
     archived = archive_attempt(directory) if directory.exists() else None
@@ -758,7 +821,11 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
         "domain": DOMAIN,
         "num_repeats": args.num_repeats,
         "limit": args.limit,
-        "student_prompt": isinstance(experiment, DecomposerExperiment),
+        "decomposer_system_prompt_profile": (
+            experiment.prompt_profile
+            if isinstance(experiment, DecomposerExperiment)
+            else None
+        ),
         "cuda_visible_devices": list(visible_devices),
         "output_dir": str(directory),
         "preparation_manifest": str(preparation_manifest(experiment)),
@@ -800,23 +867,27 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
             )
         else:
             manager_command, worker_command = decomposer_vllm_commands(experiment)
-            manager_process = supervisor.start(
-                "manager_vllm",
-                manager_command,
-                cwd=local_repo,
-                env={"CUDA_VISIBLE_DEVICES": visible_devices[0]},
-            )
+            manager_process = None
+            if manager_command is not None:
+                manager_process = supervisor.start(
+                    "manager_vllm",
+                    manager_command,
+                    cwd=local_repo,
+                    env={"CUDA_VISIBLE_DEVICES": visible_devices[0]},
+                )
+            worker_device_index = 1 if experiment.requires_local_manager else 0
             worker_process = supervisor.start(
                 "worker_vllm",
                 worker_command,
                 cwd=local_repo,
-                env={"CUDA_VISIBLE_DEVICES": visible_devices[1]},
+                env={"CUDA_VISIBLE_DEVICES": visible_devices[worker_device_index]},
             )
-            wait_http(
-                f"http://127.0.0.1:{experiment.manager_port}/v1/models",
-                [manager_process],
-                1800,
-            )
+            if manager_process is not None:
+                wait_http(
+                    f"http://127.0.0.1:{experiment.manager_port}/v1/models",
+                    [manager_process],
+                    1800,
+                )
             wait_http(
                 f"http://127.0.0.1:{experiment.worker_port}/v1/models",
                 [worker_process],

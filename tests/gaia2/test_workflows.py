@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
+from gyms.gaia2 import prepare
 from gyms.gaia2.dataset import (
     validate_materialized_dataset,
     validate_materialized_filesystem,
@@ -12,6 +14,8 @@ from gyms.gaia2.dataset import (
 )
 from gyms.gaia2.experiments import (
     DATASET_REVISION,
+    DEEPSEEK_GEMMA_EXPERIMENT,
+    DEEPSEEK_QWEN_EXPERIMENT,
     DECOMPOSER_EXPERIMENT,
     DOMAIN,
     INSTANCE_TYPES_BY_NUM_GPUS,
@@ -24,12 +28,13 @@ from gyms.gaia2.experiments import (
 )
 from gyms.gaia2.run import (
     _base_environment,
+    _runtime_configs,
     are_command,
     decomposer_vllm_commands,
     simple_vllm_command,
     validate_result,
 )
-from gyms.gaia2.run_eval import build_payload, normalize_job_desc
+from gyms.gaia2.run_eval import build_payload, normalize_job_desc, redact_payload
 
 
 def _rows():
@@ -85,8 +90,13 @@ def test_filesystem_mirror_manifest_detects_asset_changes(tmp_path) -> None:
         validate_materialized_filesystem(tmp_path)
 
 
-def test_experiment_registry_contains_only_initial_execution_profiles() -> None:
-    assert collect_experiments() == [DECOMPOSER_EXPERIMENT, SIMPLE_EXPERIMENT]
+def test_experiment_registry_contains_local_and_openrouter_profiles() -> None:
+    assert collect_experiments() == [
+        DECOMPOSER_EXPERIMENT,
+        DEEPSEEK_GEMMA_EXPERIMENT,
+        DEEPSEEK_QWEN_EXPERIMENT,
+        SIMPLE_EXPERIMENT,
+    ]
     assert INSTANCE_TYPES_BY_NUM_GPUS == {
         1: "a100plus.1gpu.80vG.12C.182G",
         2: "a100plus.2gpu.80vG.24C.364G",
@@ -108,6 +118,68 @@ def test_vllm_commands_use_current_e4b_thinking_profiles() -> None:
     assert '{"enable_thinking":true}' in worker
     assert str(DECOMPOSER_EXPERIMENT.manager_checkpoint) in manager
     assert str(DECOMPOSER_EXPERIMENT.worker_checkpoint) in worker
+
+
+def test_openrouter_decomposer_starts_only_the_configured_worker() -> None:
+    gemma_manager, gemma_worker = decomposer_vllm_commands(
+        DEEPSEEK_GEMMA_EXPERIMENT
+    )
+    qwen_manager, qwen_worker = decomposer_vllm_commands(DEEPSEEK_QWEN_EXPERIMENT)
+
+    assert gemma_manager is None
+    assert qwen_manager is None
+    assert "gemma4" in gemma_worker
+    assert "--language-model-only" in gemma_worker
+    assert "qwen3_xml" in qwen_worker
+    assert "--reasoning-parser" not in qwen_worker
+    assert "--language-model-only" not in qwen_worker
+    assert "--trust-remote-code" in qwen_worker
+    assert qwen_worker[qwen_worker.index("--gdn-prefill-backend") + 1] == "triton"
+
+
+def test_openrouter_runtime_uses_teacher_responses_api(tmp_path) -> None:
+    _, plugin_path = _runtime_configs(
+        Path(__file__).resolve().parents[2],
+        tmp_path,
+        DEEPSEEK_GEMMA_EXPERIMENT,
+    )
+    plugin = json.loads(plugin_path.read_text(encoding="utf-8"))
+    service = plugin["service_configuration"]
+
+    assert service["decomposer_system_prompt_profile"] == "teacher"
+    assert service["manager"] == {
+        "model": "deepseek/deepseek-v4-flash-0731",
+        "base_url": "https://openrouter.ai/api/v1",
+        "api_key_env": "OPENROUTER_API_KEY_DECOMPOSER",
+        "temperature": 1.0,
+        "top_p": 1.0,
+        "use_responses_api": True,
+        "reasoning": {"effort": "high"},
+        "timeout": 3300,
+        "max_retries": 2,
+    }
+    assert "path" not in plugin["model_configuration"]["manager"]
+
+
+def test_openrouter_preparation_hashes_only_the_local_worker(monkeypatch) -> None:
+    calls = []
+
+    def fake_validate_checkpoint(path, *, full_hashes):
+        calls.append((path, full_hashes))
+        return {"path": str(path)}
+
+    monkeypatch.setattr(prepare, "validate_checkpoint", fake_validate_checkpoint)
+
+    models = prepare.experiment_models(
+        DEEPSEEK_QWEN_EXPERIMENT,
+        full_hashes=False,
+    )
+
+    assert calls == [(DEEPSEEK_QWEN_EXPERIMENT.worker_checkpoint, False)]
+    assert models["manager"] == {
+        "backend": "openrouter",
+        "model": "deepseek/deepseek-v4-flash-0731",
+    }
 
 
 def test_are_commands_use_local_execution_dataset(tmp_path) -> None:
@@ -203,6 +275,8 @@ def test_mlspace_payload_uses_registry_gpu_type_and_redactable_judge_key(
             "LLM_PROXY_URL": "https://judge.test/v1",
             "LLM_PROXY_MASTER_KEY": "secret",
         },
+        proxy_environment={},
+        openrouter_key="<not-set>",
     )
 
     assert payload["instance_type"] == INSTANCE_TYPES_BY_NUM_GPUS[2]
@@ -212,3 +286,33 @@ def test_mlspace_payload_uses_registry_gpu_type_and_redactable_judge_key(
     assert normalize_job_desc(payload["job_desc"]) == normalize_job_desc(
         payload["job_desc"] + " @someone"
     )
+
+
+def test_openrouter_mlspace_payload_uses_one_gpu_and_redacts_credentials(
+    tmp_path,
+) -> None:
+    payload = build_payload(
+        DEEPSEEK_QWEN_EXPERIMENT,
+        tmp_path / "staged",
+        num_repeats=1,
+        limit=1,
+        author="sukhorukov",
+        base_image="image",
+        priority="high",
+        force=False,
+        judge_environment={
+            "LLM_PROXY_URL": "https://judge.test/v1",
+            "LLM_PROXY_MASTER_KEY": "judge-secret",
+        },
+        proxy_environment={"HTTPS_PROXY": "http://user:pass@proxy.test"},
+        openrouter_key="openrouter-secret",
+    )
+
+    assert payload["instance_type"] == INSTANCE_TYPES_BY_NUM_GPUS[1]
+    assert "--cuda-visible-devices 0" in payload["script"]
+    assert payload["env_variables"]["OPENROUTER_API_KEY_DECOMPOSER"] == (
+        "openrouter-secret"
+    )
+    redacted = redact_payload(payload)
+    assert redacted["env_variables"]["OPENROUTER_API_KEY_DECOMPOSER"] == "<redacted>"
+    assert redacted["env_variables"]["HTTPS_PROXY"] == "<redacted>"

@@ -10,6 +10,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
+from collections.abc import Mapping
 from typing import Any, TypedDict
 
 import uvicorn
@@ -20,6 +21,16 @@ from langgraph.checkpoint.memory import InMemorySaver
 from pydantic import BaseModel, Field
 
 from decomposer.core import TERMINAL_STATUSES, create_decomposer_agent
+from decomposer.prompts import (
+    DECOMPOSER_SYSTEM_PROMPT,
+    DECOMPOSER_TEACHER_SYSTEM_PROMPT,
+)
+
+
+_DECOMPOSER_SYSTEM_PROMPTS = {
+    "student": DECOMPOSER_SYSTEM_PROMPT,
+    "teacher": DECOMPOSER_TEACHER_SYSTEM_PROMPT,
+}
 
 
 class EpisodeContext(TypedDict):
@@ -96,6 +107,40 @@ def _safe_message(message: Any) -> dict[str, Any]:
     return json.loads(json.dumps(value, default=str))
 
 
+def _visible_message_text(message: AIMessage) -> str:
+    """Extract user-visible text without leaking Responses API reasoning blocks."""
+
+    if isinstance(message.content, str):
+        return message.content
+    parts: list[str] = []
+    for block in message.content:
+        if isinstance(block, str):
+            parts.append(block)
+        elif not isinstance(block, Mapping):
+            continue
+        elif block.get("type") in {"text", "output_text"} and isinstance(
+            block.get("text"), str
+        ):
+            parts.append(block["text"])
+        elif block.get("type") == "refusal" and isinstance(
+            block.get("refusal"), str
+        ):
+            parts.append(block["refusal"])
+    return "".join(parts)
+
+
+def _decomposer_system_prompt(config: dict[str, Any]) -> str:
+    profile = config.get("decomposer_system_prompt_profile", "student")
+    try:
+        return _DECOMPOSER_SYSTEM_PROMPTS[profile]
+    except KeyError as error:
+        expected = ", ".join(sorted(_DECOMPOSER_SYSTEM_PROMPTS))
+        raise ValueError(
+            f"Unknown decomposer_system_prompt_profile {profile!r}; "
+            f"expected one of: {expected}"
+        ) from error
+
+
 def _public_context(context: EpisodeContext) -> dict[str, Any]:
     return {
         "tool_schemas": context["tool_schemas"],
@@ -155,6 +200,7 @@ def create_app(config: dict[str, Any]) -> FastAPI:
     graph = create_decomposer_agent(
         decomposer_model=manager_model,
         subagent_types=subagent_types,
+        decomposer_system_prompt=_decomposer_system_prompt(config),
         checkpointer=checkpointer,
         context_schema=EpisodeContext,
         subagent_recursion_limit=int(config.get("subagent_recursion_limit", 200)),
@@ -248,9 +294,9 @@ def create_app(config: dict[str, Any]) -> FastAPI:
         messages = state.get("messages") or []
         if not messages or not isinstance(messages[-1], AIMessage):
             raise HTTPException(502, "Decomposer produced no final AI message")
-        final_text = messages[-1].content
-        if not isinstance(final_text, str):
-            final_text = json.dumps(final_text, ensure_ascii=False)
+        final_text = _visible_message_text(messages[-1])
+        if not final_text.strip():
+            raise HTTPException(502, "Decomposer produced no visible final text")
         subagents, outstanding = _subagent_summary(state)
         result = {
             "final_text": final_text,

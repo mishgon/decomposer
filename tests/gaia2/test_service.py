@@ -11,12 +11,14 @@ from gyms.gaia2 import service
 
 
 class FakeGraph:
-    def __init__(self):
+    def __init__(self, content=None):
         self.calls = []
+        self.content = content
 
     async def ainvoke(self, value, config, context):
         self.calls.append((value, config, context.copy()))
-        return {"messages": [AIMessage(content=f"turn-{len(self.calls)}")]}
+        content = self.content if self.content is not None else f"turn-{len(self.calls)}"
+        return {"messages": [AIMessage(content=content)]}
 
 
 def test_episode_persists_thread_and_forwards_runtime_context(monkeypatch):
@@ -91,6 +93,107 @@ def test_uncollected_subagent_is_reported_as_outstanding():
         }
     )
     assert outstanding == ["running", "uncollected"]
+
+
+def test_openrouter_content_blocks_return_only_visible_text(monkeypatch):
+    graph = FakeGraph(
+        [
+            {
+                "type": "reasoning",
+                "content": [{"type": "reasoning_text", "text": "private"}],
+            },
+            {"type": "text", "text": "visible answer"},
+        ]
+    )
+    monkeypatch.setattr(service, "_model_from_config", lambda value: object())
+    monkeypatch.setattr(service, "create_decomposer_agent", lambda **kwargs: graph)
+    app = service.create_app(
+        {
+            "manager": {"model": "fake"},
+            "decomposer_system_prompt_profile": "teacher",
+            "subagent_types": [{"subagent_type_id": "worker"}],
+        }
+    )
+    with TestClient(app) as client:
+        episode_id = client.post(
+            "/v1/episodes", json={"context": _context()}
+        ).json()["episode_id"]
+        response = client.post(
+            f"/v1/episodes/{episode_id}/turn", json=_turn()
+        )
+
+    assert response.status_code == 200
+    assert response.json()["final_text"] == "visible answer"
+    raw_content = response.json()["trace"]["manager_messages"][-1]["data"]["content"]
+    assert raw_content[0]["type"] == "reasoning"
+
+
+def test_reasoning_only_response_is_not_a_final_answer(monkeypatch):
+    graph = FakeGraph([{"type": "reasoning", "content": []}])
+    monkeypatch.setattr(service, "_model_from_config", lambda value: object())
+    monkeypatch.setattr(service, "create_decomposer_agent", lambda **kwargs: graph)
+    app = service.create_app(
+        {
+            "manager": {"model": "fake"},
+            "subagent_types": [{"subagent_type_id": "worker"}],
+        }
+    )
+    with TestClient(app) as client:
+        episode_id = client.post(
+            "/v1/episodes", json={"context": _context()}
+        ).json()["episode_id"]
+        response = client.post(
+            f"/v1/episodes/{episode_id}/turn", json=_turn()
+        )
+
+    assert response.status_code == 502
+    assert response.json()["detail"] == "Decomposer produced no visible final text"
+
+
+def test_prompt_profile_is_forwarded_to_decomposer(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(service, "_model_from_config", lambda value: object())
+
+    def fake_create_decomposer_agent(**kwargs):
+        captured.update(kwargs)
+        return FakeGraph()
+
+    monkeypatch.setattr(service, "create_decomposer_agent", fake_create_decomposer_agent)
+    service.create_app(
+        {
+            "manager": {"model": "fake"},
+            "decomposer_system_prompt_profile": "teacher",
+            "subagent_types": [{"subagent_type_id": "worker"}],
+        }
+    )
+
+    assert captured["decomposer_system_prompt"] == service.DECOMPOSER_TEACHER_SYSTEM_PROMPT
+
+
+def _context():
+    return {
+        "tool_schemas": [],
+        "broker_url": "http://broker/session",
+        "session_token": "secret",
+        "policy": "shared_serialized",
+        "scenario_id": "scenario",
+        "run_number": 1,
+        "notification_cursor": 0,
+    }
+
+
+def _turn():
+    return {
+        "notifications": [
+            {
+                "type": "USER_MESSAGE",
+                "message": "message",
+                "simulated_timestamp": "2026-01-01T00:00:00+00:00",
+            }
+        ],
+        "notification_cursor": 1,
+        "turn_number": 1,
+    }
 
 
 def test_manager_model_forwards_non_thinking_sampling(monkeypatch):

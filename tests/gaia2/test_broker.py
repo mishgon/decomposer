@@ -10,6 +10,7 @@ import time
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
+from typing import Any
 
 from are.simulation.apps.app import App
 from are.simulation.environment import Environment, EnvironmentConfig
@@ -49,6 +50,7 @@ def tool(name, function, *, default=False):
                 description="A value.",
                 has_default=default,
                 default=3 if default else None,
+                type_obj=int,
             )
         ],
         function=function,
@@ -82,7 +84,17 @@ def test_schema_conversion_and_hidden_filtering():
     visible = tool("Calendar__write", lambda value: value)
     hidden = tool("AgentUserInterface__send_message_to_user", lambda value: value)
     schema = app_tool_schema(visible)
-    assert schema == visible.to_open_ai()
+    assert schema["function"]["parameters"] == {
+        "type": "object",
+        "properties": {
+            "value": {
+                "type": "integer",
+                "description": "A value.",
+            }
+        },
+        "additionalProperties": False,
+        "required": ["value"],
+    }
 
     broker = ToolStateBroker()
     try:
@@ -90,6 +102,52 @@ def test_schema_conversion_and_hidden_filtering():
         assert [s["function"]["name"] for s in session.schemas] == ["Calendar__write"]
     finally:
         broker.close()
+
+
+def test_schema_uses_runtime_types_defaults_and_omits_variadic_kwargs():
+    class TypedTools(App):
+        @app_tool()
+        def send(
+            self,
+            subject: str,
+            recipients: list[str] | None = None,
+            min_price: int | float | None = None,
+            enabled: bool = False,
+            **kwargs: dict[str, Any],
+        ) -> str:
+            """Send a typed value.
+
+            :param subject: Message subject.
+            :param recipients: Optional recipients.
+            :param min_price: Optional minimum price.
+            :param enabled: Whether the operation is enabled.
+            :param kwargs: Additional unsupported options.
+            :return: The subject.
+            """
+
+            return subject
+
+    app = TypedTools()
+    environment = Environment(EnvironmentConfig(duration=1))
+    environment.register_apps([app])
+    schema = app_tool_schema(app.get_tools()[0])["function"]["parameters"]
+
+    assert schema["required"] == ["subject"]
+    assert "kwargs" not in schema["properties"]
+    assert schema["properties"]["recipients"] == {
+        "anyOf": [
+            {"type": "array", "items": {"type": "string"}},
+            {"type": "null"},
+        ],
+        "description": "Optional recipients.",
+        "default": None,
+    }
+    assert schema["properties"]["min_price"]["anyOf"] == [
+        {"type": "integer"},
+        {"type": "number"},
+        {"type": "null"},
+    ]
+    assert schema["properties"]["enabled"]["default"] is False
 
 
 def test_token_tool_rejection_and_exactly_once_invocation():
