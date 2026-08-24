@@ -140,6 +140,7 @@ def main() -> int:
             "base_image": args.base_image,
             "n_workers": 1,
             "processes_per_worker": 1,
+            "priority_class": "high",
         }
         print(f"Would launch [{experiment.num_gpus} GPU]: {description}")
         if args.dry:
