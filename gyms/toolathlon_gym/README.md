@@ -93,6 +93,46 @@ uv run python gyms/toolathlon_gym/run.py howtocook-event-menu-ppt \
 Use `--reuse-vllm` only when the configured port already serves the expected
 model and the runner must not own that external process.
 
+For several externally managed replicas, pass their host-local ports as a pool.
+The batch verifies every endpoint and assigns episodes round-robin:
+
+```bash
+uv run python gyms/toolathlon_gym/run.py --all \
+  --purpose trace-generation \
+  --subagent-ports 18100 18101 18102 18103 \
+  --concurrency 16 \
+  --n-jobs-per-worker 1000
+```
+
+## MLSpace inference pool
+
+Toolathlon's Docker containers remain on Hertz-2. MLSpace jobs only run Gemma
+vLLM replicas and expose them through dedicated SSH reverse tunnels bound to
+Hertz-2 loopback. This avoids requiring Docker inside MLSpace.
+
+The reproducible service definitions are in `mlspace_experiments.py`. The live
+SR008 mapping uses one H100 for the connectivity pilot and two eight-H100 jobs
+for the full pool. Artifacts, staged code, service logs, and dedicated tunnel
+credentials live outside the checkout at:
+
+```text
+/mnt/shared_ru.ml.SZ-5_000264/matrosov/decomposer-toolathlon-artifacts/
+  code/<git-commit>/
+  inference/<experiment>/
+  secrets/
+```
+
+Run the zero-GPU payload validation from the configured OCC environment:
+
+```bash
+conda run -n decomposer_jobs python \
+  gyms/toolathlon_gym/run_mlspace_inference_jobs.py \
+  --full --author-name matrosov --telegram-nick js0n_statham --dry
+```
+
+Submit `--pilot` first and verify port 18099 from Hertz-2. Submit `--full` only
+after that succeeds; the two full jobs forward ports 18100 through 18115.
+
 ## Artifacts and resume behavior
 
 All new output is under `artifacts/gyms/toolathlon_gym/`:

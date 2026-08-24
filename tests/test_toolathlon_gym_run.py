@@ -3,12 +3,13 @@ import subprocess
 import sys
 import threading
 import time
+from collections import Counter
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
-from gyms.toolathlon_gym import batch, run
+from gyms.toolathlon_gym import batch, mlspace_serve, run
 
 
 def test_configured_subagents_are_registered() -> None:
@@ -269,6 +270,103 @@ def test_batch_runs_episodes_with_requested_concurrency(tmp_path, monkeypatch) -
 
     assert maximum_active == 4
     assert manifest["counts"]["completed"] == 4
+
+
+def test_batch_distributes_episodes_across_external_vllm_ports(
+    tmp_path, monkeypatch
+) -> None:
+    toolathlon_root = tmp_path / "toolathlon"
+    tasks = [f"task-{index}" for index in range(6)]
+    for task in tasks:
+        (toolathlon_root / "tasks" / "finalpool" / task).mkdir(parents=True)
+    artifacts = tmp_path / "artifacts"
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    monkeypatch.setattr(batch, "new_run_id", lambda: "endpoint-pool-run")
+
+    ports = []
+
+    def fake_execute_episode(args, **kwargs):
+        ports.append(kwargs["subagent_port"])
+        attempt = kwargs["attempt"]
+        return {
+            "attempt": attempt,
+            "status": "completed",
+            "score": True,
+            "artifact_path": "/trace",
+            "evaluation_path": "/eval/result.json",
+            "started_at": "start",
+            "finished_at": "finish",
+            "duration_seconds": 0.01,
+            "returncode": 0,
+            "error": None,
+        }
+
+    monkeypatch.setattr(batch, "execute_episode", fake_execute_episode)
+    starts = []
+    manifest = batch.main(
+        [
+            "--tasks",
+            *tasks,
+            "--purpose",
+            "trace-generation",
+            "--subagent-ports",
+            "18100",
+            "18101",
+            "18102",
+            "--concurrency",
+            "3",
+            "--gym-artifacts-dir",
+            str(artifacts),
+        ],
+        repo_root=tmp_path,
+        toolathlon_root=toolathlon_root,
+        default_artifacts_dir=artifacts,
+        default_image="image",
+        default_model="decomposer-model",
+        default_subagent_model="subagent-model",
+        default_subagent_port=8023,
+        start_vllm=lambda **kwargs: starts.append(kwargs) or None,
+        stop_vllm=lambda process: None,
+        docker=lambda *args, **kwargs: subprocess.CompletedProcess(args, 0, "", ""),
+    )
+
+    assert [item["port"] for item in starts] == [18100, 18101, 18102]
+    assert all(item["reuse"] for item in starts)
+    assert Counter(ports) == Counter({18100: 2, 18101: 2, 18102: 2})
+    assert manifest["config"]["subagent_ports"] == [18100, 18101, 18102]
+
+
+def test_mlspace_serve_builds_one_replica_and_reverse_forward_per_gpu() -> None:
+    args = SimpleNamespace(
+        model="/models/gemma",
+        max_model_len=65536,
+        gpu_memory_utilization=0.9,
+        ssh_key=Path("/secrets/key"),
+        known_hosts=Path("/secrets/known_hosts"),
+        hertz_port=44444,
+        gpu_count=2,
+        remote_port_start=18108,
+        local_port_start=8023,
+        hertz_user="matrosov",
+        hertz_host="135.106.169.8",
+    )
+
+    vllm = mlspace_serve.vllm_command(args, 8024)
+    tunnel = mlspace_serve.tunnel_command(args)
+
+    assert vllm[vllm.index("--served-model-name") + 1] == mlspace_serve.SERVED_MODEL
+    assert vllm[vllm.index("--default-chat-template-kwargs") + 1] == (
+        '{"enable_thinking":false}'
+    )
+    forwards = [
+        tunnel[index + 1]
+        for index, value in enumerate(tunnel)
+        if value == "-R"
+    ]
+    assert forwards == [
+        "127.0.0.1:18108:127.0.0.1:8023",
+        "127.0.0.1:18109:127.0.0.1:8024",
+    ]
 
 
 def test_cleanup_continues_when_log_capture_fails(tmp_path, monkeypatch) -> None:
