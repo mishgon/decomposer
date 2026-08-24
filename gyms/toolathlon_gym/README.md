@@ -124,9 +124,12 @@ task/repetition has its own entry and each retry has a distinct attempt log
 directory. Existing trace/evaluation directories are never overwritten. A
 batch runs up to `--concurrency` episodes at once, creates a fresh Docker
 network, PostgreSQL container, and task container for each one, and removes all
-three in the worker's `finally` block. Each task container starts LangGraph with
-`--n-jobs-per-worker` slots (default 1000). The supervised vLLM is started once
-before the worker pool and stopped once after it.
+three in the worker's `finally` block. Container startup and cleanup are briefly
+serialized, and each task receives its PostgreSQL container's network address
+directly to avoid rootless Podman DNS races; Decomposer execution remains
+concurrent. Each task container starts LangGraph with `--n-jobs-per-worker`
+slots (default 1000). The supervised vLLM is started once before the worker pool
+and stopped once after it.
 
 ## Runtime boundary
 

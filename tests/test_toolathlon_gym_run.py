@@ -65,6 +65,22 @@ def test_postgres_image_is_fully_qualified_for_podman() -> None:
     assert run.POSTGRES_IMAGE == "docker.io/library/postgres:15"
 
 
+def test_postgres_environment_uses_container_ip_instead_of_dns(monkeypatch) -> None:
+    monkeypatch.setattr(
+        run,
+        "_docker",
+        lambda *args, **kwargs: subprocess.CompletedProcess(
+            args, 0, "10.89.3.7\n", ""
+        ),
+    )
+
+    environment = run._postgres_environment("postgres-container")
+
+    assert environment["PGHOST"] == "10.89.3.7"
+    assert environment["PG_HOST"] == "10.89.3.7"
+    assert environment["PGDATABASE"] == "toolathlon_gym"
+
+
 def test_main_requires_explicit_trace_generation_purpose(monkeypatch) -> None:
     monkeypatch.setattr(sys, "argv", ["run.py", "example"])
 
@@ -397,3 +413,6 @@ def test_execute_episode_maps_deterministic_trace_and_eval_paths(
     assert command[command.index("--episode-id") + 1] == episode_id
     assert command[command.index("--run-id") + 1] == "run-id"
     assert command[command.index("--n-jobs-per-worker") + 1] == "1000"
+    assert command[command.index("--container-lock-file") + 1] == str(
+        root / "runs" / "run-id" / "container.lock"
+    )

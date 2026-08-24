@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import fcntl
 import json
 import os
 import signal
@@ -63,6 +64,35 @@ def _docker(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
 
 def _handle_termination(signum: int, _frame: object) -> None:
     raise KeyboardInterrupt(f"received signal {signum}")
+
+
+def _open_container_lock(path: Path | None):
+    if path is None:
+        return None
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path.open("a+")
+
+
+def _acquire_container_lock(lock_file) -> None:
+    if lock_file is not None:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+
+
+def _release_container_lock(lock_file) -> None:
+    if lock_file is not None:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
+
+def _postgres_environment(pg_container: str) -> dict[str, str]:
+    address = _docker(
+        "inspect",
+        "--format",
+        "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}",
+        pg_container,
+    ).stdout.strip()
+    if not address:
+        raise RuntimeError(f"PostgreSQL container has no network address: {pg_container}")
+    return {**POSTGRES_ENV, "PGHOST": address, "PG_HOST": address}
 
 
 def _cleanup_episode(
@@ -295,6 +325,7 @@ def main() -> None:
     parser.add_argument("--evals-dir", type=Path, default=DEFAULT_EVALS_DIR)
     parser.add_argument("--startup-timeout", type=float, default=180)
     parser.add_argument("--n-jobs-per-worker", type=int, default=1000)
+    parser.add_argument("--container-lock-file", type=Path, help=argparse.SUPPRESS)
     args = parser.parse_args()
     if args.n_jobs_per_worker < 1:
         parser.error("--n-jobs-per-worker must be at least 1")
@@ -338,7 +369,11 @@ def main() -> None:
         reuse=args.reuse_vllm,
     )
 
+    container_lock = _open_container_lock(args.container_lock_file)
+    container_lock_held = False
     try:
+        _acquire_container_lock(container_lock)
+        container_lock_held = container_lock is not None
         print("Starting PostgreSQL...", flush=True)
         _docker("network", "create", network)
         dump = (TOOLATHLON_ROOT / "db" / "init.sql.gz").resolve()
@@ -417,7 +452,7 @@ def main() -> None:
         print("Starting task environment...", flush=True)
         postgres_env = [
             item
-            for pair in POSTGRES_ENV.items()
+            for pair in _postgres_environment(pg_container).items()
             for item in ("--env", "=".join(pair))
         ]
         _docker(
@@ -490,6 +525,9 @@ def main() -> None:
                 f"{subagent_url}/ok did not become ready within "
                 f"{args.startup_timeout:g}s"
             )
+
+        _release_container_lock(container_lock)
+        container_lock_held = False
 
         runtime = json.loads((episode_dir / "runtime.json").read_text(encoding="utf-8"))
         print("Running Decomposer...", flush=True)
@@ -616,14 +654,23 @@ def main() -> None:
         print(f"\nArtifacts: {episode_dir}")
         print(f"Evaluation: {evaluation['pass']} ({evaluation_path})")
     finally:
+        if container_lock_held:
+            _release_container_lock(container_lock)
+            container_lock_held = False
+        _acquire_container_lock(container_lock)
         print("Cleaning up...", flush=True)
-        _cleanup_episode(
-            episode_dir=episode_dir,
-            task_container=task_container,
-            pg_container=pg_container,
-            network=network,
-        )
-        stop_vllm(vllm_process)
+        try:
+            _cleanup_episode(
+                episode_dir=episode_dir,
+                task_container=task_container,
+                pg_container=pg_container,
+                network=network,
+            )
+        finally:
+            _release_container_lock(container_lock)
+            if container_lock is not None:
+                container_lock.close()
+            stop_vllm(vllm_process)
 
 
 if __name__ == "__main__":
