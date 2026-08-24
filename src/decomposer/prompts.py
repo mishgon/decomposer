@@ -27,7 +27,7 @@ Available subagent types are listed in the table below:
 {available_subagent_types}"""
 
 
-PROMPT_PARAMETER_DESCRIPTION = """The prompt specifying the subtask."""
+PROMPT_PARAMETER_DESCRIPTION = """The prompt specifying the subtask. It must be at most {subagent_prompt_max_tokens} approximate tokens."""
 
 
 WAIT_TOOL_DESCRIPTION = """Waits for at least one new report to become available and returns all new subagent reports that have been produced since the last `wait` call.
@@ -36,7 +36,7 @@ Use this tool when you have already spawned subagents for all the necessary unbl
 
 This tool takes no arguments. If there are no new reports and no running subagents, it returns immediately with "{no_running_subagents_error}" If any subagents have completed since the last `wait` call, it immediately returns their reports. Otherwise, it waits up to {wait_timeout_seconds} seconds for at least one running subagent to complete, then returns all newly available reports. On timeout, it returns "{no_completed_subagent_runs_error}"
 
-The reports are formatted as a JSON list. Each report contains `subagent_run_id`, `status`, and `content` fields. Use the `subagent_run_id` field to identify the subagent run that produced the report. Note that the `status` field only reflects the mechanical status of the run, but does not reflect whether the subagent completed the subtask successfully. If status is `"success"`, the `content` field contains the subagent's final response. If status is `"error"`, the `content` field contains the error message, if available.
+The reports are formatted as a JSON list. Each report contains `subagent_run_id`, `status`, and `content` fields. Use the `subagent_run_id` field to identify the subagent run that produced the report. Note that the `status` field only reflects the mechanical status of the run, but does not reflect whether the subagent completed the subtask successfully. If status is `"success"`, the `content` field contains the subagent's final response, truncated to at most {subagent_report_max_tokens} approximate tokens. If status is `"error"`, the `content` field contains the error message, if available, with the same limit.
 
 Do not use the `wait` tool when there are no running subagents to wait for.
 
