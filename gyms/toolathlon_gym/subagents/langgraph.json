@@ -3,7 +3,8 @@
     "."
   ],
   "graphs": {
-    "gemma_4_26b_a4b_thinking": "./graph.py:gemma_4_26b_a4b_thinking"
+    "gemma_4_26b_a4b_thinking": "./graph.py:gemma_4_26b_a4b_thinking",
+    "gemma_4_26b_a4b_non_thinking": "./graph.py:gemma_4_26b_a4b_non_thinking"
   },
   "http": {
     "app": "webapp:app"

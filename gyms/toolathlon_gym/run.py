@@ -47,8 +47,8 @@ SUBAGENT_TYPES = (
     # ("gemma_4_4b_non_thinking", "gemma_4_4b_non_thinking", "Gemma-4-4B non-thinking"),
     # ("gemma_4_12b_thinking", "gemma_4_12b_thinking", "Gemma-4-12B thinking"),
     # ("gemma_4_12b_non_thinking", "gemma_4_12b_non_thinking", "Gemma-4-12B non-thinking"),
-    ("gemma_4_26b_a4b_thinking", "gemma_4_26b_a4b_thinking", "Gemma-4-26B-A4B thinking"),
-    # ("gemma_4_26b_a4b_non_thinking", "gemma_4_26b_a4b_non_thinking", "Gemma-4-26B-A4B non-thinking"),
+    # ("gemma_4_26b_a4b_thinking", "gemma_4_26b_a4b_thinking", "Gemma-4-26B-A4B thinking"),
+    ("gemma_4_26b_a4b_non_thinking", "gemma_4_26b_a4b_non_thinking", "Gemma-4-26B-A4B non-thinking"),
 )
 
 
@@ -147,7 +147,7 @@ def vllm_command(
         "--reasoning-parser",
         "gemma4",
         "--default-chat-template-kwargs",
-        '{"enable_thinking":true}',
+        '{"enable_thinking":false}',
     ]
 
 
@@ -294,7 +294,10 @@ def main() -> None:
     parser.add_argument("--artifacts-dir", type=Path, default=DEFAULT_ARTIFACTS_DIR)
     parser.add_argument("--evals-dir", type=Path, default=DEFAULT_EVALS_DIR)
     parser.add_argument("--startup-timeout", type=float, default=180)
+    parser.add_argument("--n-jobs-per-worker", type=int, default=1000)
     args = parser.parse_args()
+    if args.n_jobs_per_worker < 1:
+        parser.error("--n-jobs-per-worker must be at least 1")
 
     tasks_dir = (TOOLATHLON_ROOT / "tasks" / "finalpool").resolve()
     task_dir = (tasks_dir / args.task).resolve()
@@ -430,6 +433,8 @@ def main() -> None:
             "127.0.0.1::2024",
             "--env",
             f"TOOLATHLON_TASK={args.task}",
+            "--env",
+            f"N_JOBS_PER_WORKER={args.n_jobs_per_worker}",
             "--env",
             (
                 "GEMMA_4_26B_A4B_BASE_URL="

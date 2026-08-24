@@ -1,6 +1,8 @@
 import json
 import subprocess
 import sys
+import threading
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -17,6 +19,9 @@ def test_configured_subagents_are_registered() -> None:
     assert {
         assistant_id for _, assistant_id, _ in run.SUBAGENT_TYPES
     } <= registered.keys()
+    assert [item[0] for item in run.SUBAGENT_TYPES] == [
+        "gemma_4_26b_a4b_non_thinking"
+    ]
 
 
 def test_docker(monkeypatch) -> None:
@@ -51,6 +56,9 @@ def test_vllm_command_uses_current_environment_and_gemma_parsers() -> None:
     )
     assert command[command.index("--tool-call-parser") + 1] == "gemma4"
     assert command[command.index("--reasoning-parser") + 1] == "gemma4"
+    assert command[command.index("--default-chat-template-kwargs") + 1] == (
+        '{"enable_thinking":false}'
+    )
 
 
 def test_postgres_image_is_fully_qualified_for_podman() -> None:
@@ -184,6 +192,69 @@ def test_batch_repetitions_and_resume_skip_completed(tmp_path, monkeypatch) -> N
     assert len(vllm_starts) == 2
 
 
+def test_batch_runs_episodes_with_requested_concurrency(tmp_path, monkeypatch) -> None:
+    toolathlon_root = tmp_path / "toolathlon"
+    tasks = [f"task-{index}" for index in range(4)]
+    for task in tasks:
+        (toolathlon_root / "tasks" / "finalpool" / task).mkdir(parents=True)
+    artifacts = tmp_path / "artifacts"
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    monkeypatch.setattr(batch, "new_run_id", lambda: "concurrent-run")
+
+    lock = threading.Lock()
+    active = 0
+    maximum_active = 0
+
+    def fake_execute_episode(args, **kwargs):
+        nonlocal active, maximum_active
+        with lock:
+            active += 1
+            maximum_active = max(maximum_active, active)
+        time.sleep(0.05)
+        with lock:
+            active -= 1
+        attempt = kwargs["attempt"]
+        return {
+            "attempt": attempt,
+            "status": "completed",
+            "score": True,
+            "artifact_path": "/trace",
+            "evaluation_path": "/eval/result.json",
+            "started_at": "start",
+            "finished_at": "finish",
+            "duration_seconds": 0.05,
+            "returncode": 0,
+            "error": None,
+        }
+
+    monkeypatch.setattr(batch, "execute_episode", fake_execute_episode)
+    manifest = batch.main(
+        [
+            "--tasks",
+            *tasks,
+            "--purpose",
+            "trace-generation",
+            "--concurrency",
+            "4",
+            "--gym-artifacts-dir",
+            str(artifacts),
+        ],
+        repo_root=tmp_path,
+        toolathlon_root=toolathlon_root,
+        default_artifacts_dir=artifacts,
+        default_image="image",
+        default_model="decomposer-model",
+        default_subagent_model="subagent-model",
+        default_subagent_port=8023,
+        start_vllm=lambda **kwargs: "process",
+        stop_vllm=lambda process: None,
+        docker=lambda *args, **kwargs: subprocess.CompletedProcess(args, 0, "", ""),
+    )
+
+    assert maximum_active == 4
+    assert manifest["counts"]["completed"] == 4
+
+
 def test_cleanup_continues_when_log_capture_fails(tmp_path, monkeypatch) -> None:
     calls = []
 
@@ -306,6 +377,7 @@ def test_execute_episode_maps_deterministic_trace_and_eval_paths(
         vllm_startup_timeout=30,
         image="image",
         startup_timeout=10,
+        n_jobs_per_worker=1000,
     )
 
     result = batch.execute_episode(
@@ -324,3 +396,4 @@ def test_execute_episode_maps_deterministic_trace_and_eval_paths(
     command = popen_calls[0][0]
     assert command[command.index("--episode-id") + 1] == episode_id
     assert command[command.index("--run-id") + 1] == "run-id"
+    assert command[command.index("--n-jobs-per-worker") + 1] == "1000"

@@ -4,6 +4,7 @@ This gym integration keeps Decomposer and its model credentials on the host whil
 task container owns the Toolathlon workspace, MCP servers, and evaluator.
 The host runner owns one supervised vLLM process for a batch. Task containers
 reuse it and do not pay a per-example model cold start.
+The configured Gemma-4-26B-A4B subagent runs in non-thinking mode.
 
 ## Image layout
 
@@ -50,7 +51,9 @@ Run the full dataset once (an omitted `-n` means one repetition):
 uv run python gyms/toolathlon_gym/run.py --all \
   --purpose trace-generation \
   --subagent-model "$GEMMA" \
-  --subagent-gpu 1
+  --subagent-gpu 1 \
+  --concurrency 4 \
+  --n-jobs-per-worker 1000
 ```
 
 Run a subset, with every selected task repeated three times:
@@ -119,10 +122,11 @@ evals/<task>/<episode-id>/result.json
 The manifest is atomically replaced after every state transition. Each
 task/repetition has its own entry and each retry has a distinct attempt log
 directory. Existing trace/evaluation directories are never overwritten. A
-batch runs episodes sequentially, creates a fresh Docker network, PostgreSQL
-container, and task container for each one, and removes all three in the
-worker's `finally` block. The supervised vLLM is started once before the loop
-and stopped once after it.
+batch runs up to `--concurrency` episodes at once, creates a fresh Docker
+network, PostgreSQL container, and task container for each one, and removes all
+three in the worker's `finally` block. Each task container starts LangGraph with
+`--n-jobs-per-worker` slots (default 1000). The supervised vLLM is started once
+before the worker pool and stopped once after it.
 
 ## Runtime boundary
 

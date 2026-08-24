@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import hashlib
 import json
 import os
@@ -8,6 +9,7 @@ import platform
 import signal
 import subprocess
 import sys
+import threading
 import time
 import traceback
 import uuid
@@ -89,6 +91,8 @@ def parse_args(argv: Sequence[str], defaults: dict[str, Any]) -> argparse.Namesp
         "--gym-artifacts-dir", type=Path, default=defaults["artifacts_dir"]
     )
     parser.add_argument("--startup-timeout", type=float, default=180)
+    parser.add_argument("--n-jobs-per-worker", type=int, default=1000)
+    parser.add_argument("--concurrency", type=int, default=1)
     args = parser.parse_args(argv)
     if args.resume and (args.all or args.tasks):
         parser.error("--resume cannot be combined with --all or --tasks")
@@ -98,6 +102,10 @@ def parse_args(argv: Sequence[str], defaults: dict[str, Any]) -> argparse.Namesp
         parser.error("--repetitions must be at least 1")
     if args.resume and args.repetitions != 1:
         parser.error("--repetitions cannot be changed on resume")
+    if args.n_jobs_per_worker < 1:
+        parser.error("--n-jobs-per-worker must be at least 1")
+    if args.concurrency < 1:
+        parser.error("--concurrency must be at least 1")
     return args
 
 
@@ -215,6 +223,7 @@ def episode_command(
         "--artifacts-dir", str(root / "traces"),
         "--evals-dir", str(root / "evals"),
         "--startup-timeout", str(args.startup_timeout),
+        "--n-jobs-per-worker", str(args.n_jobs_per_worker),
     ]
 
 
@@ -225,6 +234,7 @@ def execute_episode(
     run_dir: Path,
     episode: dict[str, Any],
     attempt: int,
+    stop_event: threading.Event | None = None,
 ) -> dict[str, Any]:
     task, repetition = episode["task"], episode["repetition"]
     attempt_dir = run_dir / "attempts" / task / f"rep-{repetition:03d}" / f"attempt-{attempt:03d}"
@@ -243,7 +253,13 @@ def execute_episode(
     ).open("wb") as stderr:
         process = subprocess.Popen(command, stdout=stdout, stderr=stderr)
         try:
-            returncode = process.wait()
+            while True:
+                try:
+                    returncode = process.wait(timeout=0.5)
+                    break
+                except subprocess.TimeoutExpired:
+                    if stop_event is not None and stop_event.is_set():
+                        raise KeyboardInterrupt("batch interrupted")
         except BaseException:
             if process.poll() is None:
                 process.send_signal(signal.SIGINT)
@@ -414,6 +430,7 @@ def main(
             reuse=args.reuse_vllm,
         )
         append_event(run_dir, "vllm_ready", externally_managed=args.reuse_vllm)
+        work: list[tuple[int, dict[str, Any], int]] = []
         for index, episode in enumerate(manifest["episodes"], start=1):
             attempt, reconciled = next_attempt(run_dir, episode)
             if reconciled:
@@ -422,6 +439,43 @@ def main(
             if episode["status"] == "completed":
                 append_event(run_dir, "episode_skipped", key=episode["key"])
                 continue
+            work.append((index, episode, attempt))
+
+        stop_event = threading.Event()
+        executor = concurrent.futures.ThreadPoolExecutor(
+            max_workers=args.concurrency,
+            thread_name_prefix="toolathlon-episode",
+        )
+        active: dict[
+            concurrent.futures.Future[dict[str, Any]],
+            tuple[int, dict[str, Any], int],
+        ] = {}
+        remaining = iter(work)
+
+        def record_result(
+            episode: dict[str, Any], result: dict[str, Any], *, interrupted_run: bool = False
+        ) -> None:
+            if interrupted_run:
+                result["error"] = result.get("error") or {}
+                result["error"]["interrupted"] = True
+            episode["attempts"].append(result)
+            episode.update(result)
+            save_manifest(run_dir, manifest)
+            append_event(
+                run_dir,
+                "episode_interrupted"
+                if interrupted_run
+                else f"episode_{result['status']}",
+                key=episode["key"],
+                attempt=result["attempt"],
+                score=result.get("score"),
+            )
+
+        def submit_next() -> bool:
+            try:
+                index, episode, attempt = next(remaining)
+            except StopIteration:
+                return False
             print(
                 f"[{index}/{manifest['counts']['total']}] {episode['key']} "
                 f"attempt {attempt}",
@@ -430,35 +484,56 @@ def main(
             episode.update(status="running", started_at=utc_now(), finished_at=None, error=None)
             save_manifest(run_dir, manifest)
             append_event(run_dir, "episode_started", key=episode["key"], attempt=attempt)
-            try:
-                result = execute_episode(
-                    args,
-                    runner_path=repo_root / "gyms" / "toolathlon_gym" / "run.py",
-                    root=root,
-                    run_dir=run_dir,
-                    episode=episode,
-                    attempt=attempt,
-                )
-            except Exception as error:
-                result = failure(attempt, error, episode["started_at"])
-            except BaseException as error:
-                result = failure(attempt, error, episode["started_at"])
-                result["error"]["interrupted"] = True
-                episode["attempts"].append(result)
-                episode.update(result)
-                save_manifest(run_dir, manifest)
-                append_event(run_dir, "episode_interrupted", key=episode["key"], attempt=attempt)
-                raise
-            episode["attempts"].append(result)
-            episode.update(result)
-            save_manifest(run_dir, manifest)
-            append_event(
-                run_dir,
-                f"episode_{result['status']}",
-                key=episode["key"],
+            future = executor.submit(
+                execute_episode,
+                args,
+                runner_path=repo_root / "gyms" / "toolathlon_gym" / "run.py",
+                root=root,
+                run_dir=run_dir,
+                episode=episode,
                 attempt=attempt,
-                score=result.get("score"),
+                stop_event=stop_event,
             )
+            active[future] = (index, episode, attempt)
+            return True
+
+        try:
+            for _ in range(min(args.concurrency, len(work))):
+                submit_next()
+            while active:
+                done, _ = concurrent.futures.wait(
+                    active,
+                    return_when=concurrent.futures.FIRST_COMPLETED,
+                )
+                for future in done:
+                    _index, episode, attempt = active.pop(future)
+                    try:
+                        result = future.result()
+                    except Exception as error:
+                        result = failure(attempt, error, episode["started_at"])
+                    except BaseException as error:
+                        result = failure(attempt, error, episode["started_at"])
+                        record_result(episode, result, interrupted_run=True)
+                        raise
+                    record_result(episode, result)
+                    submit_next()
+        except BaseException:
+            stop_event.set()
+            for future, (_index, episode, attempt) in list(active.items()):
+                try:
+                    result = future.result()
+                except BaseException as error:
+                    result = failure(attempt, error, episode["started_at"])
+                record_result(
+                    episode,
+                    result,
+                    interrupted_run=result["status"] != "completed",
+                )
+            active.clear()
+            raise
+        finally:
+            stop_event.set()
+            executor.shutdown(wait=True, cancel_futures=True)
     except BaseException as error:
         interrupted = True
         manifest["error"] = {
