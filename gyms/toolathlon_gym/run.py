@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import fcntl
 import json
 import os
+import signal
 import shlex
 import subprocess
+import sys
 import time
 import urllib.request
 import uuid
@@ -21,11 +24,14 @@ from decomposer.prompts import DECOMPOSER_TEACHER_SYSTEM_PROMPT
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 TOOLATHLON_ROOT = REPO_ROOT / "external" / "toolathlon_gym"
-DEFAULT_ARTIFACTS_DIR = REPO_ROOT / "artifacts" / "data" / "toolathlon_gym"
-DEFAULT_EVALS_DIR = REPO_ROOT / "artifacts" / "evals" / "toolathlon_gym"
+DEFAULT_GYM_ARTIFACTS_DIR = REPO_ROOT / "artifacts" / "gyms" / "toolathlon_gym"
+DEFAULT_ARTIFACTS_DIR = DEFAULT_GYM_ARTIFACTS_DIR / "traces"
+DEFAULT_EVALS_DIR = DEFAULT_GYM_ARTIFACTS_DIR / "evals"
 DEFAULT_IMAGE = "decomposer-toolathlon:latest"
 DEFAULT_MODEL = "deepseek/deepseek-v4-flash-0731"
-POSTGRES_IMAGE = "postgres:15"
+DEFAULT_SUBAGENT_MODEL = "google/gemma-4-26B-A4B-it"
+DEFAULT_SUBAGENT_PORT = 8023
+POSTGRES_IMAGE = "docker.io/library/postgres:15"
 POSTGRES_ENV = {
     "PGHOST": "postgres",
     "PG_HOST": "postgres",
@@ -33,12 +39,6 @@ POSTGRES_ENV = {
     "PGUSER": "eigent",
     "PGPASSWORD": "camel",
     "PGDATABASE": "toolathlon_gym",
-}
-VLLM_MODELS = {
-    # 8020: "google/gemma-4-E2B-it",
-    # 8021: "google/gemma-4-E4B-it",
-    # 8022: "google/gemma-4-12B-it",
-    8023: "google/gemma-4-26B-A4B-it",
 }
 SUBAGENT_TYPES = (
     # subagent_type_id, assistant_id, model_description
@@ -48,8 +48,8 @@ SUBAGENT_TYPES = (
     # ("gemma_4_4b_non_thinking", "gemma_4_4b_non_thinking", "Gemma-4-4B non-thinking"),
     # ("gemma_4_12b_thinking", "gemma_4_12b_thinking", "Gemma-4-12B thinking"),
     # ("gemma_4_12b_non_thinking", "gemma_4_12b_non_thinking", "Gemma-4-12B non-thinking"),
-    ("gemma_4_26b_a4b_thinking", "gemma_4_26b_a4b_thinking", "Gemma-4-26B-A4B thinking"),
-    # ("gemma_4_26b_a4b_non_thinking", "gemma_4_26b_a4b_non_thinking", "Gemma-4-26B-A4B non-thinking"),
+    # ("gemma_4_26b_a4b_thinking", "gemma_4_26b_a4b_thinking", "Gemma-4-26B-A4B thinking"),
+    ("gemma_4_26b_a4b_non_thinking", "gemma_4_26b_a4b_non_thinking", "Gemma-4-26B-A4B non-thinking"),
 )
 
 
@@ -62,15 +62,273 @@ def _docker(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
     )
 
 
+def _handle_termination(signum: int, _frame: object) -> None:
+    raise KeyboardInterrupt(f"received signal {signum}")
+
+
+def _open_container_lock(path: Path | None):
+    if path is None:
+        return None
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path.open("a+")
+
+
+def _acquire_container_lock(lock_file) -> None:
+    if lock_file is not None:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+
+
+def _release_container_lock(lock_file) -> None:
+    if lock_file is not None:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
+
+def _postgres_environment(pg_container: str) -> dict[str, str]:
+    address = _docker(
+        "inspect",
+        "--format",
+        "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}",
+        pg_container,
+    ).stdout.strip()
+    if not address:
+        raise RuntimeError(f"PostgreSQL container has no network address: {pg_container}")
+    return {**POSTGRES_ENV, "PGHOST": address, "PG_HOST": address}
+
+
+def _cleanup_episode(
+    *,
+    episode_dir: Path,
+    task_container: str,
+    pg_container: str,
+    network: str,
+) -> None:
+    """Capture raw container state and remove all per-episode resources."""
+    cleanup: dict[str, object] = {
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "captures": [],
+        "removals": [],
+    }
+    for label, container in (("task", task_container), ("postgres", pg_container)):
+        for kind, command in (
+            ("log", ("logs", container)),
+            ("inspect.json", ("inspect", container)),
+        ):
+            try:
+                completed = _docker(*command, check=False)
+                content = completed.stdout + completed.stderr
+                if content:
+                    (episode_dir / f"{label}.{kind}").write_text(
+                        content, encoding="utf-8"
+                    )
+                cleanup["captures"].append(
+                    {"container": label, "kind": kind, "returncode": completed.returncode}
+                )
+            except BaseException as error:
+                cleanup["captures"].append(
+                    {"container": label, "kind": kind, "error": repr(error)}
+                )
+    for command in (
+        ("rm", "--force", task_container),
+        ("rm", "--force", pg_container),
+        ("network", "rm", network),
+    ):
+        try:
+            completed = _docker(*command, check=False)
+            cleanup["removals"].append(
+                {"command": command, "returncode": completed.returncode,
+                 "stdout": completed.stdout, "stderr": completed.stderr}
+            )
+        except BaseException as error:
+            cleanup["removals"].append({"command": command, "error": repr(error)})
+    cleanup["finished_at"] = datetime.now(timezone.utc).isoformat()
+    try:
+        (episode_dir / "cleanup.json").write_text(
+            json.dumps(cleanup, indent=2, ensure_ascii=False), encoding="utf-8"
+        )
+    except BaseException:
+        pass
+
+
+def vllm_command(
+    model: str,
+    port: int,
+    *,
+    max_model_len: int,
+    gpu_memory_utilization: float,
+) -> list[str]:
+    return [
+        str(Path(sys.executable).with_name("vllm")),
+        "serve",
+        model,
+        "--served-model-name",
+        DEFAULT_SUBAGENT_MODEL,
+        "--host",
+        "0.0.0.0",
+        "--port",
+        str(port),
+        "--max-model-len",
+        str(max_model_len),
+        "--gpu-memory-utilization",
+        str(gpu_memory_utilization),
+        "--language-model-only",
+        "--enable-auto-tool-choice",
+        "--tool-call-parser",
+        "gemma4",
+        "--reasoning-parser",
+        "gemma4",
+        "--default-chat-template-kwargs",
+        '{"enable_thinking":false}',
+    ]
+
+
+def wait_for_vllm(
+    process: subprocess.Popen[bytes] | None,
+    *,
+    port: int,
+    expected_model: str,
+    timeout: float,
+    log_path: Path,
+) -> None:
+    url = f"http://127.0.0.1:{port}/v1/models"
+    deadline = time.monotonic() + timeout
+    last_error: Exception | None = None
+    while time.monotonic() < deadline:
+        if process is not None and process.poll() is not None:
+            raise RuntimeError(
+                f"vLLM exited with code {process.returncode}; inspect {log_path}"
+            )
+        try:
+            with urllib.request.urlopen(url, timeout=2) as response:
+                models = json.load(response)["data"]
+            if expected_model in {model["id"] for model in models}:
+                return
+            last_error = RuntimeError(f"{url} does not serve {expected_model}")
+        except (OSError, KeyError, json.JSONDecodeError) as error:
+            last_error = error
+        time.sleep(1)
+    raise TimeoutError(
+        f"vLLM did not become ready at {url} within {timeout:g}s; "
+        f"inspect {log_path}"
+    ) from last_error
+
+
+def start_vllm(
+    *,
+    model: str,
+    port: int,
+    gpu: str,
+    max_model_len: int,
+    gpu_memory_utilization: float,
+    timeout: float,
+    log_path: Path,
+    reuse: bool,
+) -> subprocess.Popen[bytes] | None:
+    no_proxy = {
+        item
+        for item in (
+            os.environ.get("NO_PROXY", "") + "," + os.environ.get("no_proxy", "")
+        ).split(",")
+        if item
+    }
+    no_proxy.update({"127.0.0.1", "localhost", "host.docker.internal"})
+    no_proxy_value = ",".join(sorted(no_proxy))
+    os.environ["NO_PROXY"] = no_proxy_value
+    os.environ["no_proxy"] = no_proxy_value
+
+    if reuse:
+        wait_for_vllm(
+            None,
+            port=port,
+            expected_model=DEFAULT_SUBAGENT_MODEL,
+            timeout=2,
+            log_path=log_path,
+        )
+        return None
+
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    command = vllm_command(
+        model,
+        port,
+        max_model_len=max_model_len,
+        gpu_memory_utilization=gpu_memory_utilization,
+    )
+    environment = {
+        **os.environ,
+        "CUDA_VISIBLE_DEVICES": gpu,
+        "VLLM_ENGINE_READY_TIMEOUT_S": str(max(1, int(timeout))),
+    }
+    with log_path.open("ab") as log:
+        process = subprocess.Popen(
+            command,
+            env=environment,
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+    try:
+        wait_for_vllm(
+            process,
+            port=port,
+            expected_model=DEFAULT_SUBAGENT_MODEL,
+            timeout=timeout,
+            log_path=log_path,
+        )
+    except BaseException:
+        stop_vllm(process)
+        raise
+    return process
+
+
+def stop_vllm(process: subprocess.Popen[bytes] | None) -> None:
+    if process is None:
+        return
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return
+    if process.poll() is None:
+        try:
+            process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            pass
+    deadline = time.monotonic() + 20
+    while time.monotonic() < deadline:
+        try:
+            os.killpg(process.pid, 0)
+        except ProcessLookupError:
+            return
+        time.sleep(0.1)
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        return
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("task")
+    parser.add_argument("--episode-id", help=argparse.SUPPRESS)
+    parser.add_argument("--run-id", help=argparse.SUPPRESS)
+    parser.add_argument("--repetition", type=int, help=argparse.SUPPRESS)
+    parser.add_argument("--attempt", type=int, help=argparse.SUPPRESS)
+    parser.add_argument("--purpose", choices=("trace-generation",), required=True)
     parser.add_argument("--model", default=DEFAULT_MODEL)
+    parser.add_argument("--subagent-model", default=DEFAULT_SUBAGENT_MODEL)
+    parser.add_argument("--subagent-port", type=int, default=DEFAULT_SUBAGENT_PORT)
+    parser.add_argument("--subagent-gpu", default="0")
+    parser.add_argument("--vllm-max-model-len", type=int, default=256000)
+    parser.add_argument("--vllm-gpu-memory-utilization", type=float, default=0.9)
+    parser.add_argument("--vllm-startup-timeout", type=float, default=1800)
+    parser.add_argument("--reuse-vllm", action="store_true")
     parser.add_argument("--image", default=DEFAULT_IMAGE)
     parser.add_argument("--artifacts-dir", type=Path, default=DEFAULT_ARTIFACTS_DIR)
     parser.add_argument("--evals-dir", type=Path, default=DEFAULT_EVALS_DIR)
     parser.add_argument("--startup-timeout", type=float, default=180)
+    parser.add_argument("--n-jobs-per-worker", type=int, default=1000)
+    parser.add_argument("--container-lock-file", type=Path, help=argparse.SUPPRESS)
     args = parser.parse_args()
+    if args.n_jobs_per_worker < 1:
+        parser.error("--n-jobs-per-worker must be at least 1")
 
     tasks_dir = (TOOLATHLON_ROOT / "tasks" / "finalpool").resolve()
     task_dir = (tasks_dir / args.task).resolve()
@@ -79,31 +337,43 @@ def main() -> None:
     if not os.environ.get("OPENROUTER_API_KEY"):
         raise RuntimeError("Set OPENROUTER_API_KEY for the Decomposer model")
 
-    print("Checking vLLM servers...", flush=True)
-    for port, expected_model in VLLM_MODELS.items():
-        url = f"http://127.0.0.1:{port}/v1/models"
-        try:
-            with urllib.request.urlopen(url, timeout=2) as response:
-                models = json.load(response)["data"]
-        except (OSError, KeyError, json.JSONDecodeError) as error:
-            raise RuntimeError(f"vLLM is not ready at {url}") from error
-        if expected_model not in {model["id"] for model in models}:
-            raise RuntimeError(f"{url} does not serve {expected_model}")
     _docker("image", "inspect", args.image)
 
-    episode_id = (
+    episode_id = args.episode_id or (
         datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ-")
         + uuid.uuid4().hex[:8]
     )
     episode_dir = args.artifacts_dir.resolve() / args.task / episode_id
     evaluation_path = args.evals_dir.resolve() / args.task / episode_id / "result.json"
     episode_dir.mkdir(parents=True)
-    network = f"decomposer-toolathlon-{episode_id}"
+    network = f"decomposer-toolathlon-{uuid.uuid4().hex[:16]}"
     pg_container = f"{network}-pg"
     task_container = f"{network}-task"
     started_at = datetime.now(timezone.utc).isoformat()
+    vllm_log = (
+        args.artifacts_dir.resolve().parent
+        / "logs"
+        / args.task
+        / episode_id
+        / "vllm.log"
+    )
+    print(f"Starting vLLM on GPU {args.subagent_gpu}...", flush=True)
+    vllm_process = start_vllm(
+        model=args.subagent_model,
+        port=args.subagent_port,
+        gpu=args.subagent_gpu,
+        max_model_len=args.vllm_max_model_len,
+        gpu_memory_utilization=args.vllm_gpu_memory_utilization,
+        timeout=args.vllm_startup_timeout,
+        log_path=vllm_log,
+        reuse=args.reuse_vllm,
+    )
 
+    container_lock = _open_container_lock(args.container_lock_file)
+    container_lock_held = False
     try:
+        _acquire_container_lock(container_lock)
+        container_lock_held = container_lock is not None
         print("Starting PostgreSQL...", flush=True)
         _docker("network", "create", network)
         dump = (TOOLATHLON_ROOT / "db" / "init.sql.gz").resolve()
@@ -182,7 +452,7 @@ def main() -> None:
         print("Starting task environment...", flush=True)
         postgres_env = [
             item
-            for pair in POSTGRES_ENV.items()
+            for pair in _postgres_environment(pg_container).items()
             for item in ("--env", "=".join(pair))
         ]
         _docker(
@@ -198,12 +468,34 @@ def main() -> None:
             "127.0.0.1::2024",
             "--env",
             f"TOOLATHLON_TASK={args.task}",
+            "--env",
+            f"N_JOBS_PER_WORKER={args.n_jobs_per_worker}",
+            "--env",
+            (
+                "GEMMA_4_26B_A4B_BASE_URL="
+                f"http://host.docker.internal:{args.subagent_port}/v1"
+            ),
             *postgres_env,
             "--volume",
             f"{episode_dir.resolve()}:/artifacts/data",
             args.image,
         )
         mapping = _docker("port", task_container, "2024/tcp").stdout.strip()
+        if ":" not in mapping:
+            status = _docker(
+                "inspect",
+                "--format",
+                "{{.State.Status}}",
+                task_container,
+                check=False,
+            ).stdout.strip()
+            logs = _docker("logs", task_container, check=False)
+            raise RuntimeError(
+                "Task container did not publish port 2024 "
+                f"(status={status or 'unknown'}):\n"
+                + logs.stdout
+                + logs.stderr
+            )
         subagent_url = f"http://127.0.0.1:{mapping.rsplit(':', 1)[1]}"
         deadline = time.monotonic() + args.startup_timeout
         while time.monotonic() < deadline:
@@ -233,6 +525,9 @@ def main() -> None:
                 f"{subagent_url}/ok did not become ready within "
                 f"{args.startup_timeout:g}s"
             )
+
+        _release_container_lock(container_lock)
+        container_lock_held = False
 
         runtime = json.loads((episode_dir / "runtime.json").read_text(encoding="utf-8"))
         print("Running Decomposer...", flush=True)
@@ -275,8 +570,13 @@ def main() -> None:
             json.dumps(
                 {
                     "episode_id": episode_id,
+                    "run_id": args.run_id,
                     "task": args.task,
+                    "repetition": args.repetition,
+                    "attempt": args.attempt,
+                    "purpose": args.purpose,
                     "decomposer_model": args.model,
+                    "subagent_model": args.subagent_model,
                     "started_at": started_at,
                     "finished_at": datetime.now(timezone.utc).isoformat(),
                     "messages": [message_to_dict(message) for message in messages],
@@ -354,15 +654,42 @@ def main() -> None:
         print(f"\nArtifacts: {episode_dir}")
         print(f"Evaluation: {evaluation['pass']} ({evaluation_path})")
     finally:
+        if container_lock_held:
+            _release_container_lock(container_lock)
+            container_lock_held = False
+        _acquire_container_lock(container_lock)
         print("Cleaning up...", flush=True)
-        log_result = _docker("logs", task_container, check=False)
-        logs = log_result.stdout + log_result.stderr
-        if logs:
-            (episode_dir / "container.log").write_text(logs, encoding="utf-8")
-        _docker("rm", "--force", task_container, check=False)
-        _docker("rm", "--force", pg_container, check=False)
-        _docker("network", "rm", network, check=False)
+        try:
+            _cleanup_episode(
+                episode_dir=episode_dir,
+                task_container=task_container,
+                pg_container=pg_container,
+                network=network,
+            )
+        finally:
+            _release_container_lock(container_lock)
+            if container_lock is not None:
+                container_lock.close()
+            stop_vllm(vllm_process)
 
 
 if __name__ == "__main__":
-    main()
+    import batch
+
+    signal.signal(signal.SIGTERM, _handle_termination)
+    if batch.wants_batch(sys.argv[1:]):
+        batch.main(
+            sys.argv[1:],
+            repo_root=REPO_ROOT,
+            toolathlon_root=TOOLATHLON_ROOT,
+            default_artifacts_dir=DEFAULT_GYM_ARTIFACTS_DIR,
+            default_image=DEFAULT_IMAGE,
+            default_model=DEFAULT_MODEL,
+            default_subagent_model=DEFAULT_SUBAGENT_MODEL,
+            default_subagent_port=DEFAULT_SUBAGENT_PORT,
+            start_vllm=start_vllm,
+            stop_vllm=stop_vllm,
+            docker=_docker,
+        )
+    else:
+        main()

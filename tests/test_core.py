@@ -4,13 +4,20 @@ from typing import Any
 from unittest.mock import AsyncMock
 
 import decomposer.core as core
-from langchain_core.messages import AIMessage
+import pytest
+from httpx import ReadError, RemoteProtocolError, Request
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from decomposer.core import (
     DecomposerAgentMiddleware,
     SubagentType,
     _build_spawn_subagent_tool,
     _build_wait_tool,
     _extract_subagent_tool_calls,
+)
+from decomposer.prompts import (
+    EARLY_REPORT_ERROR,
+    EMPTY_REPORT_ERROR,
+    PARALLEL_WAIT_CALL_ERROR,
 )
 
 
@@ -201,68 +208,221 @@ def test_await_wait_polls_until_a_run_completes(monkeypatch) -> None:
     )
 
 
-def test_after_model_replaces_early_answer_and_reasoning_with_wait() -> None:
-    middleware = DecomposerAgentMiddleware([SUBAGENT_TYPE], 1, False)
-    message = AIMessage(
-        content="early answer",
-        additional_kwargs={"reasoning": "unfinished reasoning", "other": "value"},
-        id="message_1",
+@pytest.mark.parametrize("error_type", [ReadError, RemoteProtocolError])
+def test_await_wait_retries_transient_run_errors(
+    monkeypatch, error_type: type[Exception]
+) -> None:
+    monkeypatch.setattr(core, "WAIT_POLL_SECONDS", 0.0)
+    client = SimpleNamespace(
+        runs=SimpleNamespace(
+            get=AsyncMock(
+                side_effect=[
+                    error_type("transient error", request=Request("GET", "http://test")),
+                    {
+                        "thread_id": "run_a_thread",
+                        "run_id": "run_a",
+                        "status": "success",
+                    },
+                ]
+            )
+        ),
+        threads=SimpleNamespace(
+            get_history=AsyncMock(
+                return_value=_CompletedThreads().get_history(
+                    thread_id="run_a_thread",
+                    limit=core.HISTORY_LIMIT,
+                    metadata={"run_id": "run_a"},
+                )
+            )
+        ),
     )
+    tool = _build_wait_tool(_ClientCacheStub(async_client=client))
+    runtime = SimpleNamespace(
+        state={"subagent_runs": {"run_a": _subagent_run("run_a")}},
+        tool_call_id="wait_1",
+    )
+
+    assert tool.coroutine is not None
+    command = asyncio.run(tool.coroutine(runtime=runtime))
+
+    assert client.runs.get.await_count == 2
+    assert command.update["subagent_runs"]["run_a"]["report"]["content"] == (
+        "report from run_a"
+    )
+
+
+def test_await_wait_raises_unexpected_run_errors() -> None:
+    error = RuntimeError("unexpected error")
+    client = SimpleNamespace(
+        runs=SimpleNamespace(get=AsyncMock(side_effect=error)),
+    )
+    tool = _build_wait_tool(_ClientCacheStub(async_client=client))
+    runtime = SimpleNamespace(
+        state={"subagent_runs": {"run_a": _subagent_run("run_a")}},
+        tool_call_id="wait_1",
+    )
+
+    assert tool.coroutine is not None
+    with pytest.raises(RuntimeError, match="unexpected error"):
+        asyncio.run(tool.coroutine(runtime=runtime))
+
+
+@pytest.mark.parametrize(
+    ("tool_names", "rejected_ids"),
+    [
+        (["wait", "spawn_subagent"], ["call_0"]),
+        (["wait", "wait"], ["call_0", "call_1"]),
+    ],
+)
+def test_after_model_rejects_parallel_wait_calls(
+    tool_names: list[str], rejected_ids: list[str]
+) -> None:
+    middleware = DecomposerAgentMiddleware([SUBAGENT_TYPE], 1)
+    tool_calls = [
+        {
+            "name": name,
+            "args": {},
+            "id": f"call_{index}",
+            "type": "tool_call",
+        }
+        for index, name in enumerate(tool_names)
+    ]
+
+    update = middleware.after_model(
+        {"messages": [AIMessage(content="", tool_calls=tool_calls)]},
+        SimpleNamespace(),
+    )
+
+    assert update is not None
+    assert [message.tool_call_id for message in update["messages"]] == rejected_ids
+    assert all(isinstance(message, ToolMessage) for message in update["messages"])
+    assert all(message.name == "wait" for message in update["messages"])
+    assert all(
+        message.content == PARALLEL_WAIT_CALL_ERROR
+        for message in update["messages"]
+    )
+
+
+def test_after_model_allows_non_wait_tool_calls() -> None:
+    middleware = DecomposerAgentMiddleware([SUBAGENT_TYPE], 1)
+    ai_message = AIMessage(
+        content="",
+        tool_calls=[
+            {
+                "name": "spawn_subagent",
+                "args": {},
+                "id": "call_1",
+                "type": "tool_call",
+            }
+        ],
+    )
+
+    assert (
+        middleware.after_model(
+            {"messages": [ai_message]},
+            SimpleNamespace(),
+        )
+        is None
+    )
+
+
+def test_after_model_rejects_report_before_all_subagents_finish() -> None:
+    middleware = DecomposerAgentMiddleware([SUBAGENT_TYPE], 1)
 
     update = middleware.after_model(
         {
-            "messages": [message],
+            "messages": [AIMessage(content="early report")],
             "subagent_runs": {"run_a": _subagent_run("run_a")},
         },
         SimpleNamespace(),
     )
 
-    wait_message = update["messages"][0]
-    assert wait_message.id == message.id
-    assert wait_message.content == ""
-    assert wait_message.tool_calls[0]["name"] == "wait"
-    assert wait_message.tool_calls[0]["args"] == {}
-    assert wait_message.additional_kwargs == {
-        "reasoning_content": "Let me wait for the remaining subagents.",
-    }
+    assert update is not None
+    assert update["jump_to"] == "model"
+    assert update["messages"] == [HumanMessage(content=EARLY_REPORT_ERROR)]
 
 
-def test_after_model_allows_answer_after_all_reports_are_collected() -> None:
-    middleware = DecomposerAgentMiddleware([SUBAGENT_TYPE], 1, False)
-    run = {
-        **_subagent_run("run_a"),
-        "report": {
-            "subagent_run_id": "run_a",
-            "status": "success",
-            "content": "done",
+def test_after_model_rejects_empty_report() -> None:
+    middleware = DecomposerAgentMiddleware([SUBAGENT_TYPE], 1)
+
+    update = middleware.after_model(
+        {"messages": [AIMessage(content=" \n ")]},
+        SimpleNamespace(),
+    )
+
+    assert update is not None
+    assert update["jump_to"] == "model"
+    assert update["messages"] == [HumanMessage(content=EMPTY_REPORT_ERROR)]
+
+
+def test_after_model_accepts_report_after_all_subagents_finish() -> None:
+    middleware = DecomposerAgentMiddleware([SUBAGENT_TYPE], 1)
+
+    assert (
+        middleware.after_model(
+            {
+                "messages": [AIMessage(content="final report")],
+                "subagent_runs": {
+                    "run_a": _completed_subagent_run("run_a"),
+                },
+            },
+            SimpleNamespace(),
+        )
+        is None
+    )
+
+
+def test_after_model_ignores_invalid_tool_calls_when_checking_report() -> None:
+    middleware = DecomposerAgentMiddleware([SUBAGENT_TYPE], 1)
+    ai_message = AIMessage(
+        content="early report",
+        invalid_tool_calls=[
+            {
+                "name": "wait",
+                "args": "{",
+                "id": "invalid_call",
+                "error": "invalid JSON",
+                "type": "invalid_tool_call",
+            }
+        ],
+    )
+
+    assert (
+        middleware.after_model(
+            {"messages": [ai_message]},
+            SimpleNamespace(),
+        )
+        is None
+    )
+
+    update = middleware.after_model(
+        {
+            "messages": [ai_message],
+            "subagent_runs": {"run_a": _subagent_run("run_a")},
         },
-    }
-
-    assert (
-        middleware.after_model(
-            {
-                "messages": [AIMessage(content="answer")],
-                "subagent_runs": {"run_a": run},
-            },
-            SimpleNamespace(),
-        )
-        is None
+        SimpleNamespace(),
     )
 
+    assert update is not None
+    assert update["messages"] == [HumanMessage(content=EARLY_REPORT_ERROR)]
 
-def test_after_model_allows_early_response_when_configured() -> None:
-    middleware = DecomposerAgentMiddleware([SUBAGENT_TYPE], 1, True)
 
-    assert (
-        middleware.after_model(
-            {
-                "messages": [AIMessage(content="early answer")],
-                "subagent_runs": {"run_a": _subagent_run("run_a")},
-            },
-            SimpleNamespace(),
-        )
-        is None
+def test_after_model_uses_latest_ai_message() -> None:
+    middleware = DecomposerAgentMiddleware([SUBAGENT_TYPE], 1)
+
+    update = middleware.after_model(
+        {
+            "messages": [
+                AIMessage(content="old report"),
+                HumanMessage(content="continue"),
+                AIMessage(content=""),
+            ]
+        },
+        SimpleNamespace(),
     )
+
+    assert update is not None
+    assert update["messages"] == [HumanMessage(content=EMPTY_REPORT_ERROR)]
 
 
 def _subagent_run(run_id: str) -> dict[str, Any]:
@@ -274,6 +434,18 @@ def _subagent_run(run_id: str) -> dict[str, Any]:
         "run_id": run_id,
         "status": "running",
         "prompt": "do the task",
+    }
+
+
+def _completed_subagent_run(run_id: str) -> dict[str, Any]:
+    return {
+        **_subagent_run(run_id),
+        "status": "success",
+        "report": {
+            "subagent_run_id": run_id,
+            "status": "success",
+            "content": "done",
+        },
     }
 
 
