@@ -23,6 +23,7 @@ RESUME_CONFIG_FIELDS = (
     "model",
     "subagent_model",
     "subagent_port",
+    "subagent_ports",
     "subagent_gpu",
     "image",
     "reuse_vllm",
@@ -81,6 +82,15 @@ def parse_args(argv: Sequence[str], defaults: dict[str, Any]) -> argparse.Namesp
     parser.add_argument("--model", default=defaults["model"])
     parser.add_argument("--subagent-model", default=defaults["subagent_model"])
     parser.add_argument("--subagent-port", type=int, default=defaults["subagent_port"])
+    parser.add_argument(
+        "--subagent-ports",
+        type=int,
+        nargs="+",
+        help=(
+            "Pool of externally managed vLLM ports on this host. Episodes are "
+            "assigned round-robin; implies --reuse-vllm."
+        ),
+    )
     parser.add_argument("--subagent-gpu", default="0")
     parser.add_argument("--vllm-max-model-len", type=int, default=256000)
     parser.add_argument("--vllm-gpu-memory-utilization", type=float, default=0.9)
@@ -106,6 +116,12 @@ def parse_args(argv: Sequence[str], defaults: dict[str, Any]) -> argparse.Namesp
         parser.error("--n-jobs-per-worker must be at least 1")
     if args.concurrency < 1:
         parser.error("--concurrency must be at least 1")
+    if args.subagent_ports:
+        if len(set(args.subagent_ports)) != len(args.subagent_ports):
+            parser.error("--subagent-ports must not contain duplicates")
+        args.reuse_vllm = True
+    else:
+        args.subagent_ports = [args.subagent_port]
     return args
 
 
@@ -207,14 +223,16 @@ def episode_command(
     attempt: int,
     episode_id: str,
     root: Path,
+    subagent_port: int | None = None,
 ) -> list[str]:
+    port = args.subagent_port if subagent_port is None else subagent_port
     return [
         sys.executable, str(runner_path), task,
         "--episode-id", episode_id, "--run-id", run_id,
         "--repetition", str(repetition), "--attempt", str(attempt),
         "--purpose", args.purpose, "--model", args.model,
         "--subagent-model", args.subagent_model,
-        "--subagent-port", str(args.subagent_port),
+        "--subagent-port", str(port),
         "--subagent-gpu", args.subagent_gpu,
         "--vllm-max-model-len", str(args.vllm_max_model_len),
         "--vllm-gpu-memory-utilization", str(args.vllm_gpu_memory_utilization),
@@ -236,13 +254,22 @@ def execute_episode(
     episode: dict[str, Any],
     attempt: int,
     stop_event: threading.Event | None = None,
+    subagent_port: int | None = None,
 ) -> dict[str, Any]:
     task, repetition = episode["task"], episode["repetition"]
     attempt_dir = run_dir / "attempts" / task / f"rep-{repetition:03d}" / f"attempt-{attempt:03d}"
     attempt_dir.mkdir(parents=True, exist_ok=False)
     episode_id = episode_id_for(run_dir.name, task, repetition, attempt)
     command = episode_command(
-        args, runner_path, task, run_dir.name, repetition, attempt, episode_id, root
+        args,
+        runner_path,
+        task,
+        run_dir.name,
+        repetition,
+        attempt,
+        episode_id,
+        root,
+        subagent_port,
     )
     started_at, started = utc_now(), time.monotonic()
     write_json(attempt_dir / "attempt.json", {
@@ -390,7 +417,10 @@ def main(
         if args.purpose != manifest["config"]["purpose"]:
             raise ValueError("Resume purpose does not match the manifest")
         for name in RESUME_CONFIG_FIELDS:
-            setattr(args, name, manifest["config"][name])
+            if name == "subagent_ports" and name not in manifest["config"]:
+                setattr(args, name, [manifest["config"]["subagent_port"]])
+            else:
+                setattr(args, name, manifest["config"][name])
     else:
         tasks = select_tasks(
             toolathlon_root / "tasks" / "finalpool", args.all, args.tasks
@@ -417,20 +447,28 @@ def main(
     append_event(run_dir, "batch_started", resume=bool(args.resume))
     print(f"Run {run_dir.name}: {manifest['counts']['total']} episode(s)", flush=True)
 
-    process = None
+    processes: list[subprocess.Popen[bytes] | None] = []
     interrupted = False
     try:
-        process = start_vllm(
-            model=args.subagent_model,
-            port=args.subagent_port,
-            gpu=args.subagent_gpu,
-            max_model_len=args.vllm_max_model_len,
-            gpu_memory_utilization=args.vllm_gpu_memory_utilization,
-            timeout=args.vllm_startup_timeout,
-            log_path=run_dir / "vllm.log",
-            reuse=args.reuse_vllm,
+        for port in args.subagent_ports:
+            processes.append(
+                start_vllm(
+                    model=args.subagent_model,
+                    port=port,
+                    gpu=args.subagent_gpu,
+                    max_model_len=args.vllm_max_model_len,
+                    gpu_memory_utilization=args.vllm_gpu_memory_utilization,
+                    timeout=args.vllm_startup_timeout,
+                    log_path=run_dir / f"vllm-{port}.log",
+                    reuse=args.reuse_vllm,
+                )
+            )
+        append_event(
+            run_dir,
+            "vllm_ready",
+            externally_managed=args.reuse_vllm,
+            ports=args.subagent_ports,
         )
-        append_event(run_dir, "vllm_ready", externally_managed=args.reuse_vllm)
         work: list[tuple[int, dict[str, Any], int]] = []
         for index, episode in enumerate(manifest["episodes"], start=1):
             attempt, reconciled = next_attempt(run_dir, episode)
@@ -452,6 +490,7 @@ def main(
             tuple[int, dict[str, Any], int],
         ] = {}
         remaining = iter(work)
+        next_endpoint = 0
 
         def record_result(
             episode: dict[str, Any], result: dict[str, Any], *, interrupted_run: bool = False
@@ -473,6 +512,7 @@ def main(
             )
 
         def submit_next() -> bool:
+            nonlocal next_endpoint
             try:
                 index, episode, attempt = next(remaining)
             except StopIteration:
@@ -494,7 +534,9 @@ def main(
                 episode=episode,
                 attempt=attempt,
                 stop_event=stop_event,
+                subagent_port=args.subagent_ports[next_endpoint],
             )
+            next_endpoint = (next_endpoint + 1) % len(args.subagent_ports)
             active[future] = (index, episode, attempt)
             return True
 
@@ -544,8 +586,14 @@ def main(
         }
         raise
     finally:
-        stop_vllm(process)
-        append_event(run_dir, "vllm_stopped", externally_managed=args.reuse_vllm)
+        for process in processes:
+            stop_vllm(process)
+        append_event(
+            run_dir,
+            "vllm_stopped",
+            externally_managed=args.reuse_vllm,
+            ports=args.subagent_ports,
+        )
         incomplete = any(item["status"] != "completed" for item in manifest["episodes"])
         manifest["status"] = (
             "interrupted"
