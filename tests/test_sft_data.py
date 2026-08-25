@@ -941,3 +941,36 @@ def test_strict_tool_call_validation_in_error_mode(
         _prepare_fixture_dataset(
             [source], tmp_path / "prepared", invalid_policy="error"
         )
+
+
+def test_qwen35_workplace_partial_spec_is_pinned_and_success_only() -> None:
+    loaded = load_build_spec(
+        Path(
+            "data/sft/specs/"
+            "decomposer_workplace_deepseek_qwen35_4b_nonthinking_"
+            "v1_1444_32k.yaml"
+        )
+    )
+    spec = loaded.spec
+    assert spec.dataset.id == (
+        "decomposer-workplace-deepseek-qwen35-4b-nonthinking"
+    )
+    assert spec.dataset.version == "v1-1444-32k"
+    assert len(spec.sources) == 1
+    source = spec.sources[0]
+    assert source.adapter == "nemo_gym"
+    assert source.partition == "train"
+    assert source.path is not None
+    assert source.path.name.endswith("first-1444")
+    assert spec.selection.success_reward == 1.0
+    assert spec.selection.invalid_policy == "exclude"
+    assert spec.selection.max_traces_per_prompt_per_teacher is None
+    assert spec.split.strategy == "prompt_fixed"
+    assert spec.split.validation_fraction == 0.1
+    assert spec.split.seed == 42
+    assert spec.tokenization is not None
+    assert spec.tokenization.profile == "qwen35_sft_non_thinking"
+    assert spec.tokenization.revision == (
+        "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a"
+    )
+    assert spec.tokenization.max_tokens == 32768

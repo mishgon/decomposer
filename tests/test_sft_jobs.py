@@ -83,7 +83,7 @@ def test_sft_experiments_are_unique_and_register_retained_configs() -> None:
         False,
         True,
     }
-    assert len(experiments) == 11
+    assert len(experiments) == 12
     e2b_four_gpu = experiments[2]
     assert e2b_four_gpu.num_gpus == 4
     assert e2b_four_gpu.use_liger_kernel is True
@@ -102,6 +102,7 @@ def test_sft_experiments_are_unique_and_register_retained_configs() -> None:
         "gemma4-e4b-nonthinking-deepseek-e4b-v2-32k-full-4gpu",
         "qwen35-4b-nonthinking-mixed-v1-32k-smoke-4gpu",
         "qwen35-4b-nonthinking-mixed-v1-32k-full-4gpu",
+        "qwen35-4b-nonthinking-workplace-v1-1444-32k-full-4gpu",
     }
     for experiment in experiments[4:]:
         assert experiment.num_gpus == 4
@@ -809,3 +810,50 @@ def test_workplace_26b_v3_configs_use_cleaned_data_and_32k_exclusion(
         "patience": 2,
         "threshold": 0.0,
     }
+
+
+def test_qwen35_workplace_partial_config_is_pinned_and_uses_full_recipe() -> None:
+    config = yaml.safe_load(
+        Path(
+            "training/sft/configs/"
+            "qwen35_4b_nonthinking_workplace_v1_1444_32k_full_4gpu.yaml"
+        ).read_text()
+    )
+    revision = "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a"
+    assert config["model"]["name_or_path"] == "Qwen/Qwen3.5-4B"
+    assert config["model"]["revision"] == revision
+    data = config["data"]
+    release = (
+        "datasets/sft/decomposer-workplace-deepseek-qwen35-4b-nonthinking/"
+        "v1-1444-32k"
+    )
+    assert release in data["train_file"]
+    assert release in data["validation_file"]
+    assert release in data["manifest_file"]
+    assert data["include_reasoning"] is False
+    assert data["require_prepared_tokenization"] is True
+    assert data["exclude_overlength"] is True
+    assert data["error_on_truncation"] is True
+    training = config["training"]
+    assert training["max_length"] == 32768
+    assert training["global_batch_size"] == 4
+    assert training["num_train_epochs"] == 5
+    assert training["learning_rate"] == 1.0e-5
+    assert training["use_liger_kernel"] is True
+    assert training["fsdp_config"]["activation_checkpointing"] is True
+    resolved, _ = _resolve_train_batch_config(training, world_size=4)
+    assert resolved["gradient_accumulation_steps"] == 1
+    assert config["run"]["expected_world_size"] == 4
+    assert config["run"]["early_stopping"] == {
+        "patience": 2,
+        "threshold": 0.0,
+    }
+    experiments = collect_experiments(
+        "qwen35-4b-nonthinking-workplace-v1-1444-32k-full-4gpu"
+    )
+    assert len(experiments) == 1
+    command = build_train_command(
+        experiments[0], workdir="/staged", output_dir="/artifacts/qwen-workplace"
+    )
+    assert command[:3] == ["torchrun", "--standalone", "--nproc-per-node=4"]
+    assert command[-1] == "--use-liger-kernel"
