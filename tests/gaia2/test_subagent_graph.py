@@ -119,23 +119,27 @@ def test_worker_model_forwards_non_thinking_sampling(monkeypatch):
     monkeypatch.setattr(graphs, "ChatOpenAI", fake_model)
     monkeypatch.setenv("GAIA2_SUBAGENT_MODEL", "worker")
     monkeypatch.setenv("GAIA2_SUBAGENT_ENDPOINT", "http://127.0.0.1:8023/v1")
-    monkeypatch.setenv("GAIA2_SUBAGENT_TEMPERATURE", "1.0")
-    monkeypatch.setenv("GAIA2_SUBAGENT_TOP_P", "0.95")
+    monkeypatch.setenv("GAIA2_SUBAGENT_TEMPERATURE", "0.7")
+    monkeypatch.setenv("GAIA2_SUBAGENT_TOP_P", "0.8")
+    monkeypatch.setenv("GAIA2_SUBAGENT_TOP_K", "20")
+    monkeypatch.setenv("GAIA2_SUBAGENT_MIN_P", "0.0")
+    monkeypatch.setenv("GAIA2_SUBAGENT_PRESENCE_PENALTY", "1.5")
+    monkeypatch.setenv("GAIA2_SUBAGENT_REPETITION_PENALTY", "1.0")
     monkeypatch.setenv("GAIA2_SUBAGENT_MAX_COMPLETION_TOKENS", "4096")
-    monkeypatch.setenv(
-        "GAIA2_SUBAGENT_EXTRA_BODY",
-        '{"top_k":64,"include_reasoning":false,'
-        '"chat_template_kwargs":{"enable_thinking":false}}',
-    )
+    monkeypatch.setenv("GAIA2_SUBAGENT_THINKING", "0")
+    monkeypatch.delenv("GAIA2_SUBAGENT_EXTRA_BODY", raising=False)
 
     graphs._model()
 
     assert captured["model"] == "worker"
-    assert captured["temperature"] == 1.0
-    assert captured["top_p"] == 0.95
+    assert captured["temperature"] == 0.7
+    assert captured["top_p"] == 0.8
+    assert captured["presence_penalty"] == 1.5
     assert captured["max_completion_tokens"] == 4096
     assert captured["extra_body"] == {
-        "top_k": 64,
+        "top_k": 20,
+        "min_p": 0.0,
+        "repetition_penalty": 1.0,
         "include_reasoning": False,
         "chat_template_kwargs": {"enable_thinking": False},
     }

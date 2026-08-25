@@ -157,6 +157,10 @@ def _model() -> ChatOpenAI:
     extra_body: dict[str, Any] = {
         "top_k": int(os.environ.get("GAIA2_SUBAGENT_TOP_K", "64")),
     }
+    if min_p := os.environ.get("GAIA2_SUBAGENT_MIN_P"):
+        extra_body["min_p"] = float(min_p)
+    if repetition_penalty := os.environ.get("GAIA2_SUBAGENT_REPETITION_PENALTY"):
+        extra_body["repetition_penalty"] = float(repetition_penalty)
     if not thinking:
         extra_body.update(
             {
@@ -181,6 +185,8 @@ def _model() -> ChatOpenAI:
         "timeout": float(os.environ.get("GAIA2_SUBAGENT_TIMEOUT", "300")),
         "max_retries": int(os.environ.get("GAIA2_SUBAGENT_MAX_RETRIES", "2")),
     }
+    if presence_penalty := os.environ.get("GAIA2_SUBAGENT_PRESENCE_PENALTY"):
+        kwargs["presence_penalty"] = float(presence_penalty)
     if extra_body:
         kwargs["extra_body"] = extra_body
     return ChatOpenAI(**kwargs)

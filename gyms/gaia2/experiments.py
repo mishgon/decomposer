@@ -7,6 +7,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
+from gyms.qwen_sampling import qwen35_general_sampling
+
 ARTIFACTS_ROOT = Path("/mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts")
 PROJECT_ROOT = Path("/mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_sft")
 PROJECT_VENV = PROJECT_ROOT / ".venv"
@@ -125,6 +127,9 @@ class DecomposerExperiment:
     temperature: float = 1.0
     top_p: float = 0.95
     top_k: int = 64
+    min_p: float | None = None
+    presence_penalty: float | None = None
+    repetition_penalty: float | None = None
     gpu_memory_utilization: float = 0.90
     concurrency: int = 4
     manager_thinking: bool = False
@@ -189,6 +194,7 @@ DEEPSEEK_GEMMA_EXPERIMENT = DecomposerExperiment(
     manager_served_name="deepseek/deepseek-v4-flash-0731",
     manager_thinking=True,
 )
+_QWEN35_NON_THINKING_SAMPLING = qwen35_general_sampling(thinking=False)
 DEEPSEEK_QWEN_EXPERIMENT = DecomposerExperiment(
     name="deepseek-v4-flash-0731-teacher-qwen35-4b-non-thinking",
     worker_checkpoint=QWEN35_4B_BASE,
@@ -202,6 +208,12 @@ DEEPSEEK_QWEN_EXPERIMENT = DecomposerExperiment(
     service_port=8134,
     subagent_port=2034,
     max_model_len=131072,
+    temperature=_QWEN35_NON_THINKING_SAMPLING.temperature,
+    top_p=_QWEN35_NON_THINKING_SAMPLING.top_p,
+    top_k=_QWEN35_NON_THINKING_SAMPLING.top_k,
+    min_p=_QWEN35_NON_THINKING_SAMPLING.min_p,
+    presence_penalty=_QWEN35_NON_THINKING_SAMPLING.presence_penalty,
+    repetition_penalty=_QWEN35_NON_THINKING_SAMPLING.repetition_penalty,
     worker_thinking=False,
     worker_tool_call_parser="qwen3_xml",
     worker_reasoning_parser=None,

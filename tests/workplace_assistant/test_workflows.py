@@ -28,16 +28,75 @@ from gyms.workplace_assistant.experiments import (
     output_dir,
     run_name,
 )
+from gyms.qwen_sampling import qwen35_general_sampling
 
 
 def test_registry_is_global_and_unique() -> None:
-    assert len(DECOMPOSER_EXPERIMENTS) == 7
+    assert len(DECOMPOSER_EXPERIMENTS) == 8
     assert len(SIMPLE_EXPERIMENTS) == 26
-    assert len(experiments.EXPERIMENTS) == 33
+    assert len(experiments.EXPERIMENTS) == 34
     assert {experiment.kind for experiment in experiments.ALL_EXPERIMENTS} == {
         "decomposer",
         "simple",
     }
+
+
+def test_all_qwen_simple_profiles_use_official_mode_specific_sampling() -> None:
+    qwen_experiments = [
+        experiment
+        for experiment in SIMPLE_EXPERIMENTS
+        if experiment.name.startswith(("q35-", "qwen35-"))
+    ]
+    assert qwen_experiments
+
+    for experiment in qwen_experiments:
+        expected = qwen35_general_sampling(thinking=experiment.thinking)
+        assert (
+            experiment.temperature,
+            experiment.top_p,
+            experiment.top_k,
+            experiment.min_p,
+            experiment.presence_penalty,
+            experiment.repetition_penalty,
+        ) == (
+            expected.temperature,
+            expected.top_p,
+            expected.top_k,
+            expected.min_p,
+            expected.presence_penalty,
+            expected.repetition_penalty,
+        )
+        assert experiment.extra_body == expected.extra_body | {
+            "presence_penalty": expected.presence_penalty
+        }
+        assert run_module.hydra_flow_mapping(experiment.extra_body) == (
+            "{top_k:20,min_p:0.0,presence_penalty:1.5,repetition_penalty:1.0}"
+        )
+        command = run_module.gym_eval_command(
+            experiment,
+            gym_bin=Path("/gym"),
+            split="validation",
+            output=Path("/tmp/qwen-sampling-test"),
+            num_repeats=1,
+            limit=1,
+            resume=False,
+        )
+        assert command[command.index("--temperature") + 1] == str(
+            expected.temperature
+        )
+        assert command[command.index("--top-p") + 1] == str(expected.top_p)
+
+
+def test_gemma_simple_profiles_keep_existing_sampling() -> None:
+    for experiment in SIMPLE_EXPERIMENTS:
+        if not experiment.name.startswith("gemma4-"):
+            continue
+        assert (experiment.temperature, experiment.top_p, experiment.top_k) == (
+            1.0,
+            0.95,
+            64,
+        )
+        assert experiment.presence_penalty == 0.0
 
 
 def test_decomposer_base_profiles_use_student_prompt() -> None:
@@ -136,7 +195,9 @@ def test_decomposer_model_placement_and_single_model_remapping() -> None:
     assert isinstance(full, DecomposerExperiment)
     selected = models_for_experiment(full)
     assert {model.gpu for model in selected} == {0, 1, 2}
-    assert sum(model.gpu_memory_utilization for model in selected if model.gpu == 0) == pytest.approx(0.9)
+    assert sum(
+        model.gpu_memory_utilization for model in selected if model.gpu == 0
+    ) == pytest.approx(0.9)
 
     one = get_experiment("glm-5-2-gemma4-26b-a4b-non-thinking")
     assert isinstance(one, DecomposerExperiment)
@@ -147,9 +208,7 @@ def test_decomposer_model_placement_and_single_model_remapping() -> None:
 
 
 def test_deepseek_e4b_thinking_profile_is_single_type_and_single_gpu() -> None:
-    experiment = get_experiment(
-        "deepseek-v4-flash-0731-gemma4-e4b-thinking"
-    )
+    experiment = get_experiment("deepseek-v4-flash-0731-gemma4-e4b-thinking")
     assert isinstance(experiment, DecomposerExperiment)
     assert experiment.num_gpus == 1
     selected = models_for_experiment(experiment)
@@ -195,13 +254,23 @@ def test_deepseek_e4b_thinking_profile_is_single_type_and_single_gpu() -> None:
     assert payload["instance_type"] == INSTANCE_TYPES_BY_NUM_GPUS[1]
     assert "--purpose trace-generation" in payload["script"]
     assert "--num-repeats 3" in payload["script"]
-    assert "deepseek-v4-flash-0731-gemma4-e4b-thinking-n3" in payload[
-        "job_desc"
-    ]
+    assert "deepseek-v4-flash-0731-gemma4-e4b-thinking-n3" in payload["job_desc"]
     assert payload["job_desc"] == (
         "workplace-assistant-train decomposer-agent "
         "deepseek-v4-flash-0731-gemma4-e4b-thinking-n3 #alice"
     )
+
+
+def test_deepseek_qwen_profile_uses_128k_context() -> None:
+    experiment = get_experiment("deepseek-v4-flash-0731-qwen35-4b-non-thinking")
+    assert isinstance(experiment, DecomposerExperiment)
+    assert experiment.num_gpus == 1
+    assert experiment.max_model_len == 131072
+
+    selected = models_for_experiment(experiment)
+    assert [model.model_id for model in selected] == ["Qwen/Qwen3.5-4B"]
+    command = run_module.decomposer_vllm_command(selected[0], experiment)
+    assert command[command.index("--max-model-len") + 1] == "131072"
 
 
 def test_local_e4b_manager_shares_thinking_subagent_server() -> None:
@@ -275,10 +344,7 @@ def test_local_e4b_manager_shares_thinking_subagent_server() -> None:
 
 
 def test_sft_e4b_manager_and_vanilla_subagent_use_dedicated_gpus() -> None:
-    name = (
-        "gemma4-e4b-sft-deepseek-e4b-v1-8k-non-thinking-"
-        "gemma4-e4b-thinking"
-    )
+    name = "gemma4-e4b-sft-deepseek-e4b-v1-8k-non-thinking-gemma4-e4b-thinking"
     experiment = get_experiment(name)
     assert isinstance(experiment, DecomposerExperiment)
     assert experiment.manager_backend == "local_vllm"
@@ -293,9 +359,7 @@ def test_sft_e4b_manager_and_vanilla_subagent_use_dedicated_gpus() -> None:
         WORKPLACE_E4B_SFT_VLLM,
         experiments.GEMMA4_E4B_BASE,
     ]
-    assert WORKPLACE_E4B_SFT_VLLM == WORKPLACE_E4B_SFT_FINAL.with_name(
-        "final-vllm"
-    )
+    assert WORKPLACE_E4B_SFT_VLLM == WORKPLACE_E4B_SFT_FINAL.with_name("final-vllm")
     assert [model.gpu for model in selected] == [0, 1]
     assert [model.port for model in selected] == [8024, 8021]
     assert [model.gpu_memory_utilization for model in selected] == [0.9, 0.9]
@@ -303,12 +367,12 @@ def test_sft_e4b_manager_and_vanilla_subagent_use_dedicated_gpus() -> None:
 
     manager_server = run_module.decomposer_vllm_command(selected[0], experiment)
     subagent_server = run_module.decomposer_vllm_command(selected[1], experiment)
-    assert manager_server[manager_server.index("--default-chat-template-kwargs") + 1] == (
-        '{"enable_thinking":false}'
-    )
-    assert subagent_server[subagent_server.index("--default-chat-template-kwargs") + 1] == (
-        '{"enable_thinking":true}'
-    )
+    assert manager_server[
+        manager_server.index("--default-chat-template-kwargs") + 1
+    ] == ('{"enable_thinking":false}')
+    assert subagent_server[
+        subagent_server.index("--default-chat-template-kwargs") + 1
+    ] == ('{"enable_thinking":true}')
 
     repo_root = Path(__file__).resolve().parents[2]
     config = yaml.safe_load(
@@ -441,10 +505,16 @@ def test_agent_profiles_share_one_gym_eval_builder() -> None:
         resume=False,
     )
     assert simple_command[:3] == decomposer_command[:3] == ["/gym", "eval", "run"]
-    assert simple_command[simple_command.index("--agent") + 1] == "workplace_assistant_simple_agent"
+    assert (
+        simple_command[simple_command.index("--agent") + 1]
+        == "workplace_assistant_simple_agent"
+    )
     assert decomposer_command[decomposer_command.index("--agent") + 1] == "decomposer"
     assert "train.jsonl" in simple_command[simple_command.index("--input") + 1]
-    assert "validation.decomposer.jsonl" in decomposer_command[decomposer_command.index("--input") + 1]
+    assert (
+        "validation.decomposer.jsonl"
+        in decomposer_command[decomposer_command.index("--input") + 1]
+    )
     assert "--resume" in simple_command
     assert "--limit" in simple_command
 
@@ -482,9 +552,7 @@ def test_local_cuda_devices_remap_decomposer_logical_slots() -> None:
     assert run_module.selected_cuda_devices(one_gpu, ("2",)) == ("2",)
     with pytest.raises(ValueError, match="requires 1 CUDA device"):
         run_module.selected_cuda_devices(one_gpu, ("2", "3"))
-    with pytest.raises(
-        run_module.argparse.ArgumentTypeError, match="must be unique"
-    ):
+    with pytest.raises(run_module.argparse.ArgumentTypeError, match="must be unique"):
         run_module.parse_cuda_visible_devices("2,2")
 
 
@@ -588,9 +656,7 @@ def test_component_preparation_repairs_partial_environment(
 
     assert result["components"][component]["python"] == str(python)
     install_commands = [
-        command
-        for command in commands
-        if command[:3] == ["/uv", "pip", "install"]
+        command for command in commands if command[:3] == ["/uv", "pip", "install"]
     ]
     assert len(install_commands) == 2
 
@@ -615,13 +681,9 @@ def test_result_validation_uses_split_limit_and_repeats(
 ) -> None:
     monkeypatch.setitem(experiments.SPLIT_ROWS, "validation", 5)
     rollouts = tmp_path / "rollouts.jsonl"
-    rollouts.write_text(
-        "".join(json.dumps({"id": index}) + "\n" for index in range(6))
-    )
+    rollouts.write_text("".join(json.dumps({"id": index}) + "\n" for index in range(6)))
     (tmp_path / "rollouts_aggregate_metrics.json").write_text("{}")
-    result = run_module.validate_result(
-        "validation", 3, rollout_path=rollouts, limit=2
-    )
+    result = run_module.validate_result("validation", 3, rollout_path=rollouts, limit=2)
     assert result["task_rows"] == 2
     assert result["rollout_rows"] == 6
 
@@ -730,8 +792,7 @@ def test_custom_output_completion_marker_is_isolated(
     )
 
 
-def test_job_payload_uses_shared_runner_and_redacts_decomposer_secrets(
-) -> None:
+def test_job_payload_uses_shared_runner_and_redacts_decomposer_secrets() -> None:
     repo_root = Path(__file__).resolve().parents[2]
     experiment = get_experiment("glm-5-2-gemma4-26b-a4b-non-thinking")
     payload = run_eval.build_payload(
@@ -768,4 +829,7 @@ def test_named_sft_specs_are_gym_owned() -> None:
         "workplace-deepseek-e4b-thinking-v2-8k",
         "workplace-deepseek-e4b-thinking-v2-32k",
     }
-    assert all((spec_root / filename).is_file() for filename in prepare_module.SFT_SPECS.values())
+    assert all(
+        (spec_root / filename).is_file()
+        for filename in prepare_module.SFT_SPECS.values()
+    )

@@ -1,4 +1,4 @@
-"""Shared, model-facing preprocessing for Gemma-4 SFT examples."""
+"""Shared, model-facing preprocessing for Decomposer SFT examples."""
 
 from __future__ import annotations
 
@@ -7,12 +7,18 @@ from typing import Any
 
 JsonObject = dict[str, Any]
 PREPARED_TOKENIZATION_ATTRIBUTE = "prepared_tokenization"
-PREPARED_TOKENIZATION_PROFILE = "gemma4_sft_non_thinking"
+GEMMA4_PREPARED_TOKENIZATION_PROFILE = "gemma4_sft_non_thinking"
+QWEN35_PREPARED_TOKENIZATION_PROFILE = "qwen35_sft_non_thinking"
+PREPARED_TOKENIZATION_PROFILE = GEMMA4_PREPARED_TOKENIZATION_PROFILE
+PREPARED_TOKENIZATION_PROFILES = frozenset(
+    {
+        GEMMA4_PREPARED_TOKENIZATION_PROFILE,
+        QWEN35_PREPARED_TOKENIZATION_PROFILE,
+    }
+)
 
 
-def clean_message(
-    message: Mapping[str, Any], *, include_reasoning: bool
-) -> JsonObject:
+def clean_message(message: Mapping[str, Any], *, include_reasoning: bool) -> JsonObject:
     clean = {key: value for key, value in message.items() if value is not None}
     teacher_reasoning = clean.pop("teacher_reasoning", None)
     clean.pop("reasoning", None)
@@ -22,7 +28,9 @@ def clean_message(
     return clean
 
 
-def configure_example(example: Mapping[str, Any], include_reasoning: bool) -> JsonObject:
+def configure_example(
+    example: Mapping[str, Any], include_reasoning: bool
+) -> JsonObject:
     messages = example.get("messages")
     if not isinstance(messages, list):
         raise ValueError("Prepared example has no messages list.")

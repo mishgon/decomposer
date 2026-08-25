@@ -13,10 +13,7 @@ from training.sft.liger import (
 
 
 def test_gemma4_uses_multimodal_preload_patch() -> None:
-    assert (
-        liger_patch_strategy("gemma4", "gemma4_text")
-        == "gemma4_multimodal_preload"
-    )
+    assert liger_patch_strategy("gemma4", "gemma4_text") == "gemma4_multimodal_preload"
 
 
 def test_gemma4_liger_fails_closed_for_unknown_text_config() -> None:
@@ -26,6 +23,12 @@ def test_gemma4_liger_fails_closed_for_unknown_text_config() -> None:
 
 def test_other_models_keep_transformers_instance_hook() -> None:
     assert liger_patch_strategy("llama", None) == "transformers_instance"
+
+
+def test_qwen35_uses_supported_transformers_instance_hook() -> None:
+    assert liger_patch_strategy("qwen3_5", "qwen3_5_text") == "transformers_instance"
+    with pytest.raises(ValueError, match="expected 'qwen3_5_text'"):
+        liger_patch_strategy("qwen3_5", "future_qwen_text")
 
 
 def test_gemma4_preload_passes_fused_ce_only_config(

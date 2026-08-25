@@ -316,6 +316,34 @@ def langgraph_command(
     )
 
 
+def subagent_environment(experiment: DecomposerExperiment) -> dict[str, str]:
+    environment = {
+        "GAIA2_SUBAGENT_MODEL": experiment.worker_served_name,
+        "GAIA2_SUBAGENT_ENDPOINT": (
+            f"http://127.0.0.1:{experiment.worker_port}/v1"
+        ),
+        "GAIA2_SUBAGENT_API_KEY": "EMPTY",
+        "GAIA2_SUBAGENT_TEMPERATURE": str(experiment.temperature),
+        "GAIA2_SUBAGENT_TOP_P": str(experiment.top_p),
+        "GAIA2_SUBAGENT_TOP_K": str(experiment.top_k),
+        "GAIA2_SUBAGENT_MAX_COMPLETION_TOKENS": str(
+            experiment.max_completion_tokens
+        ),
+        "GAIA2_SUBAGENT_THINKING": "1" if experiment.worker_thinking else "0",
+    }
+    if experiment.min_p is not None:
+        environment["GAIA2_SUBAGENT_MIN_P"] = str(experiment.min_p)
+    if experiment.presence_penalty is not None:
+        environment["GAIA2_SUBAGENT_PRESENCE_PENALTY"] = str(
+            experiment.presence_penalty
+        )
+    if experiment.repetition_penalty is not None:
+        environment["GAIA2_SUBAGENT_REPETITION_PENALTY"] = str(
+            experiment.repetition_penalty
+        )
+    return environment
+
+
 def service_command(
     experiment: DecomposerExperiment,
     config_path: Path,
@@ -896,20 +924,7 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
             service_config, plugin_config = _runtime_configs(
                 local_repo, directory, experiment
             )
-            subagent_env = {
-                "GAIA2_SUBAGENT_MODEL": experiment.worker_served_name,
-                "GAIA2_SUBAGENT_ENDPOINT": (
-                    f"http://127.0.0.1:{experiment.worker_port}/v1"
-                ),
-                "GAIA2_SUBAGENT_API_KEY": "EMPTY",
-                "GAIA2_SUBAGENT_TEMPERATURE": str(experiment.temperature),
-                "GAIA2_SUBAGENT_TOP_P": str(experiment.top_p),
-                "GAIA2_SUBAGENT_TOP_K": str(experiment.top_k),
-                "GAIA2_SUBAGENT_MAX_COMPLETION_TOKENS": str(
-                    experiment.max_completion_tokens
-                ),
-                "GAIA2_SUBAGENT_THINKING": ("1" if experiment.worker_thinking else "0"),
-            }
+            subagent_env = subagent_environment(experiment)
             langgraph_argv, langgraph_cwd = langgraph_command(local_repo, experiment)
             langgraph_process = supervisor.start(
                 "langgraph_subagent",

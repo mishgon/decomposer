@@ -68,9 +68,7 @@ def sft_experiments() -> list[ExperimentConfig]:
             pytorch_cuda_alloc_conf="expandable_segments:True",
         ),
         ExperimentConfig(
-            name=(
-                "gemma4-e4b-nonthinking-deepseek-e4b-v1-8k-smoke-4gpu"
-            ),
+            name=("gemma4-e4b-nonthinking-deepseek-e4b-v1-8k-smoke-4gpu"),
             config_path=(
                 "training/sft/configs/"
                 "gemma4_e4b_nonthinking_4gpu_liger_workplace_"
@@ -86,9 +84,7 @@ def sft_experiments() -> list[ExperimentConfig]:
             pytorch_cuda_alloc_conf="expandable_segments:True",
         ),
         ExperimentConfig(
-            name=(
-                "gemma4-e4b-nonthinking-deepseek-e4b-v1-8k-full-4gpu"
-            ),
+            name=("gemma4-e4b-nonthinking-deepseek-e4b-v1-8k-full-4gpu"),
             config_path=(
                 "training/sft/configs/"
                 "gemma4_e4b_nonthinking_4gpu_liger_workplace_"
@@ -104,9 +100,7 @@ def sft_experiments() -> list[ExperimentConfig]:
             pytorch_cuda_alloc_conf="expandable_segments:True",
         ),
         ExperimentConfig(
-            name=(
-                "gemma4-e4b-nonthinking-deepseek-e4b-v2-8k-smoke-4gpu"
-            ),
+            name=("gemma4-e4b-nonthinking-deepseek-e4b-v2-8k-smoke-4gpu"),
             config_path=(
                 "training/sft/configs/"
                 "gemma4_e4b_nonthinking_4gpu_liger_workplace_"
@@ -122,9 +116,7 @@ def sft_experiments() -> list[ExperimentConfig]:
             pytorch_cuda_alloc_conf="expandable_segments:True",
         ),
         ExperimentConfig(
-            name=(
-                "gemma4-e4b-nonthinking-deepseek-e4b-v2-8k-full-4gpu"
-            ),
+            name=("gemma4-e4b-nonthinking-deepseek-e4b-v2-8k-full-4gpu"),
             config_path=(
                 "training/sft/configs/"
                 "gemma4_e4b_nonthinking_4gpu_liger_workplace_"
@@ -140,9 +132,7 @@ def sft_experiments() -> list[ExperimentConfig]:
             pytorch_cuda_alloc_conf="expandable_segments:True",
         ),
         ExperimentConfig(
-            name=(
-                "gemma4-e4b-nonthinking-deepseek-e4b-v2-32k-full-4gpu"
-            ),
+            name=("gemma4-e4b-nonthinking-deepseek-e4b-v2-32k-full-4gpu"),
             config_path=(
                 "training/sft/configs/"
                 "gemma4_e4b_nonthinking_4gpu_liger_workplace_"
@@ -152,6 +142,33 @@ def sft_experiments() -> list[ExperimentConfig]:
                 "Gemma-4 E4B Decomposer SFT "
                 "(non-thinking, Workplace DeepSeek/E4B v2-32k, 4 GPU, "
                 "Liger fused CE, experimental 32K memory envelope)"
+            ),
+            num_gpus=4,
+            use_liger_kernel=True,
+            pytorch_cuda_alloc_conf="expandable_segments:True",
+        ),
+        ExperimentConfig(
+            name="qwen35-4b-nonthinking-mixed-v1-32k-smoke-4gpu",
+            config_path=(
+                "training/sft/configs/"
+                "qwen35_4b_nonthinking_mixed_v1_32k_smoke_4gpu.yaml"
+            ),
+            description=(
+                "Qwen3.5-4B Decomposer SFT mechanical smoke "
+                "(non-thinking, one step, 4 GPU, Liger fused CE)"
+            ),
+            num_gpus=4,
+            use_liger_kernel=True,
+            pytorch_cuda_alloc_conf="expandable_segments:True",
+        ),
+        ExperimentConfig(
+            name="qwen35-4b-nonthinking-mixed-v1-32k-full-4gpu",
+            config_path=(
+                "training/sft/configs/qwen35_4b_nonthinking_mixed_v1_32k_full_4gpu.yaml"
+            ),
+            description=(
+                "Qwen3.5-4B Decomposer SFT "
+                "(non-thinking, Workplace plus Toolathlon, 32K, 4 GPU)"
             ),
             num_gpus=4,
             use_liger_kernel=True,
@@ -202,6 +219,8 @@ def build_train_command(
 
 def has_training_artifacts(output_dir: str | Path) -> bool:
     output_dir = Path(output_dir)
-    return (output_dir / "training_summary.json").is_file() and (
-        output_dir / "final" / "model.safetensors"
+    final_dir = output_dir / "final"
+    weights_exist = (final_dir / "model.safetensors").is_file() or (
+        final_dir / "model.safetensors.index.json"
     ).is_file()
+    return (output_dir / "training_summary.json").is_file() and weights_exist

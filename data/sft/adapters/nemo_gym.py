@@ -6,10 +6,10 @@ import json
 import math
 from collections import Counter
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .base import AdapterReadResult
 from ..schema import (
     EXCLUSION_REASONS,
     CanonicalOutcome,
@@ -29,13 +29,6 @@ from ..schema import (
 )
 
 ADAPTER_VERSION = 2
-
-
-@dataclass(frozen=True)
-class AdapterReadResult:
-    records: tuple[CanonicalRollout, ...]
-    source_manifest: JsonObject
-    counts: Counter[str]
 
 
 def _canonical_prompt_input(value: Any) -> str:

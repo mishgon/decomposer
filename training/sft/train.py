@@ -16,7 +16,12 @@ import torch
 import yaml
 from accelerate.utils import merge_fsdp_weights, save_fsdp_model
 from datasets import Dataset, load_dataset
-from transformers import AutoTokenizer, EarlyStoppingCallback, GenerationConfig
+from transformers import (
+    AutoConfig,
+    AutoTokenizer,
+    EarlyStoppingCallback,
+    GenerationConfig,
+)
 from trl import SFTConfig, SFTTrainer
 
 from data.sft.builder import compute_dataset_fingerprint
@@ -26,8 +31,12 @@ from .clearml_logging import (
     SeparatePlotsClearMLCallback,
     validate_weight_norm_interval,
 )
-from .gemma4_template import build_gemma4_training_template
 from .liger import configure_liger_for_model, liger_compatible_loss_type
+from .model_support import (
+    build_training_template,
+    tokenization_profile_for_model_config,
+    validate_reasoning_policy,
+)
 from .preprocessing import (
     PREPARED_TOKENIZATION_ATTRIBUTE,
     PREPARED_TOKENIZATION_PROFILE,
@@ -150,7 +159,7 @@ def _preflight_tokenization(
             "training_template": training_template,
         },
         num_proc=workers,
-        desc="Validating Gemma assistant masks and lengths",
+        desc="Validating assistant masks and lengths",
     )
     return with_stats, _summarize_tokenization(with_stats)
 
@@ -288,6 +297,7 @@ def _validate_prepared_tokenization(
     include_reasoning: bool,
     max_length: int | None,
     required: bool,
+    profile: str = PREPARED_TOKENIZATION_PROFILE,
 ) -> JsonObject | None:
     if not isinstance(required, bool):
         raise ValueError("data.require_prepared_tokenization must be a boolean.")
@@ -301,7 +311,7 @@ def _validate_prepared_tokenization(
     if not isinstance(prepared, Mapping):
         raise ValueError("Prepared-data manifest tokenization must be an object.")
     prepared = dict(prepared)
-    if prepared.get("profile") != PREPARED_TOKENIZATION_PROFILE:
+    if prepared.get("profile") != profile:
         raise ValueError("Prepared-data tokenization profile is unsupported.")
     if prepared.get("tokenizer") != model_name_or_path:
         raise ValueError(
@@ -337,7 +347,7 @@ def _validate_prepared_tokenization(
     ).hexdigest()
     if prepared.get("training_template_sha256") != expected_template_hash:
         raise ValueError(
-            "Prepared-data Gemma training template does not match the runtime template."
+            "Prepared-data training template does not match the runtime template."
         )
     init_kwargs = getattr(tokenizer, "init_kwargs", {})
     runtime_revision = (
@@ -366,7 +376,7 @@ def _validate_prepared_tokenization(
                     f"Prepared {split} example {example.get('id', index)} has no "
                     "mandatory token metadata."
                 )
-            if metadata.get("profile") != PREPARED_TOKENIZATION_PROFILE:
+            if metadata.get("profile") != profile:
                 raise ValueError(
                     f"Prepared {split} example {example.get('id', index)} has an "
                     "unsupported tokenization profile."
@@ -376,9 +386,7 @@ def _validate_prepared_tokenization(
                     f"Prepared {split} example {example.get('id', index)} token count "
                     "does not match fresh tokenization."
                 )
-            if metadata.get("supervised_tokens") != int(
-                example["_supervised_tokens"]
-            ):
+            if metadata.get("supervised_tokens") != int(example["_supervised_tokens"]):
                 raise ValueError(
                     f"Prepared {split} example {example.get('id', index)} supervised "
                     "token count does not match fresh tokenization."
@@ -593,6 +601,74 @@ def _configure_gemma4_generation(
     }
 
 
+def _configure_qwen35_generation(
+    generation_config: GenerationConfig,
+    *,
+    tokenizer: Any,
+) -> JsonObject:
+    """Align Qwen3.5 generation metadata with its tokenizer and end markers."""
+    eos_token_id = getattr(tokenizer, "eos_token_id", None)
+    pad_token_id = getattr(tokenizer, "pad_token_id", None)
+    if (
+        isinstance(eos_token_id, bool)
+        or not isinstance(eos_token_id, int)
+        or eos_token_id < 0
+    ):
+        raise ValueError("The Qwen3.5 tokenizer must define a valid eos_token_id.")
+    if (
+        isinstance(pad_token_id, bool)
+        or not isinstance(pad_token_id, int)
+        or pad_token_id < 0
+    ):
+        raise ValueError("The Qwen3.5 tokenizer must define a valid pad_token_id.")
+    eos_ids = [eos_token_id]
+    for token_id in _generation_eos_ids(generation_config.eos_token_id):
+        if token_id not in eos_ids:
+            eos_ids.append(token_id)
+    generation_config.bos_token_id = tokenizer.bos_token_id
+    generation_config.pad_token_id = pad_token_id
+    generation_config.eos_token_id = eos_ids
+    return {
+        "bos_token_id": generation_config.bos_token_id,
+        "eos_token_id": eos_ids,
+        "pad_token_id": pad_token_id,
+        "required_stop_token_ids": {},
+    }
+
+
+def _load_generation_config(
+    model_name_or_path: str,
+    *,
+    revision: str,
+    model_config: Any,
+) -> tuple[GenerationConfig, str]:
+    try:
+        return (
+            GenerationConfig.from_pretrained(
+                model_name_or_path,
+                revision=revision,
+            ),
+            "pretrained",
+        )
+    except OSError:
+        # Qwen3.5 base snapshots may omit generation_config.json. Transformers'
+        # model-derived defaults still preserve checkpoint EOS metadata.
+        return GenerationConfig.from_model_config(model_config), "model_config"
+
+
+def _configure_generation(
+    profile: str,
+    generation_config: GenerationConfig,
+    *,
+    tokenizer: Any,
+) -> JsonObject:
+    if profile == "gemma4_sft_non_thinking":
+        return _configure_gemma4_generation(generation_config, tokenizer=tokenizer)
+    if profile == "qwen35_sft_non_thinking":
+        return _configure_qwen35_generation(generation_config, tokenizer=tokenizer)
+    raise ValueError(f"Unsupported prepared tokenization profile: {profile}")
+
+
 def _save_final_configuration(
     final_dir: Path,
     *,
@@ -756,7 +832,7 @@ def _initialize_clearml(config: Mapping[str, Any], resolved_config: JsonObject):
         raise ValueError("clearml.tags must be a list of non-empty strings.")
 
     os.environ["CLEARML_PROJECT"] = str(config.get("project", "decomposer"))
-    os.environ["CLEARML_TASK"] = str(config.get("task", "Gemma-4 Decomposer SFT"))
+    os.environ["CLEARML_TASK"] = str(config.get("task", "Decomposer SFT"))
     os.environ["CLEARML_LOG_MODEL"] = (
         "TRUE" if config.get("log_model", False) else "FALSE"
     )
@@ -819,7 +895,7 @@ def _resolve_config(config: JsonObject, args: argparse.Namespace) -> JsonObject:
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Full-parameter Gemma-4 SFT on Decomposer traces."
+        description="Full-parameter SFT on Decomposer traces."
     )
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument(
@@ -879,6 +955,17 @@ def main(argv: Sequence[str] | None = None) -> None:
 
     model_name_or_path = str(model_config["name_or_path"])
     include_reasoning = bool(data_config.get("include_reasoning", False))
+    model_revision = str(model_config.get("revision", "main"))
+    checkpoint_config = AutoConfig.from_pretrained(
+        model_name_or_path,
+        revision=model_revision,
+        trust_remote_code=bool(model_config.get("trust_remote_code", False)),
+    )
+    tokenization_profile = tokenization_profile_for_model_config(checkpoint_config)
+    validate_reasoning_policy(
+        tokenization_profile,
+        include_reasoning=include_reasoning,
+    )
     num_proc = int(data_config.get("num_proc", 8))
     max_train_samples = data_config.get("max_train_samples")
     max_eval_samples = data_config.get("max_eval_samples")
@@ -913,17 +1000,23 @@ def main(argv: Sequence[str] | None = None) -> None:
         revision=model_config.get("revision", "main"),
         trust_remote_code=bool(model_config.get("trust_remote_code", False)),
     )
-    generation_config = GenerationConfig.from_pretrained(
+    generation_config, generation_config_source = _load_generation_config(
         model_name_or_path,
-        revision=model_config.get("revision", "main"),
+        revision=model_revision,
+        model_config=checkpoint_config,
     )
-    generation_runtime = _configure_gemma4_generation(
+    generation_runtime = _configure_generation(
+        tokenization_profile,
         generation_config,
         tokenizer=tokenizer,
     )
+    generation_runtime["source"] = generation_config_source
     tokenizer.padding_side = "right"
     canonical_template = tokenizer.chat_template
-    training_template = build_gemma4_training_template(canonical_template)
+    training_template = build_training_template(
+        tokenization_profile,
+        canonical_template,
+    )
     tokenizer.chat_template = training_template
 
     train_dataset, raw_train_token_stats = _preflight_tokenization(
@@ -950,6 +1043,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         include_reasoning=include_reasoning,
         max_length=max_length,
         required=data_config.get("require_prepared_tokenization", False),
+        profile=tokenization_profile,
     )
     exclude_overlength = data_config.get("exclude_overlength", False)
     error_on_truncation = data_config.get("error_on_truncation", True)
@@ -1045,6 +1139,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             "sdpa_backends": sdpa_backends,
             "liger_kernel": liger_runtime,
             "include_reasoning": include_reasoning,
+            "tokenization_profile": tokenization_profile,
             "prepared_tokenization": prepared_tokenization,
             "raw_train_token_stats": raw_train_token_stats,
             "raw_validation_token_stats": raw_validation_token_stats,

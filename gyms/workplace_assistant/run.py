@@ -30,8 +30,8 @@ from gyms.workplace_assistant.experiments import (  # noqa: E402
     HF_HOME,
     PROJECT_VENV,
     RUN_PURPOSES,
-    SPLITS,
     SPLIT_ROWS,
+    SPLITS,
     UV_BIN,
     UV_CACHE,
     DecomposerExperiment,
@@ -40,8 +40,8 @@ from gyms.workplace_assistant.experiments import (  # noqa: E402
     RunPurpose,
     SimpleExperiment,
     component_venv_root,
-    decomposer_prompt_profile,
     decomposer_dataset,
+    decomposer_prompt_profile,
     get_experiment,
     gym_venv,
     models_for_experiment,
@@ -88,9 +88,11 @@ def count_jsonl(path: Path) -> int:
 
 
 def hydra_flow_mapping(values: Mapping[str, int | float]) -> str:
-    return "{" + ",".join(
-        f"{key}:{json.dumps(value)}" for key, value in values.items()
-    ) + "}"
+    return (
+        "{"
+        + ",".join(f"{key}:{json.dumps(value)}" for key, value in values.items())
+        + "}"
+    )
 
 
 class Supervisor:
@@ -195,7 +197,7 @@ def simple_vllm_command(experiment: SimpleExperiment) -> list[str]:
 def decomposer_vllm_command(
     model: ModelServer, experiment: DecomposerExperiment
 ) -> list[str]:
-    return [
+    command = [
         str(PROJECT_VENV / "bin" / "vllm"),
         "serve",
         str(model.snapshot),
@@ -214,25 +216,31 @@ def decomposer_vllm_command(
         "--language-model-only",
         "--enable-auto-tool-choice",
         "--tool-call-parser",
-        "gemma4",
-        "--reasoning-parser",
-        "gemma4",
+        model.tool_call_parser,
         "--default-chat-template-kwargs",
         json.dumps({"enable_thinking": model.thinking}, separators=(",", ":")),
     ]
+    if model.reasoning_parser is not None:
+        command.extend(["--reasoning-parser", model.reasoning_parser])
+    if model.gdn_prefill_backend is not None:
+        command.extend(["--gdn-prefill-backend", model.gdn_prefill_backend])
+    return command
 
 
 def langgraph_command(
     local_repo: Path, experiment: DecomposerExperiment
 ) -> tuple[list[str], Path]:
-    directory = (
-        local_repo
-        / "external"
-        / "Gym"
-        / "responses_api_agents"
-        / "decomposer_agent"
-        / "subagents"
-    )
+    if experiment.subagent_graph == "qwen35":
+        directory = local_repo / "gyms" / "workplace_assistant" / "subagents"
+    else:
+        directory = (
+            local_repo
+            / "external"
+            / "Gym"
+            / "responses_api_agents"
+            / "decomposer_agent"
+            / "subagents"
+        )
     return (
         [
             str(PROJECT_VENV / "bin" / "langgraph"),
@@ -335,7 +343,11 @@ def gym_eval_command(
         if isinstance(experiment, DecomposerExperiment)
         else source_dataset(split)
     )
-    agent = "decomposer" if experiment.kind == "decomposer" else "workplace_assistant_simple_agent"
+    agent = (
+        "decomposer"
+        if experiment.kind == "decomposer"
+        else "workplace_assistant_simple_agent"
+    )
     command = [
         str(gym_bin),
         "eval",
@@ -424,7 +436,9 @@ def validate_preparation(
         raise ValueError("Prepared Gym revision does not match the current submodule")
     expected_components = component_venv_root(repo_root)
     if Path(manifest["component_runtime"]["root"]) != expected_components:
-        raise ValueError("Preparation manifest points at unexpected component environments")
+        raise ValueError(
+            "Preparation manifest points at unexpected component environments"
+        )
     for component in manifest["component_runtime"]["components"].values():
         python = Path(component["python"])
         if not python.is_file() or not (python.parent / "activate").is_file():
@@ -432,10 +446,14 @@ def validate_preparation(
     if isinstance(experiment, SimpleExperiment):
         policy = manifest["models"]["policy"]
         if Path(policy["path"]) != experiment.checkpoint:
-            raise ValueError("Preparation manifest points at an unexpected policy checkpoint")
+            raise ValueError(
+                "Preparation manifest points at an unexpected policy checkpoint"
+            )
         _validate_file_manifest(experiment.checkpoint, policy)
     else:
-        selected = {model.model_id: model for model in models_for_experiment(experiment)}
+        selected = {
+            model.model_id: model for model in models_for_experiment(experiment)
+        }
         prepared = manifest["models"]["subagents"]
         if set(prepared) != set(selected):
             raise ValueError("Preparation manifest contains unexpected subagent models")
@@ -482,7 +500,9 @@ def archive_attempt(directory: Path) -> Path | None:
         return None
     status_path = directory / "run_status.json"
     if status_path.is_file():
-        started_at = str(json.loads(status_path.read_text()).get("started_at", utc_now()))
+        started_at = str(
+            json.loads(status_path.read_text()).get("started_at", utc_now())
+        )
     else:
         started_at = utc_now()
     attempt_id = (
@@ -659,10 +679,7 @@ def _dry_plan(
         gpu_assignments = {"policy_vllm": ",".join(visible_devices)}
     else:
         models = models_for_experiment(experiment)
-        services = [
-            decomposer_vllm_command(model, experiment)
-            for model in models
-        ]
+        services = [decomposer_vllm_command(model, experiment) for model in models]
         services.append(langgraph_command(local_repo, experiment)[0])
         gpu_assignments = {
             f"subagent_vllm_{model.port}": visible_devices[model.gpu]
@@ -750,7 +767,9 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
     if args.dry:
         manifest = preparation_manifest(args.split, experiment.name)
         if not manifest.is_file():
-            print(f"Warning: preparation manifest is missing: {manifest}", file=sys.stderr)
+            print(
+                f"Warning: preparation manifest is missing: {manifest}", file=sys.stderr
+            )
         print(
             json.dumps(
                 _dry_plan(
@@ -816,9 +835,7 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
         "cuda_visible_devices": list(visible_devices),
         "started_at": utc_now(),
         "timings_seconds": {},
-        "preparation_manifest": str(
-            preparation_manifest(args.split, experiment.name)
-        ),
+        "preparation_manifest": str(preparation_manifest(args.split, experiment.name)),
     }
     if archived_attempt is not None:
         status["archived_attempt"] = str(archived_attempt)
@@ -833,9 +850,7 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
         try:
             yield
         finally:
-            status["timings_seconds"][name] = round(
-                time.monotonic() - phase_started, 3
-            )
+            status["timings_seconds"][name] = round(time.monotonic() - phase_started, 3)
             atomic_json(status_path, status)
 
     env = _base_environment(
@@ -911,9 +926,7 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
                 ),
                 cwd=local_repo / "external" / "Gym",
             )
-            wait_http(
-                "http://127.0.0.1:11000/server_instances", [gym_process], 300
-            )
+            wait_http("http://127.0.0.1:11000/server_instances", [gym_process], 300)
             subprocess.run(
                 [
                     str(
@@ -963,16 +976,20 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
                 rollout_path=rollout_path,
                 limit=args.limit,
             )
-            gpu_metadata = subprocess.run(
-                [
-                    "nvidia-smi",
-                    "--query-gpu=index,name,uuid,memory.total,driver_version",
-                    "--format=csv,noheader,nounits",
-                ],
-                check=False,
-                capture_output=True,
-                text=True,
-            ).stdout.strip().splitlines()
+            gpu_metadata = (
+                subprocess.run(
+                    [
+                        "nvidia-smi",
+                        "--query-gpu=index,name,uuid,memory.total,driver_version",
+                        "--format=csv,noheader,nounits",
+                    ],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                )
+                .stdout.strip()
+                .splitlines()
+            )
     except Exception:
         status.update(
             {

@@ -246,6 +246,65 @@ def _prepare_fixture_dataset(
     )
 
 
+def test_source_paths_can_be_required_and_overridden_explicitly(
+    tmp_path: Path,
+) -> None:
+    source_dir = _source(tmp_path, "teacher")
+    spec = BuildSpec(
+        spec_version=1,
+        dataset=DatasetIdentity(id="override-fixture", version="v1"),
+        policy=PolicySpec(id="decomposer-default"),
+        sources=(
+            SourceSpec(
+                id="workplace",
+                adapter="nemo_gym",
+                benchmark="workplace_assistant",
+                environment="workplace",
+                partition="train",
+                teacher="teacher",
+            ),
+        ),
+        selection=SelectionSpec(),
+        split=SplitSpec(
+            strategy="prompt_fixed",
+            validation_fraction=0.1,
+            seed=42,
+        ),
+    )
+    loaded = LoadedBuildSpec(
+        path=tmp_path / "spec.yaml",
+        sha256="0" * 64,
+        spec=spec,
+    )
+    with pytest.raises(ValueError, match="require explicit path overrides"):
+        prepare_dataset(
+            loaded,
+            tmp_path / "missing",
+            git_revision="test",
+            require_clean_git=False,
+        )
+    with pytest.raises(ValueError, match="Unknown source path override"):
+        prepare_dataset(
+            loaded,
+            tmp_path / "unknown",
+            git_revision="test",
+            require_clean_git=False,
+            source_paths={"unknown": source_dir},
+        )
+
+    prepared = prepare_dataset(
+        loaded,
+        tmp_path / "prepared-overrides",
+        git_revision="test",
+        require_clean_git=False,
+        source_paths={"workplace": source_dir},
+    )
+    assert prepared.manifest["records"]["total"] == 10
+    assert prepared.manifest["records"]["train"] == 9
+    assert prepared.manifest["records"]["validation"] == 1
+    assert prepared.manifest["sources"][0]["locator"] == str(source_dir.resolve())
+
+
 def test_prepare_groups_teacher_variants_and_writes_manifest_v3(tmp_path: Path) -> None:
     prepared = _prepare_fixture_dataset(
         [_source(tmp_path, "teacher-a"), _source(tmp_path, "teacher-b")],

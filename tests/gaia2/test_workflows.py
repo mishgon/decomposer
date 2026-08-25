@@ -32,6 +32,7 @@ from gyms.gaia2.run import (
     are_command,
     decomposer_vllm_commands,
     simple_vllm_command,
+    subagent_environment,
     validate_result,
 )
 from gyms.gaia2.run_eval import build_payload, normalize_job_desc, redact_payload
@@ -135,6 +136,43 @@ def test_openrouter_decomposer_starts_only_the_configured_worker() -> None:
     assert "--language-model-only" not in qwen_worker
     assert "--trust-remote-code" in qwen_worker
     assert qwen_worker[qwen_worker.index("--gdn-prefill-backend") + 1] == "triton"
+
+
+def test_qwen_worker_uses_official_non_thinking_sampling() -> None:
+    experiment = DEEPSEEK_QWEN_EXPERIMENT
+    assert (
+        experiment.temperature,
+        experiment.top_p,
+        experiment.top_k,
+        experiment.min_p,
+        experiment.presence_penalty,
+        experiment.repetition_penalty,
+    ) == (0.7, 0.8, 20, 0.0, 1.5, 1.0)
+    assert subagent_environment(experiment) == {
+        "GAIA2_SUBAGENT_MODEL": "Qwen/Qwen3.5-4B",
+        "GAIA2_SUBAGENT_ENDPOINT": "http://127.0.0.1:8031/v1",
+        "GAIA2_SUBAGENT_API_KEY": "EMPTY",
+        "GAIA2_SUBAGENT_TEMPERATURE": "0.7",
+        "GAIA2_SUBAGENT_TOP_P": "0.8",
+        "GAIA2_SUBAGENT_TOP_K": "20",
+        "GAIA2_SUBAGENT_MAX_COMPLETION_TOKENS": "4096",
+        "GAIA2_SUBAGENT_THINKING": "0",
+        "GAIA2_SUBAGENT_MIN_P": "0.0",
+        "GAIA2_SUBAGENT_PRESENCE_PENALTY": "1.5",
+        "GAIA2_SUBAGENT_REPETITION_PENALTY": "1.0",
+    }
+
+
+def test_gemma_worker_sampling_is_unchanged() -> None:
+    assert (
+        DECOMPOSER_EXPERIMENT.temperature,
+        DECOMPOSER_EXPERIMENT.top_p,
+        DECOMPOSER_EXPERIMENT.top_k,
+    ) == (1.0, 0.95, 64)
+    environment = subagent_environment(DECOMPOSER_EXPERIMENT)
+    assert "GAIA2_SUBAGENT_MIN_P" not in environment
+    assert "GAIA2_SUBAGENT_PRESENCE_PENALTY" not in environment
+    assert "GAIA2_SUBAGENT_REPETITION_PENALTY" not in environment
 
 
 def test_openrouter_runtime_uses_teacher_responses_api(tmp_path) -> None:

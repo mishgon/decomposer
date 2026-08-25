@@ -26,6 +26,7 @@ EXCLUSION_REASONS = (
     "excluded_invalid_indices",
     "excluded_invalid_agent_ref",
     "excluded_missing_materialized_input",
+    "excluded_missing_evaluation",
     "excluded_prompt_mismatch",
     "excluded_missing_final_state",
     "excluded_empty_training_target",
@@ -73,8 +74,8 @@ class PolicySpec(StrictModel):
 
 class SourceSpec(StrictModel):
     id: str
-    adapter: Literal["nemo_gym"]
-    path: Path
+    adapter: Literal["nemo_gym", "toolathlon_gym"]
+    path: Path | None = None
     benchmark: str
     environment: str
     partition: SourcePartition
@@ -139,7 +140,10 @@ class SplitSpec(StrictModel):
 
 
 class TokenizationSpec(StrictModel):
-    profile: Literal["gemma4_sft_non_thinking"]
+    profile: Literal[
+        "gemma4_sft_non_thinking",
+        "qwen35_sft_non_thinking",
+    ]
     tokenizer: str
     revision: str = "main"
     max_tokens: int = 32768
@@ -300,6 +304,83 @@ def normalize_response_tools(tools: Any) -> list[JsonObject]:
             "Exposed tools must be exactly one spawn_subagent and one wait tool.",
         )
     return normalized
+
+
+def validate_chat_tools(tools: Any) -> list[JsonObject]:
+    """Validate canonical chat function schemas embedded in a native trace."""
+    if not isinstance(tools, list):
+        raise TraceValidationError(
+            "excluded_invalid_tool_schema", "trace.tools must be a list."
+        )
+    validated: list[JsonObject] = []
+    names: list[str] = []
+    for index, raw_tool in enumerate(tools):
+        tool = require_mapping(
+            raw_tool, f"trace.tools[{index}]", "excluded_invalid_tool_schema"
+        )
+        function = require_mapping(
+            tool.get("function"),
+            f"trace.tools[{index}].function",
+            "excluded_invalid_tool_schema",
+        )
+        name = function.get("name")
+        description = function.get("description")
+        parameters = function.get("parameters")
+        if (
+            tool.get("type") != "function"
+            or not isinstance(name, str)
+            or not name
+            or not isinstance(description, str)
+            or not description
+            or not isinstance(parameters, Mapping)
+        ):
+            raise TraceValidationError(
+                "excluded_invalid_tool_schema",
+                f"trace.tools[{index}] is not a valid function schema.",
+            )
+        properties = parameters.get("properties")
+        required = parameters.get("required", [])
+        if parameters.get("type") != "object" or not isinstance(properties, Mapping):
+            raise TraceValidationError(
+                "excluded_invalid_tool_schema",
+                f"Tool {name!r} must have object parameters.",
+            )
+        if not isinstance(required, list) or not all(
+            isinstance(item, str) for item in required
+        ):
+            raise TraceValidationError(
+                "excluded_invalid_tool_schema",
+                f"Tool {name!r} has an invalid required-parameter list.",
+            )
+        if name == "spawn_subagent":
+            expected = {"subagent_type_id", "prompt"}
+            if set(properties) != expected or set(required) != expected:
+                raise TraceValidationError(
+                    "excluded_invalid_tool_schema",
+                    "spawn_subagent must require subagent_type_id and prompt.",
+                )
+            if any(
+                not isinstance(properties[item], Mapping)
+                or properties[item].get("type") != "string"
+                for item in expected
+            ):
+                raise TraceValidationError(
+                    "excluded_invalid_tool_schema",
+                    "spawn_subagent parameters must be strings.",
+                )
+        elif name == "wait":
+            if properties or required:
+                raise TraceValidationError(
+                    "excluded_invalid_tool_schema", "wait must take no arguments."
+                )
+        names.append(name)
+        validated.append(dict(tool))
+    if len(names) != 2 or set(names) != {"spawn_subagent", "wait"}:
+        raise TraceValidationError(
+            "excluded_invalid_tool_schema",
+            "Exposed tools must be exactly one spawn_subagent and one wait tool.",
+        )
+    return validated
 
 
 def sequentialize_parallel_spawn_calls(

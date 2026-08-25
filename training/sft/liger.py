@@ -1,4 +1,4 @@
-"""Liger setup for Gemma-4 conditional-generation checkpoints."""
+"""Liger setup for supported Decomposer conditional-generation checkpoints."""
 
 from __future__ import annotations
 
@@ -8,6 +8,13 @@ from typing import Any
 
 def liger_patch_strategy(model_type: str, text_model_type: str | None) -> str:
     """Return the patch path needed by a Transformers model configuration."""
+    if model_type == "qwen3_5":
+        if text_model_type != "qwen3_5_text":
+            raise ValueError(
+                "Liger was requested for Qwen3.5, but its nested text config has "
+                f"model_type={text_model_type!r}; expected 'qwen3_5_text'."
+            )
+        return "transformers_instance"
     if model_type != "gemma4":
         return "transformers_instance"
     if text_model_type != "gemma4_text":

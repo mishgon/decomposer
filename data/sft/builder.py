@@ -64,7 +64,9 @@ def load_build_spec(path: str | Path) -> LoadedBuildSpec:
         source.model_copy(
             update={
                 "path": (
-                    source.path.resolve()
+                    None
+                    if source.path is None
+                    else source.path.resolve()
                     if source.path.is_absolute()
                     else (path.parent / source.path).resolve()
                 )
@@ -329,18 +331,15 @@ def _load_tokenization_runtime(
 ) -> tuple[Any, str, JsonObject]:
     from transformers import AutoTokenizer
 
-    from training.sft.gemma4_template import build_gemma4_training_template
-    from training.sft.preprocessing import PREPARED_TOKENIZATION_PROFILE
+    from training.sft.model_support import build_training_template
 
-    if spec.profile != PREPARED_TOKENIZATION_PROFILE:
-        raise ValueError(f"Unsupported prepared tokenization profile: {spec.profile}")
     tokenizer = AutoTokenizer.from_pretrained(
         spec.tokenizer,
         revision=spec.revision,
         trust_remote_code=spec.trust_remote_code,
     )
     canonical_template = tokenizer.chat_template
-    training_template = build_gemma4_training_template(canonical_template)
+    training_template = build_training_template(spec.profile, canonical_template)
     init_kwargs = getattr(tokenizer, "init_kwargs", {})
     resolved_revision = (
         init_kwargs.get("_commit_hash") if isinstance(init_kwargs, Mapping) else None
@@ -494,11 +493,35 @@ def prepare_dataset(
     *,
     git_revision: str | None = None,
     require_clean_git: bool = True,
+    source_paths: Mapping[str, str | Path] | None = None,
 ) -> PreparedDataset:
     """Build one immutable dataset release from a checked-in specification."""
     if not isinstance(loaded, LoadedBuildSpec):
         loaded = load_build_spec(loaded)
     spec = loaded.spec
+    overrides = {
+        source_id: Path(path).expanduser().resolve()
+        for source_id, path in (source_paths or {}).items()
+    }
+    known_source_ids = {source.id for source in spec.sources}
+    unknown_overrides = sorted(set(overrides) - known_source_ids)
+    if unknown_overrides:
+        raise ValueError(
+            "Unknown source path override IDs: " + ", ".join(unknown_overrides)
+        )
+    resolved_sources = tuple(
+        source.model_copy(update={"path": overrides.get(source.id, source.path)})
+        for source in spec.sources
+    )
+    missing_paths = sorted(
+        source.id for source in resolved_sources if source.path is None
+    )
+    if missing_paths:
+        raise ValueError(
+            "Dataset sources require explicit path overrides: "
+            + ", ".join(missing_paths)
+        )
+    spec = spec.model_copy(update={"sources": resolved_sources})
     revision = git_revision or _git_revision(require_clean=require_clean_git)
     output_root = Path(output_root).resolve()
     release_dir = output_root / spec.dataset.id / spec.dataset.version
@@ -616,8 +639,7 @@ def prepare_dataset(
         0
         if tokenization_manifest is None
         else sum(
-            int(split["excluded"])
-            for split in tokenization_manifest["splits"].values()
+            int(split["excluded"]) for split in tokenization_manifest["splits"].values()
         )
     )
 

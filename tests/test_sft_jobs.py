@@ -83,7 +83,7 @@ def test_sft_experiments_are_unique_and_register_retained_configs() -> None:
         False,
         True,
     }
-    assert len(experiments) == 9
+    assert len(experiments) == 11
     e2b_four_gpu = experiments[2]
     assert e2b_four_gpu.num_gpus == 4
     assert e2b_four_gpu.use_liger_kernel is True
@@ -100,6 +100,8 @@ def test_sft_experiments_are_unique_and_register_retained_configs() -> None:
         "gemma4-e4b-nonthinking-deepseek-e4b-v2-8k-smoke-4gpu",
         "gemma4-e4b-nonthinking-deepseek-e4b-v2-8k-full-4gpu",
         "gemma4-e4b-nonthinking-deepseek-e4b-v2-32k-full-4gpu",
+        "qwen35-4b-nonthinking-mixed-v1-32k-smoke-4gpu",
+        "qwen35-4b-nonthinking-mixed-v1-32k-full-4gpu",
     }
     for experiment in experiments[4:]:
         assert experiment.num_gpus == 4
@@ -617,28 +619,23 @@ def test_training_state_summary_reports_early_stop_and_best_checkpoint() -> None
             "gemma-4-E4B-it",
         ),
         (
-            "gemma4_e4b_nonthinking_4gpu_liger_workplace_"
-            "deepseek_e4b_v1_8k_smoke.yaml",
+            "gemma4_e4b_nonthinking_4gpu_liger_workplace_deepseek_e4b_v1_8k_smoke.yaml",
             "gemma-4-E4B-it",
         ),
         (
-            "gemma4_e4b_nonthinking_4gpu_liger_workplace_"
-            "deepseek_e4b_v1_8k.yaml",
+            "gemma4_e4b_nonthinking_4gpu_liger_workplace_deepseek_e4b_v1_8k.yaml",
             "gemma-4-E4B-it",
         ),
         (
-            "gemma4_e4b_nonthinking_4gpu_liger_workplace_"
-            "deepseek_e4b_v2_8k_smoke.yaml",
+            "gemma4_e4b_nonthinking_4gpu_liger_workplace_deepseek_e4b_v2_8k_smoke.yaml",
             "gemma-4-E4B-it",
         ),
         (
-            "gemma4_e4b_nonthinking_4gpu_liger_workplace_"
-            "deepseek_e4b_v2_8k.yaml",
+            "gemma4_e4b_nonthinking_4gpu_liger_workplace_deepseek_e4b_v2_8k.yaml",
             "gemma-4-E4B-it",
         ),
         (
-            "gemma4_e4b_nonthinking_4gpu_liger_workplace_"
-            "deepseek_e4b_v2_32k.yaml",
+            "gemma4_e4b_nonthinking_4gpu_liger_workplace_deepseek_e4b_v2_32k.yaml",
             "gemma-4-E4B-it",
         ),
     ],
@@ -669,11 +666,12 @@ def test_smoke_config_evaluates_clearml_metrics_after_one_step() -> None:
 def test_e4b_deepseek_v1_8k_configs_are_oom_safe_and_non_thinking() -> None:
     root = Path("training/sft/configs")
     filenames = (
-        "gemma4_e4b_nonthinking_4gpu_liger_workplace_"
-        "deepseek_e4b_v1_8k_smoke.yaml",
+        "gemma4_e4b_nonthinking_4gpu_liger_workplace_deepseek_e4b_v1_8k_smoke.yaml",
         "gemma4_e4b_nonthinking_4gpu_liger_workplace_deepseek_e4b_v1_8k.yaml",
     )
-    smoke, full = [yaml.safe_load((root / filename).read_text()) for filename in filenames]
+    smoke, full = [
+        yaml.safe_load((root / filename).read_text()) for filename in filenames
+    ]
 
     for config in (smoke, full):
         data = config["data"]
@@ -720,10 +718,7 @@ def test_e4b_deepseek_v2_configs_require_matching_prepared_releases() -> None:
     for suffix, (version, max_length) in variants.items():
         config = yaml.safe_load(
             (
-                root
-                / (
-                    "gemma4_e4b_nonthinking_4gpu_liger_workplace_" + suffix
-                )
+                root / ("gemma4_e4b_nonthinking_4gpu_liger_workplace_" + suffix)
             ).read_text()
         )
         data = config["data"]
@@ -742,6 +737,14 @@ def test_training_completion_requires_summary_and_final_weights(tmp_path: Path) 
     (output / "training_summary.json").write_text("{}")
     assert not has_training_artifacts(output)
     (output / "final" / "model.safetensors").write_bytes(b"weights")
+    assert has_training_artifacts(output)
+
+
+def test_training_completion_accepts_sharded_safetensors_index(tmp_path: Path) -> None:
+    output = tmp_path / "run"
+    (output / "final").mkdir(parents=True)
+    (output / "training_summary.json").write_text("{}")
+    (output / "final" / "model.safetensors.index.json").write_text("{}")
     assert has_training_artifacts(output)
 
 

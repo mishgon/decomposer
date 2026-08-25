@@ -9,12 +9,10 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Literal, cast
 
-ARTIFACTS_ROOT = Path(
-    "/mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts"
-)
-PROJECT_VENV = Path(
-    "/mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_sft/.venv"
-)
+from gyms.qwen_sampling import qwen35_general_sampling
+
+ARTIFACTS_ROOT = Path("/mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts")
+PROJECT_VENV = Path("/mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_sft/.venv")
 HF_HUB_ROOT = Path("/mnt/shared_ru.ml.SZ-5_000264/.cache/huggingface/hub")
 CHECKPOINTS_ROOT = Path("/mnt/shared_ru.ml.SZ-5_000264/sukhorukov/checkpoints")
 
@@ -93,6 +91,9 @@ class ModelServer:
     gpu_memory_utilization: float
     startup_wave: int
     thinking: bool = True
+    tool_call_parser: str = "gemma4"
+    reasoning_parser: str | None = "gemma4"
+    gdn_prefill_backend: str | None = None
 
 
 @dataclass(frozen=True)
@@ -107,6 +108,7 @@ class DecomposerExperiment:
     num_gpus: int = 3
     model_ids: tuple[str, ...] | None = None
     model_servers: tuple[ModelServer, ...] | None = None
+    subagent_graph: Literal["gym_gemma4", "qwen35"] = "gym_gemma4"
     kind: Literal["decomposer"] = field(init=False, default="decomposer")
 
     @property
@@ -236,9 +238,26 @@ MODELS = (
     ),
 )
 
-WORKPLACE_E4B_SFT_MODEL_ID = (
-    "decomposer/gemma4-e4b-sft-deepseek-e4b-v1-8k"
+QWEN35_08B_BASE = (
+    HF_HUB_ROOT
+    / "models--Qwen--Qwen3.5-0.8B"
+    / "snapshots"
+    / "2fc06364715b967f1860aea9cf38778875588b17"
 )
+QWEN35_2B_BASE = (
+    HF_HUB_ROOT
+    / "models--Qwen--Qwen3.5-2B"
+    / "snapshots"
+    / "15852e8c16360a2fea060d615a32b45270f8a8fc"
+)
+QWEN35_4B_BASE = (
+    HF_HUB_ROOT
+    / "models--Qwen--Qwen3.5-4B"
+    / "snapshots"
+    / "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a"
+)
+
+WORKPLACE_E4B_SFT_MODEL_ID = "decomposer/gemma4-e4b-sft-deepseek-e4b-v1-8k"
 WORKPLACE_E4B_SFT_FINAL = (
     ARTIFACTS_ROOT
     / "training"
@@ -251,10 +270,30 @@ WORKPLACE_E4B_SFT_VLLM = WORKPLACE_E4B_SFT_FINAL.with_name("final-vllm")
 
 DECOMPOSER_EXPERIMENTS = (
     DecomposerExperiment(
-        name=(
-            "gemma4-e4b-sft-deepseek-e4b-v1-8k-non-thinking-"
-            "gemma4-e4b-thinking"
+        name="deepseek-v4-flash-0731-qwen35-4b-non-thinking",
+        gym_config_filename=(
+            "workplace_assistant_deepseek_v4_flash_0731_qwen35_4b_non_thinking.yaml"
         ),
+        num_gpus=1,
+        max_model_len=131072,
+        subagent_graph="qwen35",
+        model_servers=(
+            ModelServer(
+                "Qwen/Qwen3.5-4B",
+                QWEN35_4B_BASE,
+                8025,
+                0,
+                0.90,
+                0,
+                thinking=False,
+                tool_call_parser="qwen3_xml",
+                reasoning_parser=None,
+                gdn_prefill_backend="triton",
+            ),
+        ),
+    ),
+    DecomposerExperiment(
+        name=("gemma4-e4b-sft-deepseek-e4b-v1-8k-non-thinking-gemma4-e4b-thinking"),
         gym_config_filename=(
             "workplace_assistant_gemma4_e4b_sft_deepseek_e4b_v1_8k_"
             "non_thinking_gemma4_e4b_thinking.yaml"
@@ -323,24 +362,6 @@ DECOMPOSER_EXPERIMENTS = (
     ),
 )
 
-QWEN35_08B_BASE = (
-    HF_HUB_ROOT
-    / "models--Qwen--Qwen3.5-0.8B"
-    / "snapshots"
-    / "2fc06364715b967f1860aea9cf38778875588b17"
-)
-QWEN35_2B_BASE = (
-    HF_HUB_ROOT
-    / "models--Qwen--Qwen3.5-2B"
-    / "snapshots"
-    / "15852e8c16360a2fea060d615a32b45270f8a8fc"
-)
-QWEN35_4B_BASE = (
-    HF_HUB_ROOT
-    / "models--Qwen--Qwen3.5-4B"
-    / "snapshots"
-    / "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a"
-)
 GEMMA4_E2B_BASE = MODELS[0].snapshot
 GEMMA4_E4B_BASE = MODELS[1].snapshot
 GEMMA4_12B_BASE = MODELS[2].snapshot
@@ -371,6 +392,26 @@ def _gemma4_simple_experiments() -> list[SimpleExperiment]:
     ]
 
 
+def _qwen35_simple_experiment(
+    name: str,
+    checkpoint: Path,
+    *,
+    thinking: bool = False,
+) -> SimpleExperiment:
+    sampling = qwen35_general_sampling(thinking=thinking)
+    return SimpleExperiment(
+        name=name,
+        checkpoint=checkpoint,
+        thinking=thinking,
+        temperature=sampling.temperature,
+        top_p=sampling.top_p,
+        top_k=sampling.top_k,
+        min_p=sampling.min_p,
+        presence_penalty=sampling.presence_penalty,
+        repetition_penalty=sampling.repetition_penalty,
+    )
+
+
 def _simple_experiments() -> tuple[SimpleExperiment, ...]:
     checkpoint_profiles = (
         "q35-2b-grpo-nightly-step55",
@@ -380,16 +421,16 @@ def _simple_experiments() -> tuple[SimpleExperiment, ...]:
         "q35-4b-gaia2-grpo-v23-binres-s45",
     )
     experiments = [
-        SimpleExperiment(
-            name=f"{name}{suffix}",
-            checkpoint=CHECKPOINTS_ROOT / name,
+        _qwen35_simple_experiment(
+            f"{name}{suffix}",
+            CHECKPOINTS_ROOT / name,
             thinking=thinking,
         )
         for name in checkpoint_profiles
         for suffix, thinking in (("", False), ("-thinking", True))
     ]
     experiments.extend(
-        SimpleExperiment(name=name, checkpoint=CHECKPOINTS_ROOT / name)
+        _qwen35_simple_experiment(name, CHECKPOINTS_ROOT / name)
         for name in (
             "q35-4b-gaia2-grpo-v32-kl0temp1-s30",
             "q35-4b-gaia2-grpo-v32-kl0temp1-s45",
@@ -397,16 +438,22 @@ def _simple_experiments() -> tuple[SimpleExperiment, ...]:
     )
     experiments.extend(
         (
-            SimpleExperiment("qwen35-0.8b-base-non-thinking", QWEN35_08B_BASE),
-            SimpleExperiment(
+            _qwen35_simple_experiment(
+                "qwen35-0.8b-base-non-thinking", QWEN35_08B_BASE
+            ),
+            _qwen35_simple_experiment(
                 "qwen35-0.8b-base-thinking", QWEN35_08B_BASE, thinking=True
             ),
-            SimpleExperiment("qwen35-2b-base-non-thinking", QWEN35_2B_BASE),
-            SimpleExperiment(
+            _qwen35_simple_experiment(
+                "qwen35-2b-base-non-thinking", QWEN35_2B_BASE
+            ),
+            _qwen35_simple_experiment(
                 "qwen35-2b-base-thinking", QWEN35_2B_BASE, thinking=True
             ),
-            SimpleExperiment("qwen35-4b-base-non-thinking", QWEN35_4B_BASE),
-            SimpleExperiment(
+            _qwen35_simple_experiment(
+                "qwen35-4b-base-non-thinking", QWEN35_4B_BASE
+            ),
+            _qwen35_simple_experiment(
                 "qwen35-4b-base-thinking", QWEN35_4B_BASE, thinking=True
             ),
         )
@@ -471,7 +518,9 @@ def models_for_experiment(
         selected = MODELS
     else:
         by_id = {model.model_id: model for model in MODELS}
-        missing = [model_id for model_id in experiment.model_ids if model_id not in by_id]
+        missing = [
+            model_id for model_id in experiment.model_ids if model_id not in by_id
+        ]
         if missing:
             raise ValueError(f"Unknown model IDs for {experiment.name}: {missing}")
         selected = tuple(by_id[model_id] for model_id in experiment.model_ids)
