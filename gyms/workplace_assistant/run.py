@@ -220,6 +220,8 @@ def decomposer_vllm_command(
         "--default-chat-template-kwargs",
         json.dumps({"enable_thinking": model.thinking}, separators=(",", ":")),
     ]
+    if model.dtype is not None:
+        command.extend(["--dtype", model.dtype])
     if model.reasoning_parser is not None:
         command.extend(["--reasoning-parser", model.reasoning_parser])
     if model.gdn_prefill_backend is not None:
