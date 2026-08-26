@@ -19,6 +19,7 @@ from gyms.workplace_assistant.experiments import (
     WORKPLACE_E4B_SFT_VLLM,
     WORKPLACE_QWEN35_4B_SFT_FINAL,
     WORKPLACE_QWEN35_4B_SFT_MODEL_ID,
+    WORKPLACE_QWEN35_4B_BASE_MANAGER_MODEL_ID,
     DecomposerExperiment,
     SimpleExperiment,
     collect_experiments,
@@ -34,9 +35,10 @@ from gyms.qwen_sampling import qwen35_general_sampling
 
 
 def test_registry_is_global_and_unique() -> None:
-    assert len(DECOMPOSER_EXPERIMENTS) == 9
+    assert len(DECOMPOSER_EXPERIMENTS) == 10
     assert len(SIMPLE_EXPERIMENTS) == 26
-    assert len(experiments.EXPERIMENTS) == 35
+    assert len(experiments.EXPERIMENTS) == 36
+    assert experiments.BASE_IMAGE.endswith("py3.12-torch2.7.0:0.0.42")
     assert {experiment.kind for experiment in experiments.ALL_EXPERIMENTS} == {
         "decomposer",
         "simple",
@@ -380,6 +382,119 @@ def test_sft_qwen_manager_and_base_worker_use_dedicated_gpus() -> None:
     )
     assert payload["instance_type"] == INSTANCE_TYPES_BY_NUM_GPUS[2]
     assert payload["priority_class"] == "high"
+    assert "--split validation" in payload["script"]
+    assert "--num-repeats 3" in payload["script"]
+    assert "OPENROUTER_API_KEY_DECOMPOSER" not in payload["env_variables"]
+    assert payload["job_desc"] == (
+        f"workplace-assistant-validation-evaluation decomposer-agent {name}-n3 "
+        "#alice"
+    )
+
+
+def test_untuned_qwen_manager_matches_tuned_two_gpu_topology() -> None:
+    name = "qwen35-4b-base-non-thinking-qwen35-4b-non-thinking"
+    experiment = get_experiment(name)
+    assert isinstance(experiment, DecomposerExperiment)
+    assert experiment.manager_backend == "local_vllm"
+    assert experiment.requires_openrouter is False
+    assert experiment.num_gpus == 2
+    assert experiment.max_model_len == 131072
+    assert experiment.subagent_graph == "qwen35"
+
+    selected = models_for_experiment(experiment)
+    assert [model.model_id for model in selected] == [
+        WORKPLACE_QWEN35_4B_BASE_MANAGER_MODEL_ID,
+        "Qwen/Qwen3.5-4B",
+    ]
+    assert [model.snapshot for model in selected] == [
+        experiments.QWEN35_4B_BASE,
+        experiments.QWEN35_4B_BASE,
+    ]
+    assert [model.gpu for model in selected] == [0, 1]
+    assert [model.port for model in selected] == [8026, 8025]
+    assert [model.thinking for model in selected] == [False, False]
+    assert [model.dtype for model in selected] == ["bfloat16", "bfloat16"]
+
+    for model in selected:
+        command = run_module.decomposer_vllm_command(model, experiment)
+        assert command[command.index("--dtype") + 1] == "bfloat16"
+        assert command[command.index("--max-model-len") + 1] == "131072"
+        assert command[command.index("--tool-call-parser") + 1] == "qwen3_xml"
+        assert "--reasoning-parser" not in command
+        assert command[command.index("--default-chat-template-kwargs") + 1] == (
+            '{"enable_thinking":false}'
+        )
+
+    repo_root = Path(__file__).resolve().parents[2]
+    config = yaml.safe_load(
+        (
+            repo_root
+            / "gyms"
+            / "workplace_assistant"
+            / "configs"
+            / experiment.gym_config_filename
+        ).read_text()
+    )
+    assert config["responses_create_params"] == {
+        "temperature": 0.7,
+        "top_p": 0.8,
+        "presence_penalty": 1.5,
+    }
+    policy = config["policy_model"]["responses_api_models"]["vllm_model"]
+    assert policy["base_url"] == "http://127.0.0.1:8026/v1"
+    assert policy["model"] == WORKPLACE_QWEN35_4B_BASE_MANAGER_MODEL_ID
+    assert policy["chat_template_kwargs"] == {
+        "enable_thinking": False,
+        "preserve_thinking": False,
+    }
+    assert policy["extra_body"] == {
+        "top_k": 20,
+        "min_p": 0.0,
+        "repetition_penalty": 1.0,
+        "include_reasoning": False,
+    }
+    agent = config["decomposer"]["responses_api_agents"]["decomposer_agent"]
+    assert agent["decomposer_system_prompt_profile"] == "student"
+    assert [item["assistant_id"] for item in agent["subagent_types"]] == [
+        "qwen35_4b_non_thinking"
+    ]
+
+    plan = run_module._dry_plan(
+        repo_root,
+        experiment,
+        "evaluation",
+        "validation",
+        3,
+        None,
+        Path("/tmp/workplace-qwen-base-manager-eval"),
+        ("0", "1"),
+    )
+    assert plan["gpu_assignments"] == {
+        "subagent_vllm_8026": "0",
+        "subagent_vllm_8025": "1",
+    }
+    assert plan["decomposer_system_prompt_profile"] == "student"
+    assert "--num-repeats 3" in plan["gym_eval"]
+    assert "validation.decomposer.jsonl" in plan["gym_eval"]
+
+    payload = run_eval.build_payload(
+        experiment,
+        repo_root,
+        purpose="evaluation",
+        split="validation",
+        num_repeats=3,
+        limit=None,
+        author="alice",
+        base_image=experiments.BASE_IMAGE,
+        priority="medium",
+        force=False,
+        proxy_env={},
+        openrouter_key="",
+    )
+    assert payload["instance_type"] == INSTANCE_TYPES_BY_NUM_GPUS[2]
+    assert payload["priority_class"] == "medium"
+    assert payload["base_image"].endswith("py3.12-torch2.7.0:0.0.42")
+    assert "--purpose evaluation" in payload["script"]
     assert "--split validation" in payload["script"]
     assert "--num-repeats 3" in payload["script"]
     assert "OPENROUTER_API_KEY_DECOMPOSER" not in payload["env_variables"]

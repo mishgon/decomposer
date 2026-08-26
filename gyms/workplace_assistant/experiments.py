@@ -26,7 +26,7 @@ UV_BIN = ARTIFACTS_ROOT / "tools" / "uv"
 HF_HOME = ARTIFACTS_ROOT / "cache" / "huggingface"
 SFT_OUTPUT_ROOT = ARTIFACTS_ROOT / "datasets" / "sft"
 
-BASE_IMAGE = "cr.ai.cloud.ru/aicloud-base-images/py3.12-torch2.7.0:0.0.41"
+BASE_IMAGE = "cr.ai.cloud.ru/aicloud-base-images/py3.12-torch2.7.0:0.0.42"
 INSTANCE_TYPES_BY_NUM_GPUS = {
     1: "a100plus.1gpu.80vG.12C.244G",
     2: "a100plus.2gpu.80vG.24C.488G",
@@ -272,6 +272,9 @@ WORKPLACE_E4B_SFT_VLLM = WORKPLACE_E4B_SFT_FINAL.with_name("final-vllm")
 WORKPLACE_QWEN35_4B_SFT_MODEL_ID = (
     "decomposer/qwen35-4b-sft-workplace-v1-3765-32k"
 )
+WORKPLACE_QWEN35_4B_BASE_MANAGER_MODEL_ID = (
+    "decomposer/qwen35-4b-base-manager"
+)
 WORKPLACE_QWEN35_4B_SFT_FINAL = (
     ARTIFACTS_ROOT
     / "training"
@@ -282,6 +285,48 @@ WORKPLACE_QWEN35_4B_SFT_FINAL = (
 )
 
 DECOMPOSER_EXPERIMENTS = (
+    DecomposerExperiment(
+        name=(
+            "qwen35-4b-base-non-thinking-"
+            "qwen35-4b-non-thinking"
+        ),
+        gym_config_filename=(
+            "workplace_assistant_qwen35_4b_base_non_thinking_"
+            "qwen35_4b_non_thinking.yaml"
+        ),
+        manager_backend="local_vllm",
+        num_gpus=2,
+        max_model_len=131072,
+        subagent_graph="qwen35",
+        model_servers=(
+            ModelServer(
+                WORKPLACE_QWEN35_4B_BASE_MANAGER_MODEL_ID,
+                QWEN35_4B_BASE,
+                8026,
+                0,
+                0.90,
+                0,
+                thinking=False,
+                tool_call_parser="qwen3_xml",
+                reasoning_parser=None,
+                gdn_prefill_backend="triton",
+                dtype="bfloat16",
+            ),
+            ModelServer(
+                "Qwen/Qwen3.5-4B",
+                QWEN35_4B_BASE,
+                8025,
+                1,
+                0.90,
+                0,
+                thinking=False,
+                tool_call_parser="qwen3_xml",
+                reasoning_parser=None,
+                gdn_prefill_backend="triton",
+                dtype="bfloat16",
+            ),
+        ),
+    ),
     DecomposerExperiment(
         name=(
             "qwen35-4b-sft-workplace-v1-3765-32k-non-thinking-"

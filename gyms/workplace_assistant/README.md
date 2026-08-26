@@ -116,6 +116,22 @@ The Decomposer profile shares one E4B vLLM server between its non-thinking
 manager requests and thinking subagent requests, so both comparison jobs use
 one GPU each.
 
+Run the untuned Qwen manager control on the complete validation split with the
+same two-GPU topology and non-thinking base worker as the tuned Qwen manager:
+
+```bash
+$MLSPY -m gyms.workplace_assistant.run_eval \
+  --purpose evaluation \
+  --experiment qwen35-4b-base-non-thinking-qwen35-4b-non-thinking \
+  --split validation \
+  --num-repeats 3 \
+  --priority medium \
+  --author-name sukhorukov
+```
+
+Logical GPU 0 serves the untuned base manager under a dedicated model name;
+logical GPU 1 serves an identical base Qwen3.5-4B checkpoint to subagents.
+
 After the Workplace E4B SFT run has exported its merged `final/` checkpoint,
 evaluate the tuned non-thinking manager and vanilla thinking E4B subagent on
 dedicated GPUs:
