@@ -974,3 +974,38 @@ def test_qwen35_workplace_partial_spec_is_pinned_and_success_only() -> None:
         "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a"
     )
     assert spec.tokenization.max_tokens == 32768
+
+
+def test_qwen35_workplace_full_spec_is_pinned_and_success_only() -> None:
+    loaded = load_build_spec(
+        Path(
+            "data/sft/specs/"
+            "decomposer_workplace_deepseek_qwen35_4b_nonthinking_"
+            "v1_3765_32k.yaml"
+        )
+    )
+    spec = loaded.spec
+    assert spec.dataset.id == (
+        "decomposer-workplace-deepseek-qwen35-4b-nonthinking"
+    )
+    assert spec.dataset.version == "v1-3765-32k"
+    assert len(spec.sources) == 1
+    source = spec.sources[0]
+    assert source.adapter == "nemo_gym"
+    assert source.partition == "train"
+    assert source.path is not None
+    assert source.path.name == (
+        "deepseek-v4-flash-0731-qwen35-4b-non-thinking-n3"
+    )
+    assert spec.selection.success_reward == 1.0
+    assert spec.selection.invalid_policy == "exclude"
+    assert spec.selection.max_traces_per_prompt_per_teacher is None
+    assert spec.split.strategy == "prompt_fixed"
+    assert spec.split.validation_fraction == 0.1
+    assert spec.split.seed == 42
+    assert spec.tokenization is not None
+    assert spec.tokenization.profile == "qwen35_sft_non_thinking"
+    assert spec.tokenization.revision == (
+        "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a"
+    )
+    assert spec.tokenization.max_tokens == 32768
