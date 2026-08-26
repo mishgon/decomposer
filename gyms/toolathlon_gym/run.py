@@ -54,12 +54,18 @@ SUBAGENT_TYPES = (
 
 
 def _docker(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
+    process = subprocess.run(
         ["docker", *args],
-        check=check,
         capture_output=True,
         text=True,
     )
+    if check and process.returncode != 0:
+        detail = (process.stderr or process.stdout or "").strip()
+        raise RuntimeError(
+            f"docker {' '.join(args)} failed with exit code {process.returncode}"
+            + (f": {detail}" if detail else "")
+        )
+    return process
 
 
 def _handle_termination(signum: int, _frame: object) -> None:

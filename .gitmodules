@@ -4,3 +4,6 @@
 [submodule "external/toolathlon_gym"]
 	path = external/toolathlon_gym
 	url = https://github.com/eigent-ai/toolathlon_gym
+[submodule "external/toolathlon"]
+	path = external/toolathlon
+	url = https://github.com/hkust-nlp/Toolathlon.git

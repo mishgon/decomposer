@@ -37,9 +37,23 @@ def test_docker(monkeypatch) -> None:
     result = run._docker("ps", check=False)
 
     assert result.stdout == "output"
-    assert calls == [
-        ((["docker", "ps"],), {"check": False, "capture_output": True, "text": True})
-    ]
+    assert calls == [((["docker", "ps"],), {"capture_output": True, "text": True})]
+
+
+def test_docker_failure_includes_stderr(monkeypatch) -> None:
+    def fake_run(*args, **kwargs):
+        return subprocess.CompletedProcess(
+            args, 125, "", "Error: statfs /x: no such file"
+        )
+
+    monkeypatch.setattr(run.subprocess, "run", fake_run)
+
+    with pytest.raises(
+        RuntimeError,
+        match="docker run x failed with exit code 125: "
+        "Error: statfs /x: no such file",
+    ):
+        run._docker("run", "x")
 
 
 def test_vllm_command_uses_current_environment_and_gemma_parsers() -> None:

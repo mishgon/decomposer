@@ -38,7 +38,7 @@ Ideas:
 
 - `src/decomposer/`: core Decomposer package. This should stay benchmark- and training-agnostic.
 - `examples/`: runnable examples of configuring and using Decomposer.
-- `gyms/`: environment integrations that collect traces and run native evaluation.
+- `gyms/`: environment integrations that collect traces and run native evaluation. `toolathlon_gym/` is the eigent-ai Toolathlon-Gym integration; `toolathlon/` is the hkust-nlp Toolathlon benchmark integration (benchmark sources in the `external/toolathlon` submodule, pinned at the Toolathlon-Verified release), used for evaluation of final agents/harnesses/models only, not for trace collection. Both run the Qwen3.5-4B non-thinking subagent served by host vLLM replicas.
 - `training/`: training and finetuning workflows.
 - `artifacts/data/`: collected trajectories and episode workspaces ignored by git.
 - `artifacts/evals/`: evaluation results and aggregate metrics ignored by git.

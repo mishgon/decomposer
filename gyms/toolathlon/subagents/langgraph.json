@@ -1,0 +1,12 @@
+{
+  "dependencies": [
+    "."
+  ],
+  "graphs": {
+    "qwen_3_5_4b_non_thinking": "./graph.py:qwen_3_5_4b_non_thinking"
+  },
+  "http": {
+    "app": "webapp:app"
+  },
+  "python_version": "3.12"
+}
