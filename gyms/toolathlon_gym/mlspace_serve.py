@@ -82,9 +82,7 @@ def vllm_command(args: argparse.Namespace, port: int) -> list[str]:
         "--language-model-only",
         "--enable-auto-tool-choice",
         "--tool-call-parser",
-        "gemma4",
-        "--reasoning-parser",
-        "gemma4",
+        "qwen3_xml",
         "--default-chat-template-kwargs",
         '{"enable_thinking":false}',
     ]
