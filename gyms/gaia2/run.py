@@ -256,7 +256,28 @@ def simple_vllm_command(experiment: SimpleExperiment) -> list[str]:
         max_model_len=experiment.max_model_len,
         max_num_seqs=experiment.max_num_seqs,
         gpu_memory_utilization=experiment.gpu_memory_utilization,
+        tool_call_parser=experiment.tool_call_parser,
+        reasoning_parser=experiment.reasoning_parser,
+        language_model_only=experiment.language_model_only,
+        trust_remote_code=experiment.trust_remote_code,
+        gdn_prefill_backend=experiment.gdn_prefill_backend,
     )
+
+
+def simple_sampling_parameters(
+    experiment: SimpleExperiment,
+) -> dict[str, int | float]:
+    parameters: dict[str, int | float] = {
+        "temperature": experiment.temperature,
+        "top_p": experiment.top_p,
+        "top_k": experiment.top_k,
+        "max_tokens": experiment.max_completion_tokens,
+    }
+    for name in ("min_p", "presence_penalty", "repetition_penalty"):
+        value = getattr(experiment, name)
+        if value is not None:
+            parameters[name] = value
+    return parameters
 
 
 def decomposer_vllm_commands(
@@ -911,13 +932,7 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
             )
             env["ARE_ENABLE_THINKING"] = "1" if experiment.thinking else "0"
             env["ARE_SAMPLING_PARAMS"] = json.dumps(
-                {
-                    "temperature": experiment.temperature,
-                    "top_p": experiment.top_p,
-                    "top_k": experiment.top_k,
-                    "max_tokens": experiment.max_completion_tokens,
-                },
-                separators=(",", ":"),
+                simple_sampling_parameters(experiment), separators=(",", ":")
             )
         else:
             manager_command, worker_command = decomposer_vllm_commands(experiment)

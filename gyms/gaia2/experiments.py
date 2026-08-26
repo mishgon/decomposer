@@ -33,7 +33,7 @@ UV_CACHE = ARTIFACTS_ROOT / "cache" / "uv"
 UV_BIN = ARTIFACTS_ROOT / "tools" / "uv"
 HF_HOME = Path("/mnt/shared_ru.ml.SZ-5_000264/.cache/huggingface")
 
-BASE_IMAGE = "cr.ai.cloud.ru/aicloud-base-images/py3.12-torch2.7.0:0.0.41"
+BASE_IMAGE = "cr.ai.cloud.ru/aicloud-base-images/py3.12-torch2.7.0:0.0.42"
 INSTANCE_TYPES_BY_NUM_GPUS = {
     1: "a100plus.1gpu.80vG.12C.182G",
     2: "a100plus.2gpu.80vG.24C.364G",
@@ -189,9 +189,17 @@ class SimpleExperiment:
     temperature: float = 1.0
     top_p: float = 0.95
     top_k: int = 64
+    min_p: float | None = None
+    presence_penalty: float | None = None
+    repetition_penalty: float | None = None
     gpu_memory_utilization: float = 0.90
     concurrency: int = 4
     thinking: bool = True
+    tool_call_parser: str = "gemma4"
+    reasoning_parser: str | None = "gemma4"
+    language_model_only: bool = True
+    trust_remote_code: bool = False
+    gdn_prefill_backend: str | None = None
     kind: Literal["simple"] = field(init=False, default="simple")
 
 
@@ -273,12 +281,31 @@ SIMPLE_EXPERIMENT = SimpleExperiment(
     name="gemma4-e4b-it-thinking",
     checkpoint=GEMMA4_E4B_BASE,
 )
+SIMPLE_QWEN_EXPERIMENT = SimpleExperiment(
+    name="qwen35-4b-non-thinking",
+    checkpoint=QWEN35_4B_BASE,
+    served_name="Qwen/Qwen3.5-4B",
+    max_model_len=131072,
+    temperature=_QWEN35_NON_THINKING_SAMPLING.temperature,
+    top_p=_QWEN35_NON_THINKING_SAMPLING.top_p,
+    top_k=_QWEN35_NON_THINKING_SAMPLING.top_k,
+    min_p=_QWEN35_NON_THINKING_SAMPLING.min_p,
+    presence_penalty=_QWEN35_NON_THINKING_SAMPLING.presence_penalty,
+    repetition_penalty=_QWEN35_NON_THINKING_SAMPLING.repetition_penalty,
+    thinking=False,
+    tool_call_parser="qwen3_xml",
+    reasoning_parser=None,
+    language_model_only=False,
+    trust_remote_code=True,
+    gdn_prefill_backend="triton",
+)
 ALL_EXPERIMENTS: tuple[Experiment, ...] = (
     DECOMPOSER_EXPERIMENT,
     DEEPSEEK_GEMMA_EXPERIMENT,
     QWEN35_SFT_EXPERIMENT,
     DEEPSEEK_QWEN_EXPERIMENT,
     SIMPLE_EXPERIMENT,
+    SIMPLE_QWEN_EXPERIMENT,
 )
 EXPERIMENTS = {experiment.name: experiment for experiment in ALL_EXPERIMENTS}
 if len(EXPERIMENTS) != len(ALL_EXPERIMENTS):

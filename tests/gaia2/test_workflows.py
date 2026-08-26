@@ -13,6 +13,7 @@ from gyms.gaia2.dataset import (
     write_materialized_dataset,
 )
 from gyms.gaia2.experiments import (
+    BASE_IMAGE,
     DATASET_REVISION,
     DEEPSEEK_GEMMA_EXPERIMENT,
     DEEPSEEK_QWEN_EXPERIMENT,
@@ -22,6 +23,7 @@ from gyms.gaia2.experiments import (
     QWEN35_SFT_EXPERIMENT,
     SCENARIO_COUNT,
     SIMPLE_EXPERIMENT,
+    SIMPLE_QWEN_EXPERIMENT,
     SPLIT,
     collect_experiments,
     filesystem_dir,
@@ -34,6 +36,7 @@ from gyms.gaia2.run import (
     are_command,
     decomposer_vllm_commands,
     simple_vllm_command,
+    simple_sampling_parameters,
     subagent_environment,
     validate_result,
 )
@@ -100,7 +103,9 @@ def test_experiment_registry_contains_local_and_openrouter_profiles() -> None:
         QWEN35_SFT_EXPERIMENT,
         DEEPSEEK_QWEN_EXPERIMENT,
         SIMPLE_EXPERIMENT,
+        SIMPLE_QWEN_EXPERIMENT,
     ]
+    assert BASE_IMAGE.endswith("py3.12-torch2.7.0:0.0.42")
     assert INSTANCE_TYPES_BY_NUM_GPUS == {
         1: "a100plus.1gpu.80vG.12C.182G",
         2: "a100plus.2gpu.80vG.24C.364G",
@@ -119,6 +124,9 @@ def test_experiment_registry_contains_local_and_openrouter_profiles() -> None:
         DOMAIN,
         "gemma4-e4b-it-thinking-n3",
     )
+    assert output_dir(SIMPLE_QWEN_EXPERIMENT, 3).parts[-1] == (
+        "qwen35-4b-non-thinking-n3"
+    )
 
 
 def test_vllm_commands_use_current_e4b_thinking_profiles() -> None:
@@ -131,6 +139,28 @@ def test_vllm_commands_use_current_e4b_thinking_profiles() -> None:
     assert '{"enable_thinking":true}' in worker
     assert str(DECOMPOSER_EXPERIMENT.manager_checkpoint) in manager
     assert str(DECOMPOSER_EXPERIMENT.worker_checkpoint) in worker
+
+
+def test_simple_qwen_uses_qwen_runtime_and_sampling_profile() -> None:
+    command = simple_vllm_command(SIMPLE_QWEN_EXPERIMENT)
+
+    assert str(SIMPLE_QWEN_EXPERIMENT.checkpoint) in command
+    assert command[command.index("--max-model-len") + 1] == "131072"
+    assert command[command.index("--tool-call-parser") + 1] == "qwen3_xml"
+    assert "--reasoning-parser" not in command
+    assert "--language-model-only" not in command
+    assert "--trust-remote-code" in command
+    assert command[command.index("--gdn-prefill-backend") + 1] == "triton"
+    assert '{"enable_thinking":false}' in command
+    assert simple_sampling_parameters(SIMPLE_QWEN_EXPERIMENT) == {
+        "temperature": 0.7,
+        "top_p": 0.8,
+        "top_k": 20,
+        "max_tokens": 4096,
+        "min_p": 0.0,
+        "presence_penalty": 1.5,
+        "repetition_penalty": 1.0,
+    }
 
 
 def test_openrouter_decomposer_starts_only_the_configured_worker() -> None:
@@ -315,6 +345,26 @@ def test_qwen_sft_preparation_hashes_manager_and_worker(monkeypatch) -> None:
     assert models == {
         "worker": {"path": str(QWEN35_SFT_EXPERIMENT.worker_checkpoint)},
         "manager": {"path": str(QWEN35_SFT_EXPERIMENT.manager_checkpoint)},
+    }
+
+
+def test_simple_qwen_preparation_hashes_policy_only(monkeypatch) -> None:
+    calls = []
+
+    def fake_validate_checkpoint(path, *, full_hashes):
+        calls.append((path, full_hashes))
+        return {"path": str(path)}
+
+    monkeypatch.setattr(prepare, "validate_checkpoint", fake_validate_checkpoint)
+
+    models = prepare.experiment_models(
+        SIMPLE_QWEN_EXPERIMENT,
+        full_hashes=False,
+    )
+
+    assert calls == [(SIMPLE_QWEN_EXPERIMENT.checkpoint, False)]
+    assert models == {
+        "policy": {"path": str(SIMPLE_QWEN_EXPERIMENT.checkpoint)}
     }
 
 

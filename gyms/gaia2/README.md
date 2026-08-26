@@ -61,6 +61,9 @@ The registered experiments are:
   a base non-thinking Qwen3.5-4B worker on the second GPU, using the student
   prompt and 128K context.
 - `gemma4-e4b-it-thinking`: vanilla thinking E4B simple agent on one GPU.
+- `qwen35-4b-non-thinking`: vanilla non-thinking Qwen3.5-4B simple agent on
+  one GPU, using the recommended general-task sampling parameters and 128K
+  context.
 
 ```bash
 # Decomposer, three attempts per scenario.
@@ -80,6 +83,12 @@ The registered experiments are:
   --experiment gemma4-e4b-it-thinking \
   --num-repeats 1 \
   --limit 1 \
+  --cuda-visible-devices 7
+
+# Simple Qwen, three attempts per scenario.
+.venv/bin/python -m gyms.gaia2.run \
+  --experiment qwen35-4b-non-thinking \
+  --num-repeats 3 \
   --cuda-visible-devices 7
 
 # OpenRouter teacher one-scenario smoke. HTTPS_PROXY (or https_proxy) and
