@@ -29,7 +29,7 @@ DEFAULT_ARTIFACTS_DIR = DEFAULT_GYM_ARTIFACTS_DIR / "traces"
 DEFAULT_EVALS_DIR = DEFAULT_GYM_ARTIFACTS_DIR / "evals"
 DEFAULT_IMAGE = "decomposer-toolathlon:latest"
 DEFAULT_MODEL = "deepseek/deepseek-v4-flash-0731"
-DEFAULT_SUBAGENT_MODEL = "google/gemma-4-26B-A4B-it"
+DEFAULT_SUBAGENT_MODEL = "Qwen/Qwen3.5-4B"
 DEFAULT_SUBAGENT_PORT = 8023
 POSTGRES_IMAGE = "docker.io/library/postgres:15"
 POSTGRES_ENV = {
@@ -49,7 +49,7 @@ SUBAGENT_TYPES = (
     # ("gemma_4_12b_thinking", "gemma_4_12b_thinking", "Gemma-4-12B thinking"),
     # ("gemma_4_12b_non_thinking", "gemma_4_12b_non_thinking", "Gemma-4-12B non-thinking"),
     # ("gemma_4_26b_a4b_thinking", "gemma_4_26b_a4b_thinking", "Gemma-4-26B-A4B thinking"),
-    ("gemma_4_26b_a4b_non_thinking", "gemma_4_26b_a4b_non_thinking", "Gemma-4-26B-A4B non-thinking"),
+    ("qwen_3_5_4b_non_thinking", "qwen_3_5_4b_non_thinking", "Qwen-3.5-4B non-thinking"),
 )
 
 
@@ -173,9 +173,7 @@ def vllm_command(
         "--language-model-only",
         "--enable-auto-tool-choice",
         "--tool-call-parser",
-        "gemma4",
-        "--reasoning-parser",
-        "gemma4",
+        "qwen3_xml",
         "--default-chat-template-kwargs",
         '{"enable_thinking":false}',
     ]
@@ -472,7 +470,7 @@ def main() -> None:
             f"N_JOBS_PER_WORKER={args.n_jobs_per_worker}",
             "--env",
             (
-                "GEMMA_4_26B_A4B_BASE_URL="
+                "QWEN_3_5_4B_BASE_URL="
                 f"http://host.docker.internal:{args.subagent_port}/v1"
             ),
             *postgres_env,
