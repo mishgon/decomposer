@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from are.simulation.apps.app import App
+from are.simulation.apps.system import SystemApp
 from are.simulation.environment import Environment, EnvironmentConfig
 from are.simulation.notification_system import (
     Message,
@@ -255,7 +256,7 @@ def test_parallel_sessions_do_not_share_lock():
         broker.close()
 
 
-def test_notification_journal_is_non_destructive_and_has_attachments():
+def test_notification_journal_consumes_native_queue_and_replays_attachments():
     notifications = notification_system()
     notifications.message_queue.put(
         Message(
@@ -272,8 +273,135 @@ def test_notification_journal_is_non_destructive_and_has_attachments():
         assert first == second
         assert first["notifications"][0]["sequence"] == 1
         assert first["notifications"][0]["attachments"] == []
-        assert len(notifications.message_queue.list_view()) == 1
+        assert notifications.message_queue.list_view() == []
         assert session.notifications_after(1)["notifications"] == []
+    finally:
+        broker.close()
+
+
+def test_wait_adapter_never_moves_clock_back_and_preserves_native_event():
+    environment = Environment(
+        EnvironmentConfig(start_time=1000, duration=120, verbose=False)
+    )
+    system_app = SystemApp()
+    environment.register_apps([system_app])
+    current_time = environment.time_manager.time()
+    ready_time = datetime.fromtimestamp(current_time - 30, tz=timezone.utc)
+    future_time = datetime.fromtimestamp(current_time + 10, tz=timezone.utc)
+    environment.notification_system.message_queue.put(
+        Message(MessageType.USER_MESSAGE, "already ready", ready_time)
+    )
+    environment.notification_system.message_queue.put(
+        Message(
+            MessageType.ENVIRONMENT_NOTIFICATION,
+            "future notification",
+            future_time,
+        )
+    )
+
+    broker = ToolStateBroker()
+    try:
+        session = broker.register(
+            Scenario(system_app.get_tools()), environment.notification_system
+        )
+        initial = session.notifications_after(0)
+        assert [entry["message"] for entry in initial["notifications"]] == [
+            "already ready"
+        ]
+        assert [
+            message.message
+            for message in environment.notification_system.message_queue.list_view()
+        ] == ["future notification"]
+
+        before_wait = environment.time_manager.time()
+        result = request(
+            "POST",
+            f"{broker.base_url}/sessions/{session.session_id}/notifications/wait",
+            session.token,
+            {
+                "cursor": initial["next_cursor"],
+                "arguments": {"timeout": 30},
+            },
+        )
+        after_wait = environment.time_manager.time()
+
+        assert after_wait >= before_wait
+        assert after_wait >= future_time.timestamp()
+        assert result["native_wait_invoked"] is True
+        assert [entry["message"] for entry in result["notifications"]] == [
+            "future notification"
+        ]
+        assert environment.notification_system.message_queue.list_view() == []
+        assert environment.get_event_log_size() == 1
+        assert [entry["tool"] for entry in session.trace] == [
+            "SystemApp__wait_for_notification"
+        ]
+    finally:
+        broker.close()
+
+
+def test_parallel_workers_at_same_cursor_advance_native_time_once():
+    environment = Environment(
+        EnvironmentConfig(start_time=2000, duration=120, verbose=False)
+    )
+    system_app = SystemApp()
+    environment.register_apps([system_app])
+    current_time = environment.time_manager.time()
+    future_time = datetime.fromtimestamp(current_time + 10, tz=timezone.utc)
+    environment.notification_system.message_queue.put(
+        Message(
+            MessageType.ENVIRONMENT_NOTIFICATION,
+            "shared future notification",
+            future_time,
+        )
+    )
+
+    broker = ToolStateBroker()
+    try:
+        session = broker.register(
+            Scenario(system_app.get_tools()), environment.notification_system
+        )
+        url = f"{broker.base_url}/sessions/{session.session_id}/notifications/wait"
+        barrier = threading.Barrier(3)
+        results = []
+        errors = []
+
+        def wait_as_worker() -> None:
+            try:
+                barrier.wait(timeout=2)
+                results.append(
+                    request(
+                        "POST",
+                        url,
+                        session.token,
+                        {"cursor": 0, "arguments": {"timeout": 60}},
+                    )
+                )
+            except Exception as error:
+                errors.append(error)
+
+        threads = [threading.Thread(target=wait_as_worker) for _ in range(2)]
+        for thread in threads:
+            thread.start()
+        barrier.wait(timeout=2)
+        for thread in threads:
+            thread.join(timeout=5)
+
+        assert errors == []
+        assert len(results) == 2
+        assert sorted(result["native_wait_invoked"] for result in results) == [
+            False,
+            True,
+        ]
+        assert all(
+            [entry["message"] for entry in result["notifications"]]
+            == ["shared future notification"]
+            for result in results
+        )
+        assert environment.time_manager.time() >= future_time.timestamp()
+        assert environment.time_manager.time() < future_time.timestamp() + 5
+        assert environment.get_event_log_size() == 1
+        assert len(session.trace) == 1
     finally:
         broker.close()
 

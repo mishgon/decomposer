@@ -14,7 +14,7 @@ import threading
 import time
 import uuid
 from dataclasses import asdict, dataclass, field
-from datetime import timezone
+from datetime import datetime, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from types import NoneType, UnionType
@@ -33,6 +33,7 @@ HIDDEN_AUI_TOOLS = frozenset(
         "AgentUserInterface__get_all_messages",
     }
 )
+WAIT_FOR_NOTIFICATION_TOOL = "SystemApp__wait_for_notification"
 
 
 def _legacy_type(type_name: str) -> Any:
@@ -100,9 +101,7 @@ def _json_schema_for_type(type_obj: Any) -> dict[str, Any]:
     if origin is dict:
         key_type, value_type = arguments if arguments else (str, Any)
         if key_type not in {str, Any}:
-            raise TypeError(
-                f"JSON object keys must be strings, received {key_type!r}"
-            )
+            raise TypeError(f"JSON object keys must be strings, received {key_type!r}")
         return {
             "type": "object",
             "additionalProperties": _json_schema_for_type(value_type),
@@ -210,29 +209,56 @@ class BrokerSession:
     schemas: list[dict[str, Any]]
     lock: threading.RLock = field(default_factory=threading.RLock)
     journal: list[dict[str, Any]] = field(default_factory=list)
-    seen_messages: set[int] = field(default_factory=set)
     trace: list[dict[str, Any]] = field(default_factory=list)
 
     def sync_notifications(self) -> None:
-        now = self.notification_system.get_current_time()
-        for message in self.notification_system.message_queue.list_view():
-            identity = id(message)
-            if identity in self.seen_messages or message.timestamp.timestamp() > now:
-                continue
-            self.seen_messages.add(identity)
-            self.journal.append(_message_entry(len(self.journal) + 1, message))
+        """Move ready native notifications into the persistent broker journal."""
+
+        with self.lock:
+            now = datetime.fromtimestamp(
+                self.notification_system.get_current_time(), tz=timezone.utc
+            )
+            for message in self.notification_system.message_queue.get_by_timestamp(now):
+                self.journal.append(_message_entry(len(self.journal) + 1, message))
+
+    def _notifications_after(self, cursor: int) -> dict[str, Any]:
+        entries = [entry for entry in self.journal if entry["sequence"] > cursor]
+        latest_cursor = self.journal[-1]["sequence"] if self.journal else cursor
+        return {
+            "notifications": entries,
+            "next_cursor": max(cursor, latest_cursor),
+            "environment_stopped": any(
+                entry["type"] == MessageType.ENVIRONMENT_STOP.value for entry in entries
+            ),
+        }
 
     def notifications_after(self, cursor: int) -> dict[str, Any]:
         with self.lock:
             self.sync_notifications()
-            entries = [entry for entry in self.journal if entry["sequence"] > cursor]
+            return self._notifications_after(cursor)
+
+    def wait_for_notifications(
+        self, cursor: int, arguments: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Return unread entries, advancing native simulated time at most once."""
+
+        with self.lock:
+            self.sync_notifications()
+            result = self._notifications_after(cursor)
+            if result["notifications"]:
+                return {**result, "native_wait_invoked": False}
+
+            if WAIT_FOR_NOTIFICATION_TOOL not in self.tools:
+                raise KeyError(WAIT_FOR_NOTIFICATION_TOOL)
+
+            # Keep the original bound AppTool invocation so ARE records the genuine
+            # SystemApp wait event. RLock makes the nested invocation safe while
+            # preserving one atomic drain/check/wait/drain operation.
+            self.invoke(WAIT_FOR_NOTIFICATION_TOOL, arguments)
+            self.sync_notifications()
             return {
-                "notifications": entries,
-                "next_cursor": self.journal[-1]["sequence"] if self.journal else cursor,
-                "environment_stopped": any(
-                    entry["type"] == MessageType.ENVIRONMENT_STOP.value
-                    for entry in entries
-                ),
+                **self._notifications_after(cursor),
+                "native_wait_invoked": True,
             }
 
     def invoke(self, tool_name: str, arguments: dict[str, Any]) -> Any:
@@ -369,6 +395,41 @@ class ToolStateBroker:
             def do_POST(self) -> None:  # noqa: N802
                 parsed = urlparse(self.path)
                 parts = parsed.path.strip("/").split("/")
+                if (
+                    len(parts) == 5
+                    and parts[:2] == ["v1", "sessions"]
+                    and parts[3:] == ["notifications", "wait"]
+                ):
+                    session = self._session(parts[2])
+                    if session is None:
+                        return
+                    try:
+                        length = int(self.headers.get("Content-Length", "0"))
+                        value = json.loads(self.rfile.read(length) or b"{}")
+                        cursor = value.get("cursor")
+                        arguments = value.get("arguments", {})
+                        if not isinstance(cursor, int) or isinstance(cursor, bool):
+                            raise ValueError("cursor must be an integer")
+                        if not isinstance(arguments, dict):
+                            raise ValueError("arguments must be an object")
+                        result = session.wait_for_notifications(cursor, arguments)
+                    except KeyError:
+                        self._write(
+                            HTTPStatus.NOT_FOUND,
+                            {"error": "wait-for-notification tool is unavailable"},
+                        )
+                        return
+                    except (ValueError, TypeError, json.JSONDecodeError) as exc:
+                        self._write(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+                        return
+                    except Exception as exc:
+                        self._write(
+                            HTTPStatus.UNPROCESSABLE_ENTITY,
+                            {"error": f"{type(exc).__name__}: {exc}"},
+                        )
+                        return
+                    self._write(HTTPStatus.OK, result)
+                    return
                 if (
                     len(parts) != 6
                     or parts[:2] != ["v1", "sessions"]

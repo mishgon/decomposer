@@ -24,6 +24,7 @@ HIDDEN_AUI_TOOLS = frozenset(
         "AgentUserInterface__get_all_messages",
     }
 )
+WAIT_FOR_NOTIFICATION_TOOL = "SystemApp__wait_for_notification"
 
 
 class EpisodeContext(TypedDict):
@@ -127,13 +128,18 @@ def _broker_tool_result(response: httpx.Response) -> str:
     return _serialize_tool_result(response.json()["result"])
 
 
-def _tool_from_schema(schema: dict[str, Any], context: EpisodeContext):
+def _tool_from_schema(
+    schema: dict[str, Any],
+    context: EpisodeContext,
+    *,
+    coroutine: Any | None = None,
+):
     function = schema["function"]
     name = function["name"]
     if name in HIDDEN_AUI_TOOLS:
         raise ValueError(f"Hidden AUI tool leaked into episode context: {name}")
 
-    async def invoke(**arguments: Any) -> Any:
+    async def broker_invoke(**arguments: Any) -> Any:
         async with httpx.AsyncClient(timeout=300) as client:
             response = await client.post(
                 f"{context['broker_url']}/tools/{name}/invoke",
@@ -143,7 +149,7 @@ def _tool_from_schema(schema: dict[str, Any], context: EpisodeContext):
             return _broker_tool_result(response)
 
     return StructuredTool.from_function(
-        coroutine=invoke,
+        coroutine=coroutine or broker_invoke,
         name=name,
         description=function.get("description") or "",
         args_schema=_arguments_model(name, function.get("parameters") or {}),
@@ -192,38 +198,79 @@ def _model() -> ChatOpenAI:
     return ChatOpenAI(**kwargs)
 
 
-async def run_subagent(
-    state: MessagesState, runtime: Runtime[EpisodeContext]
-) -> dict[str, Any]:
-    context = runtime.context
-    # Each worker owns an independent journal cursor. Starting at zero makes
-    # the initial scenario/user state readable by every parallel worker.
-    cursor = 0
-    tools = [_tool_from_schema(schema, context) for schema in context["tool_schemas"]]
+def _worker_tools(context: EpisodeContext, consumer: str) -> list[StructuredTool]:
+    """Build one worker's broker tools around an independent journal cursor."""
 
-    async def read_notifications() -> dict[str, Any]:
+    cursor = int(context["notification_cursor"])
+    authorization = {"Authorization": f"Bearer {context['session_token']}"}
+
+    def advance_cursor(result: dict[str, Any]) -> None:
         nonlocal cursor
+        cursor = max(cursor, int(result["next_cursor"]))
+
+    async def read_notifications() -> str:
         async with httpx.AsyncClient(timeout=30) as client:
             response = await client.get(
                 f"{context['broker_url']}/notifications",
-                params={"cursor": cursor, "consumer": f"subagent-{id(state)}"},
-                headers={"Authorization": f"Bearer {context['session_token']}"},
+                params={"cursor": cursor, "consumer": consumer},
+                headers=authorization,
             )
             response.raise_for_status()
             result = response.json()
-            cursor = int(result["next_cursor"])
-            return result
+            advance_cursor(result)
+            return _serialize_tool_result(result)
 
+    async def wait_for_notification(**arguments: Any) -> str:
+        async with httpx.AsyncClient(timeout=300) as client:
+            response = await client.post(
+                f"{context['broker_url']}/notifications/wait",
+                headers=authorization,
+                json={
+                    "cursor": cursor,
+                    "consumer": consumer,
+                    "arguments": arguments,
+                },
+            )
+            if response.status_code in {400, 422}:
+                return _broker_tool_result(response)
+            response.raise_for_status()
+            result = response.json()
+            advance_cursor(result)
+            return _serialize_tool_result(result)
+
+    tools = []
+    for schema in context["tool_schemas"]:
+        name = schema["function"]["name"]
+        tools.append(
+            _tool_from_schema(
+                schema,
+                context,
+                coroutine=(
+                    wait_for_notification
+                    if name == WAIT_FOR_NOTIFICATION_TOOL
+                    else None
+                ),
+            )
+        )
     tools.append(
         StructuredTool.from_function(
             coroutine=read_notifications,
             name="Gaia2Broker__read_notifications",
             description=(
                 "Read newly ready ARE notifications using this subagent's independent "
-                "cursor. Use after waiting or when the environment may have changed."
+                "cursor. Use when the environment may have changed; the wrapped "
+                "SystemApp__wait_for_notification both waits and returns notifications."
             ),
         )
     )
+    return tools
+
+
+async def run_subagent(
+    state: MessagesState, runtime: Runtime[EpisodeContext]
+) -> dict[str, Any]:
+    context = runtime.context
+    tools = _worker_tools(context, consumer=f"subagent-{id(state)}")
     system_prompt = os.environ.get(
         "GAIA2_SUBAGENT_SYSTEM_PROMPT",
         (

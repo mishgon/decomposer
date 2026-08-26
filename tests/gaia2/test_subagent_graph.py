@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 
 import httpx
 import pytest
@@ -25,6 +26,24 @@ TYPED_PARAMETERS = {
     },
     "required": ["age"],
     "additionalProperties": False,
+}
+
+WAIT_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "SystemApp__wait_for_notification",
+        "description": "Wait for the next notification.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "timeout": {
+                    "type": "integer",
+                    "default": 0,
+                }
+            },
+            "additionalProperties": False,
+        },
+    },
 }
 
 
@@ -72,7 +91,9 @@ def test_worker_does_not_hide_broker_authentication_errors():
 def test_worker_argument_model_preserves_types_and_rejects_stringified_values():
     model = graphs._arguments_model("Typed", TYPED_PARAMETERS)
 
-    assert model.model_validate({"age": 24, "recipients": ["a@example.com"]}).model_dump() == {
+    assert model.model_validate(
+        {"age": 24, "recipients": ["a@example.com"]}
+    ).model_dump() == {
         "age": 24,
         "recipients": ["a@example.com"],
     }
@@ -107,6 +128,70 @@ def test_worker_returns_argument_validation_as_correctable_tool_feedback():
     result = asyncio.run(tool.ainvoke({"age": "24", "recipients": "[]"}))
 
     assert '"error": "Invalid tool arguments"' in result
+
+
+def test_worker_wait_adapter_starts_from_context_and_advances_shared_cursor(
+    monkeypatch,
+):
+    requests = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path.endswith("/notifications/wait"):
+            body = json.loads(request.content)
+            assert body["cursor"] == 7
+            assert body["arguments"] == {"timeout": 5}
+            return httpx.Response(
+                200,
+                json={
+                    "notifications": [{"sequence": 9, "message": "ready"}],
+                    "next_cursor": 9,
+                    "environment_stopped": False,
+                    "native_wait_invoked": True,
+                },
+            )
+        assert request.url.path.endswith("/notifications")
+        assert request.url.params["cursor"] == "9"
+        return httpx.Response(
+            200,
+            json={
+                "notifications": [],
+                "next_cursor": 9,
+                "environment_stopped": False,
+            },
+        )
+
+    transport = httpx.MockTransport(handler)
+    async_client = httpx.AsyncClient
+
+    def client_factory(*args, **kwargs):
+        return async_client(transport=transport)
+
+    monkeypatch.setattr(graphs.httpx, "AsyncClient", client_factory)
+    context = {
+        "tool_schemas": [WAIT_SCHEMA],
+        "broker_url": "http://broker.test",
+        "session_token": "token",
+        "policy": "shared_serialized",
+        "scenario_id": "scenario",
+        "run_number": 1,
+        "notification_cursor": 7,
+    }
+    tools = {
+        tool.name: tool for tool in graphs._worker_tools(context, consumer="worker-a")
+    }
+
+    wait_result = asyncio.run(
+        tools["SystemApp__wait_for_notification"].ainvoke({"timeout": 5})
+    )
+    read_result = asyncio.run(tools["Gaia2Broker__read_notifications"].ainvoke({}))
+
+    assert '"native_wait_invoked": true' in wait_result
+    assert '"next_cursor": 9' in read_result
+    assert [request.url.path for request in requests] == [
+        "/notifications/wait",
+        "/notifications",
+    ]
 
 
 def test_worker_model_forwards_non_thinking_sampling(monkeypatch):
