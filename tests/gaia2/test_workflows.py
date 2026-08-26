@@ -20,6 +20,7 @@ from gyms.gaia2.experiments import (
     DECOMPOSER_EXPERIMENT,
     DOMAIN,
     INSTANCE_TYPES_BY_NUM_GPUS,
+    QWEN35_BASE_DECOMPOSER_EXPERIMENT,
     QWEN35_SFT_EXPERIMENT,
     SCENARIO_COUNT,
     SIMPLE_EXPERIMENT,
@@ -101,6 +102,7 @@ def test_experiment_registry_contains_local_and_openrouter_profiles() -> None:
         DECOMPOSER_EXPERIMENT,
         DEEPSEEK_GEMMA_EXPERIMENT,
         QWEN35_SFT_EXPERIMENT,
+        QWEN35_BASE_DECOMPOSER_EXPERIMENT,
         DEEPSEEK_QWEN_EXPERIMENT,
         SIMPLE_EXPERIMENT,
         SIMPLE_QWEN_EXPERIMENT,
@@ -116,6 +118,7 @@ def test_experiment_registry_contains_local_and_openrouter_profiles() -> None:
             DECOMPOSER_EXPERIMENT,
             DEEPSEEK_GEMMA_EXPERIMENT,
             QWEN35_SFT_EXPERIMENT,
+            QWEN35_BASE_DECOMPOSER_EXPERIMENT,
             DEEPSEEK_QWEN_EXPERIMENT,
         )
     )
@@ -195,6 +198,55 @@ def test_qwen_sft_decomposer_uses_qwen_manager_and_worker_profiles() -> None:
     assert "--trust-remote-code" not in manager
     assert "--language-model-only" not in worker
     assert "--trust-remote-code" in worker
+
+
+def test_untuned_qwen_decomposer_matches_sft_two_gpu_topology() -> None:
+    experiment = QWEN35_BASE_DECOMPOSER_EXPERIMENT
+
+    assert experiment.name == (
+        "qwen35-4b-base-non-thinking-qwen35-4b-non-thinking"
+    )
+    assert experiment.num_gpus == 2
+    assert experiment.prompt_profile == "student"
+    assert experiment.manager_parallel_tool_calls is False
+    assert experiment.manager_checkpoint == experiment.worker_checkpoint
+    assert experiment.manager_port != experiment.worker_port
+    assert (
+        experiment.temperature,
+        experiment.top_p,
+        experiment.top_k,
+        experiment.min_p,
+        experiment.presence_penalty,
+        experiment.repetition_penalty,
+    ) == (0.7, 0.8, 20, 0.0, 1.5, 1.0)
+
+    manager, worker = decomposer_vllm_commands(experiment)
+    assert manager is not None
+    for command, port in (
+        (manager, experiment.manager_port),
+        (worker, experiment.worker_port),
+    ):
+        assert str(experiment.worker_checkpoint) in command
+        assert command[command.index("--port") + 1] == str(port)
+        assert command[command.index("--max-model-len") + 1] == "131072"
+        assert command[command.index("--tool-call-parser") + 1] == "qwen3_xml"
+        assert command[command.index("--gdn-prefill-backend") + 1] == "triton"
+        assert "--reasoning-parser" not in command
+        assert "--language-model-only" not in command
+        assert "--trust-remote-code" in command
+        assert '{"enable_thinking":false}' in command
+
+    plan = _dry_plan(
+        Path.cwd(), experiment, Path("/tmp/output"), ("0", "1"), 3, None
+    )
+    assert plan["gpu_assignments"] == {
+        "manager_vllm": "0",
+        "worker_vllm": "1",
+    }
+    vllm_services = [
+        service for service in plan["services"] if "vllm serve" in service
+    ]
+    assert len(vllm_services) == 2
 
 
 def test_qwen_worker_uses_official_non_thinking_sampling() -> None:

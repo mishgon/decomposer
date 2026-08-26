@@ -67,6 +67,7 @@ QWEN35_4B_BASE = (
 QWEN35_4B_SFT_SERVED_NAME = (
     "decomposer/qwen35-4b-sft-workplace-v1-3765-32k"
 )
+QWEN35_4B_BASE_MANAGER_SERVED_NAME = "decomposer/qwen35-4b-base-manager"
 QWEN35_4B_SFT = (
     ARTIFACTS_ROOT
     / "training"
@@ -251,6 +252,36 @@ QWEN35_SFT_EXPERIMENT = DecomposerExperiment(
     worker_trust_remote_code=True,
     worker_gdn_prefill_backend="triton",
 )
+QWEN35_BASE_DECOMPOSER_EXPERIMENT = DecomposerExperiment(
+    name="qwen35-4b-base-non-thinking-qwen35-4b-non-thinking",
+    worker_checkpoint=QWEN35_4B_BASE,
+    manager_checkpoint=QWEN35_4B_BASE,
+    manager_served_name=QWEN35_4B_BASE_MANAGER_SERVED_NAME,
+    worker_served_name="Qwen/Qwen3.5-4B",
+    manager_port=8028,
+    worker_port=8027,
+    service_port=8128,
+    subagent_port=2028,
+    max_model_len=131072,
+    temperature=_QWEN35_NON_THINKING_SAMPLING.temperature,
+    top_p=_QWEN35_NON_THINKING_SAMPLING.top_p,
+    top_k=_QWEN35_NON_THINKING_SAMPLING.top_k,
+    min_p=_QWEN35_NON_THINKING_SAMPLING.min_p,
+    presence_penalty=_QWEN35_NON_THINKING_SAMPLING.presence_penalty,
+    repetition_penalty=_QWEN35_NON_THINKING_SAMPLING.repetition_penalty,
+    manager_thinking=False,
+    manager_tool_call_parser="qwen3_xml",
+    manager_reasoning_parser=None,
+    manager_language_model_only=False,
+    manager_trust_remote_code=True,
+    manager_gdn_prefill_backend="triton",
+    worker_thinking=False,
+    worker_tool_call_parser="qwen3_xml",
+    worker_reasoning_parser=None,
+    worker_language_model_only=False,
+    worker_trust_remote_code=True,
+    worker_gdn_prefill_backend="triton",
+)
 DEEPSEEK_QWEN_EXPERIMENT = DecomposerExperiment(
     name="deepseek-v4-flash-0731-teacher-qwen35-4b-non-thinking",
     worker_checkpoint=QWEN35_4B_BASE,
@@ -303,6 +334,7 @@ ALL_EXPERIMENTS: tuple[Experiment, ...] = (
     DECOMPOSER_EXPERIMENT,
     DEEPSEEK_GEMMA_EXPERIMENT,
     QWEN35_SFT_EXPERIMENT,
+    QWEN35_BASE_DECOMPOSER_EXPERIMENT,
     DEEPSEEK_QWEN_EXPERIMENT,
     SIMPLE_EXPERIMENT,
     SIMPLE_QWEN_EXPERIMENT,
