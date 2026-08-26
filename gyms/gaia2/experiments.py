@@ -64,6 +64,17 @@ QWEN35_4B_BASE = (
     / "snapshots"
     / "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a"
 )
+QWEN35_4B_SFT_SERVED_NAME = (
+    "decomposer/qwen35-4b-sft-workplace-v1-3765-32k"
+)
+QWEN35_4B_SFT = (
+    ARTIFACTS_ROOT
+    / "training"
+    / "sft"
+    / "jobs"
+    / "qwen35-4b-nonthinking-workplace-v1-3765-32k-full-4gpu"
+    / "final"
+)
 
 DecomposerManagerBackend = Literal["local_vllm", "openrouter"]
 DecomposerPromptProfile = Literal["student", "teacher"]
@@ -132,7 +143,13 @@ class DecomposerExperiment:
     repetition_penalty: float | None = None
     gpu_memory_utilization: float = 0.90
     concurrency: int = 4
+    manager_parallel_tool_calls: bool = False
     manager_thinking: bool = False
+    manager_tool_call_parser: str = "gemma4"
+    manager_reasoning_parser: str | None = "gemma4"
+    manager_language_model_only: bool = True
+    manager_trust_remote_code: bool = False
+    manager_gdn_prefill_backend: str | None = None
     worker_thinking: bool = True
     worker_tool_call_parser: str = "gemma4"
     worker_reasoning_parser: str | None = "gemma4"
@@ -195,6 +212,37 @@ DEEPSEEK_GEMMA_EXPERIMENT = DecomposerExperiment(
     manager_thinking=True,
 )
 _QWEN35_NON_THINKING_SAMPLING = qwen35_general_sampling(thinking=False)
+QWEN35_SFT_EXPERIMENT = DecomposerExperiment(
+    name=(
+        "qwen35-4b-sft-workplace-v1-3765-32k-non-thinking-"
+        "qwen35-4b-non-thinking"
+    ),
+    worker_checkpoint=QWEN35_4B_BASE,
+    manager_checkpoint=QWEN35_4B_SFT,
+    manager_served_name=QWEN35_4B_SFT_SERVED_NAME,
+    worker_served_name="Qwen/Qwen3.5-4B",
+    manager_port=8026,
+    worker_port=8025,
+    service_port=8126,
+    subagent_port=2026,
+    max_model_len=131072,
+    temperature=_QWEN35_NON_THINKING_SAMPLING.temperature,
+    top_p=_QWEN35_NON_THINKING_SAMPLING.top_p,
+    top_k=_QWEN35_NON_THINKING_SAMPLING.top_k,
+    min_p=_QWEN35_NON_THINKING_SAMPLING.min_p,
+    presence_penalty=_QWEN35_NON_THINKING_SAMPLING.presence_penalty,
+    repetition_penalty=_QWEN35_NON_THINKING_SAMPLING.repetition_penalty,
+    manager_thinking=False,
+    manager_tool_call_parser="qwen3_xml",
+    manager_reasoning_parser=None,
+    manager_gdn_prefill_backend="triton",
+    worker_thinking=False,
+    worker_tool_call_parser="qwen3_xml",
+    worker_reasoning_parser=None,
+    worker_language_model_only=False,
+    worker_trust_remote_code=True,
+    worker_gdn_prefill_backend="triton",
+)
 DEEPSEEK_QWEN_EXPERIMENT = DecomposerExperiment(
     name="deepseek-v4-flash-0731-teacher-qwen35-4b-non-thinking",
     worker_checkpoint=QWEN35_4B_BASE,
@@ -228,6 +276,7 @@ SIMPLE_EXPERIMENT = SimpleExperiment(
 ALL_EXPERIMENTS: tuple[Experiment, ...] = (
     DECOMPOSER_EXPERIMENT,
     DEEPSEEK_GEMMA_EXPERIMENT,
+    QWEN35_SFT_EXPERIMENT,
     DEEPSEEK_QWEN_EXPERIMENT,
     SIMPLE_EXPERIMENT,
 )

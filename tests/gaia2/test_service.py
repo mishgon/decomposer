@@ -222,8 +222,39 @@ def test_manager_model_forwards_non_thinking_sampling(monkeypatch):
     assert captured["temperature"] == 1.0
     assert captured["top_p"] == 0.95
     assert captured["max_completion_tokens"] == 4096
+    assert captured["model_kwargs"] == {"parallel_tool_calls": False}
     assert captured["extra_body"] == {
         "top_k": 64,
         "include_reasoning": False,
         "chat_template_kwargs": {"enable_thinking": False},
     }
+
+
+def test_manager_model_allows_parallel_tool_call_override(monkeypatch):
+    captured = {}
+
+    def fake_model(**kwargs):
+        captured.update(kwargs)
+        return object()
+
+    monkeypatch.setattr(service, "ChatOpenAI", fake_model)
+    service._model_from_config(
+        {
+            "model": "manager",
+            "parallel_tool_calls": True,
+        }
+    )
+
+    assert captured["model_kwargs"] == {"parallel_tool_calls": True}
+
+
+def test_manager_model_rejects_non_boolean_parallel_tool_calls():
+    with pytest.raises(
+        ValueError, match="manager.parallel_tool_calls must be a boolean"
+    ):
+        service._model_from_config(
+            {
+                "model": "manager",
+                "parallel_tool_calls": "false",
+            }
+        )

@@ -274,6 +274,11 @@ def decomposer_vllm_commands(
             max_model_len=experiment.max_model_len,
             max_num_seqs=experiment.max_num_seqs,
             gpu_memory_utilization=experiment.gpu_memory_utilization,
+            tool_call_parser=experiment.manager_tool_call_parser,
+            reasoning_parser=experiment.manager_reasoning_parser,
+            language_model_only=experiment.manager_language_model_only,
+            trust_remote_code=experiment.manager_trust_remote_code,
+            gdn_prefill_backend=experiment.manager_gdn_prefill_backend,
         )
     worker = _common_vllm_command(
         experiment.worker_checkpoint,
@@ -605,6 +610,19 @@ def _runtime_configs(
             "max_retries": 2,
         }
     else:
+        manager_extra_body: dict[str, Any] = {
+            "top_k": experiment.top_k,
+            "include_reasoning": experiment.manager_thinking,
+            "chat_template_kwargs": {
+                "enable_thinking": experiment.manager_thinking
+            },
+        }
+        if experiment.min_p is not None:
+            manager_extra_body["min_p"] = experiment.min_p
+        if experiment.repetition_penalty is not None:
+            manager_extra_body["repetition_penalty"] = (
+                experiment.repetition_penalty
+            )
         manager = {
             "model": experiment.manager_served_name,
             "base_url": f"http://127.0.0.1:{experiment.manager_port}/v1",
@@ -613,14 +631,11 @@ def _runtime_configs(
             "top_p": experiment.top_p,
             "max_completion_tokens": experiment.max_completion_tokens,
             "use_responses_api": False,
-            "extra_body": {
-                "top_k": experiment.top_k,
-                "include_reasoning": experiment.manager_thinking,
-                "chat_template_kwargs": {
-                    "enable_thinking": experiment.manager_thinking
-                },
-            },
+            "extra_body": manager_extra_body,
         }
+        if experiment.presence_penalty is not None:
+            manager["presence_penalty"] = experiment.presence_penalty
+    manager["parallel_tool_calls"] = experiment.manager_parallel_tool_calls
     service = {
         "manager": manager,
         "decomposer_system_prompt_profile": experiment.prompt_profile,
@@ -654,6 +669,7 @@ def _runtime_configs(
                 "backend": experiment.manager_backend,
                 "served_name": experiment.manager_served_name,
                 "thinking": experiment.manager_thinking,
+                "parallel_tool_calls": experiment.manager_parallel_tool_calls,
                 **(
                     {"path": str(experiment.manager_checkpoint)}
                     if experiment.manager_checkpoint is not None
@@ -775,6 +791,11 @@ def _dry_plan(
             if isinstance(experiment, DecomposerExperiment)
             else None
         ),
+        "manager_parallel_tool_calls": (
+            experiment.manager_parallel_tool_calls
+            if isinstance(experiment, DecomposerExperiment)
+            else None
+        ),
         "gpu_assignments": gpu_assignments,
         "preparation_manifest": str(manifest_path),
         "services": [shlex.join(command) for command in services],
@@ -851,6 +872,11 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
         "limit": args.limit,
         "decomposer_system_prompt_profile": (
             experiment.prompt_profile
+            if isinstance(experiment, DecomposerExperiment)
+            else None
+        ),
+        "manager_parallel_tool_calls": (
+            experiment.manager_parallel_tool_calls
             if isinstance(experiment, DecomposerExperiment)
             else None
         ),

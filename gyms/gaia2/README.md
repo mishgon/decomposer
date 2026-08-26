@@ -56,12 +56,22 @@ The registered experiments are:
   E4B worker on one GPU.
 - `deepseek-v4-flash-0731-teacher-qwen35-4b-non-thinking`: the same remote
   teacher manager with a local non-thinking Qwen3.5-4B worker on one GPU.
+- `qwen35-4b-sft-workplace-v1-3765-32k-non-thinking-qwen35-4b-non-thinking`:
+  the Workplace-trained non-thinking Qwen3.5-4B manager on the first GPU and
+  a base non-thinking Qwen3.5-4B worker on the second GPU, using the student
+  prompt and 128K context.
 - `gemma4-e4b-it-thinking`: vanilla thinking E4B simple agent on one GPU.
 
 ```bash
 # Decomposer, three attempts per scenario.
 .venv/bin/python -m gyms.gaia2.run \
   --experiment gemma4-e4b-sft-deepseek-e4b-v1-8k-non-thinking-gemma4-e4b-thinking \
+  --num-repeats 3 \
+  --cuda-visible-devices 6,7
+
+# Qwen SFT Decomposer, three attempts per scenario.
+.venv/bin/python -m gyms.gaia2.run \
+  --experiment qwen35-4b-sft-workplace-v1-3765-32k-non-thinking-qwen35-4b-non-thinking \
   --num-repeats 3 \
   --cuda-visible-devices 6,7
 

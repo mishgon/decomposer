@@ -19,6 +19,7 @@ from gyms.gaia2.experiments import (
     DECOMPOSER_EXPERIMENT,
     DOMAIN,
     INSTANCE_TYPES_BY_NUM_GPUS,
+    QWEN35_SFT_EXPERIMENT,
     SCENARIO_COUNT,
     SIMPLE_EXPERIMENT,
     SPLIT,
@@ -28,6 +29,7 @@ from gyms.gaia2.experiments import (
 )
 from gyms.gaia2.run import (
     _base_environment,
+    _dry_plan,
     _runtime_configs,
     are_command,
     decomposer_vllm_commands,
@@ -95,6 +97,7 @@ def test_experiment_registry_contains_local_and_openrouter_profiles() -> None:
     assert collect_experiments() == [
         DECOMPOSER_EXPERIMENT,
         DEEPSEEK_GEMMA_EXPERIMENT,
+        QWEN35_SFT_EXPERIMENT,
         DEEPSEEK_QWEN_EXPERIMENT,
         SIMPLE_EXPERIMENT,
     ]
@@ -102,6 +105,15 @@ def test_experiment_registry_contains_local_and_openrouter_profiles() -> None:
         1: "a100plus.1gpu.80vG.12C.182G",
         2: "a100plus.2gpu.80vG.24C.364G",
     }
+    assert all(
+        not experiment.manager_parallel_tool_calls
+        for experiment in (
+            DECOMPOSER_EXPERIMENT,
+            DEEPSEEK_GEMMA_EXPERIMENT,
+            QWEN35_SFT_EXPERIMENT,
+            DEEPSEEK_QWEN_EXPERIMENT,
+        )
+    )
     assert output_dir(SIMPLE_EXPERIMENT, 3).parts[-3:] == (
         SPLIT,
         DOMAIN,
@@ -138,6 +150,23 @@ def test_openrouter_decomposer_starts_only_the_configured_worker() -> None:
     assert qwen_worker[qwen_worker.index("--gdn-prefill-backend") + 1] == "triton"
 
 
+def test_qwen_sft_decomposer_uses_qwen_manager_and_worker_profiles() -> None:
+    manager, worker = decomposer_vllm_commands(QWEN35_SFT_EXPERIMENT)
+
+    assert manager is not None
+    assert str(QWEN35_SFT_EXPERIMENT.manager_checkpoint) in manager
+    assert str(QWEN35_SFT_EXPERIMENT.worker_checkpoint) in worker
+    for command in (manager, worker):
+        assert "qwen3_xml" in command
+        assert "--reasoning-parser" not in command
+        assert '{"enable_thinking":false}' in command
+        assert command[command.index("--gdn-prefill-backend") + 1] == "triton"
+    assert "--language-model-only" in manager
+    assert "--trust-remote-code" not in manager
+    assert "--language-model-only" not in worker
+    assert "--trust-remote-code" in worker
+
+
 def test_qwen_worker_uses_official_non_thinking_sampling() -> None:
     experiment = DEEPSEEK_QWEN_EXPERIMENT
     assert (
@@ -160,6 +189,34 @@ def test_qwen_worker_uses_official_non_thinking_sampling() -> None:
         "GAIA2_SUBAGENT_MIN_P": "0.0",
         "GAIA2_SUBAGENT_PRESENCE_PENALTY": "1.5",
         "GAIA2_SUBAGENT_REPETITION_PENALTY": "1.0",
+    }
+
+
+def test_qwen_sft_manager_uses_official_non_thinking_sampling(tmp_path) -> None:
+    service_path, _ = _runtime_configs(
+        Path(__file__).resolve().parents[2],
+        tmp_path,
+        QWEN35_SFT_EXPERIMENT,
+    )
+    manager = json.loads(service_path.read_text(encoding="utf-8"))["manager"]
+
+    assert manager == {
+        "model": "decomposer/qwen35-4b-sft-workplace-v1-3765-32k",
+        "base_url": "http://127.0.0.1:8026/v1",
+        "api_key": "EMPTY",
+        "temperature": 0.7,
+        "top_p": 0.8,
+        "presence_penalty": 1.5,
+        "max_completion_tokens": 4096,
+        "use_responses_api": False,
+        "parallel_tool_calls": False,
+        "extra_body": {
+            "top_k": 20,
+            "min_p": 0.0,
+            "repetition_penalty": 1.0,
+            "include_reasoning": False,
+            "chat_template_kwargs": {"enable_thinking": False},
+        },
     }
 
 
@@ -195,8 +252,25 @@ def test_openrouter_runtime_uses_teacher_responses_api(tmp_path) -> None:
         "reasoning": {"effort": "high"},
         "timeout": 3300,
         "max_retries": 2,
+        "parallel_tool_calls": False,
     }
     assert "path" not in plugin["model_configuration"]["manager"]
+    assert (
+        plugin["model_configuration"]["manager"]["parallel_tool_calls"] is False
+    )
+
+
+def test_decomposer_dry_plan_records_sequential_manager_tool_calls(tmp_path) -> None:
+    plan = _dry_plan(
+        Path(__file__).resolve().parents[2],
+        DEEPSEEK_QWEN_EXPERIMENT,
+        tmp_path,
+        ("0",),
+        1,
+        1,
+    )
+
+    assert plan["manager_parallel_tool_calls"] is False
 
 
 def test_openrouter_preparation_hashes_only_the_local_worker(monkeypatch) -> None:
@@ -217,6 +291,30 @@ def test_openrouter_preparation_hashes_only_the_local_worker(monkeypatch) -> Non
     assert models["manager"] == {
         "backend": "openrouter",
         "model": "deepseek/deepseek-v4-flash-0731",
+    }
+
+
+def test_qwen_sft_preparation_hashes_manager_and_worker(monkeypatch) -> None:
+    calls = []
+
+    def fake_validate_checkpoint(path, *, full_hashes):
+        calls.append((path, full_hashes))
+        return {"path": str(path)}
+
+    monkeypatch.setattr(prepare, "validate_checkpoint", fake_validate_checkpoint)
+
+    models = prepare.experiment_models(
+        QWEN35_SFT_EXPERIMENT,
+        full_hashes=False,
+    )
+
+    assert calls == [
+        (QWEN35_SFT_EXPERIMENT.worker_checkpoint, False),
+        (QWEN35_SFT_EXPERIMENT.manager_checkpoint, False),
+    ]
+    assert models == {
+        "worker": {"path": str(QWEN35_SFT_EXPERIMENT.worker_checkpoint)},
+        "manager": {"path": str(QWEN35_SFT_EXPERIMENT.manager_checkpoint)},
     }
 
 
@@ -301,13 +399,13 @@ def test_mlspace_payload_uses_registry_gpu_type_and_redactable_judge_key(
     tmp_path,
 ) -> None:
     payload = build_payload(
-        DECOMPOSER_EXPERIMENT,
+        QWEN35_SFT_EXPERIMENT,
         tmp_path / "staged",
         num_repeats=3,
         limit=None,
         author="sukhorukov",
         base_image="image",
-        priority=None,
+        priority="high",
         force=False,
         judge_environment={
             "LLM_PROXY_URL": "https://judge.test/v1",
@@ -318,6 +416,7 @@ def test_mlspace_payload_uses_registry_gpu_type_and_redactable_judge_key(
     )
 
     assert payload["instance_type"] == INSTANCE_TYPES_BY_NUM_GPUS[2]
+    assert payload["priority_class"] == "high"
     assert "--num-repeats 3" in payload["script"]
     assert "--cuda-visible-devices 0,1" in payload["script"]
     assert payload["env_variables"]["LLM_PROXY_MASTER_KEY"] == "secret"

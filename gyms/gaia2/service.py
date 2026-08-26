@@ -67,6 +67,9 @@ class Episode:
 def _model_from_config(value: dict[str, Any]) -> ChatOpenAI:
     if not value.get("model"):
         raise ValueError("manager.model must be configured")
+    parallel_tool_calls = value.get("parallel_tool_calls", False)
+    if not isinstance(parallel_tool_calls, bool):
+        raise ValueError("manager.parallel_tool_calls must be a boolean")
     api_key = value.get("api_key")
     api_key_env = value.get("api_key_env", "OPENAI_API_KEY")
     if api_key is None:
@@ -84,6 +87,7 @@ def _model_from_config(value: dict[str, Any]) -> ChatOpenAI:
         "use_responses_api": value.get("use_responses_api", False),
         "timeout": value.get("timeout", 3300),
         "max_retries": value.get("max_retries", 2),
+        "model_kwargs": {"parallel_tool_calls": parallel_tool_calls},
     }
     extra_body = dict(value.get("extra_body") or {})
     known = {key: item for key, item in known.items() if item is not None}
