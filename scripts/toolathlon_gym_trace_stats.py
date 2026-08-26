@@ -1,6 +1,8 @@
 import os
 import json
 from pathlib import Path
+import matplotlib.pyplot as plt
+import numpy as np
 
 from transformers import AutoTokenizer
 
@@ -58,6 +60,8 @@ def count_delegations(messages):
 
     return d
 
+percentages_passed = []
+
 all_tasks = os.listdir(traces)
 for task in all_tasks:
     runs = os.listdir(traces / task)
@@ -82,6 +86,12 @@ for task in all_tasks:
         with open(eval_filepath, "r") as f:
             ev = json.load(f)
         passed = ev["pass"]
+
+        native_result = ev["native_result"]
+        if not (native_result is None) and "total_passed" in native_result and "total_checks" in native_result:
+            percentage_passed = native_result["total_passed"] / native_result["total_checks"]
+        percentages_passed.append(percentage_passed)
+
         if passed:
             successful_messages_length.append(l)
             successful_total_tokens.append(t)
@@ -93,13 +103,37 @@ for task in all_tasks:
 
 
 print(f"Average messages length: {sum(messages_lengths) / len(messages_lengths)}")
-print(f"Passed messages length: {sum(successful_messages_length) / len(successful_messages_length)}")
-print(f"Wrong messages length: {sum(wrong_messages_length) / len(wrong_messages_length)}")
+if len(successful_messages_length) > 0:
+    print(f"Passed messages length: {sum(successful_messages_length) / len(successful_messages_length)}")
+if len(wrong_messages_length) > 0:
+    print(f"Wrong messages length: {sum(wrong_messages_length) / len(wrong_messages_length)}")
 print()
 print(f"Average total tokens: {sum(total_tokens) / len(total_tokens)}")
-print(f"Passed total tokens: {sum(successful_total_tokens) / len(successful_total_tokens)}")
-print(f"Wrong total tokens: {sum(wrong_total_tokens) / len(wrong_total_tokens)}")
+if len(successful_total_tokens) > 0:
+    print(f"Passed total tokens: {sum(successful_total_tokens) / len(successful_total_tokens)}")
+if len(wrong_total_tokens) > 0:
+    print(f"Wrong total tokens: {sum(wrong_total_tokens) / len(wrong_total_tokens)}")
 print()
 print(f"Average delegations: {sum(delegations) / len(delegations)}")
-print(f"Passed delegations: {sum(successful_delegations) / len(successful_delegations)}")
-print(f"Wrong delegations: {sum(wrong_delegations) / len(wrong_delegations)}")
+if len(successful_delegations) > 0:
+    print(f"Passed delegations: {sum(successful_delegations) / len(successful_delegations)}")
+if len(wrong_delegations) > 0:
+    print(f"Wrong delegations: {sum(wrong_delegations) / len(wrong_delegations)}")
+
+
+
+plt.figure(figsize=(8, 5))
+weights = np.ones(len(percentages_passed)) / len(percentages_passed) * 100
+plt.hist(percentages_passed, bins=10, range=(0, 1), weights=weights, edgecolor='black', color='#3498db')
+
+plt.title(f"Distribution Percentage Chart; total {len(percentages_passed)}")
+plt.xlabel('Value Intervals')
+plt.ylabel('Percentage (%)')
+plt.xticks(np.arange(0, 1.1, 0.1)) # Forces X-axis ticks at every 0.1
+plt.grid(axis='y', linestyle='--', alpha=0.7)
+
+plt.savefig('pass_distribution.png', dpi=300)
+plt.show()
+
+print()
+print("saved pass_distribution.png")
