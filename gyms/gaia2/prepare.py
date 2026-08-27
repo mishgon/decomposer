@@ -151,6 +151,15 @@ def validate_checkpoint(
 
 def experiment_models(experiment: Experiment, *, full_hashes: bool) -> dict[str, Any]:
     if isinstance(experiment, SimpleExperiment):
+        if experiment.requires_openrouter:
+            return {
+                "policy": {
+                    "backend": experiment.backend,
+                    "model": experiment.served_name,
+                }
+            }
+        if experiment.checkpoint is None:
+            raise ValueError("Local simple agent requires checkpoint")
         return {
             "policy": validate_checkpoint(
                 experiment.checkpoint, full_hashes=full_hashes
@@ -244,7 +253,13 @@ def prepare_eval(args: argparse.Namespace) -> int:
         "vllm": PROJECT_VENV / "bin" / "vllm",
         "langgraph": PROJECT_VENV / "bin" / "langgraph",
     }
-    required_tools = {"python", "vllm"}
+    required_tools = {"python"}
+    if any(
+        isinstance(item, DecomposerExperiment)
+        or (isinstance(item, SimpleExperiment) and not item.requires_openrouter)
+        for item in experiments
+    ):
+        required_tools.add("vllm")
     if any(isinstance(item, DecomposerExperiment) for item in experiments):
         required_tools.add("langgraph")
     for name in required_tools:

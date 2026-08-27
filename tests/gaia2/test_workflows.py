@@ -23,7 +23,10 @@ from gyms.gaia2.experiments import (
     QWEN35_BASE_DECOMPOSER_EXPERIMENT,
     QWEN35_SFT_EXPERIMENT,
     SCENARIO_COUNT,
+    SIMPLE_DEEPSEEK_EXPERIMENT,
     SIMPLE_EXPERIMENT,
+    SIMPLE_QWEN_2B_EXPERIMENT,
+    SIMPLE_QWEN_9B_EXPERIMENT,
     SIMPLE_QWEN_EXPERIMENT,
     SPLIT,
     collect_experiments,
@@ -36,6 +39,8 @@ from gyms.gaia2.run import (
     _runtime_configs,
     are_command,
     decomposer_vllm_commands,
+    openrouter_proxy_command,
+    selected_cuda_devices,
     simple_vllm_command,
     simple_sampling_parameters,
     subagent_environment,
@@ -106,6 +111,9 @@ def test_experiment_registry_contains_local_and_openrouter_profiles() -> None:
         DEEPSEEK_QWEN_EXPERIMENT,
         SIMPLE_EXPERIMENT,
         SIMPLE_QWEN_EXPERIMENT,
+        SIMPLE_QWEN_2B_EXPERIMENT,
+        SIMPLE_QWEN_9B_EXPERIMENT,
+        SIMPLE_DEEPSEEK_EXPERIMENT,
     ]
     assert BASE_IMAGE.endswith("py3.12-torch2.7.0:0.0.42")
     assert INSTANCE_TYPES_BY_NUM_GPUS == {
@@ -130,6 +138,15 @@ def test_experiment_registry_contains_local_and_openrouter_profiles() -> None:
     assert output_dir(SIMPLE_QWEN_EXPERIMENT, 3).parts[-1] == (
         "qwen35-4b-non-thinking-n3"
     )
+    assert output_dir(SIMPLE_QWEN_2B_EXPERIMENT, 3).parts[-1] == (
+        "qwen35-2b-base-non-thinking-n3"
+    )
+    assert output_dir(SIMPLE_QWEN_9B_EXPERIMENT, 3).parts[-1] == (
+        "qwen35-9b-base-non-thinking-n3"
+    )
+    assert output_dir(SIMPLE_DEEPSEEK_EXPERIMENT, 3).parts[-1] == (
+        "deepseek-v4-flash-0731-n3"
+    )
 
 
 def test_vllm_commands_use_current_e4b_thinking_profiles() -> None:
@@ -145,31 +162,61 @@ def test_vllm_commands_use_current_e4b_thinking_profiles() -> None:
 
 
 def test_simple_qwen_uses_qwen_runtime_and_sampling_profile() -> None:
-    command = simple_vllm_command(SIMPLE_QWEN_EXPERIMENT)
+    for experiment in (
+        SIMPLE_QWEN_EXPERIMENT,
+        SIMPLE_QWEN_2B_EXPERIMENT,
+        SIMPLE_QWEN_9B_EXPERIMENT,
+    ):
+        command = simple_vllm_command(experiment)
 
-    assert str(SIMPLE_QWEN_EXPERIMENT.checkpoint) in command
-    assert command[command.index("--max-model-len") + 1] == "131072"
-    assert command[command.index("--tool-call-parser") + 1] == "qwen3_xml"
-    assert "--reasoning-parser" not in command
-    assert "--language-model-only" not in command
-    assert "--trust-remote-code" in command
-    assert command[command.index("--gdn-prefill-backend") + 1] == "triton"
-    assert '{"enable_thinking":false}' in command
-    assert simple_sampling_parameters(SIMPLE_QWEN_EXPERIMENT) == {
-        "temperature": 0.7,
-        "top_p": 0.8,
-        "top_k": 20,
+        assert str(experiment.checkpoint) in command
+        assert command[command.index("--max-model-len") + 1] == "131072"
+        assert command[command.index("--tool-call-parser") + 1] == "qwen3_xml"
+        assert "--reasoning-parser" not in command
+        assert "--language-model-only" not in command
+        assert "--trust-remote-code" in command
+        assert command[command.index("--gdn-prefill-backend") + 1] == "triton"
+        assert '{"enable_thinking":false}' in command
+        assert simple_sampling_parameters(experiment) == {
+            "temperature": 0.7,
+            "top_p": 0.8,
+            "top_k": 20,
+            "max_tokens": 4096,
+            "min_p": 0.0,
+            "presence_penalty": 1.5,
+            "repetition_penalty": 1.0,
+        }
+
+
+def test_simple_deepseek_uses_local_credential_proxy_without_gpu() -> None:
+    experiment = SIMPLE_DEEPSEEK_EXPERIMENT
+
+    assert experiment.requires_openrouter
+    assert experiment.num_gpus == 0
+    assert selected_cuda_devices(experiment, None) == ()
+    assert experiment.remote_extra_body == {"reasoning": {"effort": "high"}}
+    assert simple_sampling_parameters(experiment) == {
+        "temperature": 1.0,
+        "top_p": 1.0,
         "max_tokens": 4096,
-        "min_p": 0.0,
-        "presence_penalty": 1.5,
-        "repetition_penalty": 1.0,
     }
+    with pytest.raises(ValueError, match="do not start a local vLLM"):
+        simple_vllm_command(experiment)
+
+    command = openrouter_proxy_command(experiment)
+    assert "gyms.gaia2.openrouter_proxy" in command
+    assert "OPENROUTER_API_KEY_DECOMPOSER" in command
+    assert not any("sk-or-" in item for item in command)
+    assert '{"reasoning":{"effort":"high"}}' in command
+
+    plan = _dry_plan(Path.cwd(), experiment, Path("/tmp/deepseek"), (), 3, None)
+    assert plan["gpu_assignments"] == {}
+    assert len(plan["services"]) == 1
+    assert "openrouter_proxy" in plan["services"][0]
 
 
 def test_openrouter_decomposer_starts_only_the_configured_worker() -> None:
-    gemma_manager, gemma_worker = decomposer_vllm_commands(
-        DEEPSEEK_GEMMA_EXPERIMENT
-    )
+    gemma_manager, gemma_worker = decomposer_vllm_commands(DEEPSEEK_GEMMA_EXPERIMENT)
     qwen_manager, qwen_worker = decomposer_vllm_commands(DEEPSEEK_QWEN_EXPERIMENT)
 
     assert gemma_manager is None
@@ -203,9 +250,7 @@ def test_qwen_sft_decomposer_uses_qwen_manager_and_worker_profiles() -> None:
 def test_untuned_qwen_decomposer_matches_sft_two_gpu_topology() -> None:
     experiment = QWEN35_BASE_DECOMPOSER_EXPERIMENT
 
-    assert experiment.name == (
-        "qwen35-4b-base-non-thinking-qwen35-4b-non-thinking"
-    )
+    assert experiment.name == ("qwen35-4b-base-non-thinking-qwen35-4b-non-thinking")
     assert experiment.num_gpus == 2
     assert experiment.prompt_profile == "student"
     assert experiment.manager_parallel_tool_calls is False
@@ -236,16 +281,12 @@ def test_untuned_qwen_decomposer_matches_sft_two_gpu_topology() -> None:
         assert "--trust-remote-code" in command
         assert '{"enable_thinking":false}' in command
 
-    plan = _dry_plan(
-        Path.cwd(), experiment, Path("/tmp/output"), ("0", "1"), 3, None
-    )
+    plan = _dry_plan(Path.cwd(), experiment, Path("/tmp/output"), ("0", "1"), 3, None)
     assert plan["gpu_assignments"] == {
         "manager_vllm": "0",
         "worker_vllm": "1",
     }
-    vllm_services = [
-        service for service in plan["services"] if "vllm serve" in service
-    ]
+    vllm_services = [service for service in plan["services"] if "vllm serve" in service]
     assert len(vllm_services) == 2
 
 
@@ -337,9 +378,7 @@ def test_openrouter_runtime_uses_teacher_responses_api(tmp_path) -> None:
         "parallel_tool_calls": False,
     }
     assert "path" not in plugin["model_configuration"]["manager"]
-    assert (
-        plugin["model_configuration"]["manager"]["parallel_tool_calls"] is False
-    )
+    assert plugin["model_configuration"]["manager"]["parallel_tool_calls"] is False
 
 
 def test_decomposer_dry_plan_records_sequential_manager_tool_calls(tmp_path) -> None:
@@ -415,8 +454,25 @@ def test_simple_qwen_preparation_hashes_policy_only(monkeypatch) -> None:
     )
 
     assert calls == [(SIMPLE_QWEN_EXPERIMENT.checkpoint, False)]
-    assert models == {
-        "policy": {"path": str(SIMPLE_QWEN_EXPERIMENT.checkpoint)}
+    assert models == {"policy": {"path": str(SIMPLE_QWEN_EXPERIMENT.checkpoint)}}
+
+
+def test_simple_deepseek_preparation_records_remote_policy_without_hashing(
+    monkeypatch,
+) -> None:
+    def unexpected_validate_checkpoint(path, *, full_hashes):
+        raise AssertionError(f"Unexpected checkpoint validation: {path}")
+
+    monkeypatch.setattr(prepare, "validate_checkpoint", unexpected_validate_checkpoint)
+
+    assert prepare.experiment_models(
+        SIMPLE_DEEPSEEK_EXPERIMENT,
+        full_hashes=False,
+    ) == {
+        "policy": {
+            "backend": "openrouter",
+            "model": "deepseek/deepseek-v4-flash-0731",
+        }
     }
 
 
@@ -555,3 +611,23 @@ def test_openrouter_mlspace_payload_uses_one_gpu_and_redacts_credentials(
     redacted = redact_payload(payload)
     assert redacted["env_variables"]["OPENROUTER_API_KEY_DECOMPOSER"] == "<redacted>"
     assert redacted["env_variables"]["HTTPS_PROXY"] == "<redacted>"
+
+
+def test_remote_simple_agent_is_local_only_for_mlspace_launcher(tmp_path) -> None:
+    with pytest.raises(ValueError, match="local-only remote experiment"):
+        build_payload(
+            SIMPLE_DEEPSEEK_EXPERIMENT,
+            tmp_path / "staged",
+            num_repeats=3,
+            limit=None,
+            author="sukhorukov",
+            base_image="image",
+            priority="high",
+            force=False,
+            judge_environment={
+                "LLM_PROXY_URL": "https://judge.test/v1",
+                "LLM_PROXY_MASTER_KEY": "judge-secret",
+            },
+            proxy_environment={"HTTPS_PROXY": "http://proxy.test"},
+            openrouter_key="openrouter-secret",
+        )

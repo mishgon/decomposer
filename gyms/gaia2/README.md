@@ -64,6 +64,11 @@ The registered experiments are:
 - `qwen35-4b-non-thinking`: vanilla non-thinking Qwen3.5-4B simple agent on
   one GPU, using the recommended general-task sampling parameters and 128K
   context.
+- `qwen35-2b-base-non-thinking` and `qwen35-9b-base-non-thinking`: matching
+  non-thinking simple-agent baselines using the pinned local checkpoints.
+- `deepseek-v4-flash-0731`: remote OpenRouter DeepSeek simple agent with high
+  reasoning. The runner starts only a credential-isolating loopback proxy and
+  does not allocate a GPU.
 
 ```bash
 # Decomposer, three attempts per scenario.
@@ -90,6 +95,11 @@ The registered experiments are:
   --experiment qwen35-4b-non-thinking \
   --num-repeats 3 \
   --cuda-visible-devices 7
+
+# Remote DeepSeek simple agent, three attempts per scenario. No CUDA flag.
+.venv/bin/python -m gyms.gaia2.run \
+  --experiment deepseek-v4-flash-0731 \
+  --num-repeats 3
 
 # OpenRouter teacher one-scenario smoke. HTTPS_PROXY (or https_proxy) and
 # OPENROUTER_API_KEY_DECOMPOSER must also be exported.

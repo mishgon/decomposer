@@ -23,7 +23,6 @@ from gyms.gaia2.experiments import (  # noqa: E402
     INSTANCE_TYPES_BY_NUM_GPUS,
     PROJECT_VENV,
     SPLIT,
-    DecomposerExperiment,
     Experiment,
     collect_experiments,
     completion_marker,
@@ -123,9 +122,14 @@ def build_job_script(
         DOMAIN,
         "--num-repeats",
         str(num_repeats),
-        "--cuda-visible-devices",
-        ",".join(str(index) for index in range(experiment.num_gpus)),
     ]
+    if experiment.num_gpus:
+        command.extend(
+            [
+                "--cuda-visible-devices",
+                ",".join(str(index) for index in range(experiment.num_gpus)),
+            ]
+        )
     if limit is not None:
         command.extend(["--limit", str(limit)])
     if force:
@@ -147,6 +151,11 @@ def build_payload(
     proxy_environment: Mapping[str, str],
     openrouter_key: str,
 ) -> dict[str, Any]:
+    if experiment.num_gpus == 0:
+        raise ValueError(
+            f"{experiment.name} is a local-only remote experiment and cannot be "
+            "submitted through the GPU MLSpace launcher"
+        )
     env_variables = {
         "WORKDIR": str(staged_workdir),
         "HF_HOME": str(HF_HOME),
@@ -157,7 +166,7 @@ def build_payload(
         "PYTHONDONTWRITEBYTECODE": "1",
         **judge_environment,
     }
-    if isinstance(experiment, DecomposerExperiment) and experiment.requires_openrouter:
+    if experiment.requires_openrouter:
         env_variables.update(proxy_environment)
         env_variables["OPENROUTER_API_KEY_DECOMPOSER"] = openrouter_key
     payload: dict[str, Any] = {
@@ -285,11 +294,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "LLM_PROXY_MASTER_KEY": judge_key or "<not-set>",
     }
     openrouter_key = os.environ.get("OPENROUTER_API_KEY_DECOMPOSER", "")
-    needs_openrouter = any(
-        isinstance(experiment, DecomposerExperiment)
-        and experiment.requires_openrouter
-        for experiment in experiments
-    )
+    needs_openrouter = any(experiment.requires_openrouter for experiment in experiments)
     if needs_openrouter and not args.dry:
         if not openrouter_key:
             raise RuntimeError("OPENROUTER_API_KEY_DECOMPOSER is required")

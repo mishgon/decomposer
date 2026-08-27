@@ -248,6 +248,8 @@ def _common_vllm_command(
 
 
 def simple_vllm_command(experiment: SimpleExperiment) -> list[str]:
+    if experiment.requires_openrouter or experiment.checkpoint is None:
+        raise ValueError("Remote simple agents do not start a local vLLM server")
     return _common_vllm_command(
         experiment.checkpoint,
         experiment.served_name,
@@ -270,14 +272,41 @@ def simple_sampling_parameters(
     parameters: dict[str, int | float] = {
         "temperature": experiment.temperature,
         "top_p": experiment.top_p,
-        "top_k": experiment.top_k,
         "max_tokens": experiment.max_completion_tokens,
     }
-    for name in ("min_p", "presence_penalty", "repetition_penalty"):
+    for name in ("top_k", "min_p", "presence_penalty", "repetition_penalty"):
         value = getattr(experiment, name)
         if value is not None:
             parameters[name] = value
     return parameters
+
+
+def openrouter_proxy_command(experiment: SimpleExperiment) -> list[str]:
+    if (
+        not experiment.requires_openrouter
+        or experiment.base_url is None
+        or experiment.api_key_env is None
+    ):
+        raise ValueError("OpenRouter proxy requires a remote simple experiment")
+    return [
+        str(PROJECT_VENV / "bin" / "python"),
+        "-m",
+        "gyms.gaia2.openrouter_proxy",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        str(experiment.port),
+        "--upstream-url",
+        experiment.base_url,
+        "--api-key-env",
+        experiment.api_key_env,
+        "--extra-body-json",
+        json.dumps(experiment.remote_extra_body, separators=(",", ":")),
+        "--timeout-seconds",
+        "3300",
+        "--max-retries",
+        "2",
+    ]
 
 
 def decomposer_vllm_commands(
@@ -345,16 +374,12 @@ def langgraph_command(
 def subagent_environment(experiment: DecomposerExperiment) -> dict[str, str]:
     environment = {
         "GAIA2_SUBAGENT_MODEL": experiment.worker_served_name,
-        "GAIA2_SUBAGENT_ENDPOINT": (
-            f"http://127.0.0.1:{experiment.worker_port}/v1"
-        ),
+        "GAIA2_SUBAGENT_ENDPOINT": (f"http://127.0.0.1:{experiment.worker_port}/v1"),
         "GAIA2_SUBAGENT_API_KEY": "EMPTY",
         "GAIA2_SUBAGENT_TEMPERATURE": str(experiment.temperature),
         "GAIA2_SUBAGENT_TOP_P": str(experiment.top_p),
         "GAIA2_SUBAGENT_TOP_K": str(experiment.top_k),
-        "GAIA2_SUBAGENT_MAX_COMPLETION_TOKENS": str(
-            experiment.max_completion_tokens
-        ),
+        "GAIA2_SUBAGENT_MAX_COMPLETION_TOKENS": str(experiment.max_completion_tokens),
         "GAIA2_SUBAGENT_THINKING": "1" if experiment.worker_thinking else "0",
     }
     if experiment.min_p is not None:
@@ -427,6 +452,7 @@ def are_command(
     if limit is not None:
         command.extend(["--limit", str(limit)])
     if isinstance(experiment, SimpleExperiment):
+        endpoint = f"http://127.0.0.1:{experiment.port}/v1"
         command.extend(
             [
                 "--model",
@@ -434,7 +460,7 @@ def are_command(
                 "--provider",
                 "local",
                 "--endpoint",
-                f"http://127.0.0.1:{experiment.port}/v1",
+                endpoint,
                 "--agent",
                 "native_tools",
             ]
@@ -512,9 +538,18 @@ def validate_preparation(experiment: Experiment) -> dict[str, Any]:
     models = manifest.get("models") or {}
     if isinstance(experiment, SimpleExperiment):
         policy = models.get("policy") or {}
-        if Path(policy.get("path", "")) != experiment.checkpoint:
-            raise ValueError("Preparation manifest points at an unexpected policy")
-        _validate_file_manifest(experiment.checkpoint, policy)
+        if experiment.requires_openrouter:
+            if policy != {
+                "backend": experiment.backend,
+                "model": experiment.served_name,
+            }:
+                raise ValueError("Preparation manifest points at an unexpected policy")
+        else:
+            if experiment.checkpoint is None:
+                raise ValueError("Local simple agent requires checkpoint")
+            if Path(policy.get("path", "")) != experiment.checkpoint:
+                raise ValueError("Preparation manifest points at an unexpected policy")
+            _validate_file_manifest(experiment.checkpoint, policy)
     else:
         manager = models.get("manager") or {}
         worker = models.get("worker") or {}
@@ -634,16 +669,12 @@ def _runtime_configs(
         manager_extra_body: dict[str, Any] = {
             "top_k": experiment.top_k,
             "include_reasoning": experiment.manager_thinking,
-            "chat_template_kwargs": {
-                "enable_thinking": experiment.manager_thinking
-            },
+            "chat_template_kwargs": {"enable_thinking": experiment.manager_thinking},
         }
         if experiment.min_p is not None:
             manager_extra_body["min_p"] = experiment.min_p
         if experiment.repetition_penalty is not None:
-            manager_extra_body["repetition_penalty"] = (
-                experiment.repetition_penalty
-            )
+            manager_extra_body["repetition_penalty"] = experiment.repetition_penalty
         manager = {
             "model": experiment.manager_served_name,
             "base_url": f"http://127.0.0.1:{experiment.manager_port}/v1",
@@ -782,8 +813,12 @@ def _dry_plan(
     services: list[list[str]] = []
     plugin_config: Path | None = None
     if isinstance(experiment, SimpleExperiment):
-        services.append(simple_vllm_command(experiment))
-        gpu_assignments = {"policy_vllm": visible_devices[0]}
+        if experiment.requires_openrouter:
+            services.append(openrouter_proxy_command(experiment))
+            gpu_assignments = {}
+        else:
+            services.append(simple_vllm_command(experiment))
+            gpu_assignments = {"policy_vllm": visible_devices[0]}
     else:
         manager_command, worker_command = decomposer_vllm_commands(experiment)
         if manager_command is not None:
@@ -870,7 +905,7 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
     judge_key = os.environ.get("LLM_PROXY_MASTER_KEY", "")
     if not judge_endpoint or not judge_key:
         raise RuntimeError("LLM_PROXY_URL and LLM_PROXY_MASTER_KEY are required")
-    if isinstance(experiment, DecomposerExperiment) and experiment.requires_openrouter:
+    if experiment.requires_openrouter:
         if not os.environ.get("OPENROUTER_API_KEY_DECOMPOSER"):
             raise RuntimeError("OPENROUTER_API_KEY_DECOMPOSER is required")
         if not (os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy")):
@@ -919,17 +954,29 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
         status["state"] = "agent_services_startup"
         atomic_json(status_path, status)
         if isinstance(experiment, SimpleExperiment):
-            process = supervisor.start(
-                "policy_vllm",
-                simple_vllm_command(experiment),
-                cwd=local_repo,
-                env={"CUDA_VISIBLE_DEVICES": visible_devices[0]},
-            )
-            wait_http(
-                f"http://127.0.0.1:{experiment.port}/v1/models",
-                [process],
-                1800,
-            )
+            if experiment.requires_openrouter:
+                process = supervisor.start(
+                    "openrouter_policy_proxy",
+                    openrouter_proxy_command(experiment),
+                    cwd=local_repo,
+                )
+                wait_http(
+                    f"http://127.0.0.1:{experiment.port}/health",
+                    [process],
+                    300,
+                )
+            else:
+                process = supervisor.start(
+                    "policy_vllm",
+                    simple_vllm_command(experiment),
+                    cwd=local_repo,
+                    env={"CUDA_VISIBLE_DEVICES": visible_devices[0]},
+                )
+                wait_http(
+                    f"http://127.0.0.1:{experiment.port}/v1/models",
+                    [process],
+                    1800,
+                )
             env["ARE_ENABLE_THINKING"] = "1" if experiment.thinking else "0"
             env["ARE_SAMPLING_PARAMS"] = json.dumps(
                 simple_sampling_parameters(experiment), separators=(",", ":")

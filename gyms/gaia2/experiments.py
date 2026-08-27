@@ -64,9 +64,21 @@ QWEN35_4B_BASE = (
     / "snapshots"
     / "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a"
 )
-QWEN35_4B_SFT_SERVED_NAME = (
-    "decomposer/qwen35-4b-sft-workplace-v1-3765-32k"
+QWEN35_2B_BASE = (
+    HF_HOME
+    / "hub"
+    / "models--Qwen--Qwen3.5-2B"
+    / "snapshots"
+    / "15852e8c16360a2fea060d615a32b45270f8a8fc"
 )
+QWEN35_9B_BASE = (
+    HF_HOME
+    / "hub"
+    / "models--Qwen--Qwen3.5-9B"
+    / "snapshots"
+    / "c202236235762e1c871ad0ccb60c8ee5ba337b9a"
+)
+QWEN35_4B_SFT_SERVED_NAME = "decomposer/qwen35-4b-sft-workplace-v1-3765-32k"
 QWEN35_4B_BASE_MANAGER_SERVED_NAME = "decomposer/qwen35-4b-base-manager"
 QWEN35_4B_SFT = (
     ARTIFACTS_ROOT
@@ -79,6 +91,7 @@ QWEN35_4B_SFT = (
 
 DecomposerManagerBackend = Literal["local_vllm", "openrouter"]
 DecomposerPromptProfile = Literal["student", "teacher"]
+SimpleAgentBackend = Literal["local_vllm", "openrouter"]
 
 
 def gaia2_lock_hash(gaia2_root: Path) -> str:
@@ -180,16 +193,20 @@ class DecomposerExperiment:
 @dataclass(frozen=True)
 class SimpleExperiment:
     name: str
-    checkpoint: Path
+    checkpoint: Path | None
+    backend: SimpleAgentBackend = "local_vllm"
     num_gpus: int = 1
     served_name: str = "google/gemma-4-E4B-it"
     port: int = 8100
+    base_url: str | None = None
+    api_key_env: str | None = None
+    reasoning_effort: str | None = None
     max_model_len: int = 65536
     max_num_seqs: int = 16
     max_completion_tokens: int = 4096
     temperature: float = 1.0
     top_p: float = 0.95
-    top_k: int = 64
+    top_k: int | None = 64
     min_p: float | None = None
     presence_penalty: float | None = None
     repetition_penalty: float | None = None
@@ -202,6 +219,36 @@ class SimpleExperiment:
     trust_remote_code: bool = False
     gdn_prefill_backend: str | None = None
     kind: Literal["simple"] = field(init=False, default="simple")
+
+    def __post_init__(self) -> None:
+        if self.backend == "local_vllm":
+            if self.checkpoint is None:
+                raise ValueError(f"{self.name}: local_vllm requires checkpoint")
+            if self.num_gpus != 1:
+                raise ValueError(f"{self.name}: local_vllm requires one GPU")
+            if any(value is not None for value in (self.base_url, self.api_key_env)):
+                raise ValueError(
+                    f"{self.name}: local_vllm cannot configure remote model fields"
+                )
+        elif self.backend == "openrouter":
+            if self.checkpoint is not None:
+                raise ValueError(f"{self.name}: openrouter cannot use checkpoint")
+            if self.num_gpus != 0:
+                raise ValueError(f"{self.name}: openrouter simple agent uses no GPU")
+            if not self.base_url or not self.api_key_env:
+                raise ValueError(
+                    f"{self.name}: openrouter requires base_url and api_key_env"
+                )
+
+    @property
+    def requires_openrouter(self) -> bool:
+        return self.backend == "openrouter"
+
+    @property
+    def remote_extra_body(self) -> dict[str, object]:
+        if self.reasoning_effort is None:
+            return {}
+        return {"reasoning": {"effort": self.reasoning_effort}}
 
 
 Experiment = DecomposerExperiment | SimpleExperiment
@@ -222,10 +269,7 @@ DEEPSEEK_GEMMA_EXPERIMENT = DecomposerExperiment(
 )
 _QWEN35_NON_THINKING_SAMPLING = qwen35_general_sampling(thinking=False)
 QWEN35_SFT_EXPERIMENT = DecomposerExperiment(
-    name=(
-        "qwen35-4b-sft-workplace-v1-3765-32k-non-thinking-"
-        "qwen35-4b-non-thinking"
-    ),
+    name=("qwen35-4b-sft-workplace-v1-3765-32k-non-thinking-" "qwen35-4b-non-thinking"),
     worker_checkpoint=QWEN35_4B_BASE,
     manager_checkpoint=QWEN35_4B_SFT,
     manager_served_name=QWEN35_4B_SFT_SERVED_NAME,
@@ -312,23 +356,60 @@ SIMPLE_EXPERIMENT = SimpleExperiment(
     name="gemma4-e4b-it-thinking",
     checkpoint=GEMMA4_E4B_BASE,
 )
-SIMPLE_QWEN_EXPERIMENT = SimpleExperiment(
-    name="qwen35-4b-non-thinking",
-    checkpoint=QWEN35_4B_BASE,
-    served_name="Qwen/Qwen3.5-4B",
-    max_model_len=131072,
-    temperature=_QWEN35_NON_THINKING_SAMPLING.temperature,
-    top_p=_QWEN35_NON_THINKING_SAMPLING.top_p,
-    top_k=_QWEN35_NON_THINKING_SAMPLING.top_k,
-    min_p=_QWEN35_NON_THINKING_SAMPLING.min_p,
-    presence_penalty=_QWEN35_NON_THINKING_SAMPLING.presence_penalty,
-    repetition_penalty=_QWEN35_NON_THINKING_SAMPLING.repetition_penalty,
-    thinking=False,
-    tool_call_parser="qwen3_xml",
+
+
+def _qwen35_simple_experiment(
+    name: str, checkpoint: Path, served_name: str
+) -> SimpleExperiment:
+    return SimpleExperiment(
+        name=name,
+        checkpoint=checkpoint,
+        served_name=served_name,
+        max_model_len=131072,
+        temperature=_QWEN35_NON_THINKING_SAMPLING.temperature,
+        top_p=_QWEN35_NON_THINKING_SAMPLING.top_p,
+        top_k=_QWEN35_NON_THINKING_SAMPLING.top_k,
+        min_p=_QWEN35_NON_THINKING_SAMPLING.min_p,
+        presence_penalty=_QWEN35_NON_THINKING_SAMPLING.presence_penalty,
+        repetition_penalty=_QWEN35_NON_THINKING_SAMPLING.repetition_penalty,
+        thinking=False,
+        tool_call_parser="qwen3_xml",
+        reasoning_parser=None,
+        language_model_only=False,
+        trust_remote_code=True,
+        gdn_prefill_backend="triton",
+    )
+
+
+SIMPLE_QWEN_EXPERIMENT = _qwen35_simple_experiment(
+    "qwen35-4b-non-thinking", QWEN35_4B_BASE, "Qwen/Qwen3.5-4B"
+)
+SIMPLE_QWEN_2B_EXPERIMENT = _qwen35_simple_experiment(
+    "qwen35-2b-base-non-thinking", QWEN35_2B_BASE, "Qwen/Qwen3.5-2B"
+)
+SIMPLE_QWEN_9B_EXPERIMENT = _qwen35_simple_experiment(
+    "qwen35-9b-base-non-thinking", QWEN35_9B_BASE, "Qwen/Qwen3.5-9B"
+)
+SIMPLE_DEEPSEEK_EXPERIMENT = SimpleExperiment(
+    name="deepseek-v4-flash-0731",
+    checkpoint=None,
+    backend="openrouter",
+    num_gpus=0,
+    served_name="deepseek/deepseek-v4-flash-0731",
+    port=8140,
+    base_url="https://openrouter.ai/api/v1",
+    api_key_env="OPENROUTER_API_KEY_DECOMPOSER",
+    reasoning_effort="high",
+    temperature=1.0,
+    top_p=1.0,
+    top_k=None,
+    max_num_seqs=0,
+    concurrency=4,
+    thinking=True,
+    tool_call_parser="",
     reasoning_parser=None,
     language_model_only=False,
-    trust_remote_code=True,
-    gdn_prefill_backend="triton",
+    gdn_prefill_backend=None,
 )
 ALL_EXPERIMENTS: tuple[Experiment, ...] = (
     DECOMPOSER_EXPERIMENT,
@@ -338,6 +419,9 @@ ALL_EXPERIMENTS: tuple[Experiment, ...] = (
     DEEPSEEK_QWEN_EXPERIMENT,
     SIMPLE_EXPERIMENT,
     SIMPLE_QWEN_EXPERIMENT,
+    SIMPLE_QWEN_2B_EXPERIMENT,
+    SIMPLE_QWEN_9B_EXPERIMENT,
+    SIMPLE_DEEPSEEK_EXPERIMENT,
 )
 EXPERIMENTS = {experiment.name: experiment for experiment in ALL_EXPERIMENTS}
 if len(EXPERIMENTS) != len(ALL_EXPERIMENTS):
