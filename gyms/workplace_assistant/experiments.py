@@ -38,6 +38,7 @@ RUN_PURPOSES = ("trace-generation", "evaluation")
 RunPurpose = Literal["trace-generation", "evaluation"]
 DecomposerPromptProfile = Literal["teacher", "student"]
 DecomposerManagerBackend = Literal["openrouter", "local_vllm"]
+SimpleAgentBackend = Literal["openrouter", "local_vllm"]
 
 
 def source_dataset(split: str) -> Path:
@@ -120,7 +121,12 @@ class DecomposerExperiment:
 @dataclass(frozen=True)
 class SimpleExperiment:
     name: str
-    checkpoint: Path
+    checkpoint: Path | None
+    backend: SimpleAgentBackend = "local_vllm"
+    model_id: str | None = None
+    base_url: str | None = None
+    api_key_env: str | None = None
+    reasoning_effort: str | None = None
     thinking: bool = False
     num_gpus: int = 1
     temperature: float = 0.6
@@ -139,6 +145,36 @@ class SimpleExperiment:
     reasoning_parser: str | None = None
     gdn_prefill_backend: str | None = "triton"
     kind: Literal["simple"] = field(init=False, default="simple")
+
+    def __post_init__(self) -> None:
+        if self.backend == "local_vllm":
+            if self.checkpoint is None:
+                raise ValueError(f"{self.name}: local_vllm requires checkpoint")
+            if any(
+                value is not None
+                for value in (self.model_id, self.base_url, self.api_key_env)
+            ):
+                raise ValueError(
+                    f"{self.name}: local_vllm cannot configure remote model fields"
+                )
+        elif self.backend == "openrouter":
+            if self.checkpoint is not None:
+                raise ValueError(f"{self.name}: openrouter cannot use checkpoint")
+            if not self.model_id or not self.base_url or not self.api_key_env:
+                raise ValueError(
+                    f"{self.name}: openrouter requires model_id, base_url, and "
+                    "api_key_env"
+                )
+
+    @property
+    def requires_openrouter(self) -> bool:
+        return self.backend == "openrouter"
+
+    @property
+    def remote_extra_body(self) -> dict[str, object]:
+        if self.reasoning_effort is None:
+            return {}
+        return {"reasoning": {"effort": self.reasoning_effort}}
 
     @property
     def extra_body(self) -> dict[str, int | float]:
@@ -256,6 +292,12 @@ QWEN35_4B_BASE = (
     / "models--Qwen--Qwen3.5-4B"
     / "snapshots"
     / "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a"
+)
+QWEN35_9B_BASE = (
+    HF_HUB_ROOT
+    / "models--Qwen--Qwen3.5-9B"
+    / "snapshots"
+    / "c202236235762e1c871ad0ccb60c8ee5ba337b9a"
 )
 
 WORKPLACE_E4B_SFT_MODEL_ID = "decomposer/gemma4-e4b-sft-deepseek-e4b-v1-8k"
@@ -555,6 +597,21 @@ def _simple_experiments() -> tuple[SimpleExperiment, ...]:
             ),
             _qwen35_simple_experiment(
                 "qwen35-4b-base-thinking", QWEN35_4B_BASE, thinking=True
+            ),
+            _qwen35_simple_experiment(
+                "qwen35-9b-base-non-thinking", QWEN35_9B_BASE
+            ),
+            SimpleExperiment(
+                name="deepseek-v4-flash-0731",
+                checkpoint=None,
+                backend="openrouter",
+                model_id="deepseek/deepseek-v4-flash-0731",
+                base_url="https://openrouter.ai/api/v1",
+                api_key_env="OPENROUTER_API_KEY_DECOMPOSER",
+                reasoning_effort="high",
+                temperature=1.0,
+                top_p=1.0,
+                concurrency=8,
             ),
         )
     )

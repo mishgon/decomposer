@@ -36,8 +36,8 @@ from gyms.qwen_sampling import qwen35_general_sampling
 
 def test_registry_is_global_and_unique() -> None:
     assert len(DECOMPOSER_EXPERIMENTS) == 10
-    assert len(SIMPLE_EXPERIMENTS) == 26
-    assert len(experiments.EXPERIMENTS) == 36
+    assert len(SIMPLE_EXPERIMENTS) == 28
+    assert len(experiments.EXPERIMENTS) == 38
     assert experiments.BASE_IMAGE.endswith("py3.12-torch2.7.0:0.0.42")
     assert {experiment.kind for experiment in experiments.ALL_EXPERIMENTS} == {
         "decomposer",
@@ -101,6 +101,90 @@ def test_gemma_simple_profiles_keep_existing_sampling() -> None:
             64,
         )
         assert experiment.presence_penalty == 0.0
+
+
+def test_qwen35_9b_simple_profile_uses_cached_non_thinking_checkpoint() -> None:
+    experiment = get_experiment("qwen35-9b-base-non-thinking")
+    assert isinstance(experiment, SimpleExperiment)
+    assert experiment.checkpoint == experiments.QWEN35_9B_BASE
+    assert experiment.checkpoint.is_dir()
+    assert experiment.thinking is False
+    assert experiment.num_gpus == 1
+    command = run_module.simple_vllm_command(experiment)
+    assert str(experiments.QWEN35_9B_BASE) in command
+    assert command[command.index("--default-chat-template-kwargs") + 1] == (
+        '{"enable_thinking":false}'
+    )
+
+
+def test_deepseek_simple_profile_is_remote_and_does_not_start_vllm() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    experiment = get_experiment("deepseek-v4-flash-0731")
+    assert isinstance(experiment, SimpleExperiment)
+    assert experiment.requires_openrouter
+    assert experiment.checkpoint is None
+    assert experiment.model_id == "deepseek/deepseek-v4-flash-0731"
+    assert experiment.reasoning_effort == "high"
+    assert experiment.concurrency == 8
+    assert prepare_module.components_for_experiments((experiment,)) == (
+        "resources_servers/workplace_assistant",
+        "responses_api_agents/simple_agent",
+        "responses_api_models/openai_model",
+    )
+    with pytest.raises(ValueError, match="does not use a local vLLM server"):
+        run_module.simple_vllm_command(experiment)
+
+    start = run_module.gym_start_command(
+        repo_root,
+        experiment,
+        purpose="evaluation",
+        gym_bin=Path("/gym"),
+        component_root=Path("/components"),
+        logs=Path("/logs"),
+    )
+    assert start[start.index("--model-type") + 1] == "openai_model"
+    assert start[start.index("--model") + 1] == experiment.model_id
+    assert start[start.index("--model-url") + 1] == experiment.base_url
+    assert "--model-api-key" not in start
+    assert any(
+        argument.endswith('{reasoning:{effort:"high"}}')
+        for argument in start
+    )
+
+    plan = run_module._dry_plan(
+        repo_root,
+        experiment,
+        "evaluation",
+        "validation",
+        3,
+        None,
+        Path("/tmp/workplace-deepseek-simple"),
+        ("0",),
+    )
+    assert plan["services"] == []
+    assert plan["gpu_assignments"] == {}
+    assert "policy_vllm" not in plan["gym_start"]
+
+    payload = run_eval.build_payload(
+        experiment,
+        repo_root,
+        purpose="evaluation",
+        split="validation",
+        num_repeats=3,
+        limit=None,
+        author="alice",
+        base_image=experiments.BASE_IMAGE,
+        priority="high",
+        force=False,
+        proxy_env={"HTTPS_PROXY": "http://proxy"},
+        openrouter_key="secret",
+    )
+    assert payload["priority_class"] == "high"
+    assert payload["env_variables"]["OPENROUTER_API_KEY_DECOMPOSER"] == "secret"
+    assert payload["job_desc"] == (
+        "workplace-assistant-validation simple-agent "
+        "deepseek-v4-flash-0731-n3 #alice"
+    )
 
 
 def test_decomposer_base_profiles_use_student_prompt() -> None:

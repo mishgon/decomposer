@@ -209,10 +209,7 @@ def build_payload(
         "GYM_VENV": str(gym_venv(staged_workdir)),
         "PYTHONDONTWRITEBYTECODE": "1",
     }
-    if (
-        isinstance(experiment, DecomposerExperiment)
-        and experiment.requires_openrouter
-    ):
+    if experiment.requires_openrouter:
         env_variables.update(proxy_env)
         env_variables["OPENROUTER_API_KEY_DECOMPOSER"] = openrouter_key
     payload: dict[str, Any] = {
@@ -358,9 +355,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     openrouter_key = os.environ.get("OPENROUTER_API_KEY_DECOMPOSER", "")
     needs_openrouter = any(
-        isinstance(experiment, DecomposerExperiment)
-        and experiment.requires_openrouter
-        for experiment in experiments
+        experiment.requires_openrouter for experiment in experiments
     )
     if needs_openrouter and not args.dry:
         if not openrouter_key:

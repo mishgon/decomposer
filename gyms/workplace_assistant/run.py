@@ -87,10 +87,15 @@ def count_jsonl(path: Path) -> int:
     return rows
 
 
-def hydra_flow_mapping(values: Mapping[str, int | float]) -> str:
+def hydra_flow_mapping(values: Mapping[str, Any]) -> str:
+    def encode(value: Any) -> str:
+        if isinstance(value, Mapping):
+            return hydra_flow_mapping(value)
+        return json.dumps(value)
+
     return (
         "{"
-        + ",".join(f"{key}:{json.dumps(value)}" for key, value in values.items())
+        + ",".join(f"{key}:{encode(value)}" for key, value in values.items())
         + "}"
     )
 
@@ -165,6 +170,8 @@ def wait_http(
 
 
 def simple_vllm_command(experiment: SimpleExperiment) -> list[str]:
+    if experiment.requires_openrouter or experiment.checkpoint is None:
+        raise ValueError(f"{experiment.name} does not use a local vLLM server")
     command = [
         str(PROJECT_VENV / "bin" / "vllm"),
         "serve",
@@ -304,6 +311,39 @@ def gym_start_command(
             prompt_override,
             *common,
         ]
+    if experiment.requires_openrouter:
+        if experiment.model_id is None or experiment.base_url is None:
+            raise ValueError(f"{experiment.name}: incomplete OpenRouter configuration")
+        command = [
+            str(gym_bin),
+            "env",
+            "start",
+            "--environment",
+            "workplace_assistant",
+            "--model-type",
+            "openai_model",
+            "--model",
+            experiment.model_id,
+            "--model-url",
+            experiment.base_url,
+        ]
+        if experiment.remote_extra_body:
+            command.append(
+                "++policy_model.responses_api_models.openai_model.extra_body="
+                + hydra_flow_mapping(experiment.remote_extra_body)
+            )
+        command.extend(
+            [
+                (
+                    "++workplace_assistant_simple_agent.responses_api_agents."
+                    f"simple_agent.max_steps={experiment.max_steps}"
+                ),
+                *common,
+            ]
+        )
+        return command
+    if experiment.checkpoint is None:
+        raise ValueError(f"{experiment.name}: local policy has no checkpoint")
     return [
         str(gym_bin),
         "env",
@@ -447,11 +487,25 @@ def validate_preparation(
             raise FileNotFoundError(component["python"])
     if isinstance(experiment, SimpleExperiment):
         policy = manifest["models"]["policy"]
-        if Path(policy["path"]) != experiment.checkpoint:
-            raise ValueError(
-                "Preparation manifest points at an unexpected policy checkpoint"
-            )
-        _validate_file_manifest(experiment.checkpoint, policy)
+        if experiment.requires_openrouter:
+            expected_policy = {
+                "backend": experiment.backend,
+                "model_id": experiment.model_id,
+                "base_url": experiment.base_url,
+                "reasoning_effort": experiment.reasoning_effort,
+            }
+            if policy != expected_policy:
+                raise ValueError(
+                    "Preparation manifest points at an unexpected remote policy"
+                )
+        else:
+            if experiment.checkpoint is None:
+                raise ValueError(f"{experiment.name}: local policy has no checkpoint")
+            if Path(policy["path"]) != experiment.checkpoint:
+                raise ValueError(
+                    "Preparation manifest points at an unexpected policy checkpoint"
+                )
+            _validate_file_manifest(experiment.checkpoint, policy)
     else:
         selected = {
             model.model_id: model for model in models_for_experiment(experiment)
@@ -657,7 +711,10 @@ def _base_environment(
         ),
         **{name: str(path) for name, path in caches.items()},
     }
-    if experiment.kind == "simple":
+    if (
+        isinstance(experiment, SimpleExperiment)
+        and not experiment.requires_openrouter
+    ):
         for name in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"):
             env.pop(name, None)
     return env
@@ -677,8 +734,12 @@ def _dry_plan(
     logs = directory / "logs"
     gym_bin = gym_venv(local_repo) / "bin" / "gym"
     if isinstance(experiment, SimpleExperiment):
-        services = [simple_vllm_command(experiment)]
-        gpu_assignments = {"policy_vllm": ",".join(visible_devices)}
+        if experiment.requires_openrouter:
+            services = []
+            gpu_assignments = {}
+        else:
+            services = [simple_vllm_command(experiment)]
+            gpu_assignments = {"policy_vllm": ",".join(visible_devices)}
     else:
         models = models_for_experiment(experiment)
         services = [decomposer_vllm_command(model, experiment) for model in models]
@@ -805,7 +866,7 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
         return 0
 
     manifest = validate_preparation(local_repo, experiment, args.split)
-    if isinstance(experiment, DecomposerExperiment) and experiment.requires_openrouter:
+    if experiment.requires_openrouter:
         if not os.environ.get("OPENROUTER_API_KEY_DECOMPOSER"):
             raise RuntimeError("OPENROUTER_API_KEY_DECOMPOSER is not set")
         if not (os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy")):
@@ -869,13 +930,16 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
     try:
         with phase("agent_services_startup"):
             if isinstance(experiment, SimpleExperiment):
-                model_process = supervisor.start(
-                    "policy_vllm",
-                    simple_vllm_command(experiment),
-                    cwd=local_repo,
-                    env={"CUDA_VISIBLE_DEVICES": ",".join(visible_devices)},
-                )
-                wait_http("http://127.0.0.1:8000/v1/models", [model_process], 1800)
+                if not experiment.requires_openrouter:
+                    model_process = supervisor.start(
+                        "policy_vllm",
+                        simple_vllm_command(experiment),
+                        cwd=local_repo,
+                        env={"CUDA_VISIBLE_DEVICES": ",".join(visible_devices)},
+                    )
+                    wait_http(
+                        "http://127.0.0.1:8000/v1/models", [model_process], 1800
+                    )
             else:
                 model_processes: list[subprocess.Popen[Any]] = []
                 models = models_for_experiment(experiment)
@@ -909,10 +973,7 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
                 wait_http("http://127.0.0.1:2024/docs", [langgraph], 300)
 
         with phase("gym_startup"):
-            if (
-                isinstance(experiment, DecomposerExperiment)
-                and experiment.requires_openrouter
-            ):
+            if experiment.requires_openrouter:
                 key = os.environ["OPENROUTER_API_KEY_DECOMPOSER"]
                 gym_env_path.write_text(f"policy_api_key: {json.dumps(key)}\n")
                 gym_env_path.chmod(0o600)

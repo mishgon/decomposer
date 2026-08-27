@@ -174,13 +174,17 @@ def _runtime_versions(gym_python: Path) -> dict[str, str]:
 
 def components_for_experiments(experiments: Sequence[Experiment]) -> tuple[str, ...]:
     components = {"resources_servers/workplace_assistant"}
-    if any(experiment.kind == "simple" for experiment in experiments):
-        components.update(
-            {
-                "responses_api_agents/simple_agent",
-                "responses_api_models/vllm_model",
-            }
-        )
+    simple_experiments = tuple(
+        experiment
+        for experiment in experiments
+        if isinstance(experiment, SimpleExperiment)
+    )
+    if simple_experiments:
+        components.add("responses_api_agents/simple_agent")
+    if any(not experiment.requires_openrouter for experiment in simple_experiments):
+        components.add("responses_api_models/vllm_model")
+    if any(experiment.requires_openrouter for experiment in simple_experiments):
+        components.add("responses_api_models/openai_model")
     decomposer_experiments = tuple(
         experiment
         for experiment in experiments
@@ -335,6 +339,17 @@ def _experiment_models(
     experiment: Experiment, *, full_hashes: bool
 ) -> dict[str, Any]:
     if isinstance(experiment, SimpleExperiment):
+        if experiment.requires_openrouter:
+            return {
+                "policy": {
+                    "backend": experiment.backend,
+                    "model_id": experiment.model_id,
+                    "base_url": experiment.base_url,
+                    "reasoning_effort": experiment.reasoning_effort,
+                }
+            }
+        if experiment.checkpoint is None:
+            raise ValueError(f"{experiment.name}: local policy has no checkpoint")
         return {
             "policy": validate_checkpoint(
                 experiment.checkpoint, full_hashes=full_hashes
@@ -443,7 +458,17 @@ def prepare_eval(args: argparse.Namespace) -> int:
         args.split,
         reuse_source=args.reuse_source,
     )
-    project_tools = {"vllm": PROJECT_VENV / "bin" / "vllm"}
+    needs_vllm = any(
+        isinstance(experiment, DecomposerExperiment)
+        or (
+            isinstance(experiment, SimpleExperiment)
+            and not experiment.requires_openrouter
+        )
+        for experiment in experiments
+    )
+    project_tools = (
+        {"vllm": PROJECT_VENV / "bin" / "vllm"} if needs_vllm else {}
+    )
     if any(experiment.kind == "decomposer" for experiment in experiments):
         project_tools["langgraph"] = PROJECT_VENV / "bin" / "langgraph"
     for name, path in project_tools.items():
