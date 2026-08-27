@@ -26,7 +26,7 @@ ARTIFACTS_ROOT = Path(
 )
 IMPORT_ROOT = ARTIFACTS_ROOT / "evaluation" / "data" / "toolathlon_gym" / "imports"
 IMPORT_SCHEMA_VERSION = 1
-ARCHIVE_PREFIX = "toolathlon_gym"
+DEFAULT_ARCHIVE_PREFIX = "toolathlon_gym"
 
 
 def sha256_file(path: Path) -> str:
@@ -42,12 +42,23 @@ def _validate_run_id(run_id: str) -> None:
         raise ValueError(f"Invalid Toolathlon run ID: {run_id!r}")
 
 
+def _safe_relative_path(value: str, *, description: str) -> PurePosixPath:
+    path = PurePosixPath(value)
+    if (
+        path.is_absolute()
+        or not path.parts
+        or ".." in path.parts
+        or "\\" in value
+    ):
+        raise ValueError(f"Unsafe {description}: {value!r}")
+    return path
+
+
 def _safe_member_path(name: str) -> PurePosixPath:
     path = PurePosixPath(name)
     if (
         path.is_absolute()
         or not path.parts
-        or path.parts[0] != ARCHIVE_PREFIX
         or ".." in path.parts
         or "\\" in name
     ):
@@ -55,19 +66,26 @@ def _safe_member_path(name: str) -> PurePosixPath:
     return path
 
 
-def _selected_relative_path(path: PurePosixPath, run_id: str) -> Path | None:
-    parts = path.parts
-    if parts == (ARCHIVE_PREFIX, "runs", run_id, "manifest.json"):
-        return Path(*parts[1:])
-    if len(parts) != 5 or parts[0] != ARCHIVE_PREFIX:
+def _selected_relative_path(
+    path: PurePosixPath,
+    run_id: str,
+    archive_prefix: PurePosixPath,
+) -> Path | None:
+    prefix_parts = archive_prefix.parts
+    if path.parts[: len(prefix_parts)] != prefix_parts:
         return None
-    kind, _task, episode_id, filename = parts[1:]
+    parts = path.parts[len(prefix_parts) :]
+    if parts == ("runs", run_id, "manifest.json"):
+        return Path(*parts)
+    if len(parts) != 4:
+        return None
+    kind, _task, episode_id, filename = parts
     if not episode_id.startswith(run_id + "-"):
         return None
     if kind == "traces" and filename in {"trace.json", "runtime.json"}:
-        return Path(*parts[1:])
+        return Path(*parts)
     if kind == "evals" and filename == "result.json":
-        return Path(*parts[1:])
+        return Path(*parts)
     return None
 
 
@@ -85,7 +103,10 @@ def _manifest_relative_path(value: str, manifest_path: Path) -> Path:
 
 
 def _validate_existing_import(
-    destination: Path, archive_sha256: str, run_id: str
+    destination: Path,
+    archive_sha256: str,
+    run_id: str,
+    archive_prefix: PurePosixPath,
 ) -> None:
     manifest_path = destination / "import_manifest.json"
     if not manifest_path.is_file():
@@ -97,6 +118,8 @@ def _validate_existing_import(
         manifest.get("schema_version") != IMPORT_SCHEMA_VERSION
         or manifest.get("run_id") != run_id
         or (manifest.get("archive") or {}).get("sha256") != archive_sha256
+        or (manifest.get("archive") or {}).get("prefix")
+        != archive_prefix.as_posix()
     ):
         raise FileExistsError(
             f"Import destination belongs to different source content: {destination}"
@@ -139,11 +162,16 @@ def import_archive(
     output_root: Path,
     *,
     expected_sha256: str | None = None,
+    archive_prefix: str = DEFAULT_ARCHIVE_PREFIX,
 ) -> Path:
     """Securely materialize one run's SFT-relevant files from an archive."""
     archive = archive.expanduser().resolve()
     output_root = output_root.expanduser().resolve()
     _validate_run_id(run_id)
+    safe_archive_prefix = _safe_relative_path(
+        archive_prefix,
+        description="Toolathlon archive prefix",
+    )
     if not archive.is_file():
         raise FileNotFoundError(f"Toolathlon archive does not exist: {archive}")
     archive_sha256 = sha256_file(archive)
@@ -154,7 +182,12 @@ def import_archive(
 
     destination = output_root / run_id
     if destination.exists():
-        _validate_existing_import(destination, archive_sha256, run_id)
+        _validate_existing_import(
+            destination,
+            archive_sha256,
+            run_id,
+            safe_archive_prefix,
+        )
         return destination
 
     selected: dict[Path, bytes] = {}
@@ -171,7 +204,7 @@ def import_archive(
                 raise ValueError(
                     f"Unsupported Toolathlon archive member type: {member.name}"
                 )
-            relative = _selected_relative_path(path, run_id)
+            relative = _selected_relative_path(path, run_id, safe_archive_prefix)
             if relative is None:
                 continue
             if relative in selected:
@@ -212,6 +245,7 @@ def import_archive(
             "path": str(archive),
             "bytes": archive.stat().st_size,
             "sha256": archive_sha256,
+            "prefix": safe_archive_prefix.as_posix(),
         },
         "files": files,
         "counts": {
@@ -251,6 +285,7 @@ def prepare_import(args: argparse.Namespace) -> int:
         args.run_id,
         args.output_root,
         expected_sha256=args.expected_sha256,
+        archive_prefix=args.archive_prefix,
     )
     manifest = json.loads(
         (destination / "import_manifest.json").read_text(encoding="utf-8")
@@ -275,6 +310,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--archive", type=Path, required=True)
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--expected-sha256")
+    parser.add_argument(
+        "--archive-prefix",
+        default=DEFAULT_ARCHIVE_PREFIX,
+        help="Directory inside the archive that contains runs/, traces/, and evals/.",
+    )
     parser.add_argument("--output-root", type=Path, default=IMPORT_ROOT)
     return parser
 

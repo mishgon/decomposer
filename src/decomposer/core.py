@@ -17,6 +17,7 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.messages.utils import count_tokens_approximately
 from langchain_core.tools import StructuredTool
+from langchain_core.utils.function_calling import convert_to_openai_tool
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.runtime import Runtime
 from langgraph.types import Checkpointer, Command
@@ -675,6 +676,23 @@ class DecomposerAgentMiddleware(
             "messages": [HumanMessage(content=error)],
             "jump_to": "model",
         }
+
+
+def build_decomposer_chat_tools(
+    subagent_types: Sequence[SubagentType],
+) -> list[dict[str, Any]]:
+    """Return the OpenAI/Transformers schemas exposed by Decomposer.
+
+    Dataset preparation uses this helper so canonical SFT records and live
+    Decomposer agents cannot silently drift to different tool descriptions or
+    argument schemas. Constructing the middleware is side-effect free; clients
+    are created lazily only when a tool is invoked.
+    """
+    middleware = DecomposerAgentMiddleware(
+        subagent_types,
+        subagent_recursion_limit=100,
+    )
+    return [convert_to_openai_tool(tool) for tool in middleware.tools]
 
 
 def create_decomposer_agent(

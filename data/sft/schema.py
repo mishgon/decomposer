@@ -60,9 +60,29 @@ class DatasetIdentity(StrictModel):
         return value
 
 
+class SubagentInterfaceSpec(StrictModel):
+    id: str
+    description: str
+
+    @field_validator("id")
+    @classmethod
+    def validate_id(cls, value: str) -> str:
+        if not _IDENTIFIER.fullmatch(value):
+            raise ValueError("subagent type ID must be a lowercase identifier")
+        return value
+
+    @field_validator("description")
+    @classmethod
+    def validate_description(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("subagent type description must be non-empty")
+        return value
+
+
 class PolicySpec(StrictModel):
     id: str
     system_prompt: Literal["decomposer_default"] = "decomposer_default"
+    subagent_types: tuple[SubagentInterfaceSpec, ...] = ()
 
     @field_validator("id")
     @classmethod
@@ -70,6 +90,38 @@ class PolicySpec(StrictModel):
         if not _IDENTIFIER.fullmatch(value):
             raise ValueError("policy.id must be a lowercase identifier")
         return value
+
+    @model_validator(mode="after")
+    def validate_subagent_types(self) -> "PolicySpec":
+        ids = [subagent.id for subagent in self.subagent_types]
+        if len(ids) != len(set(ids)):
+            raise ValueError("policy.subagent_types IDs must be unique")
+        return self
+
+
+class SourceSamplingSpec(StrictModel):
+    strategy: Literal["task_hash"] = "task_hash"
+    seed: int = 42
+    max_per_task: int = 1
+    expected_tasks: int
+    expected_rollouts_per_task: int
+
+    @field_validator(
+        "max_per_task", "expected_tasks", "expected_rollouts_per_task"
+    )
+    @classmethod
+    def validate_positive(cls, value: int) -> int:
+        if isinstance(value, bool) or value <= 0:
+            raise ValueError("source sampling counts must be positive integers")
+        return value
+
+    @model_validator(mode="after")
+    def validate_limit(self) -> "SourceSamplingSpec":
+        if self.max_per_task > self.expected_rollouts_per_task:
+            raise ValueError(
+                "sampling.max_per_task must not exceed expected_rollouts_per_task"
+            )
+        return self
 
 
 class SourceSpec(StrictModel):
@@ -80,6 +132,12 @@ class SourceSpec(StrictModel):
     environment: str
     partition: SourcePartition
     teacher: str
+    trace_format: Literal["native", "toolathlon_legacy_unversioned"] = "native"
+    subagent_type_aliases: dict[str, str] = Field(default_factory=dict)
+    sampling: SourceSamplingSpec | None = None
+    expected_native_rollouts: int | None = None
+    expected_candidates: int | None = None
+    require_completed_run: bool = False
 
     @field_validator("id")
     @classmethod
@@ -95,9 +153,59 @@ class SourceSpec(StrictModel):
             raise ValueError("source string fields must be non-empty")
         return value
 
+    @field_validator("expected_native_rollouts", "expected_candidates")
+    @classmethod
+    def validate_expected_count(cls, value: int | None) -> int | None:
+        if value is not None and (isinstance(value, bool) or value <= 0):
+            raise ValueError("expected source counts must be positive integers")
+        return value
+
+    @field_validator("subagent_type_aliases")
+    @classmethod
+    def validate_aliases(cls, value: dict[str, str]) -> dict[str, str]:
+        if any(
+            not isinstance(source_id, str)
+            or not source_id.strip()
+            or not isinstance(target_id, str)
+            or not target_id.strip()
+            for source_id, target_id in value.items()
+        ):
+            raise ValueError("subagent type aliases must map non-empty strings")
+        return value
+
+    @model_validator(mode="after")
+    def validate_adapter_options(self) -> "SourceSpec":
+        if (
+            self.trace_format == "toolathlon_legacy_unversioned"
+            and self.adapter != "toolathlon_gym"
+        ):
+            raise ValueError(
+                "toolathlon_legacy_unversioned is only valid for Toolathlon sources"
+            )
+        if self.sampling is not None and self.adapter != "nemo_gym":
+            raise ValueError("source task sampling is only supported for NeMo Gym")
+        if self.require_completed_run and self.adapter != "toolathlon_gym":
+            raise ValueError("require_completed_run is only valid for Toolathlon")
+        if self.sampling is not None and self.expected_native_rollouts is not None:
+            expected = (
+                self.sampling.expected_tasks
+                * self.sampling.expected_rollouts_per_task
+            )
+            if self.expected_native_rollouts != expected:
+                raise ValueError(
+                    "expected_native_rollouts must match the sampling task layout"
+                )
+        if self.sampling is not None and self.expected_candidates is not None:
+            expected = self.sampling.expected_tasks * self.sampling.max_per_task
+            if self.expected_candidates != expected:
+                raise ValueError(
+                    "expected_candidates must match the sampling task layout"
+                )
+        return self
+
 
 class SelectionSpec(StrictModel):
-    policy: Literal["exact_reward"] = "exact_reward"
+    policy: Literal["exact_reward", "all_rewards"] = "exact_reward"
     success_reward: float = 1.0
     invalid_policy: InvalidPolicy = "exclude"
     max_traces_per_prompt_per_teacher: int | None = None
@@ -165,7 +273,7 @@ class TokenizationSpec(StrictModel):
 
 
 class BuildSpec(StrictModel):
-    spec_version: Literal[1]
+    spec_version: Literal[1, 2]
     dataset: DatasetIdentity
     policy: PolicySpec
     sources: tuple[SourceSpec, ...]
@@ -189,6 +297,46 @@ class BuildSpec(StrictModel):
             partitions
         ):
             raise ValueError("preserve split requires train and validation sources")
+        if self.spec_version == 1:
+            if self.policy.subagent_types:
+                raise ValueError("spec_version 1 does not support policy subagent types")
+            if self.selection.policy != "exact_reward":
+                raise ValueError("spec_version 1 requires exact_reward selection")
+            if any(
+                source.trace_format != "native"
+                or source.subagent_type_aliases
+                or source.sampling is not None
+                or source.expected_native_rollouts is not None
+                or source.expected_candidates is not None
+                or source.require_completed_run
+                for source in self.sources
+            ):
+                raise ValueError("spec_version 1 does not support v2 source options")
+        else:
+            if not self.policy.subagent_types:
+                raise ValueError("spec_version 2 requires policy.subagent_types")
+            allowed_ids = {
+                subagent.id for subagent in self.policy.subagent_types
+            }
+            for source in self.sources:
+                unknown_targets = sorted(
+                    set(source.subagent_type_aliases.values()) - allowed_ids
+                )
+                if unknown_targets:
+                    raise ValueError(
+                        f"Source {source.id!r} aliases unknown canonical subagent "
+                        "types: " + ", ".join(unknown_targets)
+                    )
+                if source.expected_native_rollouts is None:
+                    raise ValueError(
+                        f"spec_version 2 source {source.id!r} must pin "
+                        "expected_native_rollouts"
+                    )
+                if source.expected_candidates is None:
+                    raise ValueError(
+                        f"spec_version 2 source {source.id!r} must pin "
+                        "expected_candidates"
+                    )
         return self
 
 
@@ -383,6 +531,58 @@ def validate_chat_tools(tools: Any) -> list[JsonObject]:
     return validated
 
 
+def normalize_subagent_type_ids(
+    messages: list[JsonObject],
+    *,
+    allowed_ids: frozenset[str],
+    aliases: Mapping[str, str],
+) -> int:
+    """Normalize spawn-call subagent IDs to one canonical policy interface."""
+    if not allowed_ids:
+        return 0
+    normalized = 0
+    for message_index, message in enumerate(messages):
+        for raw_call in message.get("tool_calls") or []:
+            call = require_mapping(
+                raw_call,
+                f"assistant message {message_index} tool call",
+                "excluded_invalid_tool_calls",
+            )
+            function = require_mapping(
+                call.get("function"),
+                "tool-call function",
+                "excluded_invalid_tool_calls",
+            )
+            if function.get("name") != "spawn_subagent":
+                continue
+            arguments = require_mapping(
+                function.get("arguments"),
+                "spawn_subagent arguments",
+                "excluded_invalid_tool_calls",
+            )
+            raw_id = arguments.get("subagent_type_id")
+            if not isinstance(raw_id, str) or not raw_id.strip():
+                raise TraceValidationError(
+                    "excluded_invalid_tool_calls",
+                    "spawn_subagent has no valid subagent_type_id.",
+                )
+            canonical_id = aliases.get(raw_id, raw_id)
+            if canonical_id not in allowed_ids:
+                raise TraceValidationError(
+                    "excluded_invalid_tool_calls",
+                    f"Unknown subagent_type_id {raw_id!r}.",
+                )
+            if canonical_id != raw_id:
+                if not isinstance(arguments, dict):
+                    raise TraceValidationError(
+                        "excluded_invalid_tool_calls",
+                        "spawn_subagent arguments must be mutable JSON objects.",
+                    )
+                arguments["subagent_type_id"] = canonical_id
+                normalized += 1
+    return normalized
+
+
 def sequentialize_parallel_spawn_calls(
     messages: list[JsonObject],
 ) -> tuple[list[JsonObject], int, int]:
@@ -574,7 +774,8 @@ def validate_decomposer_messages(messages: list[JsonObject]) -> None:
                     ):
                         raise TraceValidationError(
                             "excluded_invalid_tool_calls",
-                            "spawn_subagent requires non-empty subagent_type_id and prompt strings.",
+                            "spawn_subagent requires non-empty subagent_type_id "
+                            "and prompt strings.",
                         )
                 elif arguments:
                     raise TraceValidationError(

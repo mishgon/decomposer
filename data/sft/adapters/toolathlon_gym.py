@@ -5,7 +5,8 @@ from __future__ import annotations
 import json
 import math
 from collections import Counter
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
+from copy import deepcopy
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -20,6 +21,7 @@ from ..schema import (
     SourceSpec,
     TraceValidationError,
     canonical_json,
+    normalize_subagent_type_ids,
     sequentialize_parallel_spawn_calls,
     sha256_file,
     sha256_text,
@@ -27,7 +29,7 @@ from ..schema import (
     validate_decomposer_messages,
 )
 
-ADAPTER_VERSION = 1
+ADAPTER_VERSION = 2
 TRACE_SCHEMA_VERSION = 2
 IMPORT_SCHEMA_VERSION = 1
 
@@ -225,11 +227,64 @@ def _failed_attempts(run_manifest: Mapping[str, Any]) -> int:
     )
 
 
+def _completed_trace_paths(
+    source_dir: Path,
+    run_id: str,
+    run_manifest: Mapping[str, Any],
+) -> list[Path]:
+    if run_manifest.get("status") != "completed":
+        raise ValueError(
+            f"Toolathlon run {run_id} must be completed before SFT preparation."
+        )
+    episodes = run_manifest.get("episodes")
+    if not isinstance(episodes, list) or not episodes:
+        raise ValueError(f"Toolathlon run {run_id} has no completed episode manifest.")
+    trace_paths: list[Path] = []
+    seen_episode_ids: set[str] = set()
+    for index, raw_episode in enumerate(episodes):
+        if not isinstance(raw_episode, Mapping):
+            raise ValueError(f"Toolathlon run episode {index} is not an object.")
+        task = raw_episode.get("task")
+        repetition = raw_episode.get("repetition")
+        attempt = raw_episode.get("attempt")
+        if (
+            raw_episode.get("status") != "completed"
+            or not isinstance(task, str)
+            or not task
+            or not isinstance(repetition, int)
+            or isinstance(repetition, bool)
+            or repetition < 1
+            or not isinstance(attempt, int)
+            or isinstance(attempt, bool)
+            or attempt < 1
+        ):
+            raise ValueError(
+                f"Toolathlon run {run_id} episode {index} is not completed with "
+                "valid task/repetition/attempt metadata."
+            )
+        task_digest = sha256_text(task)[:8]
+        episode_id = (
+            f"{run_id}-{task_digest}-r{repetition:03d}-a{attempt:03d}"
+        )
+        if episode_id in seen_episode_ids:
+            raise ValueError(f"Duplicate completed Toolathlon episode {episode_id}.")
+        seen_episode_ids.add(episode_id)
+        trace_path = source_dir / "traces" / task / episode_id / "trace.json"
+        if not trace_path.is_file():
+            raise ValueError(
+                f"Completed Toolathlon episode has no imported trace: {episode_id}."
+            )
+        trace_paths.append(trace_path)
+    return sorted(trace_paths)
+
+
 def read_toolathlon_gym_source(
     source: SourceSpec,
     selection: SelectionSpec,
     *,
     system_prompt: str,
+    canonical_tools: Sequence[JsonObject] | None = None,
+    canonical_subagent_type_ids: frozenset[str] = frozenset(),
 ) -> AdapterReadResult:
     """Read one immutable, run-scoped Toolathlon-Gym import."""
     source_dir = source.path.resolve()
@@ -242,7 +297,29 @@ def read_toolathlon_gym_source(
     if run_manifest.get("run_id") != run_id:
         raise ValueError(f"Toolathlon run manifest does not match {run_id}")
 
-    trace_paths = sorted(source_dir.glob("traces/*/*/trace.json"))
+    all_trace_paths = sorted(source_dir.glob("traces/*/*/trace.json"))
+    trace_paths = (
+        _completed_trace_paths(source_dir, run_id, run_manifest)
+        if source.require_completed_run
+        else all_trace_paths
+    )
+    native_rollouts = len(trace_paths)
+    if (
+        source.expected_native_rollouts is not None
+        and native_rollouts != source.expected_native_rollouts
+    ):
+        raise ValueError(
+            f"Source {source.id!r} expected {source.expected_native_rollouts} "
+            f"native rollouts, found {native_rollouts}."
+        )
+    if (
+        source.expected_candidates is not None
+        and len(trace_paths) != source.expected_candidates
+    ):
+        raise ValueError(
+            f"Source {source.id!r} expected {source.expected_candidates} "
+            f"candidate rollouts, found {len(trace_paths)}."
+        )
     result_paths = sorted(source_dir.glob("evals/*/*/result.json"))
     result_episode_ids = {path.parent.name for path in result_paths}
     trace_episode_ids = {path.parent.name for path in trace_paths}
@@ -250,6 +327,8 @@ def read_toolathlon_gym_source(
     counts = _empty_counts()
     paired_records = 0
     tool_schema_hashes: set[str] = set()
+    normalized_subagent_calls = 0
+    legacy_schema_traces = 0
 
     for trace_path in trace_paths:
         counts["rollouts"] += 1
@@ -288,7 +367,10 @@ def read_toolathlon_gym_source(
                     "excluded_invalid_reward",
                     f"Invalid reward for {episode_from_path}.",
                 )
-            if numeric_reward != selection.success_reward:
+            if (
+                selection.policy == "exact_reward"
+                and numeric_reward != selection.success_reward
+            ):
                 counts["excluded_reward"] += 1
                 continue
 
@@ -299,11 +381,29 @@ def read_toolathlon_gym_source(
                 )
             trace = _load_json(trace_path)
             runtime = _load_json(runtime_path)
-            if trace.get("schema_version") != TRACE_SCHEMA_VERSION:
-                raise TraceValidationError(
-                    "excluded_invalid_tool_schema",
-                    f"Trace {episode_from_path} must use schema_version 2.",
-                )
+            if source.trace_format == "toolathlon_legacy_unversioned":
+                if (
+                    trace.get("schema_version") is not None
+                    or trace.get("tools") is not None
+                ):
+                    raise TraceValidationError(
+                        "excluded_invalid_tool_schema",
+                        f"Legacy trace {episode_from_path} unexpectedly embeds a schema.",
+                    )
+                if canonical_tools is None:
+                    raise TraceValidationError(
+                        "excluded_invalid_tool_schema",
+                        "Legacy Toolathlon traces require a canonical policy interface.",
+                    )
+                native_tools = None
+                legacy_schema_traces += 1
+            else:
+                if trace.get("schema_version") != TRACE_SCHEMA_VERSION:
+                    raise TraceValidationError(
+                        "excluded_invalid_tool_schema",
+                        f"Trace {episode_from_path} must use schema_version 2.",
+                    )
+                native_tools = validate_chat_tools(trace.get("tools"))
             if trace.get("purpose") != "trace-generation":
                 raise TraceValidationError(
                     "excluded_invalid_metadata",
@@ -333,10 +433,25 @@ def read_toolathlon_gym_source(
                     f"Invalid runtime task metadata for {episode_from_path}.",
                 )
 
-            tools = validate_chat_tools(trace.get("tools"))
             messages, normalized_messages, normalized_calls = _convert_messages(
                 trace.get("messages"), system_prompt
             )
+            normalized_type_calls = normalize_subagent_type_ids(
+                messages,
+                allowed_ids=canonical_subagent_type_ids,
+                aliases=source.subagent_type_aliases,
+            )
+            validate_decomposer_messages(messages)
+            tools = (
+                deepcopy(list(canonical_tools))
+                if canonical_tools is not None
+                else native_tools
+            )
+            if tools is None:
+                raise TraceValidationError(
+                    "excluded_invalid_tool_schema",
+                    f"Trace {episode_from_path} has no usable tool schema.",
+                )
             if messages[1]["content"] != task_prompt:
                 raise TraceValidationError(
                     "excluded_prompt_mismatch",
@@ -381,6 +496,15 @@ def read_toolathlon_gym_source(
                 "subagent_model": trace.get("subagent_model"),
                 "needed_mcp_servers": needed_servers,
                 "subagent_statuses": dict(sorted(subagent_statuses.items())),
+                **(
+                    {
+                        "subagent_type_normalization": {
+                            "tool_calls": normalized_type_calls,
+                        }
+                    }
+                    if normalized_type_calls
+                    else {}
+                ),
             }
             if normalized_messages:
                 attributes["parallel_spawn_normalization"] = {
@@ -408,7 +532,7 @@ def read_toolathlon_gym_source(
                         rollout_id=(f"{run_id}:r{repetition:03d}:a{attempt:03d}"),
                     ),
                     outcome=CanonicalOutcome(
-                        success=True,
+                        success=numeric_reward == selection.success_reward,
                         reward=numeric_reward,
                         metrics={"reward": numeric_reward},
                     ),
@@ -417,6 +541,7 @@ def read_toolathlon_gym_source(
             )
             tool_schema_hashes.add(sha256_text(canonical_json(tools)))
             counts["eligible"] += 1
+            normalized_subagent_calls += normalized_type_calls
         except (json.JSONDecodeError, TypeError) as error:
             trace_error = TraceValidationError("excluded_invalid_json", str(error))
             if selection.invalid_policy == "error":
@@ -446,14 +571,26 @@ def read_toolathlon_gym_source(
             "run_id": run_id,
             "run_status": run_manifest.get("status"),
             "planned_episodes": planned_episodes,
-            "trace_records": len(trace_paths),
+            "native_rollouts": native_rollouts,
+            "candidate_rollouts": len(trace_paths),
+            "trace_records": len(all_trace_paths),
+            "ignored_attempt_trace_records": len(all_trace_paths) - len(trace_paths),
             "paired_records": paired_records,
             "unpaired_trace_records": len(trace_paths) - paired_records,
             "unpaired_evaluation_records": len(result_episode_ids - trace_episode_ids),
             "sidecar_failure_records": _failed_attempts(run_manifest),
             "archive_sha256": archive_sha256,
             "files": imported_files,
-            "tool_schema_origin": "trace.tools",
+            "tool_schema_origin": (
+                "canonical_policy_interface"
+                if canonical_tools is not None
+                else "trace.tools"
+            ),
+            "legacy_schema_traces": legacy_schema_traces,
+            "subagent_type_normalization": {
+                "aliases": dict(sorted(source.subagent_type_aliases.items())),
+                "tool_calls": normalized_subagent_calls,
+            },
             "eligible_tool_schema_sha256s": sorted(tool_schema_hashes),
         },
         counts=counts,

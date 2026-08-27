@@ -21,6 +21,7 @@ from data.sft.schema import (
     SourceSpec,
     SplitSpec,
     TokenizationSpec,
+    sha256_text,
 )
 from decomposer.prompts import (
     DECOMPOSER_SYSTEM_PROMPT,
@@ -339,7 +340,7 @@ def test_prepare_groups_teacher_variants_and_writes_manifest_v3(tmp_path: Path) 
     assert example["messages"][-1]["teacher_reasoning"] == "Report success."
     assert example["tools"][0]["function"]["name"] == "spawn_subagent"
     assert example["source"]["adapter"] == "nemo_gym"
-    assert example["source"]["adapter_version"] == 2
+    assert example["source"]["adapter_version"] == 3
     assert example["source"]["benchmark"] == "workplace_assistant"
     assert example["outcome"]["success"] is True
     for filename in ("train.jsonl", "validation.jsonl"):
@@ -421,6 +422,14 @@ def test_versioned_token_limits_produce_stable_strict_subset(
     assert set(rows_8k) < set(rows_32k)
     assert all(rows_32k[row_id][0] == split for row_id, split in rows_8k.items())
     assert prepared_8k.manifest["filtering"]["excluded_token_length"] == 1
+    assert prepared_8k.manifest["filtering"][
+        "excluded_token_length_by_source"
+    ] == {"teacher": 1}
+    assert prepared_8k.manifest["sources"][0]["tokenization"] == {
+        "eligible_before_token_limit": 10,
+        "excluded_token_length": 1,
+        "included": 9,
+    }
     assert prepared_32k.manifest["filtering"]["excluded_token_length"] == 0
     for _, row in rows_32k.values():
         metadata = row["attributes"]["prepared_tokenization"]
@@ -503,7 +512,7 @@ def test_prepare_sequentializes_parallel_spawn_calls(
         "tool_calls": call_count,
     }
 
-    assert prepared.manifest["preparation"]["adapter_versions"]["nemo_gym"] == 2
+    assert prepared.manifest["preparation"]["adapter_versions"]["nemo_gym"] == 3
     assert prepared.manifest["normalization"] == {
         "strategy": "parallel_spawn_calls_to_single_call_turns",
         "traces": 1,
@@ -878,6 +887,115 @@ def test_prompt_teacher_cap_is_deterministic_and_keeps_split_groups(
     )
 
 
+def test_v2_samples_before_validation_and_keeps_all_rewards(tmp_path: Path) -> None:
+    source_id = "teacher"
+    rollouts = [
+        _rollout(
+            task_index,
+            rollout_index=rollout_index,
+            reward=0.0 if task_index == 0 else 1.0,
+        )
+        for task_index in range(3)
+        for rollout_index in range(3)
+    ]
+    materialized = [
+        _materialized(task_index, rollout_index=rollout_index)
+        for task_index in range(3)
+        for rollout_index in range(3)
+    ]
+
+    def selected_rollout(task_index: int) -> int:
+        return min(
+            range(3),
+            key=lambda rollout_index: sha256_text(
+                "42\0nemo_gym:workplace_assistant:"
+                f"{source_id}:{task_index}:{rollout_index}"
+            ),
+        )
+
+    selected_invalid = next(
+        rollout
+        for rollout in rollouts
+        if rollout["_ng_task_index"] == 1
+        and rollout["_ng_rollout_index"] == selected_rollout(1)
+    )
+    selected_invalid["final_state"]["messages"][1]["tool_calls"][0]["args"][
+        "subagent_type_id"
+    ] = "unknown"
+    unselected_invalid = next(
+        rollout
+        for rollout in rollouts
+        if rollout["_ng_task_index"] == 2
+        and rollout["_ng_rollout_index"] != selected_rollout(2)
+    )
+    unselected_invalid["final_state"] = None
+
+    source = _source(tmp_path, source_id, rollouts, materialized)
+    spec = BuildSpec(
+        spec_version=2,
+        dataset=DatasetIdentity(id="sample-before-filter", version="v1"),
+        policy=PolicySpec(
+            id="decomposer-default",
+            subagent_types=(
+                {
+                    "id": "small",
+                    "description": "General-purpose fixture subagent.",
+                },
+            ),
+        ),
+        sources=(
+            SourceSpec(
+                id=source_id,
+                adapter="nemo_gym",
+                path=source,
+                benchmark="workplace_assistant",
+                environment="workplace",
+                partition="train",
+                teacher="teacher",
+                sampling={
+                    "strategy": "task_hash",
+                    "seed": 42,
+                    "max_per_task": 1,
+                    "expected_tasks": 3,
+                    "expected_rollouts_per_task": 3,
+                },
+                expected_native_rollouts=9,
+                expected_candidates=3,
+            ),
+        ),
+        selection=SelectionSpec(policy="all_rewards"),
+        split=SplitSpec(
+            strategy="prompt_fixed", validation_fraction=0.5, seed=42
+        ),
+    )
+    prepared = prepare_dataset(
+        LoadedBuildSpec(
+            path=tmp_path / "spec.yaml", sha256="2" * 64, spec=spec
+        ),
+        tmp_path / "datasets",
+        git_revision="test-revision",
+        require_clean_git=False,
+    )
+    records = _read_jsonl(prepared.train_path) + _read_jsonl(
+        prepared.validation_path
+    )
+    assert len(records) == 2
+    assert {record["outcome"]["success"] for record in records} == {False, True}
+    assert {record["outcome"]["reward"] for record in records} == {0.0, 1.0}
+    assert all(record["tools"] == records[0]["tools"] for record in records)
+    filtering = prepared.manifest["filtering"]
+    assert filtering["rollouts"] == 3
+    assert filtering["excluded_reward"] == 0
+    assert filtering["excluded_malformed"] == 1
+    assert filtering["excluded_malformed_by_source"] == {source_id: 1}
+    assert filtering["excluded_invalid_tool_calls"] == 1
+    assert filtering["included"] == 2
+    source_manifest = prepared.manifest["sources"][0]
+    assert source_manifest["native_rollouts"] == 9
+    assert source_manifest["candidate_rollouts"] == 3
+    assert source_manifest["sampling"]["not_selected"] == 6
+
+
 def test_prepare_refuses_overwrite_and_bad_materialized_source(tmp_path: Path) -> None:
     source = _source(tmp_path, "teacher")
     output = tmp_path / "prepared"
@@ -1008,4 +1126,54 @@ def test_qwen35_workplace_full_spec_is_pinned_and_success_only() -> None:
     assert spec.tokenization.revision == (
         "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a"
     )
+    assert spec.tokenization.max_tokens == 32768
+
+
+def test_qwen35_mixed_spec_pins_all_reward_sources_and_sampling() -> None:
+    spec = load_build_spec(
+        Path(
+            "data/sft/specs/"
+            "decomposer_mixed_deepseek_qwen35_4b_nonthinking_v1_32k.yaml"
+        )
+    ).spec
+    assert spec.spec_version == 2
+    assert spec.selection.policy == "all_rewards"
+    assert spec.selection.invalid_policy == "exclude"
+    assert spec.policy.subagent_types[0].id == "qwen35_4b_non_thinking"
+    workplace, toolathlon = spec.sources
+    assert workplace.expected_native_rollouts == 3765
+    assert workplace.expected_candidates == 1255
+    assert workplace.sampling is not None
+    assert workplace.sampling.seed == 42
+    assert workplace.sampling.expected_tasks == 1255
+    assert workplace.sampling.expected_rollouts_per_task == 3
+    assert toolathlon.expected_native_rollouts == 503
+    assert toolathlon.expected_candidates == 503
+    assert toolathlon.require_completed_run is True
+    assert toolathlon.trace_format == "toolathlon_legacy_unversioned"
+    assert toolathlon.subagent_type_aliases == {
+        "qwen_3_5_4b_non_thinking": "qwen35_4b_non_thinking"
+    }
+    assert spec.tokenization is not None
+    assert spec.tokenization.revision == (
+        "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a"
+    )
+
+
+def test_qwen35_partial_mixed_spec_pins_snapshot_cardinality() -> None:
+    spec = load_build_spec(
+        Path(
+            "data/sft/specs/decomposer_mixed_deepseek_qwen35_4b_"
+            "nonthinking_v1_partial_3983f605_327_32k.yaml"
+        )
+    ).spec
+    assert spec.dataset.version == "v1-partial-3983f605-327-32k"
+    assert spec.selection.policy == "all_rewards"
+    workplace, toolathlon = spec.sources
+    assert workplace.expected_native_rollouts == 3765
+    assert workplace.expected_candidates == 1255
+    assert toolathlon.expected_native_rollouts == 327
+    assert toolathlon.expected_candidates == 327
+    assert toolathlon.require_completed_run is False
+    assert spec.tokenization is not None
     assert spec.tokenization.max_tokens == 32768

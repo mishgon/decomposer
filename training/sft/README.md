@@ -1,6 +1,6 @@
 # Decomposer supervised fine-tuning
 
-This workflow converts successful Decomposer rollouts into Gemma-4 tool-calling
+This workflow converts valid Decomposer rollouts into tool-calling
 conversations and performs full-parameter SFT with TRL. The loss covers only
 Decomposer outputs. Benchmark prompts, tool definitions, tool responses, and
 subagent reports remain visible as context but receive label `-100`.
@@ -39,7 +39,94 @@ Both specifications use exact reward `1.0`, prompt-fixed validation fraction
 same split. The builder requires a clean Git worktree and refuses to replace an
 existing `<dataset-id>/<version>` directory.
 
-NeMo-Gym adapter version 2 preserves valid parallel delegation turns. When a
+### Qwen Workplace + Toolathlon all-reward release
+
+The mixed Qwen release intentionally keeps both full- and non-full-reward
+traces. Wait until one Toolathlon run manifest contains exactly 503 completed
+episodes, then import only that run from the final archive:
+
+```bash
+uv run python -m data.sft.import_toolathlon \
+  --archive /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/traces.tar.gz \
+  --archive-prefix matrosov/decomposer-qwen/artifacts/gyms/toolathlon_gym \
+  --run-id "$TOOLATHLON_RUN_ID" \
+  --expected-sha256 "$TOOLATHLON_ARCHIVE_SHA256"
+```
+
+Build the immutable mixed release after committing the preparation code and
+specification:
+
+```bash
+uv run --group train python -m data.sft.prepare \
+  --spec data/sft/specs/decomposer_mixed_deepseek_qwen35_4b_nonthinking_v1_32k.yaml \
+  --output-root /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/datasets/sft \
+  --source toolathlon-deepseek-v4-flash-0731-qwen35-4b-nonthinking-n1=/mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/evaluation/data/toolathlon_gym/imports/"$TOOLATHLON_RUN_ID"
+```
+
+Preparation starts from 1,758 candidates: all 503 Toolathlon tasks plus one of
+three Workplace rollouts for each of 1,255 tasks, selected by a stable seed-42
+hash before validation. The pinned Workplace selection contains 12 malformed
+tool-call traces, including calls to undeclared subagent type IDs, and therefore
+retains 1,243 traces (953 reward `1`, 290 reward `0`); none exceeds 32K Qwen
+tokens. The final manifest reports Toolathlon malformed and overlength drops by
+source and reason. Reward value alone never excludes a trace, and no trace is
+truncated.
+
+#### Pinned partial Toolathlon snapshot
+
+The snapshot-specific release
+`v1-partial-3983f605-327-32k` is an immutable experiment input built from
+Toolathlon archive SHA-256
+`3983f60540f1887befbc2654db8a8d7b169c397a88d62d1017625cd480386f5f`.
+It uses the 327 trace/result pairs available for run
+`20260826T122838Z-84ae95f3`; it does not claim that the 503-task source run is
+complete. Import it into a hash-namespaced location so that a later completed
+archive for the same run ID cannot collide with it:
+
+```bash
+.venv/bin/python -m data.sft.import_toolathlon \
+  --archive /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/traces.tar.gz \
+  --archive-prefix matrosov/decomposer-qwen/artifacts/gyms/toolathlon_gym \
+  --run-id 20260826T122838Z-84ae95f3 \
+  --expected-sha256 3983f60540f1887befbc2654db8a8d7b169c397a88d62d1017625cd480386f5f \
+  --output-root /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/evaluation/data/toolathlon_gym/imports/snapshots/3983f605
+```
+
+After committing the preparation implementation, build the release:
+
+```bash
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 .venv/bin/python -m data.sft.prepare \
+  --spec data/sft/specs/decomposer_mixed_deepseek_qwen35_4b_nonthinking_v1_partial_3983f605_327_32k.yaml \
+  --output-root /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/datasets/sft \
+  --source toolathlon-deepseek-v4-flash-0731-qwen35-4b-nonthinking-n1=/mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/evaluation/data/toolathlon_gym/imports/snapshots/3983f605/20260826T122838Z-84ae95f3
+```
+
+This build has 1,532 retained traces: 1,379 train and 153 validation. The
+train split contains 1,118 Workplace and 261 Toolathlon traces; validation
+contains 125 and 28 respectively. Preparation excludes 36 malformed traces
+and 14 Toolathlon traces over 32K without truncating any record. The longest
+retained train trace has 32,394 Qwen tokens.
+
+Run the longest-trace, one-step smoke at high priority before the full job:
+
+```bash
+/mnt/shared_ru.ml.SZ-5_000264/sukhorukov/.venv-mls/bin/python \
+  -m training.sft.run_train_jobs \
+  --sanity-check \
+  --filter qwen35-4b-nonthinking-mixed-v1-partial-3983f605-327-32k-smoke-4gpu \
+  --priority high
+```
+
+Submit the full five-epoch run only after that smoke succeeds:
+
+```bash
+/mnt/shared_ru.ml.SZ-5_000264/sukhorukov/.venv-mls/bin/python \
+  -m training.sft.run_train_jobs \
+  --filter qwen35-4b-nonthinking-mixed-v1-partial-3983f605-327-32k-full-4gpu \
+  --priority high
+```
+
+NeMo-Gym adapter version 3 preserves valid parallel delegation turns. When a
 teacher emits several `spawn_subagent` calls in one message, preparation pairs
 each call with its result by call ID and writes ordered assistant/tool pairs
 with one call per assistant message. Shared visible content and hidden teacher

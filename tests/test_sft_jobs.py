@@ -83,7 +83,7 @@ def test_sft_experiments_are_unique_and_register_retained_configs() -> None:
         False,
         True,
     }
-    assert len(experiments) == 13
+    assert len(experiments) == 15
     e2b_four_gpu = experiments[2]
     assert e2b_four_gpu.num_gpus == 4
     assert e2b_four_gpu.use_liger_kernel is True
@@ -102,6 +102,14 @@ def test_sft_experiments_are_unique_and_register_retained_configs() -> None:
         "gemma4-e4b-nonthinking-deepseek-e4b-v2-32k-full-4gpu",
         "qwen35-4b-nonthinking-mixed-v1-32k-smoke-4gpu",
         "qwen35-4b-nonthinking-mixed-v1-32k-full-4gpu",
+        (
+            "qwen35-4b-nonthinking-mixed-v1-partial-"
+            "3983f605-327-32k-smoke-4gpu"
+        ),
+        (
+            "qwen35-4b-nonthinking-mixed-v1-partial-"
+            "3983f605-327-32k-full-4gpu"
+        ),
         "qwen35-4b-nonthinking-workplace-v1-1444-32k-full-4gpu",
         "qwen35-4b-nonthinking-workplace-v1-3765-32k-full-4gpu",
     }
@@ -905,3 +913,71 @@ def test_qwen35_workplace_full_config_is_pinned_and_uses_full_recipe() -> None:
     )
     assert command[:3] == ["torchrun", "--standalone", "--nproc-per-node=4"]
     assert command[-1] == "--use-liger-kernel"
+
+
+@pytest.mark.parametrize(
+    "config_name",
+    [
+        "qwen35_4b_nonthinking_mixed_v1_32k_smoke_4gpu.yaml",
+        "qwen35_4b_nonthinking_mixed_v1_32k_full_4gpu.yaml",
+        (
+            "qwen35_4b_nonthinking_mixed_"
+            "v1_partial_3983f605_327_32k_smoke_4gpu.yaml"
+        ),
+        (
+            "qwen35_4b_nonthinking_mixed_"
+            "v1_partial_3983f605_327_32k_full_4gpu.yaml"
+        ),
+    ],
+)
+def test_qwen35_mixed_configs_pin_model_revision(config_name: str) -> None:
+    config = yaml.safe_load((Path("training/sft/configs") / config_name).read_text())
+    assert config["model"] == {
+        "name_or_path": "Qwen/Qwen3.5-4B",
+        "revision": "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a",
+        "dtype": "bfloat16",
+        "attn_implementation": "sdpa",
+        "trust_remote_code": False,
+    }
+
+
+def test_qwen35_partial_mixed_configs_use_snapshot_release_and_32k_recipe() -> None:
+    config_dir = Path("training/sft/configs")
+    release = (
+        "datasets/sft/decomposer-mixed-deepseek-qwen35-4b-nonthinking/"
+        "v1-partial-3983f605-327-32k"
+    )
+    smoke = yaml.safe_load(
+        (
+            config_dir
+            / (
+                "qwen35_4b_nonthinking_mixed_"
+                "v1_partial_3983f605_327_32k_smoke_4gpu.yaml"
+            )
+        ).read_text()
+    )
+    full = yaml.safe_load(
+        (
+            config_dir
+            / (
+                "qwen35_4b_nonthinking_mixed_"
+                "v1_partial_3983f605_327_32k_full_4gpu.yaml"
+            )
+        ).read_text()
+    )
+    for config in (smoke, full):
+        data = config["data"]
+        assert release in data["train_file"]
+        assert release in data["validation_file"]
+        assert release in data["manifest_file"]
+        assert data["require_prepared_tokenization"] is True
+        assert data["include_reasoning"] is False
+        assert config["training"]["max_length"] == 32768
+        assert config["training"]["global_batch_size"] == 4
+        assert config["training"]["fsdp_config"]["activation_checkpointing"] is True
+        assert config["run"]["expected_world_size"] == 4
+    assert smoke["data"]["max_train_samples"] is None
+    assert smoke["data"]["longest_train_samples"] == 4
+    assert smoke["training"]["max_steps"] == 1
+    assert full["training"]["num_train_epochs"] == 5
+    assert full["run"]["early_stopping"]["patience"] == 2

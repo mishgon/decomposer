@@ -2,7 +2,7 @@ spec_version: 2
 
 dataset:
   id: decomposer-mixed-deepseek-qwen35-4b-nonthinking
-  version: v1-32k
+  version: v1-partial-3983f605-327-32k
 
 policy:
   id: decomposer-default
@@ -36,9 +36,9 @@ sources:
     trace_format: toolathlon_legacy_unversioned
     subagent_type_aliases:
       qwen_3_5_4b_non_thinking: qwen35_4b_non_thinking
-    expected_native_rollouts: 503
-    expected_candidates: 503
-    require_completed_run: true
+    expected_native_rollouts: 327
+    expected_candidates: 327
+    require_completed_run: false
 
 selection:
   policy: all_rewards

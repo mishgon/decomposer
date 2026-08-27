@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Protocol
 
-from ..schema import SelectionSpec, SourceSpec
+from ..schema import JsonObject, SelectionSpec, SourceSpec
 from .base import AdapterReadResult
 from .nemo_gym import ADAPTER_VERSION as NEMO_GYM_ADAPTER_VERSION
 from .nemo_gym import read_nemo_gym_source
@@ -19,6 +20,8 @@ class AdapterReader(Protocol):
         selection: SelectionSpec,
         *,
         system_prompt: str,
+        canonical_tools: Sequence[JsonObject] | None = None,
+        canonical_subagent_type_ids: frozenset[str] = frozenset(),
     ) -> AdapterReadResult: ...
 
 

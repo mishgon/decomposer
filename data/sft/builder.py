@@ -17,6 +17,7 @@ from typing import Any
 
 import yaml
 
+from decomposer.core import build_decomposer_chat_tools
 from decomposer.prompts import DECOMPOSER_SYSTEM_PROMPT
 
 from .adapters import ADAPTER_VERSIONS, ADAPTERS
@@ -115,10 +116,16 @@ def _empty_counts() -> Counter[str]:
 
 
 def _serialized_counts(counts: Counter[str]) -> JsonObject:
+    malformed = sum(
+        counts[reason]
+        for reason in EXCLUSION_REASONS
+        if reason not in {"excluded_reward", "excluded_prompt_teacher_cap"}
+    )
     return {
         "rollouts": counts["rollouts"],
         "eligible_before_cap": counts["eligible"],
         "included": counts["included"],
+        "excluded_malformed": malformed,
         **{reason: counts[reason] for reason in EXCLUSION_REASONS},
     }
 
@@ -411,6 +418,8 @@ def _tokenize_and_filter_split(
                 {
                     "id": record.id,
                     "split": split,
+                    "source_id": record.source.source_id,
+                    "environment": record.source.environment,
                     "token_length": token_length,
                     "max_tokens": spec.max_tokens,
                 }
@@ -428,12 +437,26 @@ def _tokenize_and_filter_split(
 
 
 def _logical_spec(spec: BuildSpec) -> JsonObject:
+    policy_exclude = {"subagent_types"} if spec.spec_version == 1 else set()
+    source_exclude = {"path"}
+    if spec.spec_version == 1:
+        source_exclude.update(
+            {
+                "trace_format",
+                "subagent_type_aliases",
+                "sampling",
+                "expected_native_rollouts",
+                "expected_candidates",
+                "require_completed_run",
+            }
+        )
     logical = {
         "spec_version": spec.spec_version,
         "dataset": spec.dataset.model_dump(mode="json"),
-        "policy": spec.policy.model_dump(mode="json"),
+        "policy": spec.policy.model_dump(mode="json", exclude=policy_exclude),
         "sources": [
-            source.model_dump(mode="json", exclude={"path"}) for source in spec.sources
+            source.model_dump(mode="json", exclude=source_exclude)
+            for source in spec.sources
         ],
         "selection": spec.selection.model_dump(mode="json"),
         "split": spec.split.model_dump(mode="json", exclude_none=True),
@@ -531,6 +554,21 @@ def prepare_dataset(
         )
 
     system_prompt = DECOMPOSER_SYSTEM_PROMPT
+    canonical_subagent_type_ids = frozenset(
+        subagent.id for subagent in spec.policy.subagent_types
+    )
+    canonical_tools: list[JsonObject] | None = None
+    if spec.policy.subagent_types:
+        canonical_tools = build_decomposer_chat_tools(
+            [
+                {
+                    "subagent_type_id": subagent.id,
+                    "description": subagent.description,
+                    "assistant_id": subagent.id,
+                }
+                for subagent in spec.policy.subagent_types
+            ]
+        )
     records: list[CanonicalRollout] = []
     source_manifests: list[JsonObject] = []
     counts_by_source: dict[str, Counter[str]] = {}
@@ -543,6 +581,8 @@ def prepare_dataset(
             source,
             spec.selection,
             system_prompt=system_prompt,
+            canonical_tools=canonical_tools,
+            canonical_subagent_type_ids=canonical_subagent_type_ids,
         )
         for record in result.records:
             if record.id in seen_ids:
@@ -642,6 +682,29 @@ def prepare_dataset(
             int(split["excluded"]) for split in tokenization_manifest["splits"].values()
         )
     )
+    excluded_token_length_by_source: Counter[str] = Counter()
+    if tokenization_manifest is not None:
+        for split in tokenization_manifest["splits"].values():
+            for excluded in split["excluded_records"]:
+                excluded_token_length_by_source[str(excluded["source_id"])] += 1
+    excluded_malformed_by_source = {
+        source_id: sum(
+            counts[reason]
+            for reason in EXCLUSION_REASONS
+            if reason not in {"excluded_reward", "excluded_prompt_teacher_cap"}
+        )
+        for source_id, counts in sorted(counts_by_source.items())
+    }
+    if tokenization_manifest is not None:
+        for source_manifest in source_manifests:
+            source_id = str(source_manifest["id"])
+            before_token_limit = int(source_manifest["counts"]["included"])
+            excluded = excluded_token_length_by_source[source_id]
+            source_manifest["tokenization"] = {
+                "eligible_before_token_limit": before_token_limit,
+                "excluded_token_length": excluded,
+                "included": before_token_limit - excluded,
+            }
 
     manifest: JsonObject = {
         "format_version": MANIFEST_FORMAT_VERSION,
@@ -665,12 +728,20 @@ def prepare_dataset(
         "policy": {
             "id": spec.policy.id,
             "system_prompt_sha256": sha256_text(system_prompt),
+            "subagent_types": [
+                subagent.model_dump(mode="json")
+                for subagent in spec.policy.subagent_types
+            ],
         },
         "sources": source_manifests,
         "filtering": {
             **_serialized_counts(total_counts),
+            "excluded_malformed_by_source": excluded_malformed_by_source,
             "eligible_before_token_limit": total_counts["included"],
             "excluded_token_length": excluded_token_length,
+            "excluded_token_length_by_source": dict(
+                sorted(excluded_token_length_by_source.items())
+            ),
             "included": len(retained),
             "sidecar_failure_records": sum(
                 int(source["sidecar_failure_records"]) for source in source_manifests

@@ -6,23 +6,21 @@ model:
   trust_remote_code: false
 
 data:
-  # Mechanical smoke only: reuse canonical traces that predate the mixed Qwen
-  # release. This output is not a research checkpoint.
-  train_file: /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/datasets/sft/decomposer-workplace-deepseek-e4b-thinking/v1/train.jsonl
-  validation_file: /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/datasets/sft/decomposer-workplace-deepseek-e4b-thinking/v1/validation.jsonl
-  manifest_file: /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/datasets/sft/decomposer-workplace-deepseek-e4b-thinking/v1/manifest.json
+  train_file: /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/datasets/sft/decomposer-mixed-deepseek-qwen35-4b-nonthinking/v1-partial-3983f605-327-32k/train.jsonl
+  validation_file: /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/datasets/sft/decomposer-mixed-deepseek-qwen35-4b-nonthinking/v1-partial-3983f605-327-32k/validation.jsonl
+  manifest_file: /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/datasets/sft/decomposer-mixed-deepseek-qwen35-4b-nonthinking/v1-partial-3983f605-327-32k/manifest.json
   include_reasoning: false
-  require_prepared_tokenization: false
+  require_prepared_tokenization: true
   error_on_truncation: true
   exclude_overlength: true
   num_proc: 8
-  max_train_samples: 8
+  max_train_samples: null
   max_eval_samples: 4
   longest_train_samples: 4
 
 training:
-  output_dir: /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/training/sft/smoke/qwen35-4b-nonthinking-mixed-v1-32k-4gpu
-  run_name: qwen35-4b-decomposer-sft-nonthinking-smoke-4gpu
+  output_dir: /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/training/sft/smoke/qwen35-4b-nonthinking-mixed-v1-partial-3983f605-327-32k-4gpu
+  run_name: qwen35-4b-decomposer-sft-nonthinking-mixed-v1-partial-3983f605-327-32k-smoke-4gpu
   max_length: 32768
   max_steps: 1
   per_device_train_batch_size: 1
@@ -73,11 +71,14 @@ clearml:
   enabled: false
   weight_norm_interval_steps: 10
   project: decomposer
-  task: Qwen3.5-4B Decomposer SFT one-step mechanical smoke
+  task: Qwen3.5-4B Decomposer SFT partial-snapshot one-step smoke
   tags:
     - sft
     - qwen3.5-4b
     - smoke
+    - workplace-assistant
+    - toolathlon-gym
+    - partial-snapshot-3983f605
   log_model: false
   output_uri: null
 

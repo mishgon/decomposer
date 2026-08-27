@@ -20,6 +20,7 @@ from data.sft.schema import (
     SourceSpec,
     SplitSpec,
 )
+from decomposer.core import build_decomposer_chat_tools
 from decomposer.prompts import DECOMPOSER_SYSTEM_PROMPT
 
 RUN_ID = "20260824T101524Z-203eac76"
@@ -92,9 +93,16 @@ def _tool(name: str, call_id: str, content: str) -> dict:
 
 
 def _trace(
-    task: str, *, passed: bool = True, tools: object = TOOLS
+    task: str,
+    *,
+    passed: bool = True,
+    tools: object = TOOLS,
+    attempt: int = 1,
 ) -> tuple[dict, dict, dict]:
-    episode_id = f"{RUN_ID}-{hashlib.sha256(task.encode()).hexdigest()[:8]}-r001-a001"
+    episode_id = (
+        f"{RUN_ID}-{hashlib.sha256(task.encode()).hexdigest()[:8]}-"
+        f"r001-a{attempt:03d}"
+    )
     prompt = f"Complete Toolathlon task {task}."
     spawn_a = {
         "name": "spawn_subagent",
@@ -120,7 +128,7 @@ def _trace(
         "run_id": RUN_ID,
         "task": task,
         "repetition": 1,
-        "attempt": 1,
+        "attempt": attempt,
         "purpose": "trace-generation",
         "decomposer_model": "deepseek/deepseek-v4-flash-0731",
         "subagent_model": "google/gemma-4-26B-A4B-it",
@@ -164,16 +172,43 @@ def _trace(
     return trace, runtime, result
 
 
-def _source(root: Path, episodes: list[tuple[dict, dict, dict | None]]) -> Path:
+def _refresh_import_manifest(root: Path) -> None:
+    files = {}
+    for path in sorted(root.rglob("*.json")):
+        if path.name == "import_manifest.json":
+            continue
+        content = path.read_bytes()
+        files[path.relative_to(root).as_posix()] = {
+            "bytes": len(content),
+            "sha256": hashlib.sha256(content).hexdigest(),
+        }
+    _write_json(
+        root / "import_manifest.json",
+        {
+            "schema_version": 1,
+            "run_id": RUN_ID,
+            "archive": {"sha256": "a" * 64},
+            "files": files,
+        },
+    )
+
+
+def _source(
+    root: Path,
+    episodes: list[tuple[dict, dict, dict | None]],
+    *,
+    run_status: str = "running",
+) -> Path:
     run_manifest = {
         "schema_version": 1,
         "run_id": RUN_ID,
-        "status": "running",
+        "status": run_status,
         "episodes": [
             {
                 "task": trace["task"],
                 "repetition": trace["repetition"],
                 "status": "completed",
+                "attempt": trace["attempt"],
                 "attempts": [
                     (
                         {"attempt": 1, "status": "failed"}
@@ -195,24 +230,7 @@ def _source(root: Path, episodes: list[tuple[dict, dict, dict | None]]) -> Path:
         if result is not None:
             _write_json(root / "evals" / task / episode_id / "result.json", result)
 
-    files = {}
-    for path in sorted(root.rglob("*.json")):
-        if path.name == "import_manifest.json":
-            continue
-        content = path.read_bytes()
-        files[path.relative_to(root).as_posix()] = {
-            "bytes": len(content),
-            "sha256": hashlib.sha256(content).hexdigest(),
-        }
-    _write_json(
-        root / "import_manifest.json",
-        {
-            "schema_version": 1,
-            "run_id": RUN_ID,
-            "archive": {"sha256": "a" * 64},
-            "files": files,
-        },
-    )
+    _refresh_import_manifest(root)
     return root
 
 
@@ -238,39 +256,55 @@ def _add_tar_json(archive: tarfile.TarFile, name: str, value: object) -> None:
 def test_import_archive_selects_one_run_and_is_idempotent(tmp_path: Path) -> None:
     trace, runtime, result = _trace("alpha")
     archive_path = tmp_path / "toolathlon.tar.gz"
+    prefix = "matrosov/decomposer-qwen/artifacts/gyms/toolathlon_gym"
     with tarfile.open(archive_path, "w:gz") as archive:
         _add_tar_json(
             archive,
-            f"toolathlon_gym/runs/{RUN_ID}/manifest.json",
+            f"{prefix}/runs/{RUN_ID}/manifest.json",
             {"schema_version": 1, "run_id": RUN_ID, "episodes": []},
         )
         episode_id = trace["episode_id"]
-        base = f"toolathlon_gym/traces/alpha/{episode_id}"
+        base = f"{prefix}/traces/alpha/{episode_id}"
         _add_tar_json(archive, f"{base}/trace.json", trace)
         _add_tar_json(archive, f"{base}/runtime.json", runtime)
         _add_tar_json(
             archive,
-            f"toolathlon_gym/evals/alpha/{episode_id}/result.json",
+            f"{prefix}/evals/alpha/{episode_id}/result.json",
             result,
         )
         _add_tar_json(archive, f"{base}/workspace/ignored.json", {"large": True})
         _add_tar_json(
             archive,
-            "toolathlon_gym/traces/other/other-run-episode/trace.json",
+            f"{prefix}/traces/other/other-run-episode/trace.json",
             {"run_id": "other-run"},
         )
 
     expected = sha256_file(archive_path)
     destination = import_archive(
-        archive_path, RUN_ID, tmp_path / "imports", expected_sha256=expected
+        archive_path,
+        RUN_ID,
+        tmp_path / "imports",
+        expected_sha256=expected,
+        archive_prefix=prefix,
     )
     repeated = import_archive(
-        archive_path, RUN_ID, tmp_path / "imports", expected_sha256=expected
+        archive_path,
+        RUN_ID,
+        tmp_path / "imports",
+        expected_sha256=expected,
+        archive_prefix=prefix,
     )
 
     assert repeated == destination
     manifest = json.loads((destination / "import_manifest.json").read_text())
     assert manifest["counts"] == {"traces": 1, "runtimes": 1, "evaluations": 1}
+    assert manifest["archive"]["prefix"] == prefix
+    assert (
+        destination / "traces" / "alpha" / episode_id / "trace.json"
+    ).is_file()
+    assert (
+        destination / "evals" / "alpha" / episode_id / "result.json"
+    ).is_file()
     assert not list(destination.rglob("workspace"))
     assert not list(destination.rglob("other-run-episode"))
 
@@ -402,7 +436,7 @@ def test_canonical_builder_accepts_toolathlon_source(tmp_path: Path) -> None:
     assert all(
         row["messages"][0]["content"] == DECOMPOSER_SYSTEM_PROMPT for row in train
     )
-    assert prepared.manifest["preparation"]["adapter_versions"] == {"toolathlon_gym": 1}
+    assert prepared.manifest["preparation"]["adapter_versions"] == {"toolathlon_gym": 2}
     assert prepared.manifest["normalization"] == {
         "strategy": "parallel_spawn_calls_to_single_call_turns",
         "traces": 10,
@@ -434,3 +468,128 @@ def test_canonical_builder_requires_one_tool_schema(tmp_path: Path) -> None:
             git_revision="test-revision",
             require_clean_git=False,
         )
+
+
+def test_v2_legacy_toolathlon_keeps_all_rewards_and_normalizes_interface(
+    tmp_path: Path,
+) -> None:
+    episodes = [
+        _trace("success"),
+        _trace("failed", passed=False),
+        _trace("malformed"),
+    ]
+    for trace, _runtime, _result in episodes:
+        trace.pop("schema_version")
+        trace.pop("tools")
+        for message in trace["messages"]:
+            for call in message.get("data", {}).get("tool_calls", []):
+                if call.get("name") == "spawn_subagent":
+                    call["args"]["subagent_type_id"] = "external-worker"
+    malformed_trace = episodes[-1][0]
+    malformed_trace["messages"][1]["data"]["tool_calls"][0]["args"][
+        "subagent_type_id"
+    ] = "undeclared-worker"
+    source = _source(tmp_path / "source", episodes, run_status="completed")
+    spec = BuildSpec(
+        spec_version=2,
+        dataset=DatasetIdentity(id="toolathlon-legacy", version="v1"),
+        policy=PolicySpec(
+            id="decomposer-default",
+            subagent_types=(
+                {"id": "worker", "description": "Canonical worker agent."},
+            ),
+        ),
+        sources=(
+            SourceSpec(
+                id="toolathlon-source",
+                adapter="toolathlon_gym",
+                path=source,
+                benchmark="toolathlon_gym",
+                environment="toolathlon_gym",
+                partition="train",
+                teacher="deepseek-v4-flash-0731",
+                trace_format="toolathlon_legacy_unversioned",
+                subagent_type_aliases={"external-worker": "worker"},
+                expected_native_rollouts=3,
+                expected_candidates=3,
+                require_completed_run=True,
+            ),
+        ),
+        selection=SelectionSpec(policy="all_rewards"),
+        split=SplitSpec(strategy="prompt_fixed", validation_fraction=0.5, seed=42),
+    )
+    prepared = prepare_dataset(
+        LoadedBuildSpec(
+            path=tmp_path / "spec.yaml", sha256="3" * 64, spec=spec
+        ),
+        tmp_path / "datasets",
+        git_revision="test-revision",
+        require_clean_git=False,
+    )
+    records = [
+        json.loads(line)
+        for path in (prepared.train_path, prepared.validation_path)
+        for line in path.read_text().splitlines()
+    ]
+    assert len(records) == 2
+    assert {record["outcome"]["success"] for record in records} == {False, True}
+    assert prepared.manifest["filtering"]["excluded_reward"] == 0
+    assert prepared.manifest["filtering"]["excluded_malformed"] == 1
+    assert prepared.manifest["filtering"]["excluded_malformed_by_source"] == {
+        "toolathlon-source": 1
+    }
+    assert prepared.manifest["filtering"]["excluded_invalid_tool_calls"] == 1
+    assert len({json.dumps(record["tools"], sort_keys=True) for record in records}) == 1
+    for record in records:
+        spawn_ids = {
+            call["function"]["arguments"]["subagent_type_id"]
+            for message in record["messages"]
+            for call in message.get("tool_calls", [])
+            if call["function"]["name"] == "spawn_subagent"
+        }
+        assert spawn_ids == {"worker"}
+    source_manifest = prepared.manifest["sources"][0]
+    assert source_manifest["legacy_schema_traces"] == 3
+    assert source_manifest["subagent_type_normalization"]["tool_calls"] == 4
+    assert source_manifest["tool_schema_origin"] == "canonical_policy_interface"
+
+
+def test_completed_toolathlon_run_ignores_stale_attempt_traces(tmp_path: Path) -> None:
+    final = _trace("alpha", attempt=2)
+    source = _source(tmp_path / "source", [final], run_status="completed")
+    stale_trace, stale_runtime, stale_result = _trace("alpha", attempt=1)
+    stale_dir = source / "traces" / "alpha" / stale_trace["episode_id"]
+    _write_json(stale_dir / "trace.json", stale_trace)
+    _write_json(stale_dir / "runtime.json", stale_runtime)
+    _write_json(
+        source / "evals" / "alpha" / stale_trace["episode_id"] / "result.json",
+        stale_result,
+    )
+    _refresh_import_manifest(source)
+    canonical_tools = build_decomposer_chat_tools(
+        [
+            {
+                "subagent_type_id": "worker",
+                "description": "Canonical worker agent.",
+                "assistant_id": "worker",
+            }
+        ]
+    )
+    source_spec = _source_spec(source).model_copy(
+        update={
+            "expected_native_rollouts": 1,
+            "expected_candidates": 1,
+            "require_completed_run": True,
+        }
+    )
+    result = read_toolathlon_gym_source(
+        source_spec,
+        SelectionSpec(),
+        system_prompt=DECOMPOSER_SYSTEM_PROMPT,
+        canonical_tools=canonical_tools,
+        canonical_subagent_type_ids=frozenset({"worker"}),
+    )
+    assert len(result.records) == 1
+    assert result.records[0].source.rollout_id.endswith(":a002")
+    assert result.source_manifest["trace_records"] == 2
+    assert result.source_manifest["ignored_attempt_trace_records"] == 1
