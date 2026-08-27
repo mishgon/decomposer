@@ -325,6 +325,17 @@ WORKPLACE_QWEN35_4B_SFT_FINAL = (
     / "qwen35-4b-nonthinking-workplace-v1-3765-32k-full-4gpu"
     / "final"
 )
+WORKPLACE_QWEN35_4B_MIXED_SFT_MODEL_ID = (
+    "decomposer/qwen35-4b-sft-mixed-v1-partial-3983f605-327-32k"
+)
+WORKPLACE_QWEN35_4B_MIXED_SFT_FINAL = (
+    ARTIFACTS_ROOT
+    / "training"
+    / "sft"
+    / "jobs"
+    / "qwen35-4b-nonthinking-mixed-v1-partial-3983f605-327-32k-full-4gpu"
+    / "final"
+)
 
 DECOMPOSER_EXPERIMENTS = (
     DecomposerExperiment(
@@ -386,6 +397,48 @@ DECOMPOSER_EXPERIMENTS = (
             ModelServer(
                 WORKPLACE_QWEN35_4B_SFT_MODEL_ID,
                 WORKPLACE_QWEN35_4B_SFT_FINAL,
+                8026,
+                0,
+                0.90,
+                0,
+                thinking=False,
+                tool_call_parser="qwen3_xml",
+                reasoning_parser=None,
+                gdn_prefill_backend="triton",
+                dtype="bfloat16",
+            ),
+            ModelServer(
+                "Qwen/Qwen3.5-4B",
+                QWEN35_4B_BASE,
+                8025,
+                1,
+                0.90,
+                0,
+                thinking=False,
+                tool_call_parser="qwen3_xml",
+                reasoning_parser=None,
+                gdn_prefill_backend="triton",
+                dtype="bfloat16",
+            ),
+        ),
+    ),
+    DecomposerExperiment(
+        name=(
+            "qwen35-4b-sft-mixed-v1-partial-3983f605-327-32k-non-thinking-"
+            "qwen35-4b-non-thinking"
+        ),
+        gym_config_filename=(
+            "workplace_assistant_qwen35_4b_sft_mixed_v1_partial_3983f605_"
+            "327_32k_non_thinking_qwen35_4b_non_thinking.yaml"
+        ),
+        manager_backend="local_vllm",
+        num_gpus=2,
+        max_model_len=131072,
+        subagent_graph="qwen35",
+        model_servers=(
+            ModelServer(
+                WORKPLACE_QWEN35_4B_MIXED_SFT_MODEL_ID,
+                WORKPLACE_QWEN35_4B_MIXED_SFT_FINAL,
                 8026,
                 0,
                 0.90,

@@ -132,6 +132,25 @@ $MLSPY -m gyms.workplace_assistant.run_eval \
 Logical GPU 0 serves the untuned base manager under a dedicated model name;
 logical GPU 1 serves an identical base Qwen3.5-4B checkpoint to subagents.
 
+After the mixed Workplace plus partial-Toolathlon SFT run exports `final/`,
+prepare and submit its student-prompt validation evaluation with the same base
+Qwen3.5-4B non-thinking worker:
+
+```bash
+.venv/bin/python -m gyms.workplace_assistant.prepare eval \
+  --split validation \
+  --experiment qwen35-4b-sft-mixed-v1-partial-3983f605-327-32k-non-thinking-qwen35-4b-non-thinking \
+  --reuse-source
+
+$MLSPY -m gyms.workplace_assistant.run_eval \
+  --purpose evaluation \
+  --experiment qwen35-4b-sft-mixed-v1-partial-3983f605-327-32k-non-thinking-qwen35-4b-non-thinking \
+  --split validation \
+  --num-repeats 3 \
+  --priority high \
+  --author-name sukhorukov
+```
+
 After the Workplace E4B SFT run has exported its merged `final/` checkpoint,
 evaluate the tuned non-thinking manager and vanilla thinking E4B subagent on
 dedicated GPUs:

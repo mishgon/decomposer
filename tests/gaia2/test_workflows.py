@@ -21,6 +21,7 @@ from gyms.gaia2.experiments import (
     DOMAIN,
     INSTANCE_TYPES_BY_NUM_GPUS,
     QWEN35_BASE_DECOMPOSER_EXPERIMENT,
+    QWEN35_MIXED_SFT_EXPERIMENT,
     QWEN35_SFT_EXPERIMENT,
     SCENARIO_COUNT,
     SIMPLE_DEEPSEEK_EXPERIMENT,
@@ -107,6 +108,7 @@ def test_experiment_registry_contains_local_and_openrouter_profiles() -> None:
         DECOMPOSER_EXPERIMENT,
         DEEPSEEK_GEMMA_EXPERIMENT,
         QWEN35_SFT_EXPERIMENT,
+        QWEN35_MIXED_SFT_EXPERIMENT,
         QWEN35_BASE_DECOMPOSER_EXPERIMENT,
         DEEPSEEK_QWEN_EXPERIMENT,
         SIMPLE_EXPERIMENT,
@@ -126,6 +128,7 @@ def test_experiment_registry_contains_local_and_openrouter_profiles() -> None:
             DECOMPOSER_EXPERIMENT,
             DEEPSEEK_GEMMA_EXPERIMENT,
             QWEN35_SFT_EXPERIMENT,
+            QWEN35_MIXED_SFT_EXPERIMENT,
             QWEN35_BASE_DECOMPOSER_EXPERIMENT,
             DEEPSEEK_QWEN_EXPERIMENT,
         )
@@ -230,12 +233,18 @@ def test_openrouter_decomposer_starts_only_the_configured_worker() -> None:
     assert qwen_worker[qwen_worker.index("--gdn-prefill-backend") + 1] == "triton"
 
 
-def test_qwen_sft_decomposer_uses_qwen_manager_and_worker_profiles() -> None:
-    manager, worker = decomposer_vllm_commands(QWEN35_SFT_EXPERIMENT)
+@pytest.mark.parametrize(
+    "experiment",
+    [QWEN35_SFT_EXPERIMENT, QWEN35_MIXED_SFT_EXPERIMENT],
+)
+def test_qwen_sft_decomposer_uses_qwen_manager_and_worker_profiles(
+    experiment,
+) -> None:
+    manager, worker = decomposer_vllm_commands(experiment)
 
     assert manager is not None
-    assert str(QWEN35_SFT_EXPERIMENT.manager_checkpoint) in manager
-    assert str(QWEN35_SFT_EXPERIMENT.worker_checkpoint) in worker
+    assert str(experiment.manager_checkpoint) in manager
+    assert str(experiment.worker_checkpoint) in worker
     for command in (manager, worker):
         assert "qwen3_xml" in command
         assert "--reasoning-parser" not in command
@@ -315,16 +324,33 @@ def test_qwen_worker_uses_official_non_thinking_sampling() -> None:
     }
 
 
-def test_qwen_sft_manager_uses_official_non_thinking_sampling(tmp_path) -> None:
+@pytest.mark.parametrize(
+    ("experiment", "served_name"),
+    [
+        (
+            QWEN35_SFT_EXPERIMENT,
+            "decomposer/qwen35-4b-sft-workplace-v1-3765-32k",
+        ),
+        (
+            QWEN35_MIXED_SFT_EXPERIMENT,
+            "decomposer/qwen35-4b-sft-mixed-v1-partial-3983f605-327-32k",
+        ),
+    ],
+)
+def test_qwen_sft_manager_uses_official_non_thinking_sampling(
+    tmp_path,
+    experiment,
+    served_name: str,
+) -> None:
     service_path, _ = _runtime_configs(
         Path(__file__).resolve().parents[2],
         tmp_path,
-        QWEN35_SFT_EXPERIMENT,
+        experiment,
     )
     manager = json.loads(service_path.read_text(encoding="utf-8"))["manager"]
 
     assert manager == {
-        "model": "decomposer/qwen35-4b-sft-workplace-v1-3765-32k",
+        "model": served_name,
         "base_url": "http://127.0.0.1:8026/v1",
         "api_key": "EMPTY",
         "temperature": 0.7,
@@ -415,7 +441,14 @@ def test_openrouter_preparation_hashes_only_the_local_worker(monkeypatch) -> Non
     }
 
 
-def test_qwen_sft_preparation_hashes_manager_and_worker(monkeypatch) -> None:
+@pytest.mark.parametrize(
+    "experiment",
+    [QWEN35_SFT_EXPERIMENT, QWEN35_MIXED_SFT_EXPERIMENT],
+)
+def test_qwen_sft_preparation_hashes_manager_and_worker(
+    monkeypatch,
+    experiment,
+) -> None:
     calls = []
 
     def fake_validate_checkpoint(path, *, full_hashes):
@@ -425,17 +458,17 @@ def test_qwen_sft_preparation_hashes_manager_and_worker(monkeypatch) -> None:
     monkeypatch.setattr(prepare, "validate_checkpoint", fake_validate_checkpoint)
 
     models = prepare.experiment_models(
-        QWEN35_SFT_EXPERIMENT,
+        experiment,
         full_hashes=False,
     )
 
     assert calls == [
-        (QWEN35_SFT_EXPERIMENT.worker_checkpoint, False),
-        (QWEN35_SFT_EXPERIMENT.manager_checkpoint, False),
+        (experiment.worker_checkpoint, False),
+        (experiment.manager_checkpoint, False),
     ]
     assert models == {
-        "worker": {"path": str(QWEN35_SFT_EXPERIMENT.worker_checkpoint)},
-        "manager": {"path": str(QWEN35_SFT_EXPERIMENT.manager_checkpoint)},
+        "worker": {"path": str(experiment.worker_checkpoint)},
+        "manager": {"path": str(experiment.manager_checkpoint)},
     }
 
 
@@ -557,7 +590,7 @@ def test_mlspace_payload_uses_registry_gpu_type_and_redactable_judge_key(
     tmp_path,
 ) -> None:
     payload = build_payload(
-        QWEN35_SFT_EXPERIMENT,
+        QWEN35_MIXED_SFT_EXPERIMENT,
         tmp_path / "staged",
         num_repeats=3,
         limit=None,

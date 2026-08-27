@@ -60,6 +60,9 @@ The registered experiments are:
   the Workplace-trained non-thinking Qwen3.5-4B manager on the first GPU and
   a base non-thinking Qwen3.5-4B worker on the second GPU, using the student
   prompt and 128K context.
+- `qwen35-4b-sft-mixed-v1-partial-3983f605-327-32k-non-thinking-qwen35-4b-non-thinking`:
+  the Workplace plus partial-Toolathlon SFT manager with the same student
+  prompt, base non-thinking Qwen3.5-4B worker, and two-GPU topology.
 - `gemma4-e4b-it-thinking`: vanilla thinking E4B simple agent on one GPU.
 - `qwen35-4b-non-thinking`: vanilla non-thinking Qwen3.5-4B simple agent on
   one GPU, using the recommended general-task sampling parameters and 128K
@@ -80,6 +83,12 @@ The registered experiments are:
 # Qwen SFT Decomposer, three attempts per scenario.
 .venv/bin/python -m gyms.gaia2.run \
   --experiment qwen35-4b-sft-workplace-v1-3765-32k-non-thinking-qwen35-4b-non-thinking \
+  --num-repeats 3 \
+  --cuda-visible-devices 6,7
+
+# Mixed SFT Decomposer, three attempts per scenario.
+.venv/bin/python -m gyms.gaia2.run \
+  --experiment qwen35-4b-sft-mixed-v1-partial-3983f605-327-32k-non-thinking-qwen35-4b-non-thinking \
   --num-repeats 3 \
   --cuda-visible-devices 6,7
 
@@ -144,6 +153,18 @@ a systemic failure and does not create `.eval_done.json`.
   --num-repeats 3 \
   --author-name sukhorukov \
   --dry
+
+# Prepare and submit the mixed-SFT checkpoint after its final export exists.
+.venv/bin/python -m gyms.gaia2.prepare eval \
+  --experiment qwen35-4b-sft-mixed-v1-partial-3983f605-327-32k-non-thinking-qwen35-4b-non-thinking \
+  --reuse-source
+
+/mnt/shared_ru.ml.SZ-5_000264/sukhorukov/.venv-mls/bin/python \
+  -m gyms.gaia2.run_eval \
+  --experiment qwen35-4b-sft-mixed-v1-partial-3983f605-327-32k-non-thinking-qwen35-4b-non-thinking \
+  --num-repeats 3 \
+  --priority high \
+  --author-name sukhorukov
 ```
 
 The launcher uses one `a100plus.1gpu.80vG.12C.182G` instance for the simple

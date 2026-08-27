@@ -17,6 +17,8 @@ from gyms.workplace_assistant.experiments import (
     WORKPLACE_E4B_SFT_FINAL,
     WORKPLACE_E4B_SFT_MODEL_ID,
     WORKPLACE_E4B_SFT_VLLM,
+    WORKPLACE_QWEN35_4B_MIXED_SFT_FINAL,
+    WORKPLACE_QWEN35_4B_MIXED_SFT_MODEL_ID,
     WORKPLACE_QWEN35_4B_SFT_FINAL,
     WORKPLACE_QWEN35_4B_SFT_MODEL_ID,
     WORKPLACE_QWEN35_4B_BASE_MANAGER_MODEL_ID,
@@ -35,9 +37,9 @@ from gyms.qwen_sampling import qwen35_general_sampling
 
 
 def test_registry_is_global_and_unique() -> None:
-    assert len(DECOMPOSER_EXPERIMENTS) == 10
+    assert len(DECOMPOSER_EXPERIMENTS) == 11
     assert len(SIMPLE_EXPERIMENTS) == 28
-    assert len(experiments.EXPERIMENTS) == 38
+    assert len(experiments.EXPERIMENTS) == 39
     assert experiments.BASE_IMAGE.endswith("py3.12-torch2.7.0:0.0.42")
     assert {experiment.kind for experiment in experiments.ALL_EXPERIMENTS} == {
         "decomposer",
@@ -361,11 +363,28 @@ def test_deepseek_qwen_profile_uses_128k_context() -> None:
     assert command[command.index("--max-model-len") + 1] == "131072"
 
 
-def test_sft_qwen_manager_and_base_worker_use_dedicated_gpus() -> None:
-    name = (
-        "qwen35-4b-sft-workplace-v1-3765-32k-non-thinking-"
-        "qwen35-4b-non-thinking"
-    )
+@pytest.mark.parametrize(
+    ("name", "manager_model_id", "manager_checkpoint"),
+    [
+        (
+            "qwen35-4b-sft-workplace-v1-3765-32k-non-thinking-"
+            "qwen35-4b-non-thinking",
+            WORKPLACE_QWEN35_4B_SFT_MODEL_ID,
+            WORKPLACE_QWEN35_4B_SFT_FINAL,
+        ),
+        (
+            "qwen35-4b-sft-mixed-v1-partial-3983f605-327-32k-non-thinking-"
+            "qwen35-4b-non-thinking",
+            WORKPLACE_QWEN35_4B_MIXED_SFT_MODEL_ID,
+            WORKPLACE_QWEN35_4B_MIXED_SFT_FINAL,
+        ),
+    ],
+)
+def test_sft_qwen_manager_and_base_worker_use_dedicated_gpus(
+    name: str,
+    manager_model_id: str,
+    manager_checkpoint: Path,
+) -> None:
     experiment = get_experiment(name)
     assert isinstance(experiment, DecomposerExperiment)
     assert experiment.manager_backend == "local_vllm"
@@ -376,11 +395,11 @@ def test_sft_qwen_manager_and_base_worker_use_dedicated_gpus() -> None:
 
     selected = models_for_experiment(experiment)
     assert [model.model_id for model in selected] == [
-        WORKPLACE_QWEN35_4B_SFT_MODEL_ID,
+        manager_model_id,
         "Qwen/Qwen3.5-4B",
     ]
     assert [model.snapshot for model in selected] == [
-        WORKPLACE_QWEN35_4B_SFT_FINAL,
+        manager_checkpoint,
         experiments.QWEN35_4B_BASE,
     ]
     assert [model.gpu for model in selected] == [0, 1]
@@ -416,7 +435,7 @@ def test_sft_qwen_manager_and_base_worker_use_dedicated_gpus() -> None:
     }
     policy = config["policy_model"]["responses_api_models"]["vllm_model"]
     assert policy["base_url"] == "http://127.0.0.1:8026/v1"
-    assert policy["model"] == WORKPLACE_QWEN35_4B_SFT_MODEL_ID
+    assert policy["model"] == manager_model_id
     assert policy["chat_template_kwargs"] == {
         "enable_thinking": False,
         "preserve_thinking": False,
