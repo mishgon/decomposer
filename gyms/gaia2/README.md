@@ -69,6 +69,12 @@ The registered experiments are:
 - `qwen35-4b-sft-mixed-v1-final-493c24c4-404-filtered-p1-s279-non-thinking-qwen35-4b-non-thinking`:
   the filtered final-snapshot patience-1 best checkpoint at step 279, with the
   same student prompt, base worker, and two-GPU topology.
+- `qwen35-4b-base-non-thinking-qwen35-4b-non-thinking`: untuned non-thinking
+  Qwen3.5-4B manager and worker using the compact student prompt.
+- `qwen35-4b-base-non-thinking-teacher-qwen35-4b-non-thinking`: the same
+  untuned non-thinking Qwen3.5-4B manager and worker using the full teacher
+  prompt. This is a separate experiment so its manifest and results cannot
+  collide with the student-prompt baseline.
 - `gemma4-e4b-it-thinking`: vanilla thinking E4B simple agent on one GPU.
 - `qwen35-4b-non-thinking`: vanilla non-thinking Qwen3.5-4B simple agent on
   one GPU, using the recommended general-task sampling parameters and 128K
@@ -107,6 +113,12 @@ The registered experiments are:
 # Full final-snapshot SFT Decomposer, three attempts per scenario.
 .venv/bin/python -m gyms.gaia2.run \
   --experiment qwen35-4b-sft-mixed-v1-final-493c24c4-404-non-thinking-qwen35-4b-non-thinking \
+  --num-repeats 3 \
+  --cuda-visible-devices 6,7
+
+# Untuned Qwen Decomposer with the teacher prompt, three attempts per scenario.
+.venv/bin/python -m gyms.gaia2.run \
+  --experiment qwen35-4b-base-non-thinking-teacher-qwen35-4b-non-thinking \
   --num-repeats 3 \
   --cuda-visible-devices 6,7
 
@@ -204,6 +216,18 @@ a systemic failure and does not create `.eval_done.json`.
 /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/.venv-mls/bin/python \
   -m gyms.gaia2.run_eval \
   --experiment qwen35-4b-sft-mixed-v1-final-493c24c4-404-non-thinking-qwen35-4b-non-thinking \
+  --num-repeats 3 \
+  --priority high \
+  --author-name sukhorukov
+
+# Prepare and submit the untuned Qwen teacher-prompt baseline.
+.venv/bin/python -m gyms.gaia2.prepare eval \
+  --experiment qwen35-4b-base-non-thinking-teacher-qwen35-4b-non-thinking \
+  --reuse-source
+
+/mnt/shared_ru.ml.SZ-5_000264/sukhorukov/.venv-mls/bin/python \
+  -m gyms.gaia2.run_eval \
+  --experiment qwen35-4b-base-non-thinking-teacher-qwen35-4b-non-thinking \
   --num-repeats 3 \
   --priority high \
   --author-name sukhorukov

@@ -21,6 +21,7 @@ from gyms.gaia2.experiments import (
     DOMAIN,
     INSTANCE_TYPES_BY_NUM_GPUS,
     QWEN35_BASE_DECOMPOSER_EXPERIMENT,
+    QWEN35_BASE_TEACHER_DECOMPOSER_EXPERIMENT,
     QWEN35_FINAL_MIXED_SFT_EXPERIMENT,
     QWEN35_FILTERED_SFT_EXPERIMENT,
     QWEN35_MIXED_SFT_EXPERIMENT,
@@ -114,6 +115,7 @@ def test_experiment_registry_contains_local_and_openrouter_profiles() -> None:
         QWEN35_FINAL_MIXED_SFT_EXPERIMENT,
         QWEN35_FILTERED_SFT_EXPERIMENT,
         QWEN35_BASE_DECOMPOSER_EXPERIMENT,
+        QWEN35_BASE_TEACHER_DECOMPOSER_EXPERIMENT,
         DEEPSEEK_QWEN_EXPERIMENT,
         SIMPLE_EXPERIMENT,
         SIMPLE_QWEN_EXPERIMENT,
@@ -136,6 +138,7 @@ def test_experiment_registry_contains_local_and_openrouter_profiles() -> None:
             QWEN35_FINAL_MIXED_SFT_EXPERIMENT,
             QWEN35_FILTERED_SFT_EXPERIMENT,
             QWEN35_BASE_DECOMPOSER_EXPERIMENT,
+            QWEN35_BASE_TEACHER_DECOMPOSER_EXPERIMENT,
             DEEPSEEK_QWEN_EXPERIMENT,
         )
     )
@@ -308,6 +311,45 @@ def test_untuned_qwen_decomposer_matches_sft_two_gpu_topology() -> None:
     }
     vllm_services = [service for service in plan["services"] if "vllm serve" in service]
     assert len(vllm_services) == 2
+
+
+def test_untuned_qwen_teacher_decomposer_only_changes_prompt_identity() -> None:
+    experiment = QWEN35_BASE_TEACHER_DECOMPOSER_EXPERIMENT
+
+    assert experiment.name == (
+        "qwen35-4b-base-non-thinking-teacher-qwen35-4b-non-thinking"
+    )
+    assert experiment.prompt_profile == "teacher"
+    assert experiment.num_gpus == 2
+    assert (
+        experiment.manager_checkpoint
+        == QWEN35_BASE_DECOMPOSER_EXPERIMENT.manager_checkpoint
+    )
+    assert (
+        experiment.worker_checkpoint
+        == QWEN35_BASE_DECOMPOSER_EXPERIMENT.worker_checkpoint
+    )
+    assert (
+        experiment.manager_served_name
+        == QWEN35_BASE_DECOMPOSER_EXPERIMENT.manager_served_name
+    )
+    assert (
+        experiment.worker_served_name
+        == QWEN35_BASE_DECOMPOSER_EXPERIMENT.worker_served_name
+    )
+    assert experiment.manager_thinking is False
+    assert experiment.worker_thinking is False
+    assert experiment.manager_parallel_tool_calls is False
+
+    plan = _dry_plan(Path.cwd(), experiment, Path("/tmp/output"), ("0", "1"), 3, None)
+    assert plan["decomposer_system_prompt_profile"] == "teacher"
+    assert plan["gpu_assignments"] == {
+        "manager_vllm": "0",
+        "worker_vllm": "1",
+    }
+    assert output_dir(experiment, 3).parts[-1] == (
+        "qwen35-4b-base-non-thinking-teacher-qwen35-4b-non-thinking-n3"
+    )
 
 
 def test_qwen_worker_uses_official_non_thinking_sampling() -> None:

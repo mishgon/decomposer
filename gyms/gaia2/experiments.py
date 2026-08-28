@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import hashlib
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Literal
 
@@ -455,6 +455,11 @@ QWEN35_BASE_DECOMPOSER_EXPERIMENT = DecomposerExperiment(
     worker_trust_remote_code=True,
     worker_gdn_prefill_backend="triton",
 )
+QWEN35_BASE_TEACHER_DECOMPOSER_EXPERIMENT = replace(
+    QWEN35_BASE_DECOMPOSER_EXPERIMENT,
+    name="qwen35-4b-base-non-thinking-teacher-qwen35-4b-non-thinking",
+    prompt_profile="teacher",
+)
 DEEPSEEK_QWEN_EXPERIMENT = DecomposerExperiment(
     name="deepseek-v4-flash-0731-teacher-qwen35-4b-non-thinking",
     worker_checkpoint=QWEN35_4B_BASE,
@@ -548,6 +553,7 @@ ALL_EXPERIMENTS: tuple[Experiment, ...] = (
     QWEN35_FINAL_MIXED_SFT_EXPERIMENT,
     QWEN35_FILTERED_SFT_EXPERIMENT,
     QWEN35_BASE_DECOMPOSER_EXPERIMENT,
+    QWEN35_BASE_TEACHER_DECOMPOSER_EXPERIMENT,
     DEEPSEEK_QWEN_EXPERIMENT,
     SIMPLE_EXPERIMENT,
     SIMPLE_QWEN_EXPERIMENT,
