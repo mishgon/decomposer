@@ -15,12 +15,18 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 JsonObject = dict[str, Any]
 InvalidPolicy = Literal["exclude", "error"]
 SourcePartition = Literal["train", "validation", "test"]
+SelectionPolicy = Literal[
+    "exact_reward",
+    "all_rewards",
+    "toolathlon_pass_or_quality",
+]
 
 CANONICAL_SCHEMA_VERSION = 1
 MANIFEST_FORMAT_VERSION = 3
 
 EXCLUSION_REASONS = (
     "excluded_reward",
+    "excluded_quality",
     "excluded_invalid_json",
     "excluded_invalid_reward",
     "excluded_invalid_indices",
@@ -106,9 +112,7 @@ class SourceSamplingSpec(StrictModel):
     expected_tasks: int
     expected_rollouts_per_task: int
 
-    @field_validator(
-        "max_per_task", "expected_tasks", "expected_rollouts_per_task"
-    )
+    @field_validator("max_per_task", "expected_tasks", "expected_rollouts_per_task")
     @classmethod
     def validate_positive(cls, value: int) -> int:
         if isinstance(value, bool) or value <= 0:
@@ -124,6 +128,53 @@ class SourceSamplingSpec(StrictModel):
         return self
 
 
+class SourceSelectionSpec(StrictModel):
+    policy: SelectionPolicy = "exact_reward"
+    success_reward: float = 1.0
+    minimum_check_ratio_exclusive: float | None = None
+
+    @field_validator("success_reward")
+    @classmethod
+    def validate_reward(cls, value: float) -> float:
+        if not math.isfinite(value):
+            raise ValueError("selection.success_reward must be finite")
+        return value
+
+    @model_validator(mode="after")
+    def validate_quality_threshold(self) -> "SourceSelectionSpec":
+        if self.policy == "toolathlon_pass_or_quality":
+            threshold = self.minimum_check_ratio_exclusive
+            if threshold is None or not math.isfinite(threshold):
+                raise ValueError(
+                    "toolathlon_pass_or_quality requires a finite "
+                    "minimum_check_ratio_exclusive"
+                )
+            if not 0.0 <= threshold < 1.0:
+                raise ValueError(
+                    "minimum_check_ratio_exclusive must be at least 0 and less than 1"
+                )
+        elif self.minimum_check_ratio_exclusive is not None:
+            raise ValueError(
+                "minimum_check_ratio_exclusive is only valid for "
+                "toolathlon_pass_or_quality"
+            )
+        return self
+
+
+class SelectionSpec(SourceSelectionSpec):
+    invalid_policy: InvalidPolicy = "exclude"
+    max_traces_per_prompt_per_teacher: int | None = None
+
+    @field_validator("max_traces_per_prompt_per_teacher")
+    @classmethod
+    def validate_cap(cls, value: int | None) -> int | None:
+        if value is not None and value <= 0:
+            raise ValueError(
+                "selection.max_traces_per_prompt_per_teacher must be positive"
+            )
+        return value
+
+
 class SourceSpec(StrictModel):
     id: str
     adapter: Literal["nemo_gym", "toolathlon_gym"]
@@ -135,6 +186,7 @@ class SourceSpec(StrictModel):
     trace_format: Literal["native", "toolathlon_legacy_unversioned"] = "native"
     subagent_type_aliases: dict[str, str] = Field(default_factory=dict)
     sampling: SourceSamplingSpec | None = None
+    selection: SourceSelectionSpec | None = None
     expected_native_rollouts: int | None = None
     expected_candidates: int | None = None
     require_completed_run: bool = False
@@ -186,10 +238,17 @@ class SourceSpec(StrictModel):
             raise ValueError("source task sampling is only supported for NeMo Gym")
         if self.require_completed_run and self.adapter != "toolathlon_gym":
             raise ValueError("require_completed_run is only valid for Toolathlon")
+        if (
+            self.selection is not None
+            and self.selection.policy == "toolathlon_pass_or_quality"
+            and self.adapter != "toolathlon_gym"
+        ):
+            raise ValueError(
+                "toolathlon_pass_or_quality is only valid for Toolathlon sources"
+            )
         if self.sampling is not None and self.expected_native_rollouts is not None:
             expected = (
-                self.sampling.expected_tasks
-                * self.sampling.expected_rollouts_per_task
+                self.sampling.expected_tasks * self.sampling.expected_rollouts_per_task
             )
             if self.expected_native_rollouts != expected:
                 raise ValueError(
@@ -202,29 +261,6 @@ class SourceSpec(StrictModel):
                     "expected_candidates must match the sampling task layout"
                 )
         return self
-
-
-class SelectionSpec(StrictModel):
-    policy: Literal["exact_reward", "all_rewards"] = "exact_reward"
-    success_reward: float = 1.0
-    invalid_policy: InvalidPolicy = "exclude"
-    max_traces_per_prompt_per_teacher: int | None = None
-
-    @field_validator("success_reward")
-    @classmethod
-    def validate_reward(cls, value: float) -> float:
-        if not math.isfinite(value):
-            raise ValueError("selection.success_reward must be finite")
-        return value
-
-    @field_validator("max_traces_per_prompt_per_teacher")
-    @classmethod
-    def validate_cap(cls, value: int | None) -> int | None:
-        if value is not None and value <= 0:
-            raise ValueError(
-                "selection.max_traces_per_prompt_per_teacher must be positive"
-            )
-        return value
 
 
 class SplitSpec(StrictModel):
@@ -273,7 +309,7 @@ class TokenizationSpec(StrictModel):
 
 
 class BuildSpec(StrictModel):
-    spec_version: Literal[1, 2]
+    spec_version: Literal[1, 2, 3]
     dataset: DatasetIdentity
     policy: PolicySpec
     sources: tuple[SourceSpec, ...]
@@ -299,7 +335,9 @@ class BuildSpec(StrictModel):
             raise ValueError("preserve split requires train and validation sources")
         if self.spec_version == 1:
             if self.policy.subagent_types:
-                raise ValueError("spec_version 1 does not support policy subagent types")
+                raise ValueError(
+                    "spec_version 1 does not support policy subagent types"
+                )
             if self.selection.policy != "exact_reward":
                 raise ValueError("spec_version 1 requires exact_reward selection")
             if any(
@@ -309,15 +347,14 @@ class BuildSpec(StrictModel):
                 or source.expected_native_rollouts is not None
                 or source.expected_candidates is not None
                 or source.require_completed_run
+                or source.selection is not None
                 for source in self.sources
             ):
                 raise ValueError("spec_version 1 does not support v2 source options")
         else:
             if not self.policy.subagent_types:
-                raise ValueError("spec_version 2 requires policy.subagent_types")
-            allowed_ids = {
-                subagent.id for subagent in self.policy.subagent_types
-            }
+                raise ValueError("spec_version >=2 requires policy.subagent_types")
+            allowed_ids = {subagent.id for subagent in self.policy.subagent_types}
             for source in self.sources:
                 unknown_targets = sorted(
                     set(source.subagent_type_aliases.values()) - allowed_ids
@@ -329,14 +366,32 @@ class BuildSpec(StrictModel):
                     )
                 if source.expected_native_rollouts is None:
                     raise ValueError(
-                        f"spec_version 2 source {source.id!r} must pin "
+                        f"spec_version >=2 source {source.id!r} must pin "
                         "expected_native_rollouts"
                     )
                 if source.expected_candidates is None:
                     raise ValueError(
-                        f"spec_version 2 source {source.id!r} must pin "
+                        f"spec_version >=2 source {source.id!r} must pin "
                         "expected_candidates"
                     )
+        if self.spec_version < 3 and (
+            self.selection.policy == "toolathlon_pass_or_quality"
+            or any(source.selection is not None for source in self.sources)
+        ):
+            raise ValueError("source-specific selection requires spec_version 3")
+        for source in self.sources:
+            effective_policy = (
+                source.selection.policy
+                if source.selection is not None
+                else self.selection.policy
+            )
+            if (
+                effective_policy == "toolathlon_pass_or_quality"
+                and source.adapter != "toolathlon_gym"
+            ):
+                raise ValueError(
+                    "toolathlon_pass_or_quality is only valid for Toolathlon sources"
+                )
         return self
 
 

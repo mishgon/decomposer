@@ -34,6 +34,14 @@ from .schema import (
     sha256_text,
 )
 
+_SELECTION_EXCLUSION_REASONS = frozenset(
+    {
+        "excluded_reward",
+        "excluded_quality",
+        "excluded_prompt_teacher_cap",
+    }
+)
+
 
 @dataclass(frozen=True)
 class LoadedBuildSpec:
@@ -119,7 +127,7 @@ def _serialized_counts(counts: Counter[str]) -> JsonObject:
     malformed = sum(
         counts[reason]
         for reason in EXCLUSION_REASONS
-        if reason not in {"excluded_reward", "excluded_prompt_teacher_cap"}
+        if reason not in _SELECTION_EXCLUSION_REASONS
     )
     return {
         "rollouts": counts["rollouts"],
@@ -134,9 +142,14 @@ def _assert_filter_counts(counts: Counter[str], description: str) -> None:
     invalid = sum(
         counts[reason]
         for reason in EXCLUSION_REASONS
-        if reason not in {"excluded_reward", "excluded_prompt_teacher_cap"}
+        if reason not in _SELECTION_EXCLUSION_REASONS
     )
-    if counts["rollouts"] != counts["excluded_reward"] + invalid + counts["eligible"]:
+    if counts["rollouts"] != (
+        counts["excluded_reward"]
+        + counts["excluded_quality"]
+        + invalid
+        + counts["eligible"]
+    ):
         raise AssertionError(
             f"Rollout filtering counts do not add up for {description}."
         )
@@ -439,6 +452,8 @@ def _tokenize_and_filter_split(
 def _logical_spec(spec: BuildSpec) -> JsonObject:
     policy_exclude = {"subagent_types"} if spec.spec_version == 1 else set()
     source_exclude = {"path"}
+    if spec.spec_version < 3:
+        source_exclude.add("selection")
     if spec.spec_version == 1:
         source_exclude.update(
             {
@@ -577,9 +592,14 @@ def prepare_dataset(
         adapter = ADAPTERS.get(source.adapter)
         if adapter is None:
             raise ValueError(f"Unsupported dataset adapter: {source.adapter}")
+        source_selection = spec.selection
+        if source.selection is not None:
+            source_selection = spec.selection.model_copy(
+                update=source.selection.model_dump()
+            )
         result = adapter(
             source,
-            spec.selection,
+            source_selection,
             system_prompt=system_prompt,
             canonical_tools=canonical_tools,
             canonical_subagent_type_ids=canonical_subagent_type_ids,
@@ -691,7 +711,7 @@ def prepare_dataset(
         source_id: sum(
             counts[reason]
             for reason in EXCLUSION_REASONS
-            if reason not in {"excluded_reward", "excluded_prompt_teacher_cap"}
+            if reason not in _SELECTION_EXCLUSION_REASONS
         )
         for source_id, counts in sorted(counts_by_source.items())
     }

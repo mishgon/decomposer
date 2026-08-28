@@ -422,9 +422,9 @@ def test_versioned_token_limits_produce_stable_strict_subset(
     assert set(rows_8k) < set(rows_32k)
     assert all(rows_32k[row_id][0] == split for row_id, split in rows_8k.items())
     assert prepared_8k.manifest["filtering"]["excluded_token_length"] == 1
-    assert prepared_8k.manifest["filtering"][
-        "excluded_token_length_by_source"
-    ] == {"teacher": 1}
+    assert prepared_8k.manifest["filtering"]["excluded_token_length_by_source"] == {
+        "teacher": 1
+    }
     assert prepared_8k.manifest["sources"][0]["tokenization"] == {
         "eligible_before_token_limit": 10,
         "excluded_token_length": 1,
@@ -964,21 +964,15 @@ def test_v2_samples_before_validation_and_keeps_all_rewards(tmp_path: Path) -> N
             ),
         ),
         selection=SelectionSpec(policy="all_rewards"),
-        split=SplitSpec(
-            strategy="prompt_fixed", validation_fraction=0.5, seed=42
-        ),
+        split=SplitSpec(strategy="prompt_fixed", validation_fraction=0.5, seed=42),
     )
     prepared = prepare_dataset(
-        LoadedBuildSpec(
-            path=tmp_path / "spec.yaml", sha256="2" * 64, spec=spec
-        ),
+        LoadedBuildSpec(path=tmp_path / "spec.yaml", sha256="2" * 64, spec=spec),
         tmp_path / "datasets",
         git_revision="test-revision",
         require_clean_git=False,
     )
-    records = _read_jsonl(prepared.train_path) + _read_jsonl(
-        prepared.validation_path
-    )
+    records = _read_jsonl(prepared.train_path) + _read_jsonl(prepared.validation_path)
     assert len(records) == 2
     assert {record["outcome"]["success"] for record in records} == {False, True}
     assert {record["outcome"]["reward"] for record in records} == {0.0, 1.0}
@@ -1070,9 +1064,7 @@ def test_qwen35_workplace_partial_spec_is_pinned_and_success_only() -> None:
         )
     )
     spec = loaded.spec
-    assert spec.dataset.id == (
-        "decomposer-workplace-deepseek-qwen35-4b-nonthinking"
-    )
+    assert spec.dataset.id == ("decomposer-workplace-deepseek-qwen35-4b-nonthinking")
     assert spec.dataset.version == "v1-1444-32k"
     assert len(spec.sources) == 1
     source = spec.sources[0]
@@ -1088,9 +1080,7 @@ def test_qwen35_workplace_partial_spec_is_pinned_and_success_only() -> None:
     assert spec.split.seed == 42
     assert spec.tokenization is not None
     assert spec.tokenization.profile == "qwen35_sft_non_thinking"
-    assert spec.tokenization.revision == (
-        "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a"
-    )
+    assert spec.tokenization.revision == ("851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a")
     assert spec.tokenization.max_tokens == 32768
 
 
@@ -1103,18 +1093,14 @@ def test_qwen35_workplace_full_spec_is_pinned_and_success_only() -> None:
         )
     )
     spec = loaded.spec
-    assert spec.dataset.id == (
-        "decomposer-workplace-deepseek-qwen35-4b-nonthinking"
-    )
+    assert spec.dataset.id == ("decomposer-workplace-deepseek-qwen35-4b-nonthinking")
     assert spec.dataset.version == "v1-3765-32k"
     assert len(spec.sources) == 1
     source = spec.sources[0]
     assert source.adapter == "nemo_gym"
     assert source.partition == "train"
     assert source.path is not None
-    assert source.path.name == (
-        "deepseek-v4-flash-0731-qwen35-4b-non-thinking-n3"
-    )
+    assert source.path.name == ("deepseek-v4-flash-0731-qwen35-4b-non-thinking-n3")
     assert spec.selection.success_reward == 1.0
     assert spec.selection.invalid_policy == "exclude"
     assert spec.selection.max_traces_per_prompt_per_teacher is None
@@ -1123,17 +1109,14 @@ def test_qwen35_workplace_full_spec_is_pinned_and_success_only() -> None:
     assert spec.split.seed == 42
     assert spec.tokenization is not None
     assert spec.tokenization.profile == "qwen35_sft_non_thinking"
-    assert spec.tokenization.revision == (
-        "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a"
-    )
+    assert spec.tokenization.revision == ("851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a")
     assert spec.tokenization.max_tokens == 32768
 
 
 def test_qwen35_mixed_spec_pins_all_reward_sources_and_sampling() -> None:
     spec = load_build_spec(
         Path(
-            "data/sft/specs/"
-            "decomposer_mixed_deepseek_qwen35_4b_nonthinking_v1_32k.yaml"
+            "data/sft/specs/decomposer_mixed_deepseek_qwen35_4b_nonthinking_v1_32k.yaml"
         )
     ).spec
     assert spec.spec_version == 2
@@ -1156,9 +1139,36 @@ def test_qwen35_mixed_spec_pins_all_reward_sources_and_sampling() -> None:
         "qwen_3_5_4b_non_thinking": "qwen35_4b_non_thinking"
     }
     assert spec.tokenization is not None
-    assert spec.tokenization.revision == (
-        "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a"
+    assert spec.tokenization.revision == ("851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a")
+
+
+def test_qwen35_filtered_mixed_spec_uses_source_specific_selection() -> None:
+    spec = load_build_spec(
+        Path(
+            "data/sft/specs/"
+            "decomposer_mixed_deepseek_qwen35_4b_nonthinking_"
+            "v1_filtered_pass_quality_32k.yaml"
+        )
+    ).spec
+
+    assert spec.spec_version == 3
+    assert spec.dataset.version == (
+        "v1-final-493c24c4-404-wp-r1-tool-pass-or-qgt90-or-missing-32k"
     )
+    assert spec.selection.policy == "all_rewards"
+    workplace, toolathlon = spec.sources
+    assert workplace.selection is not None
+    assert workplace.selection.policy == "exact_reward"
+    assert workplace.selection.success_reward == 1.0
+    assert workplace.sampling is not None
+    assert workplace.sampling.max_per_task == 1
+    assert workplace.sampling.seed == 42
+    assert toolathlon.selection is not None
+    assert toolathlon.selection.policy == "toolathlon_pass_or_quality"
+    assert toolathlon.selection.minimum_check_ratio_exclusive == 0.9
+    assert toolathlon.expected_native_rollouts == 404
+    assert toolathlon.expected_candidates == 404
+    assert toolathlon.require_completed_run is True
 
 
 def test_qwen35_partial_mixed_spec_pins_snapshot_cardinality() -> None:

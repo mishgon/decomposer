@@ -83,7 +83,7 @@ def test_sft_experiments_are_unique_and_register_retained_configs() -> None:
         False,
         True,
     }
-    assert len(experiments) == 15
+    assert len(experiments) == 16
     e2b_four_gpu = experiments[2]
     assert e2b_four_gpu.num_gpus == 4
     assert e2b_four_gpu.use_liger_kernel is True
@@ -101,18 +101,13 @@ def test_sft_experiments_are_unique_and_register_retained_configs() -> None:
         "gemma4-e4b-nonthinking-deepseek-e4b-v2-8k-full-4gpu",
         "gemma4-e4b-nonthinking-deepseek-e4b-v2-32k-full-4gpu",
         "qwen35-4b-nonthinking-mixed-v1-32k-smoke-4gpu",
+        ("qwen35-4b-nonthinking-mixed-v1-final-493c24c4-404-32k-full-4gpu"),
         (
-            "qwen35-4b-nonthinking-mixed-v1-final-"
-            "493c24c4-404-32k-full-4gpu"
+            "qwen35-4b-nonthinking-mixed-v1-final-493c24c4-404-"
+            "filtered-pass-qgt90-32k-full-4gpu"
         ),
-        (
-            "qwen35-4b-nonthinking-mixed-v1-partial-"
-            "3983f605-327-32k-smoke-4gpu"
-        ),
-        (
-            "qwen35-4b-nonthinking-mixed-v1-partial-"
-            "3983f605-327-32k-full-4gpu"
-        ),
+        ("qwen35-4b-nonthinking-mixed-v1-partial-3983f605-327-32k-smoke-4gpu"),
+        ("qwen35-4b-nonthinking-mixed-v1-partial-3983f605-327-32k-full-4gpu"),
         "qwen35-4b-nonthinking-workplace-v1-1444-32k-full-4gpu",
         "qwen35-4b-nonthinking-workplace-v1-3765-32k-full-4gpu",
     }
@@ -836,8 +831,7 @@ def test_qwen35_workplace_partial_config_is_pinned_and_uses_full_recipe() -> Non
     assert config["model"]["revision"] == revision
     data = config["data"]
     release = (
-        "datasets/sft/decomposer-workplace-deepseek-qwen35-4b-nonthinking/"
-        "v1-1444-32k"
+        "datasets/sft/decomposer-workplace-deepseek-qwen35-4b-nonthinking/v1-1444-32k"
     )
     assert release in data["train_file"]
     assert release in data["validation_file"]
@@ -883,8 +877,7 @@ def test_qwen35_workplace_full_config_is_pinned_and_uses_full_recipe() -> None:
     assert config["model"]["revision"] == revision
     data = config["data"]
     release = (
-        "datasets/sft/decomposer-workplace-deepseek-qwen35-4b-nonthinking/"
-        "v1-3765-32k"
+        "datasets/sft/decomposer-workplace-deepseek-qwen35-4b-nonthinking/v1-3765-32k"
     )
     assert release in data["train_file"]
     assert release in data["validation_file"]
@@ -923,14 +916,9 @@ def test_qwen35_workplace_full_config_is_pinned_and_uses_full_recipe() -> None:
     [
         "qwen35_4b_nonthinking_mixed_v1_32k_smoke_4gpu.yaml",
         "qwen35_4b_nonthinking_mixed_v1_32k_full_4gpu.yaml",
-        (
-            "qwen35_4b_nonthinking_mixed_"
-            "v1_partial_3983f605_327_32k_smoke_4gpu.yaml"
-        ),
-        (
-            "qwen35_4b_nonthinking_mixed_"
-            "v1_partial_3983f605_327_32k_full_4gpu.yaml"
-        ),
+        ("qwen35_4b_nonthinking_mixed_v1_filtered_pass_quality_32k_full_4gpu.yaml"),
+        ("qwen35_4b_nonthinking_mixed_v1_partial_3983f605_327_32k_smoke_4gpu.yaml"),
+        ("qwen35_4b_nonthinking_mixed_v1_partial_3983f605_327_32k_full_4gpu.yaml"),
     ],
 )
 def test_qwen35_mixed_configs_pin_model_revision(config_name: str) -> None:
@@ -947,8 +935,7 @@ def test_qwen35_mixed_configs_pin_model_revision(config_name: str) -> None:
 def test_qwen35_final_mixed_config_pins_release_and_patience_one() -> None:
     config = yaml.safe_load(
         Path(
-            "training/sft/configs/"
-            "qwen35_4b_nonthinking_mixed_v1_32k_full_4gpu.yaml"
+            "training/sft/configs/qwen35_4b_nonthinking_mixed_v1_32k_full_4gpu.yaml"
         ).read_text()
     )
     release = (
@@ -971,6 +958,40 @@ def test_qwen35_final_mixed_config_pins_release_and_patience_one() -> None:
     }
 
 
+def test_qwen35_filtered_mixed_config_pins_release_and_experiment() -> None:
+    config = yaml.safe_load(
+        Path(
+            "training/sft/configs/"
+            "qwen35_4b_nonthinking_mixed_v1_filtered_pass_quality_"
+            "32k_full_4gpu.yaml"
+        ).read_text()
+    )
+    release = (
+        "datasets/sft/decomposer-mixed-deepseek-qwen35-4b-nonthinking/"
+        "v1-final-493c24c4-404-wp-r1-tool-pass-or-qgt90-or-missing-32k"
+    )
+    assert release in config["data"]["train_file"]
+    assert release in config["data"]["validation_file"]
+    assert release in config["data"]["manifest_file"]
+    assert config["data"]["include_reasoning"] is False
+    assert config["training"]["max_length"] == 32768
+    assert config["training"]["global_batch_size"] == 4
+    assert config["training"]["num_train_epochs"] == 5
+    assert config["run"]["resume_from_checkpoint"] is None
+    assert config["run"]["overwrite_output_dir"] is False
+    assert config["run"]["early_stopping"] == {
+        "patience": 1,
+        "threshold": 0.0,
+    }
+
+    experiments = collect_experiments("filtered-pass-qgt90-32k-full-4gpu")
+    assert len(experiments) == 1
+    assert experiments[0].num_gpus == 4
+    assert experiments[0].config_path.endswith(
+        "qwen35_4b_nonthinking_mixed_v1_filtered_pass_quality_32k_full_4gpu.yaml"
+    )
+
+
 def test_qwen35_partial_mixed_configs_use_snapshot_release_and_32k_recipe() -> None:
     config_dir = Path("training/sft/configs")
     release = (
@@ -989,10 +1010,7 @@ def test_qwen35_partial_mixed_configs_use_snapshot_release_and_32k_recipe() -> N
     full = yaml.safe_load(
         (
             config_dir
-            / (
-                "qwen35_4b_nonthinking_mixed_"
-                "v1_partial_3983f605_327_32k_full_4gpu.yaml"
-            )
+            / ("qwen35_4b_nonthinking_mixed_v1_partial_3983f605_327_32k_full_4gpu.yaml")
         ).read_text()
     )
     for config in (smoke, full):

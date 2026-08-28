@@ -162,10 +162,7 @@ def sft_experiments() -> list[ExperimentConfig]:
             pytorch_cuda_alloc_conf="expandable_segments:True",
         ),
         ExperimentConfig(
-            name=(
-                "qwen35-4b-nonthinking-mixed-v1-final-"
-                "493c24c4-404-32k-full-4gpu"
-            ),
+            name=("qwen35-4b-nonthinking-mixed-v1-final-493c24c4-404-32k-full-4gpu"),
             config_path=(
                 "training/sft/configs/qwen35_4b_nonthinking_mixed_v1_32k_full_4gpu.yaml"
             ),
@@ -180,9 +177,25 @@ def sft_experiments() -> list[ExperimentConfig]:
         ),
         ExperimentConfig(
             name=(
-                "qwen35-4b-nonthinking-mixed-v1-partial-"
-                "3983f605-327-32k-smoke-4gpu"
+                "qwen35-4b-nonthinking-mixed-v1-final-493c24c4-404-"
+                "filtered-pass-qgt90-32k-full-4gpu"
             ),
+            config_path=(
+                "training/sft/configs/"
+                "qwen35_4b_nonthinking_mixed_v1_filtered_pass_quality_"
+                "32k_full_4gpu.yaml"
+            ),
+            description=(
+                "Qwen3.5-4B Decomposer SFT from base "
+                "(non-thinking, Workplace reward-1 plus Toolathlon binary-pass, "
+                "quality >0.9, or missing-quality traces, 32K, 4 GPU)"
+            ),
+            num_gpus=4,
+            use_liger_kernel=True,
+            pytorch_cuda_alloc_conf="expandable_segments:True",
+        ),
+        ExperimentConfig(
+            name=("qwen35-4b-nonthinking-mixed-v1-partial-3983f605-327-32k-smoke-4gpu"),
             config_path=(
                 "training/sft/configs/qwen35_4b_nonthinking_mixed_"
                 "v1_partial_3983f605_327_32k_smoke_4gpu.yaml"
@@ -196,10 +209,7 @@ def sft_experiments() -> list[ExperimentConfig]:
             pytorch_cuda_alloc_conf="expandable_segments:True",
         ),
         ExperimentConfig(
-            name=(
-                "qwen35-4b-nonthinking-mixed-v1-partial-"
-                "3983f605-327-32k-full-4gpu"
-            ),
+            name=("qwen35-4b-nonthinking-mixed-v1-partial-3983f605-327-32k-full-4gpu"),
             config_path=(
                 "training/sft/configs/qwen35_4b_nonthinking_mixed_"
                 "v1_partial_3983f605_327_32k_full_4gpu.yaml"

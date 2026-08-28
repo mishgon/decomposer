@@ -90,6 +90,48 @@ high priority:
 
 The run evaluates once per epoch and uses early-stopping patience one.
 
+#### Filtered Workplace reward-1 and Toolathlon pass-or-quality variant
+
+The filtered comparison reuses exactly the same pinned sources and the same
+seed-42 one-of-three Workplace sampling as the all-rewards release. Workplace
+then keeps only reward-1 traces. Toolathlon always keeps a binary native pass;
+for binary failures it keeps traces whose available check ratio is strictly
+greater than `0.9`, or traces whose evaluator does not expose check counts.
+Check ratios support both native result schemas: `total_passed / total_checks`
+and `passed / (passed + failed)`.
+
+Build the separate immutable release from a clean committed checkout:
+
+```bash
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 .venv/bin/python -m data.sft.prepare \
+  --spec data/sft/specs/decomposer_mixed_deepseek_qwen35_4b_nonthinking_v1_filtered_pass_quality_32k.yaml \
+  --output-root /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/datasets/sft \
+  --source toolathlon-deepseek-v4-flash-0731-qwen35-4b-nonthinking-n1=/mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/evaluation/data/toolathlon_gym/imports/snapshots/493c24c4/20260826T122838Z-84ae95f3
+```
+
+The expected 32K release has 1,239 records: 953 Workplace traces and 286
+Toolathlon traces, split into 1,118 train and 121 validation records. Before
+structural and length filtering, the Toolathlon policy keeps 314 of 404
+completed traces: 68 binary passes, 21 binary failures above the quality
+threshold, and 225 binary failures without check counts. It excludes 90
+binary failures at or below the threshold. Structural validation excludes 16
+of the selected traces and the 32K limit excludes another 12.
+
+Submit a separate run from the base Qwen3.5-4B checkpoint on four GPUs with
+high priority:
+
+```bash
+/mnt/shared_ru.ml.SZ-5_000264/sukhorukov/.venv-mls/bin/python \
+  -m training.sft.run_train_jobs \
+  --filter qwen35-4b-nonthinking-mixed-v1-final-493c24c4-404-filtered-pass-qgt90-32k-full-4gpu \
+  --priority high
+```
+
+This run uses the same optimization settings as the all-rewards comparison:
+32K inputs, four GPUs, five epochs at most, per-epoch evaluation, and
+early-stopping patience one. It has an independent output directory and does
+not resume or overwrite the all-rewards run.
+
 #### Pinned partial Toolathlon snapshot
 
 The snapshot-specific release

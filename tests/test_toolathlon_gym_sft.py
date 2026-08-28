@@ -100,8 +100,7 @@ def _trace(
     attempt: int = 1,
 ) -> tuple[dict, dict, dict]:
     episode_id = (
-        f"{RUN_ID}-{hashlib.sha256(task.encode()).hexdigest()[:8]}-"
-        f"r001-a{attempt:03d}"
+        f"{RUN_ID}-{hashlib.sha256(task.encode()).hexdigest()[:8]}-r001-a{attempt:03d}"
     )
     prompt = f"Complete Toolathlon task {task}."
     spawn_a = {
@@ -299,12 +298,8 @@ def test_import_archive_selects_one_run_and_is_idempotent(tmp_path: Path) -> Non
     manifest = json.loads((destination / "import_manifest.json").read_text())
     assert manifest["counts"] == {"traces": 1, "runtimes": 1, "evaluations": 1}
     assert manifest["archive"]["prefix"] == prefix
-    assert (
-        destination / "traces" / "alpha" / episode_id / "trace.json"
-    ).is_file()
-    assert (
-        destination / "evals" / "alpha" / episode_id / "result.json"
-    ).is_file()
+    assert (destination / "traces" / "alpha" / episode_id / "trace.json").is_file()
+    assert (destination / "evals" / "alpha" / episode_id / "result.json").is_file()
     assert not list(destination.rglob("workspace"))
     assert not list(destination.rglob("other-run-episode"))
 
@@ -436,7 +431,7 @@ def test_canonical_builder_accepts_toolathlon_source(tmp_path: Path) -> None:
     assert all(
         row["messages"][0]["content"] == DECOMPOSER_SYSTEM_PROMPT for row in train
     )
-    assert prepared.manifest["preparation"]["adapter_versions"] == {"toolathlon_gym": 3}
+    assert prepared.manifest["preparation"]["adapter_versions"] == {"toolathlon_gym": 4}
     assert prepared.manifest["normalization"] == {
         "strategy": "parallel_spawn_calls_to_single_call_turns",
         "traces": 10,
@@ -519,9 +514,7 @@ def test_v2_legacy_toolathlon_keeps_all_rewards_and_normalizes_interface(
         split=SplitSpec(strategy="prompt_fixed", validation_fraction=0.5, seed=42),
     )
     prepared = prepare_dataset(
-        LoadedBuildSpec(
-            path=tmp_path / "spec.yaml", sha256="3" * 64, spec=spec
-        ),
+        LoadedBuildSpec(path=tmp_path / "spec.yaml", sha256="3" * 64, spec=spec),
         tmp_path / "datasets",
         git_revision="test-revision",
         require_clean_git=False,
@@ -552,6 +545,106 @@ def test_v2_legacy_toolathlon_keeps_all_rewards_and_normalizes_interface(
     assert source_manifest["legacy_schema_traces"] == 3
     assert source_manifest["subagent_type_normalization"]["tool_calls"] == 4
     assert source_manifest["tool_schema_origin"] == "canonical_policy_interface"
+
+
+def test_toolathlon_pass_or_quality_filter_preserves_binary_pass_precedence(
+    tmp_path: Path,
+) -> None:
+    binary_pass_low_ratio = list(_trace("binary-pass-low-ratio"))
+    binary_pass_low_ratio[2]["native_result"] = {
+        "total_passed": 4,
+        "total_checks": 10,
+    }
+    failed_high_total = list(_trace("failed-high-total", passed=False))
+    failed_high_total[2]["native_result"] = {
+        "total_passed": 10,
+        "total_checks": 11,
+    }
+    failed_high_derived = list(_trace("failed-high-derived", passed=False))
+    failed_high_derived[2]["native_result"] = {"passed": 10, "failed": 1}
+    failed_missing = _trace("failed-missing", passed=False)
+    failed_exact_threshold = list(_trace("failed-exact-threshold", passed=False))
+    failed_exact_threshold[2]["native_result"] = {
+        "total_passed": 9,
+        "total_checks": 10,
+    }
+    failed_low_derived = list(_trace("failed-low-derived", passed=False))
+    failed_low_derived[2]["native_result"] = {"passed": 8, "failed": 2}
+    failed_invalid_counts = list(_trace("failed-invalid-counts", passed=False))
+    failed_invalid_counts[2]["native_result"] = {
+        "total_passed": 11,
+        "total_checks": 10,
+    }
+    source = _source(
+        tmp_path / "source",
+        [
+            tuple(binary_pass_low_ratio),
+            tuple(failed_high_total),
+            tuple(failed_high_derived),
+            failed_missing,
+            tuple(failed_exact_threshold),
+            tuple(failed_low_derived),
+            tuple(failed_invalid_counts),
+        ],
+    )
+
+    result = read_toolathlon_gym_source(
+        _source_spec(source),
+        SelectionSpec(
+            policy="toolathlon_pass_or_quality",
+            minimum_check_ratio_exclusive=0.9,
+            invalid_policy="exclude",
+        ),
+        system_prompt=DECOMPOSER_SYSTEM_PROMPT,
+    )
+
+    assert result.counts["rollouts"] == 7
+    assert result.counts["eligible"] == 4
+    assert result.counts["excluded_quality"] == 2
+    assert result.counts["excluded_invalid_reward"] == 1
+    assert {record.source.task_id for record in result.records} == {
+        "binary-pass-low-ratio",
+        "failed-high-total",
+        "failed-high-derived",
+        "failed-missing",
+    }
+    binary_pass = next(
+        record
+        for record in result.records
+        if record.source.task_id == "binary-pass-low-ratio"
+    )
+    assert binary_pass.outcome.success is True
+    assert binary_pass.outcome.metrics == {
+        "reward": 1.0,
+        "binary_pass": 1.0,
+        "check_passed": 4.0,
+        "check_total": 10.0,
+        "check_pass_ratio": 0.4,
+    }
+    assert binary_pass.attributes["native_check_quality"] == {
+        "schema": "total_passed/total_checks"
+    }
+    assert result.source_manifest["selection"] == {
+        "policy": "toolathlon_pass_or_quality",
+        "success_reward": 1.0,
+        "minimum_check_ratio_exclusive": 0.9,
+    }
+    assert result.source_manifest["quality_filter"] == {
+        "binary_fail": 5,
+        "binary_pass": 1,
+        "excluded_binary_fail_low_ratio": 2,
+        "missing_check_counts": 1,
+        "ratio_above_threshold": 2,
+        "ratio_at_or_below_threshold": 3,
+        "retained_binary_fail_high_ratio": 2,
+        "retained_binary_fail_missing_counts": 1,
+        "retained_binary_pass": 1,
+        "with_check_counts": 5,
+        "count_schemas": {
+            "passed/(passed+failed)": 2,
+            "total_passed/total_checks": 3,
+        },
+    }
 
 
 def test_completed_toolathlon_run_ignores_stale_attempt_traces(tmp_path: Path) -> None:
@@ -603,9 +696,7 @@ def test_completed_with_errors_uses_only_completed_episodes(tmp_path: Path) -> N
     )
     manifest_path = source / "runs" / RUN_ID / "manifest.json"
     manifest = json.loads(manifest_path.read_text())
-    manifest["episodes"][0]["attempts"] = [
-        {"attempt": 1, "status": "completed"}
-    ]
+    manifest["episodes"][0]["attempts"] = [{"attempt": 1, "status": "completed"}]
     manifest["episodes"].append(
         {
             "task": "failed",

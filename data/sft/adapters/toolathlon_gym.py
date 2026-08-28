@@ -7,10 +7,10 @@ import math
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
+from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from .base import AdapterReadResult
 from ..schema import (
     EXCLUSION_REASONS,
     CanonicalOutcome,
@@ -28,11 +28,20 @@ from ..schema import (
     validate_chat_tools,
     validate_decomposer_messages,
 )
+from .base import AdapterReadResult
 
-ADAPTER_VERSION = 3
+ADAPTER_VERSION = 4
 TRACE_SCHEMA_VERSION = 2
 IMPORT_SCHEMA_VERSION = 1
 TERMINAL_RUN_STATUSES = frozenset({"completed", "completed_with_errors"})
+
+
+@dataclass(frozen=True)
+class CheckQuality:
+    passed: int
+    total: int
+    ratio: float
+    schema: str
 
 
 def _empty_counts() -> Counter[str]:
@@ -45,6 +54,57 @@ def _load_json(path: Path) -> JsonObject:
     if not isinstance(value, dict):
         raise TypeError(f"Expected {path} to contain a JSON object.")
     return value
+
+
+def _valid_nonnegative_count(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+
+def _extract_check_quality(native_result: Any, episode_id: str) -> CheckQuality | None:
+    if not isinstance(native_result, Mapping):
+        return None
+
+    if "total_passed" in native_result or "total_checks" in native_result:
+        passed = native_result.get("total_passed")
+        total = native_result.get("total_checks")
+        if (
+            not _valid_nonnegative_count(passed)
+            or not _valid_nonnegative_count(total)
+            or total <= 0
+            or passed > total
+        ):
+            raise TraceValidationError(
+                "excluded_invalid_reward",
+                f"Invalid total_passed/total_checks for {episode_id}.",
+            )
+        return CheckQuality(
+            passed=passed,
+            total=total,
+            ratio=passed / total,
+            schema="total_passed/total_checks",
+        )
+
+    if "passed" in native_result or "failed" in native_result:
+        passed = native_result.get("passed")
+        failed = native_result.get("failed")
+        if (
+            not _valid_nonnegative_count(passed)
+            or not _valid_nonnegative_count(failed)
+            or passed + failed <= 0
+        ):
+            raise TraceValidationError(
+                "excluded_invalid_reward",
+                f"Invalid passed/failed counts for {episode_id}.",
+            )
+        total = passed + failed
+        return CheckQuality(
+            passed=passed,
+            total=total,
+            ratio=passed / total,
+            schema="passed/(passed+failed)",
+        )
+
+    return None
 
 
 def _manifest_relative_path(value: str, manifest_path: Path) -> Path:
@@ -260,9 +320,7 @@ def _completed_trace_paths(
             raise ValueError(f"Toolathlon run episode {index} is not an object.")
         episode_status = raw_episode.get("status")
         allowed_statuses = (
-            {"completed"}
-            if run_status == "completed"
-            else {"completed", "failed"}
+            {"completed"} if run_status == "completed" else {"completed", "failed"}
         )
         if episode_status not in allowed_statuses:
             raise ValueError(
@@ -290,9 +348,7 @@ def _completed_trace_paths(
                 "task/repetition/attempt metadata."
             )
         task_digest = sha256_text(task)[:8]
-        episode_id = (
-            f"{run_id}-{task_digest}-r{repetition:03d}-a{attempt:03d}"
-        )
+        episode_id = f"{run_id}-{task_digest}-r{repetition:03d}-a{attempt:03d}"
         if episode_id in seen_episode_ids:
             raise ValueError(f"Duplicate completed Toolathlon episode {episode_id}.")
         seen_episode_ids.add(episode_id)
@@ -358,6 +414,11 @@ def read_toolathlon_gym_source(
     tool_schema_hashes: set[str] = set()
     normalized_subagent_calls = 0
     legacy_schema_traces = 0
+    quality_counts: Counter[str] = Counter()
+    quality_schema_counts: Counter[str] = Counter()
+    quality_threshold = selection.minimum_check_ratio_exclusive
+    if selection.policy == "toolathlon_pass_or_quality":
+        assert quality_threshold is not None
 
     for trace_path in trace_paths:
         counts["rollouts"] += 1
@@ -396,7 +457,36 @@ def read_toolathlon_gym_source(
                     "excluded_invalid_reward",
                     f"Invalid reward for {episode_from_path}.",
                 )
-            if (
+            check_quality: CheckQuality | None = None
+            if selection.policy == "toolathlon_pass_or_quality":
+                check_quality = _extract_check_quality(
+                    result.get("native_result"), episode_from_path
+                )
+                quality_counts["binary_pass" if reward else "binary_fail"] += 1
+                if check_quality is None:
+                    quality_counts["missing_check_counts"] += 1
+                else:
+                    quality_counts["with_check_counts"] += 1
+                    quality_schema_counts[check_quality.schema] += 1
+                    if check_quality.ratio > quality_threshold:
+                        quality_counts["ratio_above_threshold"] += 1
+                    else:
+                        quality_counts["ratio_at_or_below_threshold"] += 1
+                if (
+                    not reward
+                    and check_quality is not None
+                    and check_quality.ratio <= quality_threshold
+                ):
+                    quality_counts["excluded_binary_fail_low_ratio"] += 1
+                    counts["excluded_quality"] += 1
+                    continue
+                if reward:
+                    quality_counts["retained_binary_pass"] += 1
+                elif check_quality is None:
+                    quality_counts["retained_binary_fail_missing_counts"] += 1
+                else:
+                    quality_counts["retained_binary_fail_high_ratio"] += 1
+            elif (
                 selection.policy == "exact_reward"
                 and numeric_reward != selection.success_reward
             ):
@@ -540,6 +630,21 @@ def read_toolathlon_gym_source(
                     "messages": normalized_messages,
                     "tool_calls": normalized_calls,
                 }
+            if check_quality is not None:
+                attributes["native_check_quality"] = {
+                    "schema": check_quality.schema,
+                }
+            outcome_metrics = {"reward": numeric_reward}
+            if selection.policy == "toolathlon_pass_or_quality":
+                outcome_metrics["binary_pass"] = numeric_reward
+                if check_quality is not None:
+                    outcome_metrics.update(
+                        {
+                            "check_passed": float(check_quality.passed),
+                            "check_total": float(check_quality.total),
+                            "check_pass_ratio": check_quality.ratio,
+                        }
+                    )
             records.append(
                 CanonicalRollout(
                     id=(
@@ -563,7 +668,7 @@ def read_toolathlon_gym_source(
                     outcome=CanonicalOutcome(
                         success=numeric_reward == selection.success_reward,
                         reward=numeric_reward,
-                        metrics={"reward": numeric_reward},
+                        metrics=outcome_metrics,
                     ),
                     attributes=attributes,
                 )
@@ -623,6 +728,23 @@ def read_toolathlon_gym_source(
                 "tool_calls": normalized_subagent_calls,
             },
             "eligible_tool_schema_sha256s": sorted(tool_schema_hashes),
+            "selection": selection.model_dump(
+                mode="json",
+                exclude={
+                    "invalid_policy",
+                    "max_traces_per_prompt_per_teacher",
+                },
+            ),
+            **(
+                {
+                    "quality_filter": {
+                        **dict(sorted(quality_counts.items())),
+                        "count_schemas": dict(sorted(quality_schema_counts.items())),
+                    }
+                }
+                if selection.policy == "toolathlon_pass_or_quality"
+                else {}
+            ),
         },
         counts=counts,
     )
