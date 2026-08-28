@@ -21,6 +21,7 @@ from gyms.gaia2.experiments import (
     DOMAIN,
     INSTANCE_TYPES_BY_NUM_GPUS,
     QWEN35_BASE_DECOMPOSER_EXPERIMENT,
+    QWEN35_FINAL_MIXED_SFT_EXPERIMENT,
     QWEN35_FILTERED_SFT_EXPERIMENT,
     QWEN35_MIXED_SFT_EXPERIMENT,
     QWEN35_SFT_EXPERIMENT,
@@ -110,6 +111,7 @@ def test_experiment_registry_contains_local_and_openrouter_profiles() -> None:
         DEEPSEEK_GEMMA_EXPERIMENT,
         QWEN35_SFT_EXPERIMENT,
         QWEN35_MIXED_SFT_EXPERIMENT,
+        QWEN35_FINAL_MIXED_SFT_EXPERIMENT,
         QWEN35_FILTERED_SFT_EXPERIMENT,
         QWEN35_BASE_DECOMPOSER_EXPERIMENT,
         DEEPSEEK_QWEN_EXPERIMENT,
@@ -131,6 +133,7 @@ def test_experiment_registry_contains_local_and_openrouter_profiles() -> None:
             DEEPSEEK_GEMMA_EXPERIMENT,
             QWEN35_SFT_EXPERIMENT,
             QWEN35_MIXED_SFT_EXPERIMENT,
+            QWEN35_FINAL_MIXED_SFT_EXPERIMENT,
             QWEN35_FILTERED_SFT_EXPERIMENT,
             QWEN35_BASE_DECOMPOSER_EXPERIMENT,
             DEEPSEEK_QWEN_EXPERIMENT,
@@ -241,6 +244,7 @@ def test_openrouter_decomposer_starts_only_the_configured_worker() -> None:
     [
         QWEN35_SFT_EXPERIMENT,
         QWEN35_MIXED_SFT_EXPERIMENT,
+        QWEN35_FINAL_MIXED_SFT_EXPERIMENT,
         QWEN35_FILTERED_SFT_EXPERIMENT,
     ],
 )
@@ -341,6 +345,10 @@ def test_qwen_worker_uses_official_non_thinking_sampling() -> None:
         (
             QWEN35_MIXED_SFT_EXPERIMENT,
             "decomposer/qwen35-4b-sft-mixed-v1-partial-3983f605-327-32k",
+        ),
+        (
+            QWEN35_FINAL_MIXED_SFT_EXPERIMENT,
+            "decomposer/qwen35-4b-sft-mixed-v1-final-493c24c4-404",
         ),
         (
             QWEN35_FILTERED_SFT_EXPERIMENT,
@@ -460,6 +468,7 @@ def test_openrouter_preparation_hashes_only_the_local_worker(monkeypatch) -> Non
     [
         QWEN35_SFT_EXPERIMENT,
         QWEN35_MIXED_SFT_EXPERIMENT,
+        QWEN35_FINAL_MIXED_SFT_EXPERIMENT,
         QWEN35_FILTERED_SFT_EXPERIMENT,
     ],
 )

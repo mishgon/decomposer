@@ -99,6 +99,17 @@ QWEN35_4B_MIXED_SFT = (
     / "qwen35-4b-nonthinking-mixed-v1-partial-3983f605-327-32k-full-4gpu"
     / "final"
 )
+QWEN35_4B_FINAL_MIXED_SFT_SERVED_NAME = (
+    "decomposer/qwen35-4b-sft-mixed-v1-final-493c24c4-404"
+)
+QWEN35_4B_FINAL_MIXED_SFT = (
+    ARTIFACTS_ROOT
+    / "training"
+    / "sft"
+    / "jobs"
+    / "qwen35-4b-nonthinking-mixed-v1-final-493c24c4-404-32k-full-4gpu"
+    / "final"
+)
 QWEN35_4B_FILTERED_SFT_SERVED_NAME = (
     "decomposer/qwen35-4b-sft-mixed-v1-final-493c24c4-404-filtered-p1-s279"
 )
@@ -383,6 +394,37 @@ QWEN35_FILTERED_SFT_EXPERIMENT = DecomposerExperiment(
     worker_trust_remote_code=True,
     worker_gdn_prefill_backend="triton",
 )
+QWEN35_FINAL_MIXED_SFT_EXPERIMENT = DecomposerExperiment(
+    name=(
+        "qwen35-4b-sft-mixed-v1-final-493c24c4-404-non-thinking-"
+        "qwen35-4b-non-thinking"
+    ),
+    worker_checkpoint=QWEN35_4B_BASE,
+    manager_checkpoint=QWEN35_4B_FINAL_MIXED_SFT,
+    manager_served_name=QWEN35_4B_FINAL_MIXED_SFT_SERVED_NAME,
+    worker_served_name="Qwen/Qwen3.5-4B",
+    manager_port=8026,
+    worker_port=8025,
+    service_port=8126,
+    subagent_port=2026,
+    max_model_len=131072,
+    temperature=_QWEN35_NON_THINKING_SAMPLING.temperature,
+    top_p=_QWEN35_NON_THINKING_SAMPLING.top_p,
+    top_k=_QWEN35_NON_THINKING_SAMPLING.top_k,
+    min_p=_QWEN35_NON_THINKING_SAMPLING.min_p,
+    presence_penalty=_QWEN35_NON_THINKING_SAMPLING.presence_penalty,
+    repetition_penalty=_QWEN35_NON_THINKING_SAMPLING.repetition_penalty,
+    manager_thinking=False,
+    manager_tool_call_parser="qwen3_xml",
+    manager_reasoning_parser=None,
+    manager_gdn_prefill_backend="triton",
+    worker_thinking=False,
+    worker_tool_call_parser="qwen3_xml",
+    worker_reasoning_parser=None,
+    worker_language_model_only=False,
+    worker_trust_remote_code=True,
+    worker_gdn_prefill_backend="triton",
+)
 QWEN35_BASE_DECOMPOSER_EXPERIMENT = DecomposerExperiment(
     name="qwen35-4b-base-non-thinking-qwen35-4b-non-thinking",
     worker_checkpoint=QWEN35_4B_BASE,
@@ -503,6 +545,7 @@ ALL_EXPERIMENTS: tuple[Experiment, ...] = (
     DEEPSEEK_GEMMA_EXPERIMENT,
     QWEN35_SFT_EXPERIMENT,
     QWEN35_MIXED_SFT_EXPERIMENT,
+    QWEN35_FINAL_MIXED_SFT_EXPERIMENT,
     QWEN35_FILTERED_SFT_EXPERIMENT,
     QWEN35_BASE_DECOMPOSER_EXPERIMENT,
     DEEPSEEK_QWEN_EXPERIMENT,
