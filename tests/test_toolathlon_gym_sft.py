@@ -436,7 +436,7 @@ def test_canonical_builder_accepts_toolathlon_source(tmp_path: Path) -> None:
     assert all(
         row["messages"][0]["content"] == DECOMPOSER_SYSTEM_PROMPT for row in train
     )
-    assert prepared.manifest["preparation"]["adapter_versions"] == {"toolathlon_gym": 2}
+    assert prepared.manifest["preparation"]["adapter_versions"] == {"toolathlon_gym": 3}
     assert prepared.manifest["normalization"] == {
         "strategy": "parallel_spawn_calls_to_single_call_turns",
         "traces": 10,
@@ -593,3 +593,66 @@ def test_completed_toolathlon_run_ignores_stale_attempt_traces(tmp_path: Path) -
     assert result.records[0].source.rollout_id.endswith(":a002")
     assert result.source_manifest["trace_records"] == 2
     assert result.source_manifest["ignored_attempt_trace_records"] == 1
+
+
+def test_completed_with_errors_uses_only_completed_episodes(tmp_path: Path) -> None:
+    source = _source(
+        tmp_path / "source",
+        [_trace("completed")],
+        run_status="completed_with_errors",
+    )
+    manifest_path = source / "runs" / RUN_ID / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["episodes"][0]["attempts"] = [
+        {"attempt": 1, "status": "completed"}
+    ]
+    manifest["episodes"].append(
+        {
+            "task": "failed",
+            "repetition": 1,
+            "status": "failed",
+            "attempt": 1,
+            "attempts": [{"attempt": 1, "status": "failed"}],
+        }
+    )
+    _write_json(manifest_path, manifest)
+    _refresh_import_manifest(source)
+
+    source_spec = _source_spec(source).model_copy(
+        update={
+            "expected_native_rollouts": 1,
+            "expected_candidates": 1,
+            "require_completed_run": True,
+        }
+    )
+    result = read_toolathlon_gym_source(
+        source_spec,
+        SelectionSpec(),
+        system_prompt=DECOMPOSER_SYSTEM_PROMPT,
+    )
+
+    assert len(result.records) == 1
+    assert result.source_manifest["run_status"] == "completed_with_errors"
+    assert result.source_manifest["planned_episodes"] == 2
+    assert result.source_manifest["episode_statuses"] == {
+        "completed": 1,
+        "failed": 1,
+    }
+    assert result.source_manifest["sidecar_failure_records"] == 1
+
+
+@pytest.mark.parametrize("run_status", ["pending", "running", "interrupted"])
+def test_required_completed_run_rejects_nonterminal_status(
+    tmp_path: Path, run_status: str
+) -> None:
+    source = _source(tmp_path / run_status, [_trace(run_status)], run_status=run_status)
+    source_spec = _source_spec(source).model_copy(
+        update={"require_completed_run": True}
+    )
+
+    with pytest.raises(ValueError, match="must be terminal"):
+        read_toolathlon_gym_source(
+            source_spec,
+            SelectionSpec(),
+            system_prompt=DECOMPOSER_SYSTEM_PROMPT,
+        )

@@ -101,7 +101,10 @@ def test_sft_experiments_are_unique_and_register_retained_configs() -> None:
         "gemma4-e4b-nonthinking-deepseek-e4b-v2-8k-full-4gpu",
         "gemma4-e4b-nonthinking-deepseek-e4b-v2-32k-full-4gpu",
         "qwen35-4b-nonthinking-mixed-v1-32k-smoke-4gpu",
-        "qwen35-4b-nonthinking-mixed-v1-32k-full-4gpu",
+        (
+            "qwen35-4b-nonthinking-mixed-v1-final-"
+            "493c24c4-404-32k-full-4gpu"
+        ),
         (
             "qwen35-4b-nonthinking-mixed-v1-partial-"
             "3983f605-327-32k-smoke-4gpu"
@@ -938,6 +941,33 @@ def test_qwen35_mixed_configs_pin_model_revision(config_name: str) -> None:
         "dtype": "bfloat16",
         "attn_implementation": "sdpa",
         "trust_remote_code": False,
+    }
+
+
+def test_qwen35_final_mixed_config_pins_release_and_patience_one() -> None:
+    config = yaml.safe_load(
+        Path(
+            "training/sft/configs/"
+            "qwen35_4b_nonthinking_mixed_v1_32k_full_4gpu.yaml"
+        ).read_text()
+    )
+    release = (
+        "datasets/sft/decomposer-mixed-deepseek-qwen35-4b-nonthinking/"
+        "v1-final-493c24c4-404-32k"
+    )
+    assert release in config["data"]["train_file"]
+    assert release in config["data"]["validation_file"]
+    assert release in config["data"]["manifest_file"]
+    assert config["data"]["require_prepared_tokenization"] is True
+    assert config["data"]["include_reasoning"] is False
+    assert config["training"]["max_length"] == 32768
+    assert config["training"]["global_batch_size"] == 4
+    assert config["training"]["num_train_epochs"] == 5
+    assert config["run"]["expected_world_size"] == 4
+    assert config["run"]["resume_from_checkpoint"] is None
+    assert config["run"]["early_stopping"] == {
+        "patience": 1,
+        "threshold": 0.0,
     }
 
 

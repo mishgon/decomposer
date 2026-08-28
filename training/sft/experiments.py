@@ -162,13 +162,17 @@ def sft_experiments() -> list[ExperimentConfig]:
             pytorch_cuda_alloc_conf="expandable_segments:True",
         ),
         ExperimentConfig(
-            name="qwen35-4b-nonthinking-mixed-v1-32k-full-4gpu",
+            name=(
+                "qwen35-4b-nonthinking-mixed-v1-final-"
+                "493c24c4-404-32k-full-4gpu"
+            ),
             config_path=(
                 "training/sft/configs/qwen35_4b_nonthinking_mixed_v1_32k_full_4gpu.yaml"
             ),
             description=(
                 "Qwen3.5-4B Decomposer SFT "
-                "(non-thinking, Workplace plus Toolathlon, 32K, 4 GPU)"
+                "(non-thinking, Workplace plus terminal Toolathlon snapshot "
+                "493c24c4, 32K, 4 GPU)"
             ),
             num_gpus=4,
             use_liger_kernel=True,

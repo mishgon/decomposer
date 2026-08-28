@@ -1137,6 +1137,7 @@ def test_qwen35_mixed_spec_pins_all_reward_sources_and_sampling() -> None:
         )
     ).spec
     assert spec.spec_version == 2
+    assert spec.dataset.version == "v1-final-493c24c4-404-32k"
     assert spec.selection.policy == "all_rewards"
     assert spec.selection.invalid_policy == "exclude"
     assert spec.policy.subagent_types[0].id == "qwen35_4b_non_thinking"
@@ -1147,8 +1148,8 @@ def test_qwen35_mixed_spec_pins_all_reward_sources_and_sampling() -> None:
     assert workplace.sampling.seed == 42
     assert workplace.sampling.expected_tasks == 1255
     assert workplace.sampling.expected_rollouts_per_task == 3
-    assert toolathlon.expected_native_rollouts == 503
-    assert toolathlon.expected_candidates == 503
+    assert toolathlon.expected_native_rollouts == 404
+    assert toolathlon.expected_candidates == 404
     assert toolathlon.require_completed_run is True
     assert toolathlon.trace_format == "toolathlon_legacy_unversioned"
     assert toolathlon.subagent_type_aliases == {

@@ -6,9 +6,9 @@ model:
   trust_remote_code: false
 
 data:
-  train_file: /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/datasets/sft/decomposer-mixed-deepseek-qwen35-4b-nonthinking/v1-32k/train.jsonl
-  validation_file: /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/datasets/sft/decomposer-mixed-deepseek-qwen35-4b-nonthinking/v1-32k/validation.jsonl
-  manifest_file: /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/datasets/sft/decomposer-mixed-deepseek-qwen35-4b-nonthinking/v1-32k/manifest.json
+  train_file: /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/datasets/sft/decomposer-mixed-deepseek-qwen35-4b-nonthinking/v1-final-493c24c4-404-32k/train.jsonl
+  validation_file: /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/datasets/sft/decomposer-mixed-deepseek-qwen35-4b-nonthinking/v1-final-493c24c4-404-32k/validation.jsonl
+  manifest_file: /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/datasets/sft/decomposer-mixed-deepseek-qwen35-4b-nonthinking/v1-final-493c24c4-404-32k/manifest.json
   include_reasoning: false
   require_prepared_tokenization: true
   error_on_truncation: true
@@ -18,8 +18,8 @@ data:
   max_eval_samples: null
 
 training:
-  output_dir: /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/training/sft/checkpoints/qwen35-4b-nonthinking-mixed-v1-32k-4gpu
-  run_name: qwen35-4b-decomposer-sft-nonthinking-mixed-v1-32k-4gpu
+  output_dir: /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/training/sft/checkpoints/qwen35-4b-nonthinking-mixed-v1-final-493c24c4-404-32k-4gpu
+  run_name: qwen35-4b-decomposer-sft-nonthinking-mixed-v1-final-493c24c4-404-32k-4gpu
   max_length: 32768
   per_device_train_batch_size: 1
   per_device_eval_batch_size: 1
@@ -73,12 +73,13 @@ clearml:
   enabled: false
   weight_norm_interval_steps: 10
   project: decomposer
-  task: Qwen3.5-4B Decomposer SFT non-thinking mixed v1 32K
+  task: Qwen3.5-4B Decomposer SFT non-thinking mixed final 493c24c4 32K
   tags:
     - sft
     - qwen3.5-4b
     - workplace-assistant
     - toolathlon-gym
+    - final-493c24c4-404
   log_model: false
   output_uri: null
 
@@ -88,5 +89,5 @@ run:
   resume_from_checkpoint: null
   overwrite_output_dir: false
   early_stopping:
-    patience: 2
+    patience: 1
     threshold: 0.0

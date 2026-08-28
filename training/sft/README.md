@@ -39,38 +39,56 @@ Both specifications use exact reward `1.0`, prompt-fixed validation fraction
 same split. The builder requires a clean Git worktree and refuses to replace an
 existing `<dataset-id>/<version>` directory.
 
-### Qwen Workplace + Toolathlon all-reward release
+### Qwen Workplace + Toolathlon final all-reward release
 
-The mixed Qwen release intentionally keeps both full- and non-full-reward
-traces. Wait until one Toolathlon run manifest contains exactly 503 completed
-episodes, then import only that run from the final archive:
+The final mixed Qwen release intentionally keeps both full- and non-full-reward
+traces. Its terminal Toolathlon run contains 404 completed episodes and 99
+failed episodes with no trace/result pair. Import only that run into a
+hash-namespaced immutable location:
 
 ```bash
-uv run python -m data.sft.import_toolathlon \
-  --archive /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/traces.tar.gz \
+.venv/bin/python -m data.sft.import_toolathlon \
+  --archive /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/traces_full.tar.gz \
   --archive-prefix matrosov/decomposer-qwen/artifacts/gyms/toolathlon_gym \
-  --run-id "$TOOLATHLON_RUN_ID" \
-  --expected-sha256 "$TOOLATHLON_ARCHIVE_SHA256"
+  --run-id 20260826T122838Z-84ae95f3 \
+  --expected-sha256 493c24c4f8853230c0b7557b905ce2027138522ee6da06d5d2e71d0cade94753 \
+  --output-root /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/evaluation/data/toolathlon_gym/imports/snapshots/493c24c4
 ```
 
 Build the immutable mixed release after committing the preparation code and
 specification:
 
 ```bash
-uv run --group train python -m data.sft.prepare \
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 .venv/bin/python -m data.sft.prepare \
   --spec data/sft/specs/decomposer_mixed_deepseek_qwen35_4b_nonthinking_v1_32k.yaml \
   --output-root /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/datasets/sft \
-  --source toolathlon-deepseek-v4-flash-0731-qwen35-4b-nonthinking-n1=/mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/evaluation/data/toolathlon_gym/imports/"$TOOLATHLON_RUN_ID"
+  --source toolathlon-deepseek-v4-flash-0731-qwen35-4b-nonthinking-n1=/mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/evaluation/data/toolathlon_gym/imports/snapshots/493c24c4/20260826T122838Z-84ae95f3
 ```
 
-Preparation starts from 1,758 candidates: all 503 Toolathlon tasks plus one of
-three Workplace rollouts for each of 1,255 tasks, selected by a stable seed-42
-hash before validation. The pinned Workplace selection contains 12 malformed
-tool-call traces, including calls to undeclared subagent type IDs, and therefore
-retains 1,243 traces (953 reward `1`, 290 reward `0`); none exceeds 32K Qwen
-tokens. The final manifest reports Toolathlon malformed and overlength drops by
-source and reason. Reward value alone never excludes a trace, and no trace is
-truncated.
+Preparation starts from 1,659 candidates: 404 completed Toolathlon episodes
+plus one of three Workplace rollouts for each of 1,255 tasks, selected by a
+stable seed-42 hash before validation. Structural validation retains 375
+Toolathlon traces and 1,243 Workplace traces. The 32K token limit excludes 17
+Toolathlon traces, producing 1,601 records: 1,441 train and 160 validation.
+Toolathlon contributes 358 records (60 reward `1`, 298 reward `0`), while
+Workplace contributes 1,243 (953 reward `1`, 290 reward `0`). Reward value
+alone never excludes a trace, and no trace is truncated. Toolathlon adapter v3
+accepts terminal `completed_with_errors` manifests, selects only completed
+episodes, and records the 99 failed episodes separately. Because this archive
+uses the legacy trace format, the canonical policy interface supplies the tool
+schema.
+
+Submit the final run from the base Qwen3.5-4B checkpoint on four GPUs with
+high priority:
+
+```bash
+/mnt/shared_ru.ml.SZ-5_000264/sukhorukov/.venv-mls/bin/python \
+  -m training.sft.run_train_jobs \
+  --filter qwen35-4b-nonthinking-mixed-v1-final-493c24c4-404-32k-full-4gpu \
+  --priority high
+```
+
+The run evaluates once per epoch and uses early-stopping patience one.
 
 #### Pinned partial Toolathlon snapshot
 

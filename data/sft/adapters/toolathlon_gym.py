@@ -29,9 +29,10 @@ from ..schema import (
     validate_decomposer_messages,
 )
 
-ADAPTER_VERSION = 2
+ADAPTER_VERSION = 3
 TRACE_SCHEMA_VERSION = 2
 IMPORT_SCHEMA_VERSION = 1
+TERMINAL_RUN_STATUSES = frozenset({"completed", "completed_with_errors"})
 
 
 def _empty_counts() -> Counter[str]:
@@ -227,14 +228,27 @@ def _failed_attempts(run_manifest: Mapping[str, Any]) -> int:
     )
 
 
+def _episode_statuses(run_manifest: Mapping[str, Any]) -> Counter[str]:
+    episodes = run_manifest.get("episodes")
+    if not isinstance(episodes, list):
+        return Counter()
+    return Counter(
+        str(episode.get("status") or "unknown")
+        for episode in episodes
+        if isinstance(episode, Mapping)
+    )
+
+
 def _completed_trace_paths(
     source_dir: Path,
     run_id: str,
     run_manifest: Mapping[str, Any],
 ) -> list[Path]:
-    if run_manifest.get("status") != "completed":
+    run_status = run_manifest.get("status")
+    if run_status not in TERMINAL_RUN_STATUSES:
         raise ValueError(
-            f"Toolathlon run {run_id} must be completed before SFT preparation."
+            f"Toolathlon run {run_id} must be terminal before SFT preparation; "
+            f"got {run_status!r}."
         )
     episodes = run_manifest.get("episodes")
     if not isinstance(episodes, list) or not episodes:
@@ -244,12 +258,25 @@ def _completed_trace_paths(
     for index, raw_episode in enumerate(episodes):
         if not isinstance(raw_episode, Mapping):
             raise ValueError(f"Toolathlon run episode {index} is not an object.")
+        episode_status = raw_episode.get("status")
+        allowed_statuses = (
+            {"completed"}
+            if run_status == "completed"
+            else {"completed", "failed"}
+        )
+        if episode_status not in allowed_statuses:
+            raise ValueError(
+                f"Toolathlon run {run_id} episode {index} has status "
+                f"{episode_status!r}, which is inconsistent with terminal run "
+                f"status {run_status!r}."
+            )
+        if episode_status == "failed":
+            continue
         task = raw_episode.get("task")
         repetition = raw_episode.get("repetition")
         attempt = raw_episode.get("attempt")
         if (
-            raw_episode.get("status") != "completed"
-            or not isinstance(task, str)
+            not isinstance(task, str)
             or not task
             or not isinstance(repetition, int)
             or isinstance(repetition, bool)
@@ -259,8 +286,8 @@ def _completed_trace_paths(
             or attempt < 1
         ):
             raise ValueError(
-                f"Toolathlon run {run_id} episode {index} is not completed with "
-                "valid task/repetition/attempt metadata."
+                f"Toolathlon run {run_id} completed episode {index} has invalid "
+                "task/repetition/attempt metadata."
             )
         task_digest = sha256_text(task)[:8]
         episode_id = (
@@ -275,6 +302,8 @@ def _completed_trace_paths(
                 f"Completed Toolathlon episode has no imported trace: {episode_id}."
             )
         trace_paths.append(trace_path)
+    if not trace_paths:
+        raise ValueError(f"Toolathlon run {run_id} has no completed episodes.")
     return sorted(trace_paths)
 
 
@@ -554,6 +583,7 @@ def read_toolathlon_gym_source(
 
     episodes = run_manifest.get("episodes")
     planned_episodes = len(episodes) if isinstance(episodes, list) else None
+    episode_statuses = _episode_statuses(run_manifest)
     imported_files = dict(import_manifest["files"])
     archive = import_manifest.get("archive")
     archive_sha256 = archive.get("sha256") if isinstance(archive, Mapping) else None
@@ -571,6 +601,7 @@ def read_toolathlon_gym_source(
             "run_id": run_id,
             "run_status": run_manifest.get("status"),
             "planned_episodes": planned_episodes,
+            "episode_statuses": dict(sorted(episode_statuses.items())),
             "native_rollouts": native_rollouts,
             "candidate_rollouts": len(trace_paths),
             "trace_records": len(all_trace_paths),
