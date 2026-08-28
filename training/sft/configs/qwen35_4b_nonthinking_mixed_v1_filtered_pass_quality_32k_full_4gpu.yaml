@@ -90,5 +90,5 @@ run:
   resume_from_checkpoint: null
   overwrite_output_dir: false
   early_stopping:
-    patience: 1
+    patience: 2
     threshold: 0.0

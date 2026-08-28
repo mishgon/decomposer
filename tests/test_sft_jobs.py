@@ -980,7 +980,7 @@ def test_qwen35_filtered_mixed_config_pins_release_and_experiment() -> None:
     assert config["run"]["resume_from_checkpoint"] is None
     assert config["run"]["overwrite_output_dir"] is False
     assert config["run"]["early_stopping"] == {
-        "patience": 1,
+        "patience": 2,
         "threshold": 0.0,
     }
 

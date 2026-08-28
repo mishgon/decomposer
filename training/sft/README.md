@@ -130,7 +130,7 @@ high priority:
 
 This run uses the same optimization settings as the all-rewards comparison:
 32K inputs, four GPUs, five epochs at most, per-epoch evaluation, and
-early-stopping patience one. It has an independent output directory and does
+early-stopping patience two. It has an independent output directory and does
 not resume or overwrite the all-rewards run.
 
 #### Pinned partial Toolathlon snapshot
