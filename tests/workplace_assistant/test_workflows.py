@@ -17,6 +17,8 @@ from gyms.workplace_assistant.experiments import (
     WORKPLACE_E4B_SFT_FINAL,
     WORKPLACE_E4B_SFT_MODEL_ID,
     WORKPLACE_E4B_SFT_VLLM,
+    WORKPLACE_QWEN35_4B_FILTERED_SFT_FINAL,
+    WORKPLACE_QWEN35_4B_FILTERED_SFT_MODEL_ID,
     WORKPLACE_QWEN35_4B_MIXED_SFT_FINAL,
     WORKPLACE_QWEN35_4B_MIXED_SFT_MODEL_ID,
     WORKPLACE_QWEN35_4B_SFT_FINAL,
@@ -37,9 +39,9 @@ from gyms.qwen_sampling import qwen35_general_sampling
 
 
 def test_registry_is_global_and_unique() -> None:
-    assert len(DECOMPOSER_EXPERIMENTS) == 11
+    assert len(DECOMPOSER_EXPERIMENTS) == 12
     assert len(SIMPLE_EXPERIMENTS) == 28
-    assert len(experiments.EXPERIMENTS) == 39
+    assert len(experiments.EXPERIMENTS) == 40
     assert experiments.BASE_IMAGE.endswith("py3.12-torch2.7.0:0.0.42")
     assert {experiment.kind for experiment in experiments.ALL_EXPERIMENTS} == {
         "decomposer",
@@ -377,6 +379,12 @@ def test_deepseek_qwen_profile_uses_128k_context() -> None:
             "qwen35-4b-non-thinking",
             WORKPLACE_QWEN35_4B_MIXED_SFT_MODEL_ID,
             WORKPLACE_QWEN35_4B_MIXED_SFT_FINAL,
+        ),
+        (
+            "qwen35-4b-sft-mixed-v1-final-493c24c4-404-filtered-p1-s279-"
+            "non-thinking-qwen35-4b-non-thinking",
+            WORKPLACE_QWEN35_4B_FILTERED_SFT_MODEL_ID,
+            WORKPLACE_QWEN35_4B_FILTERED_SFT_FINAL,
         ),
     ],
 )

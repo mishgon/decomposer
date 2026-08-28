@@ -151,6 +151,25 @@ $MLSPY -m gyms.workplace_assistant.run_eval \
   --author-name sukhorukov
 ```
 
+The filtered final-snapshot patience-1 best checkpoint has a separate immutable
+experiment identity, so its evaluation does not overwrite the partial-snapshot
+results:
+
+```bash
+.venv/bin/python -m gyms.workplace_assistant.prepare eval \
+  --split validation \
+  --experiment qwen35-4b-sft-mixed-v1-final-493c24c4-404-filtered-p1-s279-non-thinking-qwen35-4b-non-thinking \
+  --reuse-source
+
+$MLSPY -m gyms.workplace_assistant.run_eval \
+  --purpose evaluation \
+  --experiment qwen35-4b-sft-mixed-v1-final-493c24c4-404-filtered-p1-s279-non-thinking-qwen35-4b-non-thinking \
+  --split validation \
+  --num-repeats 3 \
+  --priority high \
+  --author-name sukhorukov
+```
+
 After the Workplace E4B SFT run has exported its merged `final/` checkpoint,
 evaluate the tuned non-thinking manager and vanilla thinking E4B subagent on
 dedicated GPUs:
