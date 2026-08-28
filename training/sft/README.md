@@ -110,7 +110,8 @@ HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 .venv/bin/python -m data.sft.prepare \
 ```
 
 The expected 32K release has 1,239 records: 953 Workplace traces and 286
-Toolathlon traces, split into 1,118 train and 121 validation records. Before
+Toolathlon traces, split into 1,116 train and 123 validation records. The
+deterministic prompt-fixed split is recomputed after source filtering. Before
 structural and length filtering, the Toolathlon policy keeps 314 of 404
 completed traces: 68 binary passes, 21 binary failures above the quality
 threshold, and 225 binary failures without check counts. It excludes 90
