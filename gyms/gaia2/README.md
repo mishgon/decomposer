@@ -2,8 +2,8 @@
 
 This package owns Gaia2 evaluation data preparation, the Decomposer external
 agent adapter, local execution, and MLSpace submission. Evaluation supports the
-`execution` and `search` domains. Teacher trace generation remains restricted
-to the immutable execution train partition described below.
+`execution`, `search`, and `ambiguity` domains. Teacher trace generation remains
+restricted to the immutable execution train partition described below.
 
 The Gaia runtime is pinned through `external/gaia2` at commit
 `3bee736488864e028231755ce2ee32a7065e8648`. Preparation materializes a
@@ -18,9 +18,9 @@ run manifest records both repository commits.
   --domain execution
 ```
 
-Use `--domain search` to prepare Search. Each non-execution domain is stored in
-an isolated dataset-revision subtree, so preparation cannot change the existing
-execution source or results.
+Use `--domain search` or `--domain ambiguity` to prepare another supported
+domain. Each non-execution domain is stored in an isolated dataset-revision
+subtree, so preparation cannot change the existing execution source or results.
 
 Preparation loads revision
 `78ea3bdbdeec2bdcd6afa5420915d8a22f23ed99` of
@@ -77,6 +77,10 @@ The registered experiments are:
   E4B worker on one GPU.
 - `deepseek-v4-flash-0731-teacher-qwen35-4b-non-thinking`: the same remote
   teacher manager with a local non-thinking Qwen3.5-4B worker on one GPU.
+- `deepseek-v4-flash-0731-teacher-gaia2-ambiguity-policy-qwen35-4b-non-thinking`:
+  a separately identified prompt-alignment ablation using the same manager and
+  worker. It appends the short GAIA2 ambiguity policy to the manager prompt;
+  canonical DeepSeek results remain unchanged.
 - `qwen36-35b-a3b-teacher-qwen35-4b-non-thinking`: the internal
   `Qwen/Qwen3.6-35B-A3B-FP8` teacher with the same local worker and teacher
   prompt. A credential-isolating loopback proxy normalizes the deployment's
@@ -359,6 +363,51 @@ The matched Qwen3.6 teacher comparison uses three attempts and concurrency 16:
   --priority high \
   --author-name sukhorukov
 ```
+
+## Evaluate the Ambiguity domain
+
+Ambiguity contains 160 static scenarios. The immutable
+`ambiguity-128-32-v1` split reserves complete universes 25, 26, and 28 for a
+future 32-task holdout and leaves 128 training tasks; the baseline below uses
+`--partition full` and evaluates all 160 tasks.
+
+The native simple agent receives ARE's canonical benchmark-wide ambiguity rule.
+The canonical Decomposer keeps its existing teacher prompt. A third, separately
+named ablation appends a short equivalent policy to the Decomposer manager only.
+The longer internal `eval/conf/ambiguity_prompt.txt` override is not used, and
+the launcher does not set `ARE_EXTRA_SYSTEM_PROMPT` or
+`ARE_EXTRA_SYSTEM_PROMPT_FILE`.
+
+Prepare all three experiments:
+
+```bash
+.venv/bin/python -m gyms.gaia2.prepare eval \
+  --domain ambiguity \
+  --partition full \
+  --experiment qwen35-4b-non-thinking \
+  --experiment deepseek-v4-flash-0731-teacher-qwen35-4b-non-thinking \
+  --experiment deepseek-v4-flash-0731-teacher-gaia2-ambiguity-policy-qwen35-4b-non-thinking
+```
+
+Dry-run or submit the matched full-validation jobs together:
+
+```bash
+/mnt/shared_ru.ml.SZ-5_000264/sukhorukov/.venv-mls/bin/python \
+  -m gyms.gaia2.run_eval \
+  --domain ambiguity \
+  --partition full \
+  --experiment qwen35-4b-non-thinking \
+  --experiment deepseek-v4-flash-0731-teacher-qwen35-4b-non-thinking \
+  --experiment deepseek-v4-flash-0731-teacher-gaia2-ambiguity-policy-qwen35-4b-non-thinking \
+  --num-repeats 3 \
+  --concurrency 4 \
+  --priority high \
+  --author-name sukhorukov
+```
+
+Each job uses one A100, makes exactly 480 attempts, and writes to an isolated
+`validation/ambiguity/<experiment>-n3` result directory. The first two jobs are
+the primary canonical comparison; the policy-aligned Decomposer is an ablation.
 
 ### Generate seven additional teacher traces per training scenario
 

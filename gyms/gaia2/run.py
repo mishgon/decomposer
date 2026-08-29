@@ -59,10 +59,10 @@ from gyms.gaia2.partition import (  # noqa: E402
     partition_scenario_ids,
     validate_partition_view,
 )
+from gyms.gaia2.prompts import compose_decomposer_system_prompt  # noqa: E402
 from gyms.gaia2.staging import git  # noqa: E402
 from decomposer.prompts import (  # noqa: E402
     DECOMPOSER_PROMPT_PROFILES,
-    resolve_decomposer_system_prompt,
 )
 
 
@@ -79,7 +79,10 @@ def select_prompt_profile(
 def prompt_sha256(experiment: Experiment) -> str | None:
     if not isinstance(experiment, DecomposerExperiment):
         return None
-    prompt = resolve_decomposer_system_prompt(experiment.prompt_profile)
+    prompt = compose_decomposer_system_prompt(
+        experiment.prompt_profile,
+        experiment.manager_prompt_addendum_profile,
+    )
     return hashlib.sha256(prompt.encode("utf-8")).hexdigest()
 
 
@@ -109,6 +112,11 @@ def run_identity(
         "limit": limit,
         "decomposer_system_prompt_profile": (
             experiment.prompt_profile
+            if isinstance(experiment, DecomposerExperiment)
+            else None
+        ),
+        "decomposer_system_prompt_addendum_profile": (
+            experiment.manager_prompt_addendum_profile
             if isinstance(experiment, DecomposerExperiment)
             else None
         ),
@@ -1165,12 +1173,15 @@ def _runtime_configs(
     service = {
         "manager": manager,
         "decomposer_system_prompt_profile": experiment.prompt_profile,
+        "decomposer_system_prompt_addendum_profile": (
+            experiment.manager_prompt_addendum_profile
+        ),
         "subagent_types": [
             {
                 "subagent_type_id": "gaia2_worker",
                 "description": (
                     f"{experiment.worker_served_name} worker with authenticated access to "
-                    "the current Gaia2 execution scenario tools."
+                    "the current Gaia2 scenario tools."
                 ),
                 "assistant_id": "gaia2_worker",
                 "url": f"http://127.0.0.1:{experiment.subagent_port}",
@@ -1371,6 +1382,11 @@ def _dry_plan(
         "limit": limit,
         "decomposer_system_prompt_profile": (
             experiment.prompt_profile
+            if isinstance(experiment, DecomposerExperiment)
+            else None
+        ),
+        "decomposer_system_prompt_addendum_profile": (
+            experiment.manager_prompt_addendum_profile
             if isinstance(experiment, DecomposerExperiment)
             else None
         ),

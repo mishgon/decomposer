@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage
 
 from gyms.gaia2 import service
+from gyms.gaia2.prompts import GAIA2_AMBIGUITY_MANAGER_ADDENDUM
 
 
 class FakeGraph:
@@ -168,6 +169,30 @@ def test_prompt_profile_is_forwarded_to_decomposer(monkeypatch):
     )
 
     assert captured["decomposer_system_prompt"] == service.DECOMPOSER_TEACHER_SYSTEM_PROMPT
+
+
+def test_prompt_addendum_is_appended_only_when_configured(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(service, "_model_from_config", lambda value: object())
+
+    def fake_create_decomposer_agent(**kwargs):
+        captured.update(kwargs)
+        return FakeGraph()
+
+    monkeypatch.setattr(service, "create_decomposer_agent", fake_create_decomposer_agent)
+    service.create_app(
+        {
+            "manager": {"model": "fake"},
+            "decomposer_system_prompt_profile": "teacher",
+            "decomposer_system_prompt_addendum_profile": "gaia2-ambiguity",
+            "subagent_types": [{"subagent_type_id": "worker"}],
+        }
+    )
+
+    assert captured["decomposer_system_prompt"] == (
+        f"{service.DECOMPOSER_TEACHER_SYSTEM_PROMPT}\n\n"
+        f"{GAIA2_AMBIGUITY_MANAGER_ADDENDUM}"
+    )
 
 
 def _context():

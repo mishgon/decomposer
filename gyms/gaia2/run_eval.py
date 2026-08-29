@@ -541,6 +541,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "experiment": experiment.name,
                     "num_gpus": experiment.num_gpus,
                     "prompt_profile": args.prompt_profile,
+                    "manager_prompt_addendum_profile": getattr(
+                        experiment, "manager_prompt_addendum_profile", None
+                    ),
                 }
             )
 

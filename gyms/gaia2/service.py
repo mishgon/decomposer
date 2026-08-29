@@ -24,8 +24,8 @@ from decomposer.core import TERMINAL_STATUSES, create_decomposer_agent
 from decomposer.prompts import (
     DECOMPOSER_SYSTEM_PROMPT,
     DECOMPOSER_TEACHER_SYSTEM_PROMPT,
-    resolve_decomposer_system_prompt,
 )
+from gyms.gaia2.prompts import compose_decomposer_system_prompt
 
 
 class EpisodeContext(TypedDict):
@@ -128,7 +128,8 @@ def _visible_message_text(message: AIMessage) -> str:
 
 def _decomposer_system_prompt(config: dict[str, Any]) -> str:
     profile = config.get("decomposer_system_prompt_profile", "student")
-    return resolve_decomposer_system_prompt(profile)
+    addendum_profile = config.get("decomposer_system_prompt_addendum_profile")
+    return compose_decomposer_system_prompt(profile, addendum_profile)
 
 
 def _public_context(context: EpisodeContext) -> dict[str, Any]:

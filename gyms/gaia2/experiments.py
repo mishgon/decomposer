@@ -7,6 +7,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Literal
 
+from gyms.gaia2.prompts import Gaia2ManagerPromptAddendumProfile
 from gyms.qwen_sampling import qwen35_general_sampling
 
 ARTIFACTS_ROOT = Path("/mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts")
@@ -23,7 +24,7 @@ SPLIT = "validation"
 SPLIT_MANIFEST_SEED = 42
 PARTITIONS = ("train", "test", "full")
 
-Gaia2Domain = Literal["execution", "search"]
+Gaia2Domain = Literal["execution", "search", "ambiguity"]
 
 
 @dataclass(frozen=True)
@@ -70,8 +71,22 @@ SEARCH_DOMAIN = Gaia2DomainSpec(
     train_scenario_count=118,
     test_scenario_count=42,
 )
+AMBIGUITY_DOMAIN = Gaia2DomainSpec(
+    name="ambiguity",
+    scenario_count=160,
+    split_manifest_name="ambiguity-128-32-v1",
+    split_manifest_sha256=(
+        "d2020e48d3a375ecd78145ef41a4c455f997681d719bbb7f1e0d9125fc8b7176"
+    ),
+    dataset_aggregate_sha256=(
+        "81a3e9cf8e01a764c61f8cbfdd56e2bf29fa487d32b52280e8a3071e4f5aeb72"
+    ),
+    train_scenario_count=128,
+    test_scenario_count=32,
+)
 DOMAIN_SPECS: dict[Gaia2Domain, Gaia2DomainSpec] = {
-    spec.name: spec for spec in (EXECUTION_DOMAIN, SEARCH_DOMAIN)
+    spec.name: spec
+    for spec in (EXECUTION_DOMAIN, SEARCH_DOMAIN, AMBIGUITY_DOMAIN)
 }
 DOMAINS = tuple(DOMAIN_SPECS)
 DOMAIN: Gaia2Domain = "execution"
@@ -287,6 +302,7 @@ class DecomposerExperiment:
     manager_reasoning_mode: Literal["service_default"] | None = None
     manager_verify_tls: bool = True
     prompt_profile: DecomposerPromptProfile = "student"
+    manager_prompt_addendum_profile: Gaia2ManagerPromptAddendumProfile | None = None
     num_gpus: int = 2
     manager_served_name: str = "decomposer/gemma4-e4b-sft-deepseek-e4b-v1-8k"
     worker_served_name: str = "google/gemma-4-E4B-it"
@@ -630,6 +646,14 @@ DEEPSEEK_QWEN_EXPERIMENT = DecomposerExperiment(
     worker_trust_remote_code=True,
     worker_gdn_prefill_backend="triton",
 )
+DEEPSEEK_QWEN_AMBIGUITY_POLICY_EXPERIMENT = replace(
+    DEEPSEEK_QWEN_EXPERIMENT,
+    name=(
+        "deepseek-v4-flash-0731-teacher-gaia2-ambiguity-policy-"
+        "qwen35-4b-non-thinking"
+    ),
+    manager_prompt_addendum_profile="gaia2-ambiguity",
+)
 QWEN36_QWEN_EXPERIMENT = replace(
     DEEPSEEK_QWEN_EXPERIMENT,
     name="qwen36-35b-a3b-teacher-qwen35-4b-non-thinking",
@@ -713,6 +737,7 @@ ALL_EXPERIMENTS: tuple[Experiment, ...] = (
     QWEN35_BASE_DECOMPOSER_EXPERIMENT,
     QWEN35_BASE_TEACHER_DECOMPOSER_EXPERIMENT,
     DEEPSEEK_QWEN_EXPERIMENT,
+    DEEPSEEK_QWEN_AMBIGUITY_POLICY_EXPERIMENT,
     QWEN36_QWEN_EXPERIMENT,
     SIMPLE_EXPERIMENT,
     SIMPLE_QWEN_EXPERIMENT,

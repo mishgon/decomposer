@@ -17,9 +17,11 @@ from gyms.gaia2.dataset import (
     write_materialized_dataset,
 )
 from gyms.gaia2.experiments import (
+    AMBIGUITY_DOMAIN,
     BASE_IMAGE,
     DATASET_REVISION,
     DEEPSEEK_GEMMA_EXPERIMENT,
+    DEEPSEEK_QWEN_AMBIGUITY_POLICY_EXPERIMENT,
     DEEPSEEK_QWEN_EXPERIMENT,
     DECOMPOSER_EXPERIMENT,
     DOMAIN,
@@ -64,6 +66,7 @@ from gyms.gaia2.run import (
     are_command,
     decomposer_vllm_commands,
     openrouter_proxy_command,
+    prompt_sha256,
     remote_manager_proxy_command,
     run_identity,
     selected_cuda_devices,
@@ -182,6 +185,35 @@ def test_search_split_is_pinned_disjoint_and_domain_isolated() -> None:
     )
 
 
+def test_ambiguity_split_is_pinned_disjoint_and_domain_isolated() -> None:
+    manifest = load_split_manifest(domain="ambiguity")
+    train = partition_scenarios(manifest, "train")
+    test = partition_scenarios(manifest, "test")
+    full = partition_scenarios(manifest, "full")
+
+    assert manifest["name"] == "ambiguity-128-32-v1"
+    assert manifest["dataset"]["domain"] == "ambiguity"
+    assert manifest["dataset"]["aggregate_sha256"] == (
+        AMBIGUITY_DOMAIN.dataset_aggregate_sha256
+    )
+    assert len(train) == 128
+    assert len(test) == 32
+    assert len(full) == 160
+    assert {item["scenario_id"] for item in train}.isdisjoint(
+        item["scenario_id"] for item in test
+    )
+    assert {item["universe"] for item in test} == {25, 26, 28}
+    assert {item["universe"] for item in train}.isdisjoint({25, 26, 28})
+    assert partition_dataset_root("test", "ambiguity") != partition_dataset_root(
+        "test", "execution"
+    )
+    assert output_dir(
+        SIMPLE_QWEN_EXPERIMENT,
+        3,
+        domain="ambiguity",
+    ).parts[-2:] == ("ambiguity", "qwen35-4b-non-thinking-n3")
+
+
 def test_partition_views_are_copies_and_checksum_validated(
     tmp_path, monkeypatch
 ) -> None:
@@ -281,6 +313,7 @@ def test_experiment_registry_contains_local_and_openrouter_profiles() -> None:
         QWEN35_BASE_DECOMPOSER_EXPERIMENT,
         QWEN35_BASE_TEACHER_DECOMPOSER_EXPERIMENT,
         DEEPSEEK_QWEN_EXPERIMENT,
+        DEEPSEEK_QWEN_AMBIGUITY_POLICY_EXPERIMENT,
         QWEN36_QWEN_EXPERIMENT,
         SIMPLE_EXPERIMENT,
         SIMPLE_QWEN_EXPERIMENT,
@@ -306,6 +339,7 @@ def test_experiment_registry_contains_local_and_openrouter_profiles() -> None:
             QWEN35_BASE_DECOMPOSER_EXPERIMENT,
             QWEN35_BASE_TEACHER_DECOMPOSER_EXPERIMENT,
             DEEPSEEK_QWEN_EXPERIMENT,
+            DEEPSEEK_QWEN_AMBIGUITY_POLICY_EXPERIMENT,
             QWEN36_QWEN_EXPERIMENT,
         )
     )
@@ -696,6 +730,48 @@ def test_openrouter_runtime_uses_teacher_responses_api(tmp_path) -> None:
     assert plugin["model_configuration"]["manager"]["parallel_tool_calls"] is False
 
 
+def test_ambiguity_policy_ablation_has_distinct_prompt_and_artifact_identity(
+    tmp_path,
+) -> None:
+    experiment = DEEPSEEK_QWEN_AMBIGUITY_POLICY_EXPERIMENT
+
+    assert experiment.manager_prompt_addendum_profile == "gaia2-ambiguity"
+    assert experiment.worker_checkpoint == DEEPSEEK_QWEN_EXPERIMENT.worker_checkpoint
+    assert experiment.manager_served_name == DEEPSEEK_QWEN_EXPERIMENT.manager_served_name
+    assert prompt_sha256(experiment) != prompt_sha256(DEEPSEEK_QWEN_EXPERIMENT)
+    assert output_dir(experiment, 3, domain="ambiguity") != output_dir(
+        DEEPSEEK_QWEN_EXPERIMENT,
+        3,
+        domain="ambiguity",
+    )
+
+    service_path, _ = _runtime_configs(
+        Path(__file__).resolve().parents[2],
+        tmp_path,
+        experiment,
+    )
+    service = json.loads(service_path.read_text(encoding="utf-8"))
+    assert service["decomposer_system_prompt_profile"] == "teacher"
+    assert (
+        service["decomposer_system_prompt_addendum_profile"]
+        == "gaia2-ambiguity"
+    )
+
+    identity = run_identity(
+        experiment,
+        domain="ambiguity",
+        purpose="evaluation",
+        partition="full",
+        num_repeats=3,
+        concurrency=4,
+        limit=None,
+    )
+    assert identity["decomposer_system_prompt_addendum_profile"] == (
+        "gaia2-ambiguity"
+    )
+    assert identity["decomposer_system_prompt_sha256"] == prompt_sha256(experiment)
+
+
 def test_decomposer_dry_plan_records_sequential_manager_tool_calls(tmp_path) -> None:
     plan = _dry_plan(
         Path(__file__).resolve().parents[2],
@@ -867,6 +943,37 @@ def test_search_are_commands_support_simple_and_decomposer_agents(tmp_path) -> N
     assert decomposer[decomposer.index("--config") + 1] == "search"
     assert simple[simple.index("-d") + 1] == str(dataset)
     assert decomposer[decomposer.index("-d") + 1] == str(dataset)
+    assert "native_tools" in simple
+    assert "gyms.gaia2.plugin:create_plugin" in decomposer
+
+
+def test_ambiguity_are_commands_support_simple_and_decomposer_agents(tmp_path) -> None:
+    dataset = tmp_path / "ambiguity"
+    simple = are_command(
+        SIMPLE_QWEN_EXPERIMENT,
+        benchmark=tmp_path / "are-benchmark",
+        dataset_root=dataset,
+        output=tmp_path / "simple",
+        judge_endpoint="https://judge.test/v1",
+        num_repeats=3,
+        limit=None,
+        plugin_config=None,
+        domain="ambiguity",
+    )
+    decomposer = are_command(
+        DEEPSEEK_QWEN_EXPERIMENT,
+        benchmark=tmp_path / "are-benchmark",
+        dataset_root=dataset,
+        output=tmp_path / "decomposer",
+        judge_endpoint="https://judge.test/v1",
+        num_repeats=3,
+        limit=None,
+        plugin_config=tmp_path / "plugin.json",
+        domain="ambiguity",
+    )
+
+    assert simple[simple.index("--config") + 1] == "ambiguity"
+    assert decomposer[decomposer.index("--config") + 1] == "ambiguity"
     assert "native_tools" in simple
     assert "gyms.gaia2.plugin:create_plugin" in decomposer
 
@@ -1043,6 +1150,49 @@ def test_search_mlspace_payload_is_domain_and_holdout_specific(tmp_path) -> None
     assert "--partition test" in payload["script"]
 
 
+@pytest.mark.parametrize(
+    "experiment",
+    (
+        SIMPLE_QWEN_EXPERIMENT,
+        DEEPSEEK_QWEN_EXPERIMENT,
+        DEEPSEEK_QWEN_AMBIGUITY_POLICY_EXPERIMENT,
+    ),
+)
+def test_ambiguity_full_mlspace_payload_is_canonical_and_high_priority(
+    tmp_path, experiment
+) -> None:
+    payload = build_payload(
+        experiment,
+        tmp_path / "staged",
+        num_repeats=3,
+        limit=None,
+        author="sukhorukov",
+        base_image="image",
+        priority="high",
+        force=False,
+        judge_environment={
+            "LLM_PROXY_URL": "https://judge.test/v1",
+            "LLM_PROXY_MASTER_KEY": "secret",
+        },
+        proxy_environment={"HTTPS_PROXY": "https://proxy.test"},
+        openrouter_key="openrouter-secret",
+        purpose="evaluation",
+        partition="full",
+        concurrency=4,
+        domain="ambiguity",
+    )
+
+    assert payload["instance_type"] == INSTANCE_TYPES_BY_NUM_GPUS[1]
+    assert payload["priority_class"] == "high"
+    assert "gaia2-validation-ambiguity" in payload["job_desc"]
+    assert "--domain ambiguity" in payload["script"]
+    assert "--partition full" in payload["script"]
+    assert "--num-repeats 3" in payload["script"]
+    assert "--concurrency 4" in payload["script"]
+    assert "ARE_EXTRA_SYSTEM_PROMPT" not in payload["env_variables"]
+    assert "ARE_EXTRA_SYSTEM_PROMPT_FILE" not in payload["env_variables"]
+
+
 def test_completion_marker_identity_rejects_cross_domain_reuse(tmp_path) -> None:
     marker = tmp_path / ".eval_done.json"
     execution_identity = run_identity(
@@ -1073,11 +1223,12 @@ def test_completion_marker_identity_rejects_cross_domain_reuse(tmp_path) -> None
         validate_run_identity(marker, search_identity, require_complete=True)
 
 
-def test_search_trace_generation_is_rejected_before_startup() -> None:
-    with pytest.raises(ValueError, match="search does not support trace generation"):
+@pytest.mark.parametrize("domain", ("search", "ambiguity"))
+def test_non_execution_trace_generation_is_rejected_before_startup(domain) -> None:
+    with pytest.raises(ValueError, match=f"{domain} does not support trace generation"):
         execute_trace_generation(
             Path.cwd(),
-            Namespace(domain="search"),
+            Namespace(domain=domain),
         )
 
 
