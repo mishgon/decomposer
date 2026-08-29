@@ -326,10 +326,18 @@ def test_gaia2_trace_manifest_requires_terminal_full_grid(tmp_path: Path) -> Non
     assert len(result.records) == 3
     assert result.counts["excluded_reward"] == 1
     assert {record.source.rollout_id for record in result.records} == {"r04", "r05"}
-    assert {record.attributes["native_run_number"] for record in result.records} == {
-        0
-    }
+    assert {record.attributes["native_run_number"] for record in result.records} == {0}
     assert result.source_manifest["logical_rollout_numbers"] == [4, 5]
+
+    invalid_sidecar_path = source_dir / rows[0]["sidecar"]
+    invalid_sidecar = json.loads(invalid_sidecar_path.read_text(encoding="utf-8"))
+    invalid_sidecar["turns"][0]["manager"]["trace"]["manager_messages"][1]["data"][
+        "tool_calls"
+    ] = "invalid"
+    _write_json(invalid_sidecar_path, invalid_sidecar)
+    structurally_filtered = _read(source)
+    assert len(structurally_filtered.records) == 2
+    assert structurally_filtered.counts["excluded_invalid_tool_calls"] == 1
 
     tampered = deepcopy(rows)
     tampered[0]["reward"] = 0.95

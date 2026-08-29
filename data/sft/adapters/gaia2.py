@@ -563,10 +563,7 @@ def _validate_sidecar_identity(
             "excluded_invalid_indices",
             "GAIA2 sidecar native run number is invalid",
         )
-    if (
-        sidecar.get("scenario_id") != scenario_id
-        or sidecar_native_run != native_run
-    ):
+    if sidecar.get("scenario_id") != scenario_id or sidecar_native_run != native_run:
         raise TraceValidationError(
             "excluded_invalid_indices",
             "GAIA2 sidecar identity does not match its manifest",
@@ -617,10 +614,7 @@ def _validate_sidecar_identity(
     manager_result = turn.get("manager") if isinstance(turn, Mapping) else None
     trace = manager_result.get("trace") if isinstance(manager_result, Mapping) else None
     runtime = trace.get("runtime_context") if isinstance(trace, Mapping) else None
-    if (
-        not isinstance(runtime, Mapping)
-        or runtime.get("scenario_id") != scenario_id
-    ):
+    if not isinstance(runtime, Mapping) or runtime.get("scenario_id") != scenario_id:
         raise TraceValidationError(
             "excluded_invalid_metadata", "GAIA2 runtime context identity changed"
         )
@@ -699,7 +693,11 @@ def read_gaia2_source(
     revisions: set[tuple[Any, Any]] = set()
     reward_counts: Counter[str] = Counter()
     sidecar_failure_records = 0
-    effective_selection = source.selection or selection
+    effective_selection = selection
+    if source.selection is not None:
+        # Source-specific reward policy overrides selection thresholds, while
+        # global structural-error handling remains authoritative.
+        effective_selection = selection.model_copy(update=source.selection.model_dump())
     for row in sorted(
         candidate_rows,
         key=lambda item: (item["scenario_id"], item["logical_rollout_number"]),
