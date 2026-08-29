@@ -66,12 +66,14 @@ from gyms.gaia2.run import (
     selected_cuda_devices,
     simple_vllm_command,
     simple_sampling_parameters,
+    select_prompt_profile,
     subagent_environment,
     execute_trace_generation,
     validate_trace_round,
     validate_result,
 )
 from gyms.gaia2.run_eval import build_payload, normalize_job_desc, redact_payload
+from gyms.gaia2.snapshot_trace_prefix import create_trace_prefix_snapshot
 
 
 def _rows():
@@ -578,10 +580,7 @@ def test_qwen_worker_uses_official_non_thinking_sampling() -> None:
         ),
         (
             QWEN35_GAIA2_SFT_EXPERIMENT,
-            (
-                "decomposer/qwen35-4b-sft-mixed-v2-493c24c4-"
-                "gaia2-110-n3-filtered-p2"
-            ),
+            ("decomposer/qwen35-4b-sft-mixed-v2-493c24c4-" "gaia2-110-n3-filtered-p2"),
         ),
     ],
 )
@@ -991,6 +990,39 @@ def test_remote_simple_agent_is_local_only_for_mlspace_launcher(tmp_path) -> Non
         )
 
 
+def test_gaia_prompt_override_is_propagated_and_output_isolated(tmp_path) -> None:
+    selected = select_prompt_profile(QWEN35_GAIA2_SFT_EXPERIMENT, "teacher")
+    assert selected.prompt_profile == "teacher"
+    assert output_dir(
+        selected,
+        3,
+        partition="test",
+        prompt_profile="teacher",
+    ).name.endswith("-prompt-teacher")
+    payload = build_payload(
+        QWEN35_GAIA2_SFT_EXPERIMENT,
+        tmp_path,
+        num_repeats=3,
+        limit=None,
+        author="sukhorukov",
+        base_image="image",
+        priority="high",
+        force=False,
+        judge_environment={
+            "LLM_PROXY_URL": "https://judge.test/v1",
+            "LLM_PROXY_MASTER_KEY": "judge-secret",
+        },
+        proxy_environment={},
+        openrouter_key="unused",
+        partition="test",
+        prompt_profile="teacher",
+    )
+    assert "--prompt-profile teacher" in payload["script"]
+    assert "prompt-teacher" in payload["job_desc"]
+    with pytest.raises(ValueError, match="only valid for Decomposer"):
+        select_prompt_profile(SIMPLE_EXPERIMENT, "teacher")
+
+
 def _write_trace_round(
     trace_directory: Path,
     logical_rollout_number: int,
@@ -1089,6 +1121,46 @@ def test_trace_rounds_use_logical_numbers_four_through_ten_and_aggregate_failure
     assert failed["hf_trace"] is None
     assert failed["lite_trace"] is None
     assert len((tmp_path / "trace_manifest.jsonl").read_text().splitlines()) == 14
+
+
+def test_trace_prefix_snapshot_is_compact_complete_and_immutable(tmp_path) -> None:
+    source = tmp_path / "source"
+    output = tmp_path / "snapshot"
+    scenario_ids = ("scenario_a", "scenario_b")
+    for logical in (4, 5):
+        _write_trace_round(
+            source,
+            logical,
+            scenario_ids,
+            failed_scenarios=(
+                frozenset({"scenario_b"}) if logical == 5 else frozenset()
+            ),
+        )
+    marker = create_trace_prefix_snapshot(
+        source,
+        output,
+        logical_rollout_numbers=(4, 5),
+        scenario_ids=scenario_ids,
+    )
+    assert marker["state"] == "complete"
+    assert marker["attempted_rollouts"] == 4
+    assert marker["passed_rollouts"] == 3
+    rows = [
+        json.loads(line)
+        for line in (output / "trace_manifest.jsonl").read_text().splitlines()
+    ]
+    assert len(rows) == 4
+    assert all("hf_trace" not in row and "lite_trace" not in row for row in rows)
+    assert not (output / "round_04" / "hf").exists()
+    passing = [row for row in rows if row["reward"] == 1.0]
+    assert all((output / row["sidecar"]).is_file() for row in passing)
+    with pytest.raises(FileExistsError, match="already exists"):
+        create_trace_prefix_snapshot(
+            source,
+            output,
+            logical_rollout_numbers=(4, 5),
+            scenario_ids=scenario_ids,
+        )
 
 
 def test_trace_dry_plan_dispatches_round_robin_with_one_native_run(tmp_path) -> None:
@@ -1217,8 +1289,7 @@ def test_trace_execution_resumes_completed_round_and_reuses_services(
     expected_are_commands = 2 if initial_round_state == "partial_unmarked" else 1
     assert len(are_commands) == expected_are_commands
     assert all(
-        command[command.index("--num_runs") + 1] == "1"
-        for command in are_commands
+        command[command.index("--num_runs") + 1] == "1" for command in are_commands
     )
     assert (
         are_commands[0][are_commands[0].index("--max_concurrent_scenarios") + 1] == "10"

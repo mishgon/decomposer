@@ -182,6 +182,9 @@ processes. `--output-dir` isolates an ad-hoc run. A rerun skips a completed
 marker; `--force` archives the previous attempt before starting again.
 
 Each Decomposer experiment declares its student or teacher prompt profile.
+`--prompt-profile teacher|student` can override it for local and MLSpace runs;
+explicit overrides use a distinct output/job identity and record the resolved
+prompt hash.
 Workers see strict JSON schemas generated from the original scenario-bound ARE
 tools through an authenticated loopback broker; defaulted parameters are
 optional and variadic Python parameters are not exposed. The final

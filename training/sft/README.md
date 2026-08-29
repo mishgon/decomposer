@@ -39,6 +39,13 @@ Both specifications use exact reward `1.0`, prompt-fixed validation fraction
 same split. The builder requires a clean Git worktree and refuses to replace an
 existing `<dataset-id>/<version>` directory.
 
+New build specifications choose `policy.system_prompt_profile: student` or
+`teacher`. The builder inserts that exact prompt before tokenization and records
+its profile and SHA-256 in the immutable manifest. Training configs may set
+`data.expected_system_prompt_profile` to fail if the selected release uses a
+different prompt. Hidden teacher reasoning remains controlled separately by
+`data.include_reasoning`.
+
 ### Qwen Workplace + Toolathlon final all-reward release
 
 The final mixed Qwen release intentionally keeps both full- and non-full-reward

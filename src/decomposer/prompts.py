@@ -1,4 +1,8 @@
 from importlib.resources import files
+from typing import Literal, cast
+
+DecomposerPromptProfile = Literal["student", "teacher"]
+DECOMPOSER_PROMPT_PROFILES = ("student", "teacher")
 
 
 DECOMPOSER_TEACHER_SYSTEM_PROMPT = (
@@ -10,6 +14,23 @@ DECOMPOSER_TEACHER_SYSTEM_PROMPT = (
 
 
 DECOMPOSER_SYSTEM_PROMPT = """You are a manager agent. Complete user tasks exclusively by orchestrating subagents through the provided tools."""
+
+
+def resolve_decomposer_system_prompt(profile: str) -> str:
+    """Resolve a stable Decomposer prompt profile to its prompt text."""
+
+    prompts = {
+        "student": DECOMPOSER_SYSTEM_PROMPT,
+        "teacher": DECOMPOSER_TEACHER_SYSTEM_PROMPT,
+    }
+    try:
+        return prompts[cast(DecomposerPromptProfile, profile)]
+    except KeyError as error:
+        expected = ", ".join(DECOMPOSER_PROMPT_PROFILES)
+        raise ValueError(
+            f"Unknown Decomposer prompt profile {profile!r}; expected one of: "
+            f"{expected}"
+        ) from error
 
 
 SPAWN_SUBAGENT_TOOL_DESCRIPTION = """Creates a new subagent of a certain type with a fresh context, asynchronously runs it in the background with the given prompt, and returns immediately with a unique identifier for that run.

@@ -18,7 +18,7 @@ from typing import Any
 import yaml
 
 from decomposer.core import build_decomposer_chat_tools
-from decomposer.prompts import DECOMPOSER_SYSTEM_PROMPT
+from decomposer.prompts import resolve_decomposer_system_prompt
 
 from .adapters import ADAPTER_VERSIONS, ADAPTERS
 from .schema import (
@@ -708,7 +708,8 @@ def prepare_dataset(
             f"Dataset release already exists and is immutable: {release_dir}"
         )
 
-    system_prompt = DECOMPOSER_SYSTEM_PROMPT
+    system_prompt_profile = spec.policy.resolved_system_prompt_profile
+    system_prompt = resolve_decomposer_system_prompt(system_prompt_profile)
     canonical_subagent_type_ids = frozenset(
         subagent.id for subagent in spec.policy.subagent_types
     )
@@ -895,6 +896,7 @@ def prepare_dataset(
         },
         "policy": {
             "id": spec.policy.id,
+            "system_prompt_profile": system_prompt_profile,
             "system_prompt_sha256": sha256_text(system_prompt),
             "subagent_types": [
                 subagent.model_dump(mode="json")

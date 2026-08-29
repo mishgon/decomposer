@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -17,6 +18,7 @@ import urllib.error
 import urllib.request
 from collections import Counter
 from collections.abc import Mapping, Sequence
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -58,6 +60,27 @@ from gyms.gaia2.partition import (  # noqa: E402
     validate_partition_view,
 )
 from gyms.gaia2.staging import git  # noqa: E402
+from decomposer.prompts import (  # noqa: E402
+    DECOMPOSER_PROMPT_PROFILES,
+    resolve_decomposer_system_prompt,
+)
+
+
+def select_prompt_profile(
+    experiment: Experiment, requested_profile: str | None
+) -> Experiment:
+    if requested_profile is None:
+        return experiment
+    if not isinstance(experiment, DecomposerExperiment):
+        raise ValueError("--prompt-profile is only valid for Decomposer experiments")
+    return replace(experiment, prompt_profile=requested_profile)
+
+
+def prompt_sha256(experiment: Experiment) -> str | None:
+    if not isinstance(experiment, DecomposerExperiment):
+        return None
+    prompt = resolve_decomposer_system_prompt(experiment.prompt_profile)
+    return hashlib.sha256(prompt.encode("utf-8")).hexdigest()
 
 
 def utc_now() -> str:
@@ -1258,6 +1281,7 @@ def _dry_plan(
             if isinstance(experiment, DecomposerExperiment)
             else None
         ),
+        "decomposer_system_prompt_sha256": prompt_sha256(experiment),
         "manager_parallel_tool_calls": (
             experiment.manager_parallel_tool_calls
             if isinstance(experiment, DecomposerExperiment)
@@ -1303,7 +1327,10 @@ def _dry_plan(
 
 
 def execute_trace_generation(local_repo: Path, args: argparse.Namespace) -> int:
-    experiment = get_experiment(args.experiment)
+    requested_prompt_profile = getattr(args, "prompt_profile", None)
+    experiment = select_prompt_profile(
+        get_experiment(args.experiment), requested_prompt_profile
+    )
     if not isinstance(experiment, DecomposerExperiment):
         raise ValueError("Gaia2 trace generation requires a Decomposer experiment")
     if args.partition != "train":
@@ -1320,6 +1347,7 @@ def execute_trace_generation(local_repo: Path, args: argparse.Namespace) -> int:
             args.rollout_offset,
             args.partition,
             args.limit,
+            prompt_profile=requested_prompt_profile,
         )
     )
     logical_rollout_numbers = tuple(
@@ -1395,6 +1423,7 @@ def execute_trace_generation(local_repo: Path, args: argparse.Namespace) -> int:
         "concurrency": args.concurrency or experiment.concurrency,
         "limit": args.limit,
         "decomposer_system_prompt_profile": experiment.prompt_profile,
+        "decomposer_system_prompt_sha256": prompt_sha256(experiment),
         "manager_parallel_tool_calls": experiment.manager_parallel_tool_calls,
         "cuda_visible_devices": list(visible_devices),
         "output_dir": str(directory),
@@ -1517,9 +1546,7 @@ def execute_trace_generation(local_repo: Path, args: argparse.Namespace) -> int:
                         scenario_ids=scenario_ids,
                     )
                 except (OSError, ValueError) as error:
-                    print(
-                        f"Archive incomplete round {logical_rollout_number}: {error}"
-                    )
+                    print(f"Archive incomplete round {logical_rollout_number}: {error}")
                     archived_round = archive_attempt(round_directory)
                 else:
                     complete_trace_round(
@@ -1644,7 +1671,10 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
         raise ValueError("Gaia2 evaluation supports only full or pinned test data")
     if args.rollout_offset:
         raise ValueError("--rollout-offset is only valid for trace generation")
-    experiment = get_experiment(args.experiment)
+    requested_prompt_profile = getattr(args, "prompt_profile", None)
+    experiment = select_prompt_profile(
+        get_experiment(args.experiment), requested_prompt_profile
+    )
     visible_devices = selected_cuda_devices(experiment, args.cuda_visible_devices)
     directory = (
         args.output_dir.expanduser().resolve()
@@ -1654,6 +1684,7 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
             args.num_repeats,
             args.limit,
             partition=args.partition,
+            prompt_profile=requested_prompt_profile,
         )
     )
     if args.dry:
@@ -1694,11 +1725,7 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
     check_judge(judge_endpoint, judge_key)
 
     comparison_baselines: list[dict[str, Any]] | None = None
-    if (
-        args.partition == "test"
-        and args.limit is None
-        and args.num_repeats == 3
-    ):
+    if args.partition == "test" and args.limit is None and args.num_repeats == 3:
         from gyms.gaia2.comparison import collect_baseline_summaries
 
         comparison_baselines = collect_baseline_summaries()
@@ -1725,6 +1752,7 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
             if isinstance(experiment, DecomposerExperiment)
             else None
         ),
+        "decomposer_system_prompt_sha256": prompt_sha256(experiment),
         "manager_parallel_tool_calls": (
             experiment.manager_parallel_tool_calls
             if isinstance(experiment, DecomposerExperiment)
@@ -1960,6 +1988,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--partition", choices=PARTITIONS, default="full")
     parser.add_argument("--num-repeats", type=positive_int, default=3)
     parser.add_argument("--concurrency", type=positive_int)
+    parser.add_argument("--prompt-profile", choices=DECOMPOSER_PROMPT_PROFILES)
     parser.add_argument("--rollout-offset", type=nonnegative_int, default=0)
     parser.add_argument("--limit", type=positive_int)
     parser.add_argument("--dry", "--dry-run", action="store_true")

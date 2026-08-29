@@ -87,7 +87,10 @@ class SubagentInterfaceSpec(StrictModel):
 
 class PolicySpec(StrictModel):
     id: str
-    system_prompt: Literal["decomposer_default"] = "decomposer_default"
+    # ``system_prompt`` is retained solely so immutable legacy build specs keep
+    # loading. New specs select an explicit shared prompt profile.
+    system_prompt: Literal["decomposer_default"] | None = None
+    system_prompt_profile: Literal["student", "teacher"] | None = None
     subagent_types: tuple[SubagentInterfaceSpec, ...] = ()
 
     @field_validator("id")
@@ -99,10 +102,21 @@ class PolicySpec(StrictModel):
 
     @model_validator(mode="after")
     def validate_subagent_types(self) -> "PolicySpec":
+        if self.system_prompt is not None and self.system_prompt_profile is not None:
+            raise ValueError(
+                "policy.system_prompt and policy.system_prompt_profile are mutually "
+                "exclusive"
+            )
         ids = [subagent.id for subagent in self.subagent_types]
         if len(ids) != len(set(ids)):
             raise ValueError("policy.subagent_types IDs must be unique")
         return self
+
+    @property
+    def resolved_system_prompt_profile(self) -> Literal["student", "teacher"]:
+        # Missing and legacy ``decomposer_default`` both preserve the historical
+        # student-prompt behavior.
+        return self.system_prompt_profile or "student"
 
 
 class SourceSamplingSpec(StrictModel):

@@ -35,9 +35,10 @@ Gym evaluation, validates the output, and stops every child process.
 
 Every run declares its intent explicitly. `--purpose trace-generation` selects
 the long teacher prompt and is available only for Decomposer experiments;
-`--purpose evaluation` selects the short student prompt. Canonical SFT releases
-also replace the teacher prompt with the student prompt. Simple-agent
-evaluations are unaffected by prompt selection.
+`--purpose evaluation` selects the short student prompt. Pass
+`--prompt-profile teacher` or `--prompt-profile student` to override that
+default for a Decomposer run. Explicit overrides use a distinct output and job
+identity. Simple-agent evaluations are unaffected by prompt selection.
 
 ```bash
 # Simple agent backed by one local policy vLLM.
@@ -290,8 +291,9 @@ uv run --group train python -m gyms.workplace_assistant.prepare sft \
 
 Both releases apply reward and trace-validity filtering, assign prompt groups to
 train or validation once, remove teacher reasoning for tokenization, render the
-student prompt with the Gemma-4 E4B training template, and then apply the
-inclusive token ceiling. Consequently, `v2-8k` is a strict subset of
+prompt profile selected by the dataset specification with the Gemma-4 E4B
+training template, and then apply the inclusive token ceiling. Consequently,
+`v2-8k` is a strict subset of
 `v2-32k`, and every shared record keeps the same ID and split. Raw rollout
 artifacts are never removed.
 

@@ -24,13 +24,8 @@ from decomposer.core import TERMINAL_STATUSES, create_decomposer_agent
 from decomposer.prompts import (
     DECOMPOSER_SYSTEM_PROMPT,
     DECOMPOSER_TEACHER_SYSTEM_PROMPT,
+    resolve_decomposer_system_prompt,
 )
-
-
-_DECOMPOSER_SYSTEM_PROMPTS = {
-    "student": DECOMPOSER_SYSTEM_PROMPT,
-    "teacher": DECOMPOSER_TEACHER_SYSTEM_PROMPT,
-}
 
 
 class EpisodeContext(TypedDict):
@@ -126,23 +121,14 @@ def _visible_message_text(message: AIMessage) -> str:
             block.get("text"), str
         ):
             parts.append(block["text"])
-        elif block.get("type") == "refusal" and isinstance(
-            block.get("refusal"), str
-        ):
+        elif block.get("type") == "refusal" and isinstance(block.get("refusal"), str):
             parts.append(block["refusal"])
     return "".join(parts)
 
 
 def _decomposer_system_prompt(config: dict[str, Any]) -> str:
     profile = config.get("decomposer_system_prompt_profile", "student")
-    try:
-        return _DECOMPOSER_SYSTEM_PROMPTS[profile]
-    except KeyError as error:
-        expected = ", ".join(sorted(_DECOMPOSER_SYSTEM_PROMPTS))
-        raise ValueError(
-            f"Unknown decomposer_system_prompt_profile {profile!r}; "
-            f"expected one of: {expected}"
-        ) from error
+    return resolve_decomposer_system_prompt(profile)
 
 
 def _public_context(context: EpisodeContext) -> dict[str, Any]:

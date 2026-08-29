@@ -261,8 +261,13 @@ def validate_purpose_for_experiment(experiment: Experiment, purpose: str) -> Run
     return validated
 
 
-def decomposer_prompt_profile(purpose: str) -> DecomposerPromptProfile:
+def decomposer_prompt_profile(
+    purpose: str,
+    requested: DecomposerPromptProfile | None = None,
+) -> DecomposerPromptProfile:
     validated = validate_run_purpose(purpose)
+    if requested is not None:
+        return requested
     return "teacher" if validated == "trace-generation" else "student"
 
 
@@ -349,12 +354,8 @@ WORKPLACE_E4B_SFT_FINAL = (
 )
 WORKPLACE_E4B_SFT_VLLM = WORKPLACE_E4B_SFT_FINAL.with_name("final-vllm")
 
-WORKPLACE_QWEN35_4B_SFT_MODEL_ID = (
-    "decomposer/qwen35-4b-sft-workplace-v1-3765-32k"
-)
-WORKPLACE_QWEN35_4B_BASE_MANAGER_MODEL_ID = (
-    "decomposer/qwen35-4b-base-manager"
-)
+WORKPLACE_QWEN35_4B_SFT_MODEL_ID = "decomposer/qwen35-4b-sft-workplace-v1-3765-32k"
+WORKPLACE_QWEN35_4B_BASE_MANAGER_MODEL_ID = "decomposer/qwen35-4b-base-manager"
 WORKPLACE_QWEN35_4B_SFT_FINAL = (
     ARTIFACTS_ROOT
     / "training"
@@ -407,19 +408,13 @@ WORKPLACE_QWEN35_4B_GAIA2_SFT_FINAL = (
     / "training"
     / "sft"
     / "jobs"
-    / (
-        "qwen35-4b-nonthinking-mixed-v2-493c24c4-gaia2-110-n3-"
-        "filtered-32k-full-4gpu"
-    )
+    / ("qwen35-4b-nonthinking-mixed-v2-493c24c4-gaia2-110-n3-" "filtered-32k-full-4gpu")
     / "final"
 )
 
 DECOMPOSER_EXPERIMENTS = (
     DecomposerExperiment(
-        name=(
-            "qwen35-4b-base-non-thinking-"
-            "qwen35-4b-non-thinking"
-        ),
+        name=("qwen35-4b-base-non-thinking-" "qwen35-4b-non-thinking"),
         gym_config_filename=(
             "workplace_assistant_qwen35_4b_base_non_thinking_"
             "qwen35_4b_non_thinking.yaml"
@@ -459,8 +454,7 @@ DECOMPOSER_EXPERIMENTS = (
     ),
     DecomposerExperiment(
         name=(
-            "qwen35-4b-sft-workplace-v1-3765-32k-non-thinking-"
-            "qwen35-4b-non-thinking"
+            "qwen35-4b-sft-workplace-v1-3765-32k-non-thinking-" "qwen35-4b-non-thinking"
         ),
         gym_config_filename=(
             "workplace_assistant_qwen35_4b_sft_workplace_v1_3765_32k_"
@@ -693,8 +687,7 @@ DECOMPOSER_EXPERIMENTS = (
     DecomposerExperiment(
         name="qwen36-35b-a3b-teacher-qwen35-4b-non-thinking",
         gym_config_filename=(
-            "workplace_assistant_qwen36_35b_a3b_teacher_"
-            "qwen35_4b_non_thinking.yaml"
+            "workplace_assistant_qwen36_35b_a3b_teacher_" "qwen35_4b_non_thinking.yaml"
         ),
         manager_backend="llm_proxy",
         manager_model_id="Qwen/Qwen3.6-35B-A3B-FP8",
@@ -869,27 +862,19 @@ def _simple_experiments() -> tuple[SimpleExperiment, ...]:
     )
     experiments.extend(
         (
-            _qwen35_simple_experiment(
-                "qwen35-0.8b-base-non-thinking", QWEN35_08B_BASE
-            ),
+            _qwen35_simple_experiment("qwen35-0.8b-base-non-thinking", QWEN35_08B_BASE),
             _qwen35_simple_experiment(
                 "qwen35-0.8b-base-thinking", QWEN35_08B_BASE, thinking=True
             ),
-            _qwen35_simple_experiment(
-                "qwen35-2b-base-non-thinking", QWEN35_2B_BASE
-            ),
+            _qwen35_simple_experiment("qwen35-2b-base-non-thinking", QWEN35_2B_BASE),
             _qwen35_simple_experiment(
                 "qwen35-2b-base-thinking", QWEN35_2B_BASE, thinking=True
             ),
-            _qwen35_simple_experiment(
-                "qwen35-4b-base-non-thinking", QWEN35_4B_BASE
-            ),
+            _qwen35_simple_experiment("qwen35-4b-base-non-thinking", QWEN35_4B_BASE),
             _qwen35_simple_experiment(
                 "qwen35-4b-base-thinking", QWEN35_4B_BASE, thinking=True
             ),
-            _qwen35_simple_experiment(
-                "qwen35-9b-base-non-thinking", QWEN35_9B_BASE
-            ),
+            _qwen35_simple_experiment("qwen35-9b-base-non-thinking", QWEN35_9B_BASE),
             SimpleExperiment(
                 name="deepseek-v4-flash-0731",
                 checkpoint=None,
@@ -993,9 +978,15 @@ def validate_num_repeats(value: int) -> int:
     return value
 
 
-def run_name(experiment: Experiment, num_repeats: int = 1) -> str:
+def run_name(
+    experiment: Experiment,
+    num_repeats: int = 1,
+    *,
+    prompt_profile: DecomposerPromptProfile | None = None,
+) -> str:
     validate_num_repeats(num_repeats)
-    return experiment.name if num_repeats == 1 else f"{experiment.name}-n{num_repeats}"
+    name = experiment.name if num_repeats == 1 else f"{experiment.name}-n{num_repeats}"
+    return name if prompt_profile is None else f"{name}-prompt-{prompt_profile}"
 
 
 def output_dir(
@@ -1005,13 +996,14 @@ def output_dir(
     limit: int | None = None,
     *,
     purpose: RunPurpose,
+    prompt_profile: DecomposerPromptProfile | None = None,
 ) -> Path:
     validate_split(split)
     validate_purpose_for_experiment(experiment, purpose)
     base = RESULTS_ROOT / split
     if purpose == "evaluation" and isinstance(experiment, DecomposerExperiment):
         base /= "evaluation"
-    base /= run_name(experiment, num_repeats)
+    base /= run_name(experiment, num_repeats, prompt_profile=prompt_profile)
     return base if limit is None else base / f"smoke_{limit}"
 
 
@@ -1022,6 +1014,7 @@ def completion_marker(
     limit: int | None = None,
     *,
     purpose: RunPurpose,
+    prompt_profile: DecomposerPromptProfile | None = None,
 ) -> Path:
     return (
         output_dir(
@@ -1030,6 +1023,7 @@ def completion_marker(
             num_repeats,
             limit,
             purpose=purpose,
+            prompt_profile=prompt_profile,
         )
         / ".eval_done.json"
     )
@@ -1042,9 +1036,10 @@ def job_description(
     limit: int | None = None,
     *,
     purpose: RunPurpose,
+    prompt_profile: DecomposerPromptProfile | None = None,
 ) -> str:
     validate_purpose_for_experiment(experiment, purpose)
-    identity = run_name(experiment, num_repeats)
+    identity = run_name(experiment, num_repeats, prompt_profile=prompt_profile)
     if limit is not None:
         identity = f"{identity}-smoke-{limit}"
     prefix = f"workplace-assistant-{split}"

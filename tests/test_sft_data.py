@@ -26,8 +26,12 @@ from data.sft.schema import (
 from decomposer.prompts import (
     DECOMPOSER_SYSTEM_PROMPT,
     DECOMPOSER_TEACHER_SYSTEM_PROMPT,
+    resolve_decomposer_system_prompt,
 )
-from training.sft.train import _validate_manifest
+from training.sft.train import (
+    _validate_dataset_system_prompt_profile,
+    _validate_manifest,
+)
 
 TOOLS = [
     {
@@ -205,12 +209,16 @@ def _prepare_fixture_dataset(
     max_traces_per_prompt_per_teacher: int | None = None,
     version: str = "v3",
     tokenization: TokenizationSpec | None = None,
+    system_prompt_profile: str | None = None,
 ):
     """Test helper that exercises the new canonical builder without Git state."""
     spec = BuildSpec(
         spec_version=1,
         dataset=DatasetIdentity(id=output_dir.name, version=version),
-        policy=PolicySpec(id="decomposer-default"),
+        policy=PolicySpec(
+            id="decomposer-default",
+            system_prompt_profile=system_prompt_profile,
+        ),
         sources=tuple(
             SourceSpec(
                 id=source.name,
@@ -347,6 +355,64 @@ def test_prepare_groups_teacher_variants_and_writes_manifest_v3(tmp_path: Path) 
         metadata = prepared.manifest["prepared_files"][filename]
         assert len(metadata["sha256"]) == 64
         assert metadata["bytes"] > 0
+
+
+def test_teacher_prompt_profile_is_materialized_and_training_validated(
+    tmp_path: Path,
+) -> None:
+    prepared = _prepare_fixture_dataset(
+        [_source(tmp_path, "teacher")],
+        tmp_path / "prepared-teacher-prompt",
+        system_prompt_profile="teacher",
+    )
+    train = _read_jsonl(prepared.train_path)
+    validation = _read_jsonl(prepared.validation_path)
+    assert prepared.manifest["policy"]["system_prompt_profile"] == "teacher"
+    assert prepared.manifest["policy"]["system_prompt_sha256"] == sha256_text(
+        DECOMPOSER_TEACHER_SYSTEM_PROMPT
+    )
+    assert all(
+        record["messages"][0]["content"] == DECOMPOSER_TEACHER_SYSTEM_PROMPT
+        for record in [*train, *validation]
+    )
+    runtime = _validate_dataset_system_prompt_profile(
+        prepared.manifest,
+        train_dataset=Dataset.from_list(train),
+        validation_dataset=Dataset.from_list(validation),
+        expected_profile="teacher",
+    )
+    assert runtime == {
+        "profile": "teacher",
+        "sha256": sha256_text(DECOMPOSER_TEACHER_SYSTEM_PROMPT),
+    }
+    with pytest.raises(ValueError, match="does not match"):
+        _validate_dataset_system_prompt_profile(
+            prepared.manifest,
+            train_dataset=Dataset.from_list(train),
+            validation_dataset=Dataset.from_list(validation),
+            expected_profile="student",
+        )
+
+
+def test_prompt_profile_resolver_and_legacy_policy_are_strict() -> None:
+    assert resolve_decomposer_system_prompt("student") == DECOMPOSER_SYSTEM_PROMPT
+    assert (
+        resolve_decomposer_system_prompt("teacher") == DECOMPOSER_TEACHER_SYSTEM_PROMPT
+    )
+    assert (
+        PolicySpec(
+            id="legacy", system_prompt="decomposer_default"
+        ).resolved_system_prompt_profile
+        == "student"
+    )
+    with pytest.raises(ValueError, match="Unknown Decomposer prompt profile"):
+        resolve_decomposer_system_prompt("unknown")
+    with pytest.raises(ValidationError, match="mutually exclusive"):
+        PolicySpec(
+            id="invalid",
+            system_prompt="decomposer_default",
+            system_prompt_profile="teacher",
+        )
 
 
 class _LengthFixtureTokenizer:
@@ -1169,6 +1235,26 @@ def test_qwen35_filtered_mixed_spec_uses_source_specific_selection() -> None:
     assert toolathlon.expected_native_rollouts == 404
     assert toolathlon.expected_candidates == 404
     assert toolathlon.require_completed_run is True
+
+
+def test_qwen35_n7_mixed_spec_pins_teacher_prompt_and_exact_gaia_grid() -> None:
+    spec = load_build_spec(
+        Path(
+            "data/sft/specs/"
+            "decomposer_mixed_deepseek_qwen35_4b_nonthinking_v3_"
+            "gaia2_execution_110_n7_teacher_prompt_filtered_32k.yaml"
+        )
+    ).spec
+    assert spec.policy.resolved_system_prompt_profile == "teacher"
+    assert spec.split.strategy == "pinned"
+    assert len(spec.sources) == 4
+    old_gaia, prefix_gaia = spec.sources[-2:]
+    assert old_gaia.gaia2 is not None
+    assert prefix_gaia.gaia2 is not None
+    assert old_gaia.gaia2.logical_rollout_numbers == (1, 2, 3)
+    assert prefix_gaia.gaia2.logical_rollout_numbers == (4, 5, 6, 7)
+    assert old_gaia.expected_candidates == 330
+    assert prefix_gaia.expected_candidates == 440
 
 
 def test_qwen35_partial_mixed_spec_pins_snapshot_cardinality() -> None:

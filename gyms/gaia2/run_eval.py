@@ -15,6 +15,8 @@ from typing import Any
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from decomposer.prompts import DECOMPOSER_PROMPT_PROFILES  # noqa: E402
+
 from gyms.gaia2.experiments import (  # noqa: E402
     BASE_IMAGE,
     DECOMPOSER_STAGING_ROOT,
@@ -109,19 +111,25 @@ def build_job_desc(
     purpose: str = "evaluation",
     partition: str = "full",
     rollout_offset: int = 0,
+    prompt_profile: str | None = None,
 ) -> str:
     if purpose == "trace-generation":
-        identity = trace_run_name(experiment, num_repeats, rollout_offset)
+        identity = trace_run_name(
+            experiment,
+            num_repeats,
+            rollout_offset,
+            prompt_profile=prompt_profile,
+        )
         if limit is not None:
             identity += f"-smoke-{limit}"
         return (
             f"gaia2-trace {SPLIT_MANIFEST_NAME} {partition} "
             f"{experiment.kind}-agent {identity} #{author}"
         )
-    return (
-        f"{job_description(experiment, num_repeats, limit, partition=partition)} "
-        f"#{author}"
-    )
+    description = job_description(experiment, num_repeats, limit, partition=partition)
+    if prompt_profile is not None:
+        description += f" prompt-{prompt_profile}"
+    return f"{description} #{author}"
 
 
 def build_job_script(
@@ -135,6 +143,7 @@ def build_job_script(
     partition: str = "full",
     concurrency: int | None = None,
     rollout_offset: int = 0,
+    prompt_profile: str | None = None,
 ) -> str:
     command = [
         str(PROJECT_VENV / "bin" / "python"),
@@ -156,6 +165,8 @@ def build_job_script(
     ]
     if concurrency is not None:
         command.extend(["--concurrency", str(concurrency)])
+    if prompt_profile is not None:
+        command.extend(["--prompt-profile", prompt_profile])
     if purpose == "trace-generation" or rollout_offset:
         command.extend(["--rollout-offset", str(rollout_offset)])
     if experiment.num_gpus:
@@ -189,6 +200,7 @@ def build_payload(
     partition: str = "full",
     concurrency: int | None = None,
     rollout_offset: int = 0,
+    prompt_profile: str | None = None,
 ) -> dict[str, Any]:
     if experiment.num_gpus == 0:
         raise ValueError(
@@ -219,6 +231,7 @@ def build_payload(
             partition=partition,
             concurrency=concurrency,
             rollout_offset=rollout_offset,
+            prompt_profile=prompt_profile,
         ),
         "job_desc": build_job_desc(
             experiment,
@@ -228,6 +241,7 @@ def build_payload(
             purpose=purpose,
             partition=partition,
             rollout_offset=rollout_offset,
+            prompt_profile=prompt_profile,
         ),
         "env_variables": env_variables,
         "instance_type": INSTANCE_TYPES_BY_NUM_GPUS[experiment.num_gpus],
@@ -250,15 +264,21 @@ def print_parameter_table(
     purpose: str = "evaluation",
     partition: str = "full",
     rollout_offset: int = 0,
+    prompt_profile: str | None = None,
 ) -> None:
     print("\nSelected jobs:")
     print("| # | Run | Agent | Split/domain | GPUs |")
     print("| ---: | --- | --- | --- | ---: |")
     for index, experiment in enumerate(experiments, start=1):
         identity = (
-            trace_run_name(experiment, num_repeats, rollout_offset)
+            trace_run_name(
+                experiment,
+                num_repeats,
+                rollout_offset,
+                prompt_profile=prompt_profile,
+            )
             if purpose == "trace-generation"
-            else run_name(experiment, num_repeats)
+            else run_name(experiment, num_repeats, prompt_profile=prompt_profile)
         )
         if limit is not None:
             identity += f"/smoke_{limit}"
@@ -282,6 +302,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--partition", choices=PARTITIONS, default="full")
     parser.add_argument("--num-repeats", type=positive_int, default=3)
     parser.add_argument("--concurrency", type=positive_int)
+    parser.add_argument("--prompt-profile", choices=DECOMPOSER_PROMPT_PROFILES)
     parser.add_argument("--rollout-offset", type=nonnegative_int, default=0)
     parser.add_argument("--limit", type=positive_int)
     parser.add_argument("--dry", "--dry-run", action="store_true")
@@ -316,6 +337,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.error(str(error))
     if not experiments:
         parser.error("experiment selectors matched no registered experiments")
+    if args.prompt_profile is not None and any(
+        experiment.kind != "decomposer" for experiment in experiments
+    ):
+        parser.error("--prompt-profile is only valid for Decomposer experiments")
 
     selected_count = len(experiments)
     candidates: list[Experiment] = []
@@ -328,6 +353,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 args.rollout_offset,
                 args.partition,
                 args.limit,
+                prompt_profile=args.prompt_profile,
             )
             if args.purpose == "trace-generation"
             else completion_marker(
@@ -335,6 +361,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 args.num_repeats,
                 args.limit,
                 partition=args.partition,
+                prompt_profile=args.prompt_profile,
             )
         )
         if marker.is_file() and not args.force:
@@ -430,6 +457,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             partition=args.partition,
             concurrency=args.concurrency,
             rollout_offset=args.rollout_offset,
+            prompt_profile=args.prompt_profile,
         )
         payload["region"] = options["region"]
         if normalize_job_desc(payload["job_desc"]) in in_progress:
@@ -446,6 +474,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             purpose=args.purpose,
             partition=args.partition,
             rollout_offset=args.rollout_offset,
+            prompt_profile=args.prompt_profile,
         )
 
     launched: list[dict[str, Any]] = []
@@ -463,6 +492,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "job_name": job_name,
                     "experiment": experiment.name,
                     "num_gpus": experiment.num_gpus,
+                    "prompt_profile": args.prompt_profile,
                 }
             )
 
@@ -475,6 +505,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "partition": args.partition,
         "num_repeats": args.num_repeats,
         "concurrency": args.concurrency,
+        "prompt_profile": args.prompt_profile,
         "rollout_offset": args.rollout_offset,
         "limit": args.limit,
         "skipped_completed": skipped_completed,

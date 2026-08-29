@@ -1,0 +1,109 @@
+spec_version: 3
+
+dataset:
+  id: decomposer-mixed-deepseek-qwen35-4b-nonthinking
+  version: v3-493c24c4-gaia2-execution-110-n7-teacher-prompt-wp-r1-tool-pass-qgt90-or-missing-gaia-r1-32k
+
+policy:
+  id: decomposer-teacher
+  system_prompt_profile: teacher
+  subagent_types:
+    - id: qwen35_4b_non_thinking
+      description: General-purpose tool-calling agent with access to the environment tools.
+
+sources:
+  - id: workplace-deepseek-v4-flash-0731-qwen35-4b-nonthinking-n3
+    adapter: nemo_gym
+    path: /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/evaluation/results/train/deepseek-v4-flash-0731-qwen35-4b-non-thinking-n3
+    benchmark: workplace_assistant
+    environment: workplace_assistant
+    partition: train
+    teacher: deepseek-v4-flash-0731
+    expected_native_rollouts: 3765
+    expected_candidates: 1255
+    sampling:
+      strategy: task_hash
+      seed: 42
+      max_per_task: 1
+      expected_tasks: 1255
+      expected_rollouts_per_task: 3
+    selection:
+      policy: exact_reward
+      success_reward: 1.0
+  - id: toolathlon-deepseek-v4-flash-0731-qwen35-4b-nonthinking-n1
+    adapter: toolathlon_gym
+    path: /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/evaluation/data/toolathlon_gym/imports/snapshots/493c24c4/20260826T122838Z-84ae95f3
+    benchmark: toolathlon_gym
+    environment: toolathlon_gym
+    partition: train
+    teacher: deepseek-v4-flash-0731
+    trace_format: toolathlon_legacy_unversioned
+    subagent_type_aliases:
+      qwen_3_5_4b_non_thinking: qwen35_4b_non_thinking
+    expected_native_rollouts: 404
+    expected_candidates: 404
+    require_completed_run: true
+    selection:
+      policy: toolathlon_pass_or_quality
+      success_reward: 1.0
+      minimum_check_ratio_exclusive: 0.9
+  - id: gaia2-execution-deepseek-v4-flash-0731-qwen35-4b-nonthinking-r01-r03
+    adapter: gaia2
+    path: /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/evaluation/gaia2/results/validation/execution/deepseek-v4-flash-0731-teacher-qwen35-4b-non-thinking-n3
+    benchmark: gaia2
+    environment: gaia2_execution
+    partition: train
+    teacher: deepseek-v4-flash-0731
+    trace_format: gaia2_evaluation_v1
+    subagent_type_aliases:
+      gaia2_worker: qwen35_4b_non_thinking
+    expected_native_rollouts: 480
+    expected_candidates: 330
+    require_completed_run: true
+    selection:
+      policy: exact_reward
+      success_reward: 1.0
+    gaia2:
+      split_manifest: ../../../gyms/gaia2/split_manifests/execution-110-50-v1.json
+      scenario_partition: train
+      expected_scenarios: 110
+      logical_rollout_numbers: [1, 2, 3]
+  - id: gaia2-execution-deepseek-v4-flash-0731-qwen35-4b-nonthinking-r04-r07
+    adapter: gaia2
+    path: /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/evaluation/gaia2/traces/sft_snapshots/execution-110-50-v1/train/deepseek-v4-flash-0731-teacher-qwen35-4b-non-thinking-r04-r07
+    benchmark: gaia2
+    environment: gaia2_execution
+    partition: train
+    teacher: deepseek-v4-flash-0731
+    trace_format: gaia2_trace_manifest_v1
+    subagent_type_aliases:
+      gaia2_worker: qwen35_4b_non_thinking
+    expected_native_rollouts: 440
+    expected_candidates: 440
+    require_completed_run: true
+    selection:
+      policy: exact_reward
+      success_reward: 1.0
+    gaia2:
+      split_manifest: ../../../gyms/gaia2/split_manifests/execution-110-50-v1.json
+      scenario_partition: train
+      expected_scenarios: 110
+      logical_rollout_numbers: [4, 5, 6, 7]
+
+selection:
+  policy: all_rewards
+  success_reward: 1.0
+  invalid_policy: exclude
+  max_traces_per_prompt_per_teacher: null
+
+split:
+  strategy: pinned
+  manifest: ../split_manifests/qwen35-mixed-v2-493c24c4-gaia2-execution-110.json
+  seed: 42
+
+tokenization:
+  profile: qwen35_sft_non_thinking
+  tokenizer: Qwen/Qwen3.5-4B
+  revision: 851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a
+  max_tokens: 32768
+  trust_remote_code: false

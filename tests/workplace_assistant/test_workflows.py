@@ -55,9 +55,7 @@ def test_registry_is_global_and_unique() -> None:
 
 def test_qwen36_teacher_uses_internal_proxy_and_concurrency_override() -> None:
     repo_root = Path(__file__).resolve().parents[2]
-    experiment = get_experiment(
-        "qwen36-35b-a3b-teacher-qwen35-4b-non-thinking"
-    )
+    experiment = get_experiment("qwen36-35b-a3b-teacher-qwen35-4b-non-thinking")
     assert isinstance(experiment, DecomposerExperiment)
     assert experiment.manager_backend == "llm_proxy"
     assert experiment.manager_model_id == "Qwen/Qwen3.6-35B-A3B-FP8"
@@ -122,6 +120,39 @@ def test_qwen36_teacher_uses_internal_proxy_and_concurrency_override() -> None:
     assert payload["priority_class"] == "high"
 
 
+def test_workplace_prompt_override_is_propagated_and_output_isolated() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    experiment = get_experiment(
+        "qwen35-4b-sft-mixed-v2-493c24c4-gaia2-110-n3-filtered-p2-"
+        "non-thinking-qwen35-4b-non-thinking"
+    )
+    payload = run_eval.build_payload(
+        experiment,
+        repo_root,
+        purpose="evaluation",
+        split="validation",
+        num_repeats=3,
+        limit=None,
+        author="alice",
+        base_image=experiments.BASE_IMAGE,
+        priority="high",
+        force=False,
+        proxy_env={},
+        openrouter_key="unused",
+        prompt_profile="teacher",
+    )
+    assert "--prompt-profile teacher" in payload["script"]
+    assert "prompt-teacher" in payload["job_desc"]
+    path = output_dir(
+        experiment,
+        "validation",
+        3,
+        purpose="evaluation",
+        prompt_profile="teacher",
+    )
+    assert path.name.endswith("-prompt-teacher")
+
+
 def test_all_qwen_simple_profiles_use_official_mode_specific_sampling() -> None:
     qwen_experiments = [
         experiment
@@ -162,9 +193,7 @@ def test_all_qwen_simple_profiles_use_official_mode_specific_sampling() -> None:
             limit=1,
             resume=False,
         )
-        assert command[command.index("--temperature") + 1] == str(
-            expected.temperature
-        )
+        assert command[command.index("--temperature") + 1] == str(expected.temperature)
         assert command[command.index("--top-p") + 1] == str(expected.top_p)
 
 
@@ -223,10 +252,7 @@ def test_deepseek_simple_profile_is_remote_and_does_not_start_vllm() -> None:
     assert start[start.index("--model") + 1] == experiment.model_id
     assert start[start.index("--model-url") + 1] == experiment.base_url
     assert "--model-api-key" not in start
-    assert any(
-        argument.endswith('{reasoning:{effort:"high"}}')
-        for argument in start
-    )
+    assert any(argument.endswith('{reasoning:{effort:"high"}}') for argument in start)
 
     plan = run_module._dry_plan(
         repo_root,
@@ -1130,9 +1156,7 @@ def test_force_archives_previous_attempt(tmp_path: Path) -> None:
 
 
 def test_full_run_ignores_and_preserves_nested_smoke_output(tmp_path: Path) -> None:
-    experiment = get_experiment(
-        "qwen36-35b-a3b-teacher-qwen35-4b-non-thinking"
-    )
+    experiment = get_experiment("qwen36-35b-a3b-teacher-qwen35-4b-non-thinking")
     smoke = tmp_path / "smoke_1"
     smoke.mkdir(parents=True)
     (smoke / ".eval_done.json").write_text("{}")

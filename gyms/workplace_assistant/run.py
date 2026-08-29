@@ -26,6 +26,11 @@ from typing import Any
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from decomposer.prompts import (  # noqa: E402
+    DECOMPOSER_PROMPT_PROFILES,
+    resolve_decomposer_system_prompt,
+)
+
 from gyms.workplace_assistant.experiments import (  # noqa: E402
     ARTIFACTS_ROOT,
     HF_HOME,
@@ -95,9 +100,7 @@ def hydra_flow_mapping(values: Mapping[str, Any]) -> str:
         return json.dumps(value)
 
     return (
-        "{"
-        + ",".join(f"{key}:{encode(value)}" for key, value in values.items())
-        + "}"
+        "{" + ",".join(f"{key}:{encode(value)}" for key, value in values.items()) + "}"
     )
 
 
@@ -314,6 +317,7 @@ def gym_start_command(
     gym_bin: Path,
     component_root: Path,
     logs: Path,
+    prompt_profile: str | None = None,
 ) -> list[str]:
     validate_purpose_for_experiment(experiment, purpose)
     common = [
@@ -334,7 +338,7 @@ def gym_start_command(
             / "configs"
             / experiment.gym_config_filename
         )
-        prompt_profile = decomposer_prompt_profile(purpose)
+        prompt_profile = decomposer_prompt_profile(purpose, prompt_profile)
         prompt_override = (
             "++decomposer.responses_api_agents.decomposer_agent."
             f"decomposer_system_prompt_profile={prompt_profile}"
@@ -668,6 +672,7 @@ def validate_existing_attempt_identity(
     num_repeats: int,
     limit: int | None,
     force: bool,
+    prompt_profile: str | None = None,
 ) -> None:
     if not directory.is_dir() or force:
         return
@@ -702,7 +707,7 @@ def validate_existing_attempt_identity(
             "decomposer_system_prompt_profile",
             "teacher" if "purpose" not in metadata else None,
         )
-        expected_profile = decomposer_prompt_profile(purpose)
+        expected_profile = decomposer_prompt_profile(purpose, prompt_profile)
         if existing_profile != expected_profile:
             mismatches.append(
                 "decomposer_system_prompt_profile="
@@ -772,10 +777,7 @@ def _base_environment(
         ),
         **{name: str(path) for name, path in caches.items()},
     }
-    if (
-        isinstance(experiment, SimpleExperiment)
-        and not experiment.requires_openrouter
-    ):
+    if isinstance(experiment, SimpleExperiment) and not experiment.requires_openrouter:
         for name in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"):
             env.pop(name, None)
     return env
@@ -791,6 +793,7 @@ def _dry_plan(
     directory: Path,
     visible_devices: tuple[str, ...],
     concurrency: int | None = None,
+    prompt_profile: str | None = None,
 ) -> dict[str, Any]:
     validate_purpose_for_experiment(experiment, purpose)
     logs = directory / "logs"
@@ -816,7 +819,16 @@ def _dry_plan(
     rollout_path = directory / "rollouts.jsonl"
     return {
         "decomposer_system_prompt_profile": (
-            decomposer_prompt_profile(purpose)
+            decomposer_prompt_profile(purpose, prompt_profile)
+            if isinstance(experiment, DecomposerExperiment)
+            else None
+        ),
+        "decomposer_system_prompt_sha256": (
+            hashlib.sha256(
+                resolve_decomposer_system_prompt(
+                    decomposer_prompt_profile(purpose, prompt_profile)
+                ).encode("utf-8")
+            ).hexdigest()
             if isinstance(experiment, DecomposerExperiment)
             else None
         ),
@@ -834,6 +846,7 @@ def _dry_plan(
                 gym_bin=gym_bin,
                 component_root=component_venv_root(local_repo),
                 logs=logs,
+                prompt_profile=prompt_profile,
             )
         ),
         "gym_eval": shlex.join(
@@ -884,6 +897,7 @@ def selected_output_dir(experiment: Experiment, args: argparse.Namespace) -> Pat
         args.num_repeats,
         args.limit,
         purpose=args.purpose,
+        prompt_profile=getattr(args, "prompt_profile", None),
     )
 
 
@@ -891,6 +905,16 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
     experiment = get_experiment(args.experiment)
     validate_num_repeats(args.num_repeats)
     purpose = validate_purpose_for_experiment(experiment, args.purpose)
+    requested_prompt_profile = getattr(args, "prompt_profile", None)
+    if requested_prompt_profile is not None and not isinstance(
+        experiment, DecomposerExperiment
+    ):
+        raise ValueError("--prompt-profile is only valid for Decomposer experiments")
+    resolved_prompt_profile = (
+        decomposer_prompt_profile(purpose, requested_prompt_profile)
+        if isinstance(experiment, DecomposerExperiment)
+        else None
+    )
     directory = selected_output_dir(experiment, args)
     visible_devices = selected_cuda_devices(experiment, args.cuda_visible_devices)
     if args.dry:
@@ -911,6 +935,7 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
                     directory,
                     visible_devices,
                     args.concurrency,
+                    requested_prompt_profile,
                 ),
                 indent=2,
                 sort_keys=True,
@@ -926,6 +951,7 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
         num_repeats=args.num_repeats,
         limit=args.limit,
         force=args.force,
+        prompt_profile=requested_prompt_profile,
     )
     marker = directory / ".eval_done.json"
     if marker.is_file() and not args.force:
@@ -963,11 +989,24 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
         "kind": experiment.kind,
         "purpose": purpose,
         "decomposer_system_prompt_profile": (
-            decomposer_prompt_profile(purpose)
+            resolved_prompt_profile
             if isinstance(experiment, DecomposerExperiment)
             else None
         ),
-        "run_name": run_name(experiment, args.num_repeats),
+        "decomposer_system_prompt_sha256": (
+            hashlib.sha256(
+                resolve_decomposer_system_prompt(resolved_prompt_profile).encode(
+                    "utf-8"
+                )
+            ).hexdigest()
+            if resolved_prompt_profile is not None
+            else None
+        ),
+        "run_name": run_name(
+            experiment,
+            args.num_repeats,
+            prompt_profile=requested_prompt_profile,
+        ),
         "split": args.split,
         "num_repeats": args.num_repeats,
         "concurrency": args.concurrency or experiment.concurrency,
@@ -1023,9 +1062,7 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
                         cwd=local_repo,
                         env={"CUDA_VISIBLE_DEVICES": ",".join(visible_devices)},
                     )
-                    wait_http(
-                        "http://127.0.0.1:8000/v1/models", [model_process], 1800
-                    )
+                    wait_http("http://127.0.0.1:8000/v1/models", [model_process], 1800)
             else:
                 if experiment.requires_llm_proxy:
                     proxy_process = supervisor.start(
@@ -1083,6 +1120,7 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
                     gym_bin=gym_bin,
                     component_root=component_root,
                     logs=logs,
+                    prompt_profile=requested_prompt_profile,
                 ),
                 cwd=local_repo / "external" / "Gym",
             )
@@ -1138,8 +1176,7 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
                 limit=args.limit,
             )
             if (
-                experiment.name
-                == "qwen36-35b-a3b-teacher-qwen35-4b-non-thinking"
+                experiment.name == "qwen36-35b-a3b-teacher-qwen35-4b-non-thinking"
                 and purpose == "trace-generation"
                 and args.split == "validation"
                 and args.num_repeats == 3
@@ -1223,6 +1260,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--split", choices=SPLITS, default="train")
     parser.add_argument("--num-repeats", type=positive_int, default=1)
     parser.add_argument("--concurrency", type=positive_int)
+    parser.add_argument("--prompt-profile", choices=DECOMPOSER_PROMPT_PROFILES)
     parser.add_argument("--limit", type=positive_int)
     parser.add_argument("--dry", "--dry-run", action="store_true")
     parser.add_argument("--force", action="store_true")

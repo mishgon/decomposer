@@ -680,10 +680,16 @@ def preparation_manifest(experiment: Experiment) -> Path:
     return PREPARATION_MANIFEST_ROOT / f"{experiment.name}.json"
 
 
-def run_name(experiment: Experiment, num_repeats: int) -> str:
+def run_name(
+    experiment: Experiment,
+    num_repeats: int,
+    *,
+    prompt_profile: DecomposerPromptProfile | None = None,
+) -> str:
     if num_repeats < 1:
         raise ValueError("num_repeats must be at least 1")
-    return experiment.name if num_repeats == 1 else f"{experiment.name}-n{num_repeats}"
+    name = experiment.name if num_repeats == 1 else f"{experiment.name}-n{num_repeats}"
+    return name if prompt_profile is None else f"{name}-prompt-{prompt_profile}"
 
 
 def output_dir(
@@ -692,13 +698,14 @@ def output_dir(
     limit: int | None = None,
     *,
     partition: Partition = "full",
+    prompt_profile: DecomposerPromptProfile | None = None,
 ) -> Path:
     if partition not in PARTITIONS:
         raise ValueError(f"Unknown Gaia2 partition: {partition!r}")
     root = RESULTS_ROOT / SPLIT / DOMAIN
     if partition != "full":
         root = root / "partitions" / SPLIT_MANIFEST_NAME / partition
-    base = root / run_name(experiment, num_repeats)
+    base = root / run_name(experiment, num_repeats, prompt_profile=prompt_profile)
     return base if limit is None else base / f"smoke_{limit}"
 
 
@@ -708,9 +715,16 @@ def completion_marker(
     limit: int | None = None,
     *,
     partition: Partition = "full",
+    prompt_profile: DecomposerPromptProfile | None = None,
 ) -> Path:
     return (
-        output_dir(experiment, num_repeats, limit, partition=partition)
+        output_dir(
+            experiment,
+            num_repeats,
+            limit,
+            partition=partition,
+            prompt_profile=prompt_profile,
+        )
         / ".eval_done.json"
     )
 
@@ -719,6 +733,8 @@ def trace_run_name(
     experiment: Experiment,
     num_repeats: int,
     rollout_offset: int,
+    *,
+    prompt_profile: DecomposerPromptProfile | None = None,
 ) -> str:
     if num_repeats < 1:
         raise ValueError("num_repeats must be at least 1")
@@ -726,7 +742,8 @@ def trace_run_name(
         raise ValueError("rollout_offset cannot be negative")
     first = rollout_offset + 1
     last = rollout_offset + num_repeats
-    return f"{experiment.name}-r{first:02d}-r{last:02d}"
+    name = f"{experiment.name}-r{first:02d}-r{last:02d}"
+    return name if prompt_profile is None else f"{name}-prompt-{prompt_profile}"
 
 
 def trace_output_dir(
@@ -735,6 +752,8 @@ def trace_output_dir(
     rollout_offset: int,
     partition: Partition,
     limit: int | None = None,
+    *,
+    prompt_profile: DecomposerPromptProfile | None = None,
 ) -> Path:
     if partition not in PARTITIONS:
         raise ValueError(f"Unknown Gaia2 partition: {partition!r}")
@@ -742,7 +761,12 @@ def trace_output_dir(
         TRACES_ROOT
         / SPLIT_MANIFEST_NAME
         / partition
-        / trace_run_name(experiment, num_repeats, rollout_offset)
+        / trace_run_name(
+            experiment,
+            num_repeats,
+            rollout_offset,
+            prompt_profile=prompt_profile,
+        )
     )
     return base if limit is None else base / f"smoke_{limit}"
 
@@ -753,6 +777,8 @@ def trace_completion_marker(
     rollout_offset: int,
     partition: Partition,
     limit: int | None = None,
+    *,
+    prompt_profile: DecomposerPromptProfile | None = None,
 ) -> Path:
     return (
         trace_output_dir(
@@ -761,6 +787,7 @@ def trace_completion_marker(
             rollout_offset,
             partition,
             limit,
+            prompt_profile=prompt_profile,
         )
         / ".trace_done.json"
     )
