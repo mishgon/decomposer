@@ -950,6 +950,7 @@ def _write_trace_round(
     *,
     failed_scenarios: frozenset[str] = frozenset(),
     completed: bool = True,
+    native_run_number: int | None = 1,
 ) -> Path:
     round_directory = trace_directory / f"round_{logical_rollout_number:02d}"
     round_directory.mkdir(parents=True, exist_ok=True)
@@ -957,13 +958,16 @@ def _write_trace_round(
     for scenario_id in reversed(scenario_ids):
         trace_id = None
         if scenario_id not in failed_scenarios:
-            filename = f"{scenario_id}_run_1_deadbeef.json"
+            native_suffix = native_run_number if native_run_number is not None else 0
+            filename = f"{scenario_id}_run_{native_suffix}_deadbeef.json"
             for trace_format in ("hf", "lite"):
                 path = round_directory / trace_format / filename
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text("{}\n", encoding="utf-8")
             sidecar = (
-                round_directory / "decomposer_sidecars" / f"{scenario_id}__run1.json"
+                round_directory
+                / "decomposer_sidecars"
+                / f"{scenario_id}__run{native_suffix}.json"
             )
             sidecar.parent.mkdir(parents=True, exist_ok=True)
             sidecar.write_text("{}\n", encoding="utf-8")
@@ -975,7 +979,6 @@ def _write_trace_round(
                 "score": 0.0 if scenario_id in failed_scenarios else 1.0,
                 "metadata": {
                     "scenario_id": scenario_id,
-                    "run_number": 1,
                     "status": (
                         "failed" if scenario_id in failed_scenarios else "success"
                     ),
@@ -986,6 +989,8 @@ def _write_trace_round(
                 },
             }
         )
+        if native_run_number is not None:
+            rows[-1]["metadata"]["run_number"] = native_run_number
     (round_directory / "output.jsonl").write_text(
         "".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8"
     )
@@ -1063,12 +1068,24 @@ def test_trace_dry_plan_dispatches_round_robin_with_one_native_run(tmp_path) -> 
         assert f"round_{logical_rollout:02d}" in round_plan["command"]
 
 
+@pytest.mark.parametrize(
+    "initial_round_state", ["marked", "complete_unmarked", "partial_unmarked"]
+)
 def test_trace_execution_resumes_completed_round_and_reuses_services(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, initial_round_state
 ) -> None:
     trace_directory = tmp_path / "trace"
     scenario_ids = ("scenario_a", "scenario_b")
-    _write_trace_round(trace_directory, 4, scenario_ids)
+    initial_round = _write_trace_round(
+        trace_directory,
+        4,
+        scenario_ids,
+        completed=initial_round_state == "marked",
+        native_run_number=None,
+    )
+    if initial_round_state == "partial_unmarked":
+        output = initial_round / "output.jsonl"
+        output.write_text(output.read_text().splitlines()[0] + "\n")
     started_services: list[str] = []
     are_commands: list[list[str]] = []
 
@@ -1149,8 +1166,12 @@ def test_trace_execution_resumes_completed_round_and_reuses_services(
         "langgraph_subagent",
         "decomposer_service",
     ]
-    assert len(are_commands) == 1
-    assert are_commands[0][are_commands[0].index("--num_runs") + 1] == "1"
+    expected_are_commands = 2 if initial_round_state == "partial_unmarked" else 1
+    assert len(are_commands) == expected_are_commands
+    assert all(
+        command[command.index("--num_runs") + 1] == "1"
+        for command in are_commands
+    )
     assert (
         are_commands[0][are_commands[0].index("--max_concurrent_scenarios") + 1] == "10"
     )
@@ -1158,6 +1179,14 @@ def test_trace_execution_resumes_completed_round_and_reuses_services(
     assert (trace_directory / "round_05" / ".round_done.json").is_file()
     assert (trace_directory / ".trace_done.json").is_file()
     assert len((trace_directory / "trace_manifest.jsonl").read_text().splitlines()) == 4
+    round_marker = json.loads(
+        (trace_directory / "round_04" / ".round_done.json").read_text()
+    )
+    assert bool(round_marker.get("recovered_from_unmarked_artifacts")) is (
+        initial_round_state == "complete_unmarked"
+    )
+    if initial_round_state == "partial_unmarked":
+        assert Path(round_marker["archived_attempt"]).is_dir()
 
 
 def test_trace_mlspace_payload_is_exactly_one_high_priority_gpu(tmp_path) -> None:

@@ -126,7 +126,7 @@ def _manager_messages() -> list[dict]:
     ]
 
 
-def _sidecar(scenario_id: str, native_run_number: int) -> dict:
+def _sidecar(scenario_id: str, native_run_number: int | None) -> dict:
     return {
         "scenario_id": scenario_id,
         "run_number": native_run_number,
@@ -285,14 +285,14 @@ def test_gaia2_trace_manifest_requires_terminal_full_grid(tmp_path: Path) -> Non
         scenario_id = f"scenario_universe_21_{suffix}"
         for logical in (4, 5):
             sidecar = (
-                f"round_{logical:02d}/decomposer_sidecars/{scenario_id}__run1.json"
+                f"round_{logical:02d}/decomposer_sidecars/{scenario_id}__run0.json"
             )
             reward = 0.0 if suffix == "b" and logical == 5 else 1.0
             rows.append(
                 {
                     "scenario_id": scenario_id,
                     "logical_rollout_number": logical,
-                    "native_run_number": 1,
+                    "native_run_number": 0,
                     "reward": reward,
                     "status": "success" if reward else "failed",
                     "has_exception": False,
@@ -301,7 +301,7 @@ def test_gaia2_trace_manifest_requires_terminal_full_grid(tmp_path: Path) -> Non
                 }
             )
             if reward:
-                _write_json(source_dir / sidecar, _sidecar(scenario_id, 1))
+                _write_json(source_dir / sidecar, _sidecar(scenario_id, None))
     _write_jsonl(source_dir / "trace_manifest.jsonl", rows)
     source = _source(
         source_dir,
@@ -326,6 +326,9 @@ def test_gaia2_trace_manifest_requires_terminal_full_grid(tmp_path: Path) -> Non
     assert len(result.records) == 3
     assert result.counts["excluded_reward"] == 1
     assert {record.source.rollout_id for record in result.records} == {"r04", "r05"}
+    assert {record.attributes["native_run_number"] for record in result.records} == {
+        0
+    }
     assert result.source_manifest["logical_rollout_numbers"] == [4, 5]
 
     tampered = deepcopy(rows)

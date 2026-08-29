@@ -762,10 +762,20 @@ def validate_trace_round(
                 f"Duplicate Gaia2 scenario in round {logical_rollout_number}: "
                 f"{scenario_id}"
             )
-        if metadata.get("run_number") != 1:
+        raw_native_run_number = metadata.get("run_number")
+        if raw_native_run_number is None:
+            native_run_number = 0
+        elif (
+            isinstance(raw_native_run_number, bool)
+            or not isinstance(raw_native_run_number, int)
+            or raw_native_run_number not in (0, 1)
+        ):
             raise ValueError(
-                f"Round {logical_rollout_number} must use native run_number=1"
+                f"Round {logical_rollout_number} has unexpected native "
+                f"run_number={raw_native_run_number!r}"
             )
+        else:
+            native_run_number = raw_native_run_number
         seen.add(scenario_id)
 
         trace_id = row.get("trace_id")
@@ -790,14 +800,16 @@ def validate_trace_round(
             else round_directory / "lite" / "__missing__"
         )
         sidecar_path = (
-            round_directory / "decomposer_sidecars" / f"{scenario_id}__run1.json"
+            round_directory
+            / "decomposer_sidecars"
+            / f"{scenario_id}__run{native_run_number}.json"
         )
         records.append(
             {
                 "schema_version": 1,
                 "scenario_id": scenario_id,
                 "logical_rollout_number": logical_rollout_number,
-                "native_run_number": 1,
+                "native_run_number": native_run_number,
                 "reward": float(row.get("score") or 0.0),
                 "status": str(metadata.get("status") or "unknown"),
                 "has_exception": bool(metadata.get("has_exception")),
@@ -827,6 +839,35 @@ def validate_trace_round(
             f"Round {logical_rollout_number} is missing {len(missing)} scenarios"
         )
     return metrics, sorted(records, key=lambda item: item["scenario_id"])
+
+
+def complete_trace_round(
+    round_directory: Path,
+    *,
+    logical_rollout_number: int,
+    scenario_count: int,
+    concurrency: int,
+    metrics: Mapping[str, Any],
+    archived_round: Path | None = None,
+    recovered_from_unmarked_artifacts: bool = False,
+) -> None:
+    atomic_json(round_directory / "metrics.json", metrics)
+    round_status: dict[str, Any] = {
+        "schema_version": 1,
+        "state": "complete",
+        "logical_rollout_number": logical_rollout_number,
+        "native_num_runs": 1,
+        "scenario_count": scenario_count,
+        "attempted_rollouts": metrics["rollout_rows"],
+        "concurrency": concurrency,
+        "finished_at": utc_now(),
+        "metrics": metrics,
+    }
+    if archived_round is not None:
+        round_status["archived_attempt"] = str(archived_round)
+    if recovered_from_unmarked_artifacts:
+        round_status["recovered_from_unmarked_artifacts"] = True
+    atomic_json(round_directory / ".round_done.json", round_status)
 
 
 def aggregate_trace_manifest(
@@ -1368,9 +1409,35 @@ def execute_trace_generation(local_repo: Path, args: argparse.Namespace) -> int:
                 print(f"Skip (completed round): {round_marker}")
                 continue
 
-            archived_round = (
-                archive_attempt(round_directory) if round_directory.exists() else None
-            )
+            archived_round = None
+            if round_directory.exists():
+                try:
+                    round_metrics, _ = validate_trace_round(
+                        round_directory,
+                        trace_directory=directory,
+                        logical_rollout_number=logical_rollout_number,
+                        scenario_ids=scenario_ids,
+                    )
+                except (OSError, ValueError) as error:
+                    print(
+                        f"Archive incomplete round {logical_rollout_number}: {error}"
+                    )
+                    archived_round = archive_attempt(round_directory)
+                else:
+                    complete_trace_round(
+                        round_directory,
+                        logical_rollout_number=logical_rollout_number,
+                        scenario_count=len(scenario_ids),
+                        concurrency=args.concurrency or experiment.concurrency,
+                        metrics=round_metrics,
+                        recovered_from_unmarked_artifacts=True,
+                    )
+                    completed.append(logical_rollout_number)
+                    status["completed_logical_rollouts"] = completed
+                    atomic_json(status_path, status)
+                    print(f"Recovered completed round: {round_marker}")
+                    continue
+
             round_directory.mkdir(parents=True, exist_ok=True)
             round_logs = round_directory / "logs"
             round_logs.mkdir(parents=True, exist_ok=True)
@@ -1407,21 +1474,14 @@ def execute_trace_generation(local_repo: Path, args: argparse.Namespace) -> int:
                 logical_rollout_number=logical_rollout_number,
                 scenario_ids=scenario_ids,
             )
-            atomic_json(round_directory / "metrics.json", round_metrics)
-            round_status = {
-                "schema_version": 1,
-                "state": "complete",
-                "logical_rollout_number": logical_rollout_number,
-                "native_num_runs": 1,
-                "scenario_count": len(scenario_ids),
-                "attempted_rollouts": round_metrics["rollout_rows"],
-                "concurrency": args.concurrency or experiment.concurrency,
-                "finished_at": utc_now(),
-                "metrics": round_metrics,
-            }
-            if archived_round is not None:
-                round_status["archived_attempt"] = str(archived_round)
-            atomic_json(round_marker, round_status)
+            complete_trace_round(
+                round_directory,
+                logical_rollout_number=logical_rollout_number,
+                scenario_count=len(scenario_ids),
+                concurrency=args.concurrency or experiment.concurrency,
+                metrics=round_metrics,
+                archived_round=archived_round,
+            )
             completed.append(logical_rollout_number)
             status["completed_logical_rollouts"] = completed
             atomic_json(status_path, status)

@@ -86,6 +86,12 @@ def _require_int(value: Any, description: str) -> int:
     return value
 
 
+def _require_nonnegative_int(value: Any, description: str) -> int:
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        raise ValueError(f"{description} must be a nonnegative integer")
+    return value
+
+
 def _load_scenario_partition(
     source: SourceSpec,
 ) -> tuple[set[str], set[str], JsonObject]:
@@ -317,7 +323,9 @@ def _native_trace_manifest_rows(
         logical = _require_int(
             raw.get("logical_rollout_number"), "GAIA2 logical rollout number"
         )
-        native = _require_int(raw.get("native_run_number"), "GAIA2 native run number")
+        native = _require_nonnegative_int(
+            raw.get("native_run_number"), "GAIA2 native run number"
+        )
         if scenario_id not in selected_ids or logical not in logical_numbers:
             raise ValueError(
                 f"{manifest_path}:{line_number} is outside the pinned grid"
@@ -543,9 +551,21 @@ def _validate_sidecar_identity(
 ) -> JsonObject:
     scenario_id = row["scenario_id"]
     native_run = row["native_run_number"]
+    sidecar_native_run = sidecar.get("run_number")
+    if sidecar_native_run is None:
+        sidecar_native_run = 0
+    elif (
+        not isinstance(sidecar_native_run, int)
+        or isinstance(sidecar_native_run, bool)
+        or sidecar_native_run < 0
+    ):
+        raise TraceValidationError(
+            "excluded_invalid_indices",
+            "GAIA2 sidecar native run number is invalid",
+        )
     if (
         sidecar.get("scenario_id") != scenario_id
-        or sidecar.get("run_number") != native_run
+        or sidecar_native_run != native_run
     ):
         raise TraceValidationError(
             "excluded_invalid_indices",
@@ -600,8 +620,23 @@ def _validate_sidecar_identity(
     if (
         not isinstance(runtime, Mapping)
         or runtime.get("scenario_id") != scenario_id
-        or runtime.get("run_number") != native_run
     ):
+        raise TraceValidationError(
+            "excluded_invalid_metadata", "GAIA2 runtime context identity changed"
+        )
+    runtime_native_run = runtime.get("run_number")
+    if runtime_native_run is None:
+        runtime_native_run = 0
+    elif (
+        not isinstance(runtime_native_run, int)
+        or isinstance(runtime_native_run, bool)
+        or runtime_native_run < 0
+    ):
+        raise TraceValidationError(
+            "excluded_invalid_metadata",
+            "GAIA2 runtime context native run number is invalid",
+        )
+    if runtime_native_run != native_run:
         raise TraceValidationError(
             "excluded_invalid_metadata", "GAIA2 runtime context identity changed"
         )

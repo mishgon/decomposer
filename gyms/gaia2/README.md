@@ -310,8 +310,12 @@ Logical rollout numbers 4 through 10 line up with the existing n=3 teacher run:
 Remove `--dry` to submit. Raw outputs live in `round_04` through `round_10`
 under `evaluation/gaia2/traces/execution-110-50-v1/train/`. A successful round
 gets `.round_done.json`; resubmitting the same command skips those rounds but
-reruns a partial systemic-failure round. Per-scenario HTTP, recursion, timeout,
-and judge failures remain score-zero attempted records and are not retried.
+reruns a partial systemic-failure round. If ARE finished the full grid before a
+validator failure, the runner validates and seals the unmarked round instead of
+recomputing it. ARE omits `run_number` for these single-run passes, so the trace
+manifest records native run `0`, matching the `__run0.json` sidecars.
+Per-scenario HTTP, recursion, timeout, and judge failures remain score-zero
+attempted records and are not retried.
 After validating 770 unique `(scenario_id, logical_rollout_number)` keys and
 seven keys per scenario, the runner writes `trace_manifest.jsonl`, metrics, and
 finally `.trace_done.json`.
