@@ -1120,6 +1120,33 @@ def test_force_archives_previous_attempt(tmp_path: Path) -> None:
     assert not (output / "run_status.json").exists()
 
 
+def test_full_run_ignores_and_preserves_nested_smoke_output(tmp_path: Path) -> None:
+    experiment = get_experiment(
+        "qwen36-35b-a3b-teacher-qwen35-4b-non-thinking"
+    )
+    smoke = tmp_path / "smoke_1"
+    smoke.mkdir(parents=True)
+    (smoke / ".eval_done.json").write_text("{}")
+
+    run_module.validate_existing_attempt_identity(
+        tmp_path,
+        experiment,
+        purpose="trace-generation",
+        split="validation",
+        num_repeats=3,
+        limit=None,
+        force=False,
+    )
+
+    (tmp_path / "run_status.json").write_text(
+        json.dumps({"started_at": "2026-08-29T12:00:00+00:00"})
+    )
+    archive = run_module.archive_attempt(tmp_path)
+    assert archive is not None
+    assert (archive / "run_status.json").is_file()
+    assert (smoke / ".eval_done.json").is_file()
+
+
 def test_run_commands_require_explicit_purpose() -> None:
     with pytest.raises(SystemExit):
         run_module.build_parser().parse_args(["--experiment", "example"])

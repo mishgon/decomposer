@@ -6,6 +6,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shlex
 import shutil
 import signal
@@ -599,10 +600,19 @@ def validate_result(
     }
 
 
+def _attempt_entries(directory: Path) -> list[Path]:
+    return [
+        path
+        for path in directory.iterdir()
+        if path.name != "attempts"
+        and not (path.is_dir() and re.fullmatch(r"smoke_[1-9][0-9]*", path.name))
+    ]
+
+
 def archive_attempt(directory: Path) -> Path | None:
     if not directory.exists():
         return None
-    entries = [path for path in directory.iterdir() if path.name != "attempts"]
+    entries = _attempt_entries(directory)
     if not entries:
         return None
     status_path = directory / "run_status.json"
@@ -661,7 +671,7 @@ def validate_existing_attempt_identity(
 ) -> None:
     if not directory.is_dir() or force:
         return
-    entries = [path for path in directory.iterdir() if path.name != "attempts"]
+    entries = _attempt_entries(directory)
     if not entries:
         return
     metadata = _attempt_metadata(directory)
