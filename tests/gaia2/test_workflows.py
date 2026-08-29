@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import json
+from argparse import Namespace
+from hashlib import sha256
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
+from gyms.gaia2 import partition as partition_module
 from gyms.gaia2 import prepare
 from gyms.gaia2.dataset import (
     validate_materialized_dataset,
@@ -36,11 +40,21 @@ from gyms.gaia2.experiments import (
     collect_experiments,
     filesystem_dir,
     output_dir,
+    trace_output_dir,
+)
+from gyms.gaia2.partition import (
+    SPLIT_MANIFEST_SHA256,
+    load_split_manifest,
+    materialize_partition_views,
+    partition_scenarios,
+    validate_partition_view,
+    validate_split_against_source,
 )
 from gyms.gaia2.run import (
     _base_environment,
     _dry_plan,
     _runtime_configs,
+    aggregate_trace_manifest,
     are_command,
     decomposer_vllm_commands,
     openrouter_proxy_command,
@@ -48,6 +62,8 @@ from gyms.gaia2.run import (
     simple_vllm_command,
     simple_sampling_parameters,
     subagent_environment,
+    execute_trace_generation,
+    validate_trace_round,
     validate_result,
 )
 from gyms.gaia2.run_eval import build_payload, normalize_job_desc, redact_payload
@@ -84,6 +100,104 @@ def test_dataset_materialization_is_revisioned_and_integrity_checked(tmp_path) -
     scenario.write_text("{}", encoding="utf-8")
     with pytest.raises(ValueError, match="changed or is missing"):
         validate_materialized_dataset(revision_root)
+
+
+def test_execution_split_is_pinned_disjoint_and_isolates_complete_universes() -> None:
+    manifest = load_split_manifest()
+    train = partition_scenarios(manifest, "train")
+    test = partition_scenarios(manifest, "test")
+    full = partition_scenarios(manifest, "full")
+
+    assert len(train) == 110
+    assert len(test) == 50
+    assert len(full) == 160
+    assert {item["scenario_id"] for item in train}.isdisjoint(
+        item["scenario_id"] for item in test
+    )
+    assert {item["universe"] for item in test} == {25, 26, 28}
+    assert {item["universe"] for item in train}.isdisjoint({25, 26, 28})
+    assert manifest["seed"] == 42
+    assert manifest["dataset"]["revision"] == DATASET_REVISION
+    assert partition_module.sha256_file(partition_module.SPLIT_MANIFEST_PATH) == (
+        SPLIT_MANIFEST_SHA256
+    )
+
+    source = {
+        "aggregate_sha256": manifest["dataset"]["aggregate_sha256"],
+        "scenarios": [
+            {
+                "scenario_id": item["scenario_id"],
+                "size": item["size"],
+                "sha256": item["sha256"],
+            }
+            for item in full
+        ],
+    }
+    validate_split_against_source(manifest, source)
+    source["scenarios"][0]["sha256"] = "0" * 64
+    with pytest.raises(ValueError, match="source scenarios"):
+        validate_split_against_source(manifest, source)
+
+
+def test_partition_views_are_copies_and_checksum_validated(
+    tmp_path, monkeypatch
+) -> None:
+    source_root = tmp_path / "source"
+    source_directory = source_root / SPLIT / DOMAIN
+    source_directory.mkdir(parents=True)
+    scenarios = []
+    for universe, suffix, partition in (
+        (21, "alpha", "train"),
+        (22, "beta", "train"),
+        (25, "gamma", "test"),
+        (28, "delta", "test"),
+    ):
+        scenario_id = f"scenario_universe_{universe}_{suffix}"
+        content = f"content-{scenario_id}".encode()
+        (source_directory / f"{scenario_id}.json").write_bytes(content)
+        scenarios.append(
+            {
+                "scenario_id": scenario_id,
+                "universe": universe,
+                "partition": partition,
+                "size": len(content),
+                "sha256": sha256(content).hexdigest(),
+            }
+        )
+    source_manifest = {
+        "aggregate_sha256": "synthetic-source",
+        "scenarios": [
+            {
+                "scenario_id": item["scenario_id"],
+                "size": item["size"],
+                "sha256": item["sha256"],
+            }
+            for item in scenarios
+        ],
+    }
+    split_manifest = {
+        "dataset": {"aggregate_sha256": "synthetic-source"},
+        "scenarios": scenarios,
+    }
+    monkeypatch.setattr(
+        partition_module, "validate_materialized_dataset", lambda _root: source_manifest
+    )
+    monkeypatch.setattr(partition_module, "load_split_manifest", lambda: split_manifest)
+
+    root = tmp_path / "views"
+    views = materialize_partition_views(root=root, source_root=source_root)
+
+    assert views["train"]["rows"] == 2
+    assert views["test"]["rows"] == 2
+    source_file = source_directory / f"{scenarios[0]['scenario_id']}.json"
+    view_file = root / "train" / DOMAIN / source_file.name
+    assert view_file.read_bytes() == source_file.read_bytes()
+    assert not view_file.samefile(source_file)
+
+    view_file.write_text("changed", encoding="utf-8")
+    assert source_file.read_bytes().startswith(b"content-")
+    with pytest.raises(ValueError, match="partition scenario changed"):
+        validate_partition_view("train", root=root, source_root=source_root)
 
 
 def test_filesystem_mirror_manifest_detects_asset_changes(tmp_path) -> None:
@@ -733,3 +847,254 @@ def test_remote_simple_agent_is_local_only_for_mlspace_launcher(tmp_path) -> Non
             proxy_environment={"HTTPS_PROXY": "http://proxy.test"},
             openrouter_key="openrouter-secret",
         )
+
+
+def _write_trace_round(
+    trace_directory: Path,
+    logical_rollout_number: int,
+    scenario_ids: tuple[str, ...],
+    *,
+    failed_scenarios: frozenset[str] = frozenset(),
+    completed: bool = True,
+) -> Path:
+    round_directory = trace_directory / f"round_{logical_rollout_number:02d}"
+    round_directory.mkdir(parents=True, exist_ok=True)
+    rows = []
+    for scenario_id in reversed(scenario_ids):
+        trace_id = None
+        if scenario_id not in failed_scenarios:
+            filename = f"{scenario_id}_run_1_deadbeef.json"
+            for trace_format in ("hf", "lite"):
+                path = round_directory / trace_format / filename
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("{}\n", encoding="utf-8")
+            sidecar = (
+                round_directory / "decomposer_sidecars" / f"{scenario_id}__run1.json"
+            )
+            sidecar.parent.mkdir(parents=True, exist_ok=True)
+            sidecar.write_text("{}\n", encoding="utf-8")
+            trace_id = str(round_directory / "hf" / filename)
+        rows.append(
+            {
+                "task_id": scenario_id,
+                "trace_id": trace_id,
+                "score": 0.0 if scenario_id in failed_scenarios else 1.0,
+                "metadata": {
+                    "scenario_id": scenario_id,
+                    "run_number": 1,
+                    "status": (
+                        "failed" if scenario_id in failed_scenarios else "success"
+                    ),
+                    "has_exception": scenario_id in failed_scenarios,
+                    "exception_type": (
+                        "HTTPStatusError" if scenario_id in failed_scenarios else None
+                    ),
+                },
+            }
+        )
+    (round_directory / "output.jsonl").write_text(
+        "".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8"
+    )
+    if completed:
+        (round_directory / ".round_done.json").write_text(
+            json.dumps({"logical_rollout_number": logical_rollout_number}) + "\n",
+            encoding="utf-8",
+        )
+    return round_directory
+
+
+def test_trace_rounds_use_logical_numbers_four_through_ten_and_aggregate_failures(
+    tmp_path,
+) -> None:
+    scenario_ids = ("scenario_a", "scenario_b")
+    logical_rollouts = tuple(range(4, 11))
+    for logical_rollout in logical_rollouts:
+        _write_trace_round(
+            tmp_path,
+            logical_rollout,
+            scenario_ids,
+            failed_scenarios=(
+                frozenset({"scenario_b"}) if logical_rollout == 7 else frozenset()
+            ),
+        )
+
+    metrics, records = aggregate_trace_manifest(
+        tmp_path,
+        logical_rollout_numbers=logical_rollouts,
+        scenario_ids=scenario_ids,
+    )
+
+    assert metrics["attempted_rollouts"] == 14
+    assert metrics["unique_attempted_rollouts"] == 14
+    assert metrics["rollouts_per_scenario"] == 7
+    assert [record["logical_rollout_number"] for record in records] == [
+        logical_rollout for logical_rollout in logical_rollouts for _ in scenario_ids
+    ]
+    failed = next(
+        record
+        for record in records
+        if record["logical_rollout_number"] == 7
+        and record["scenario_id"] == "scenario_b"
+    )
+    assert failed["reward"] == 0.0
+    assert failed["exception_type"] == "HTTPStatusError"
+    assert failed["sidecar"] is None
+    assert failed["hf_trace"] is None
+    assert failed["lite_trace"] is None
+    assert len((tmp_path / "trace_manifest.jsonl").read_text().splitlines()) == 14
+
+
+def test_trace_dry_plan_dispatches_round_robin_with_one_native_run(tmp_path) -> None:
+    plan = _dry_plan(
+        Path.cwd(),
+        DEEPSEEK_QWEN_EXPERIMENT,
+        tmp_path,
+        ("0",),
+        7,
+        None,
+        purpose="trace-generation",
+        partition="train",
+        concurrency=10,
+        rollout_offset=3,
+    )
+
+    assert plan["logical_rollout_numbers"] == list(range(4, 11))
+    assert plan["concurrency"] == 10
+    assert len(plan["services"]) == 3
+    assert len(plan["are_rounds"]) == 7
+    for logical_rollout, round_plan in zip(range(4, 11), plan["are_rounds"]):
+        assert round_plan["logical_rollout_number"] == logical_rollout
+        assert "--num_runs 1" in round_plan["command"]
+        assert "--max_concurrent_scenarios 10" in round_plan["command"]
+        assert f"round_{logical_rollout:02d}" in round_plan["command"]
+
+
+def test_trace_execution_resumes_completed_round_and_reuses_services(
+    tmp_path, monkeypatch
+) -> None:
+    trace_directory = tmp_path / "trace"
+    scenario_ids = ("scenario_a", "scenario_b")
+    _write_trace_round(trace_directory, 4, scenario_ids)
+    started_services: list[str] = []
+    are_commands: list[list[str]] = []
+
+    class Process:
+        def poll(self):
+            return None
+
+    class FakeSupervisor:
+        def __init__(self, _logs, _env):
+            pass
+
+        def start(self, name, _command, *, cwd, env=None):
+            started_services.append(name)
+            return Process()
+
+        def assert_running(self):
+            return None
+
+        def stop(self):
+            return None
+
+    def fake_subprocess_run(command, **kwargs):
+        if command[0] == "nvidia-smi":
+            return SimpleNamespace(stdout="GPU metadata")
+        are_commands.append(command)
+        round_directory = Path(command[command.index("--output_dir") + 1])
+        logical_rollout = int(round_directory.name.removeprefix("round_"))
+        _write_trace_round(
+            trace_directory,
+            logical_rollout,
+            scenario_ids,
+            completed=False,
+        )
+        return SimpleNamespace(stdout="")
+
+    monkeypatch.setattr(
+        "gyms.gaia2.run.partition_scenario_ids", lambda _part: scenario_ids
+    )
+    monkeypatch.setattr(
+        "gyms.gaia2.run.partition_dataset_root", lambda _part: tmp_path / "dataset"
+    )
+    monkeypatch.setattr(
+        "gyms.gaia2.run.validate_preparation",
+        lambda _experiment, **_kwargs: {
+            "gaia2": {
+                "staged_repo": str(tmp_path / "gaia2"),
+                "runtime": {"are_benchmark": str(tmp_path / "are-benchmark")},
+            }
+        },
+    )
+    monkeypatch.setattr("gyms.gaia2.run.check_judge", lambda *_args: None)
+    monkeypatch.setattr("gyms.gaia2.run.wait_http", lambda *_args: None)
+    monkeypatch.setattr("gyms.gaia2.run.Supervisor", FakeSupervisor)
+    monkeypatch.setattr("gyms.gaia2.run.subprocess.run", fake_subprocess_run)
+    monkeypatch.setattr("gyms.gaia2.run.git", lambda *_args: "commit")
+    monkeypatch.setenv("LLM_PROXY_URL", "https://judge.test/v1")
+    monkeypatch.setenv("LLM_PROXY_MASTER_KEY", "judge-key")
+    monkeypatch.setenv("OPENROUTER_API_KEY_DECOMPOSER", "openrouter-key")
+    monkeypatch.setenv("HTTPS_PROXY", "http://proxy.test")
+    args = Namespace(
+        experiment=DEEPSEEK_QWEN_EXPERIMENT.name,
+        purpose="trace-generation",
+        partition="train",
+        num_repeats=2,
+        rollout_offset=3,
+        concurrency=10,
+        limit=None,
+        dry=False,
+        force=False,
+        output_dir=trace_directory,
+        cuda_visible_devices=("0",),
+    )
+
+    assert execute_trace_generation(tmp_path, args) == 0
+
+    assert started_services == [
+        "worker_vllm",
+        "langgraph_subagent",
+        "decomposer_service",
+    ]
+    assert len(are_commands) == 1
+    assert are_commands[0][are_commands[0].index("--num_runs") + 1] == "1"
+    assert (
+        are_commands[0][are_commands[0].index("--max_concurrent_scenarios") + 1] == "10"
+    )
+    assert (trace_directory / "round_04" / ".round_done.json").is_file()
+    assert (trace_directory / "round_05" / ".round_done.json").is_file()
+    assert (trace_directory / ".trace_done.json").is_file()
+    assert len((trace_directory / "trace_manifest.jsonl").read_text().splitlines()) == 4
+
+
+def test_trace_mlspace_payload_is_exactly_one_high_priority_gpu(tmp_path) -> None:
+    payload = build_payload(
+        DEEPSEEK_QWEN_EXPERIMENT,
+        tmp_path / "staged",
+        num_repeats=7,
+        limit=None,
+        author="sukhorukov",
+        base_image="image",
+        priority="high",
+        force=False,
+        judge_environment={
+            "LLM_PROXY_URL": "https://judge.test/v1",
+            "LLM_PROXY_MASTER_KEY": "judge-secret",
+        },
+        proxy_environment={"HTTPS_PROXY": "http://proxy.test"},
+        openrouter_key="openrouter-secret",
+        purpose="trace-generation",
+        partition="train",
+        concurrency=10,
+        rollout_offset=3,
+    )
+
+    assert payload["instance_type"] == "a100plus.1gpu.80vG.12C.182G"
+    assert payload["priority_class"] == "high"
+    assert payload["n_workers"] == 1
+    assert payload["processes_per_worker"] == 1
+    assert "--purpose trace-generation" in payload["script"]
+    assert "--partition train" in payload["script"]
+    assert "--num-repeats 7" in payload["script"]
+    assert "--concurrency 10" in payload["script"]
+    assert "--rollout-offset 3" in payload["script"]
+    assert "--cuda-visible-devices 0" in payload["script"]

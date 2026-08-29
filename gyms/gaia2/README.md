@@ -1,9 +1,9 @@
 # Gaia2 execution evaluation
 
 This package owns Gaia2 evaluation data preparation, the Decomposer external
-agent adapter, local execution, and MLSpace submission. It supports the
-`validation` split of the `execution` domain only; Gaia2 is not used for trace
-generation or SFT data.
+agent adapter, local execution, and MLSpace submission. Evaluation uses the
+complete `validation` split of the `execution` domain, while teacher trace
+generation uses the immutable train/test partition described below.
 
 The Gaia runtime is pinned through `external/gaia2` at commit
 `3bee736488864e028231755ce2ee32a7065e8648`. Preparation materializes a
@@ -43,6 +43,23 @@ does not lazily fetch execution-task files from Hugging Face.
 The Gaia runtime is created with `uv sync --frozen` under
 `decomposer_artifacts/venvs/gaia2/<uv-lock-hash>`. Evaluation never falls back
 to a live Hugging Face dataset.
+
+## Prepare the immutable training partition
+
+`split_manifests/execution-110-50-v1.json` pins the dataset revision, source
+checksum, seed 42, every scenario checksum, and complete-universe assignment.
+Universes 25, 26, and 28 form the 50-scenario test holdout; the other seven
+universes form the 110-scenario training partition. Preparation copies and
+checksum-validates isolated train/test views without modifying the original
+validation files:
+
+```bash
+.venv/bin/python -m gyms.gaia2.prepare eval \
+  --experiment deepseek-v4-flash-0731-teacher-qwen35-4b-non-thinking \
+  --purpose trace-generation \
+  --partition train \
+  --reuse-source
+```
 
 ## Run locally
 
@@ -233,11 +250,43 @@ a systemic failure and does not create `.eval_done.json`.
   --author-name sukhorukov
 ```
 
-The launcher uses one `a100plus.1gpu.80vG.12C.182G` instance for the simple
-agent and one `a100plus.2gpu.80vG.24C.364G` instance for Decomposer. It skips
-completed results and matching Pending/Running jobs, refuses a dirty worktree
-for real submissions, stages Decomposer by Git SHA, and reuses the independently
-staged Gaia SHA. Dry-run payloads redact judge credentials and submit nothing.
+The launcher uses one `a100plus.1gpu.80vG.12C.182G` instance for simple agents
+and OpenRouter-managed Decomposers, and one
+`a100plus.2gpu.80vG.24C.364G` instance when both manager and worker are local.
+It skips completed results and matching Pending/Running jobs, refuses a dirty
+worktree for real submissions, stages Decomposer by Git SHA, and reuses the
+independently staged Gaia SHA. Dry-run payloads redact credentials and submit
+nothing.
+
+### Generate seven additional teacher traces per training scenario
+
+The trace workflow starts the Qwen worker, LangGraph server, and Decomposer
+service once. It then makes seven sequential ARE passes with one native run per
+scenario, so dispatch covers all 110 scenarios before repeating any scenario.
+Logical rollout numbers 4 through 10 line up with the existing n=3 teacher run:
+
+```bash
+/mnt/shared_ru.ml.SZ-5_000264/sukhorukov/.venv-mls/bin/python \
+  -m gyms.gaia2.run_eval \
+  --experiment deepseek-v4-flash-0731-teacher-qwen35-4b-non-thinking \
+  --purpose trace-generation \
+  --partition train \
+  --num-repeats 7 \
+  --rollout-offset 3 \
+  --concurrency 10 \
+  --priority high \
+  --author-name sukhorukov \
+  --dry
+```
+
+Remove `--dry` to submit. Raw outputs live in `round_04` through `round_10`
+under `evaluation/gaia2/traces/execution-110-50-v1/train/`. A successful round
+gets `.round_done.json`; resubmitting the same command skips those rounds but
+reruns a partial systemic-failure round. Per-scenario HTTP, recursion, timeout,
+and judge failures remain score-zero attempted records and are not retried.
+After validating 770 unique `(scenario_id, logical_rollout_number)` keys and
+seven keys per scenario, the runner writes `trace_manifest.jsonl`, metrics, and
+finally `.trace_done.json`.
 
 Canonical results are stored under:
 

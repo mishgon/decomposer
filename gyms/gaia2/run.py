@@ -32,10 +32,12 @@ from gyms.gaia2.experiments import (  # noqa: E402
     DOMAIN,
     GAIA2_REVISION,
     JUDGE_MODEL,
+    PARTITIONS,
     PROJECT_VENV,
     SCENARIO_COUNT,
     SCENARIO_TIMEOUT_SECONDS,
     SPLIT,
+    SPLIT_MANIFEST_NAME,
     DecomposerExperiment,
     Experiment,
     SimpleExperiment,
@@ -44,7 +46,15 @@ from gyms.gaia2.experiments import (  # noqa: E402
     filesystem_revision_root,
     get_experiment,
     output_dir,
+    partition_dataset_root,
     preparation_manifest,
+    trace_output_dir,
+)
+from gyms.gaia2.partition import (  # noqa: E402
+    SPLIT_MANIFEST_RELPATH,
+    SPLIT_MANIFEST_SHA256,
+    partition_scenario_ids,
+    validate_partition_view,
 )
 from gyms.gaia2.staging import git  # noqa: E402
 
@@ -62,6 +72,16 @@ def atomic_json(path: Path, value: Any) -> None:
     os.replace(temporary, path)
 
 
+def atomic_jsonl(path: Path, values: Sequence[Mapping[str, Any]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(path.suffix + f".tmp.{os.getpid()}")
+    temporary.write_text(
+        "".join(json.dumps(value, sort_keys=True) + "\n" for value in values),
+        encoding="utf-8",
+    )
+    os.replace(temporary, path)
+
+
 def positive_int(value: str) -> int:
     try:
         parsed = int(value)
@@ -69,6 +89,16 @@ def positive_int(value: str) -> int:
         raise argparse.ArgumentTypeError(str(error)) from error
     if parsed < 1:
         raise argparse.ArgumentTypeError("value must be at least 1")
+    return parsed
+
+
+def nonnegative_int(value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(str(error)) from error
+    if parsed < 0:
+        raise argparse.ArgumentTypeError("value cannot be negative")
     return parsed
 
 
@@ -422,6 +452,7 @@ def are_command(
     num_repeats: int,
     limit: int | None,
     plugin_config: Path | None,
+    concurrency: int | None = None,
 ) -> list[str]:
     command = [
         str(benchmark),
@@ -439,7 +470,7 @@ def are_command(
         "--num_runs",
         str(num_repeats),
         "--max_concurrent_scenarios",
-        str(experiment.concurrency),
+        str(concurrency if concurrency is not None else experiment.concurrency),
         "--scenario_timeout",
         str(SCENARIO_TIMEOUT_SECONDS),
         "--output_dir",
@@ -496,7 +527,9 @@ def _validate_file_manifest(root: Path, manifest: Mapping[str, Any]) -> None:
             raise ValueError(f"Prepared model file checksum changed: {path}")
 
 
-def validate_preparation(experiment: Experiment) -> dict[str, Any]:
+def validate_preparation(
+    experiment: Experiment, *, partition: str = "full"
+) -> dict[str, Any]:
     path = preparation_manifest(experiment)
     if not path.is_file():
         raise FileNotFoundError(
@@ -516,6 +549,15 @@ def validate_preparation(experiment: Experiment) -> dict[str, Any]:
         != dataset["aggregate_sha256"]
     ):
         raise ValueError("Preparation manifest dataset checksum changed")
+    if partition != "full":
+        prepared_split = manifest.get("partition_split") or {}
+        if prepared_split.get("name") != SPLIT_MANIFEST_NAME:
+            raise ValueError("Preparation manifest does not identify the pinned split")
+        if prepared_split.get("path") != SPLIT_MANIFEST_RELPATH:
+            raise ValueError("Preparation manifest points at an unexpected split")
+        if prepared_split.get("sha256") != SPLIT_MANIFEST_SHA256:
+            raise ValueError("Preparation manifest split checksum changed")
+        validate_partition_view(partition)
     filesystem = validate_materialized_filesystem(filesystem_revision_root())
     prepared_filesystem = manifest.get("filesystem") or {}
     if prepared_filesystem.get("aggregate_sha256") != filesystem["aggregate_sha256"]:
@@ -603,10 +645,14 @@ def _read_jsonl(path: Path) -> list[dict[str, Any]]:
 
 
 def validate_result(
-    directory: Path, *, num_repeats: int, limit: int | None
+    directory: Path,
+    *,
+    num_repeats: int,
+    limit: int | None,
+    scenario_count: int = SCENARIO_COUNT,
 ) -> dict[str, Any]:
     rows = _read_jsonl(directory / "output.jsonl")
-    task_count = min(SCENARIO_COUNT, limit) if limit is not None else SCENARIO_COUNT
+    task_count = min(scenario_count, limit) if limit is not None else scenario_count
     expected = task_count * num_repeats
     if len(rows) != expected:
         raise ValueError(
@@ -643,6 +689,191 @@ def validate_result(
         "lite_dir": str(directory / "lite"),
         "hf_dir": str(directory / "hf"),
     }
+
+
+def _optional_round_artifact(
+    path: Path, *, round_directory: Path, trace_directory: Path
+) -> str | None:
+    if not path.is_file():
+        return None
+    resolved = path.resolve()
+    try:
+        resolved.relative_to(round_directory.resolve())
+    except ValueError as error:
+        raise ValueError(f"Round artifact escapes its raw directory: {path}") from error
+    return resolved.relative_to(trace_directory.resolve()).as_posix()
+
+
+def validate_trace_round(
+    round_directory: Path,
+    *,
+    trace_directory: Path,
+    logical_rollout_number: int,
+    scenario_ids: Sequence[str],
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    rows = _read_jsonl(round_directory / "output.jsonl")
+    expected_ids = set(scenario_ids)
+    if len(expected_ids) != len(scenario_ids):
+        raise ValueError("Expected Gaia2 trace scenario IDs must be unique")
+    metrics = validate_result(
+        round_directory,
+        num_repeats=1,
+        limit=None,
+        scenario_count=len(scenario_ids),
+    )
+    seen: set[str] = set()
+    records: list[dict[str, Any]] = []
+    for line_number, row in enumerate(rows, 1):
+        metadata = row.get("metadata") or {}
+        scenario_id = metadata.get("scenario_id") or row.get("task_id")
+        if scenario_id not in expected_ids:
+            raise ValueError(
+                f"Unexpected Gaia2 scenario in round {logical_rollout_number}: "
+                f"{scenario_id!r}"
+            )
+        if scenario_id in seen:
+            raise ValueError(
+                f"Duplicate Gaia2 scenario in round {logical_rollout_number}: "
+                f"{scenario_id}"
+            )
+        if metadata.get("run_number") != 1:
+            raise ValueError(
+                f"Round {logical_rollout_number} must use native run_number=1"
+            )
+        seen.add(scenario_id)
+
+        trace_id = row.get("trace_id")
+        hf_path: Path | None = None
+        if isinstance(trace_id, str) and trace_id:
+            candidate = Path(trace_id)
+            if not candidate.is_absolute():
+                candidate = round_directory / candidate
+            hf_path = candidate
+        hf_trace = (
+            _optional_round_artifact(
+                hf_path,
+                round_directory=round_directory,
+                trace_directory=trace_directory,
+            )
+            if hf_path is not None
+            else None
+        )
+        lite_path = (
+            round_directory / "lite" / hf_path.name
+            if hf_path is not None
+            else round_directory / "lite" / "__missing__"
+        )
+        sidecar_path = (
+            round_directory / "decomposer_sidecars" / f"{scenario_id}__run1.json"
+        )
+        records.append(
+            {
+                "schema_version": 1,
+                "scenario_id": scenario_id,
+                "logical_rollout_number": logical_rollout_number,
+                "native_run_number": 1,
+                "reward": float(row.get("score") or 0.0),
+                "status": str(metadata.get("status") or "unknown"),
+                "has_exception": bool(metadata.get("has_exception")),
+                "exception_type": metadata.get("exception_type"),
+                "round": f"round_{logical_rollout_number:02d}",
+                "output_jsonl": (round_directory / "output.jsonl")
+                .resolve()
+                .relative_to(trace_directory.resolve())
+                .as_posix(),
+                "output_line_number": line_number,
+                "sidecar": _optional_round_artifact(
+                    sidecar_path,
+                    round_directory=round_directory,
+                    trace_directory=trace_directory,
+                ),
+                "hf_trace": hf_trace,
+                "lite_trace": _optional_round_artifact(
+                    lite_path,
+                    round_directory=round_directory,
+                    trace_directory=trace_directory,
+                ),
+            }
+        )
+    missing = expected_ids - seen
+    if missing:
+        raise ValueError(
+            f"Round {logical_rollout_number} is missing {len(missing)} scenarios"
+        )
+    return metrics, sorted(records, key=lambda item: item["scenario_id"])
+
+
+def aggregate_trace_manifest(
+    trace_directory: Path,
+    *,
+    logical_rollout_numbers: Sequence[int],
+    scenario_ids: Sequence[str],
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    records: list[dict[str, Any]] = []
+    round_metrics: dict[str, Any] = {}
+    for logical_rollout_number in logical_rollout_numbers:
+        round_directory = trace_directory / f"round_{logical_rollout_number:02d}"
+        marker = round_directory / ".round_done.json"
+        if not marker.is_file():
+            raise FileNotFoundError(
+                f"Completed Gaia2 round marker is missing: {marker}"
+            )
+        marker_value = json.loads(marker.read_text(encoding="utf-8"))
+        if marker_value.get("logical_rollout_number") != logical_rollout_number:
+            raise ValueError(f"Gaia2 round marker changed: {marker}")
+        metrics, round_records = validate_trace_round(
+            round_directory,
+            trace_directory=trace_directory,
+            logical_rollout_number=logical_rollout_number,
+            scenario_ids=scenario_ids,
+        )
+        records.extend(round_records)
+        round_metrics[f"round_{logical_rollout_number:02d}"] = metrics
+
+    keys = {
+        (record["scenario_id"], record["logical_rollout_number"]) for record in records
+    }
+    expected_attempts = len(scenario_ids) * len(logical_rollout_numbers)
+    if len(records) != expected_attempts or len(keys) != expected_attempts:
+        raise ValueError(
+            f"Expected {expected_attempts} unique attempted Gaia2 rollouts, "
+            f"found {len(records)} rows and {len(keys)} unique keys"
+        )
+    counts = Counter(record["scenario_id"] for record in records)
+    expected_per_scenario = len(logical_rollout_numbers)
+    invalid_counts = {
+        scenario_id: counts[scenario_id]
+        for scenario_id in scenario_ids
+        if counts[scenario_id] != expected_per_scenario
+    }
+    if invalid_counts:
+        raise ValueError(f"Gaia2 logical rollout counts changed: {invalid_counts}")
+    records.sort(key=lambda item: (item["logical_rollout_number"], item["scenario_id"]))
+    atomic_jsonl(trace_directory / "trace_manifest.jsonl", records)
+    rewards = [record["reward"] for record in records]
+    metrics = {
+        "scenario_count": len(scenario_ids),
+        "logical_rollout_numbers": list(logical_rollout_numbers),
+        "attempted_rollouts": len(records),
+        "unique_attempted_rollouts": len(keys),
+        "rollouts_per_scenario": expected_per_scenario,
+        "passed_rollouts": sum(reward > 0 for reward in rewards),
+        "failed_rollouts": sum(reward <= 0 for reward in rewards),
+        "reward_sum": sum(rewards),
+        "fixed_denominator_score": sum(rewards) / len(rewards),
+        "rounds": round_metrics,
+        "trace_manifest": str(trace_directory / "trace_manifest.jsonl"),
+    }
+    return metrics, records
+
+
+def write_round_plugin_config(base_plugin: Path, round_directory: Path) -> Path:
+    plugin = json.loads(base_plugin.read_text(encoding="utf-8"))
+    plugin["sidecar_root"] = str(round_directory / "decomposer_sidecars")
+    plugin["output_dir"] = str(round_directory)
+    path = round_directory / "configuration" / "are_plugin.json"
+    atomic_json(path, plugin)
+    return path
 
 
 def _runtime_configs(
@@ -798,6 +1029,11 @@ def _dry_plan(
     visible_devices: tuple[str, ...],
     num_repeats: int,
     limit: int | None,
+    *,
+    purpose: str = "evaluation",
+    partition: str = "full",
+    concurrency: int | None = None,
+    rollout_offset: int = 0,
 ) -> dict[str, Any]:
     manifest_path = preparation_manifest(experiment)
     manifest = (
@@ -825,7 +1061,12 @@ def _dry_plan(
             services.append(manager_command)
         services.append(worker_command)
         service_config = directory / "configuration" / "service.json"
-        plugin_config = directory / "configuration" / "are_plugin.json"
+        plugin_directory = (
+            directory / f"round_{rollout_offset + 1:02d}"
+            if purpose == "trace-generation"
+            else directory
+        )
+        plugin_config = plugin_directory / "configuration" / "are_plugin.json"
         services.append(langgraph_command(local_repo, experiment)[0])
         services.append(service_command(experiment, service_config))
         if experiment.requires_local_manager:
@@ -835,12 +1076,37 @@ def _dry_plan(
             }
         else:
             gpu_assignments = {"worker_vllm": visible_devices[0]}
-    return {
+    selected_dataset_root = partition_dataset_root(partition)
+    effective_concurrency = concurrency or experiment.concurrency
+    first_round_output = (
+        directory / f"round_{rollout_offset + 1:02d}"
+        if purpose == "trace-generation"
+        else directory
+    )
+    first_are_command = are_command(
+        experiment,
+        benchmark=benchmark,
+        dataset_root=selected_dataset_root,
+        output=first_round_output,
+        judge_endpoint=os.environ.get("LLM_PROXY_URL", "<LLM_PROXY_URL>"),
+        num_repeats=1 if purpose == "trace-generation" else num_repeats,
+        limit=limit,
+        plugin_config=plugin_config,
+        concurrency=effective_concurrency,
+    )
+    plan = {
         "experiment": experiment.name,
         "kind": experiment.kind,
         "split": SPLIT,
         "domain": DOMAIN,
+        "purpose": purpose,
+        "partition": partition,
         "num_repeats": num_repeats,
+        "rollout_offset": rollout_offset,
+        "logical_rollout_numbers": list(
+            range(rollout_offset + 1, rollout_offset + num_repeats + 1)
+        ),
+        "concurrency": effective_concurrency,
         "limit": limit,
         "decomposer_system_prompt_profile": (
             experiment.prompt_profile
@@ -855,23 +1121,347 @@ def _dry_plan(
         "gpu_assignments": gpu_assignments,
         "preparation_manifest": str(manifest_path),
         "services": [shlex.join(command) for command in services],
-        "are_benchmark": shlex.join(
-            are_command(
-                experiment,
-                benchmark=benchmark,
-                dataset_root=dataset_revision_root() / SPLIT,
-                output=directory,
-                judge_endpoint=os.environ.get("LLM_PROXY_URL", "<LLM_PROXY_URL>"),
-                num_repeats=num_repeats,
-                limit=limit,
-                plugin_config=plugin_config,
-            )
-        ),
+        "are_benchmark": shlex.join(first_are_command),
         "output_dir": str(directory),
     }
+    if purpose == "trace-generation":
+        plan["are_rounds"] = [
+            {
+                "logical_rollout_number": logical_rollout_number,
+                "output_dir": str(directory / f"round_{logical_rollout_number:02d}"),
+                "command": shlex.join(
+                    are_command(
+                        experiment,
+                        benchmark=benchmark,
+                        dataset_root=selected_dataset_root,
+                        output=directory / f"round_{logical_rollout_number:02d}",
+                        judge_endpoint=os.environ.get(
+                            "LLM_PROXY_URL", "<LLM_PROXY_URL>"
+                        ),
+                        num_repeats=1,
+                        limit=limit,
+                        plugin_config=(
+                            directory
+                            / f"round_{logical_rollout_number:02d}"
+                            / "configuration"
+                            / "are_plugin.json"
+                        ),
+                        concurrency=effective_concurrency,
+                    )
+                ),
+            }
+            for logical_rollout_number in range(
+                rollout_offset + 1, rollout_offset + num_repeats + 1
+            )
+        ]
+    return plan
+
+
+def execute_trace_generation(local_repo: Path, args: argparse.Namespace) -> int:
+    experiment = get_experiment(args.experiment)
+    if not isinstance(experiment, DecomposerExperiment):
+        raise ValueError("Gaia2 trace generation requires a Decomposer experiment")
+    if args.partition != "train":
+        raise ValueError(
+            "Gaia2 trace generation is restricted to the pinned train partition"
+        )
+    visible_devices = selected_cuda_devices(experiment, args.cuda_visible_devices)
+    directory = (
+        args.output_dir.expanduser().resolve()
+        if args.output_dir is not None
+        else trace_output_dir(
+            experiment,
+            args.num_repeats,
+            args.rollout_offset,
+            args.partition,
+            args.limit,
+        )
+    )
+    logical_rollout_numbers = tuple(
+        range(
+            args.rollout_offset + 1,
+            args.rollout_offset + args.num_repeats + 1,
+        )
+    )
+    all_scenario_ids = partition_scenario_ids(args.partition)
+    scenario_ids = (
+        all_scenario_ids[: args.limit] if args.limit is not None else all_scenario_ids
+    )
+    if args.dry:
+        print(
+            json.dumps(
+                _dry_plan(
+                    local_repo,
+                    experiment,
+                    directory,
+                    visible_devices,
+                    args.num_repeats,
+                    args.limit,
+                    purpose=args.purpose,
+                    partition=args.partition,
+                    concurrency=args.concurrency,
+                    rollout_offset=args.rollout_offset,
+                ),
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 0
+
+    marker = directory / ".trace_done.json"
+    if marker.is_file() and not args.force:
+        print(f"Skip (completed): {marker}")
+        return 0
+    manifest = validate_preparation(experiment, partition=args.partition)
+    judge_endpoint = os.environ.get("LLM_PROXY_URL", "").rstrip("/")
+    judge_key = os.environ.get("LLM_PROXY_MASTER_KEY", "")
+    if not judge_endpoint or not judge_key:
+        raise RuntimeError("LLM_PROXY_URL and LLM_PROXY_MASTER_KEY are required")
+    if not os.environ.get("OPENROUTER_API_KEY_DECOMPOSER"):
+        raise RuntimeError("OPENROUTER_API_KEY_DECOMPOSER is required")
+    if not (os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy")):
+        raise RuntimeError("HTTPS_PROXY or https_proxy is required for OpenRouter")
+    check_judge(judge_endpoint, judge_key)
+
+    archived = archive_attempt(directory) if args.force and directory.exists() else None
+    directory.mkdir(parents=True, exist_ok=True)
+    logs = directory / "logs"
+    status_path = directory / "run_status.json"
+    started = time.monotonic()
+    status: dict[str, Any] = {
+        "schema_version": 1,
+        "state": "starting",
+        "purpose": args.purpose,
+        "experiment": experiment.name,
+        "kind": experiment.kind,
+        "split": SPLIT,
+        "domain": DOMAIN,
+        "partition": args.partition,
+        "split_manifest": {
+            "name": SPLIT_MANIFEST_NAME,
+            "path": SPLIT_MANIFEST_RELPATH,
+            "sha256": SPLIT_MANIFEST_SHA256,
+        },
+        "scenario_count": len(scenario_ids),
+        "num_repeats": args.num_repeats,
+        "rollout_offset": args.rollout_offset,
+        "logical_rollout_numbers": list(logical_rollout_numbers),
+        "concurrency": args.concurrency or experiment.concurrency,
+        "limit": args.limit,
+        "decomposer_system_prompt_profile": experiment.prompt_profile,
+        "manager_parallel_tool_calls": experiment.manager_parallel_tool_calls,
+        "cuda_visible_devices": list(visible_devices),
+        "output_dir": str(directory),
+        "preparation_manifest": str(preparation_manifest(experiment)),
+        "started_at": utc_now(),
+        "completed_logical_rollouts": [],
+    }
+    if archived is not None:
+        status["archived_attempt"] = str(archived)
+    atomic_json(status_path, status)
+
+    staged_gaia2 = Path(manifest["gaia2"]["staged_repo"])
+    benchmark = Path(manifest["gaia2"]["runtime"]["are_benchmark"])
+    env = _base_environment(local_repo, staged_gaia2, directory, judge_key)
+    supervisor = Supervisor(logs, env)
+    metrics: dict[str, Any]
+    try:
+        status["state"] = "agent_services_startup"
+        atomic_json(status_path, status)
+        manager_command, worker_command = decomposer_vllm_commands(experiment)
+        manager_process = None
+        if manager_command is not None:
+            manager_process = supervisor.start(
+                "manager_vllm",
+                manager_command,
+                cwd=local_repo,
+                env={"CUDA_VISIBLE_DEVICES": visible_devices[0]},
+            )
+        worker_device_index = 1 if experiment.requires_local_manager else 0
+        worker_process = supervisor.start(
+            "worker_vllm",
+            worker_command,
+            cwd=local_repo,
+            env={"CUDA_VISIBLE_DEVICES": visible_devices[worker_device_index]},
+        )
+        if manager_process is not None:
+            wait_http(
+                f"http://127.0.0.1:{experiment.manager_port}/v1/models",
+                [manager_process],
+                1800,
+            )
+        wait_http(
+            f"http://127.0.0.1:{experiment.worker_port}/v1/models",
+            [worker_process],
+            1800,
+        )
+        service_config, base_plugin = _runtime_configs(
+            local_repo, directory, experiment
+        )
+        subagent_env = subagent_environment(experiment)
+        langgraph_argv, langgraph_cwd = langgraph_command(local_repo, experiment)
+        langgraph_process = supervisor.start(
+            "langgraph_subagent",
+            langgraph_argv,
+            cwd=langgraph_cwd,
+            env=subagent_env,
+        )
+        service_process = supervisor.start(
+            "decomposer_service",
+            service_command(experiment, service_config),
+            cwd=local_repo,
+        )
+        wait_http(
+            f"http://127.0.0.1:{experiment.subagent_port}/ok",
+            [langgraph_process],
+            300,
+        )
+        wait_http(
+            f"http://127.0.0.1:{experiment.service_port}/health",
+            [service_process],
+            300,
+        )
+
+        are_env = dict(env)
+        for name in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"):
+            are_env.pop(name, None)
+        completed: list[int] = []
+        for logical_rollout_number in logical_rollout_numbers:
+            round_directory = directory / f"round_{logical_rollout_number:02d}"
+            round_marker = round_directory / ".round_done.json"
+            if round_marker.is_file():
+                validate_trace_round(
+                    round_directory,
+                    trace_directory=directory,
+                    logical_rollout_number=logical_rollout_number,
+                    scenario_ids=scenario_ids,
+                )
+                completed.append(logical_rollout_number)
+                status["completed_logical_rollouts"] = completed
+                atomic_json(status_path, status)
+                print(f"Skip (completed round): {round_marker}")
+                continue
+
+            archived_round = (
+                archive_attempt(round_directory) if round_directory.exists() else None
+            )
+            round_directory.mkdir(parents=True, exist_ok=True)
+            round_logs = round_directory / "logs"
+            round_logs.mkdir(parents=True, exist_ok=True)
+            plugin_config = write_round_plugin_config(base_plugin, round_directory)
+            status["state"] = "trace_generation"
+            status["active_logical_rollout"] = logical_rollout_number
+            atomic_json(status_path, status)
+            command = are_command(
+                experiment,
+                benchmark=benchmark,
+                dataset_root=partition_dataset_root(args.partition),
+                output=round_directory,
+                judge_endpoint=judge_endpoint,
+                num_repeats=1,
+                limit=args.limit,
+                plugin_config=plugin_config,
+                concurrency=args.concurrency,
+            )
+            with (round_logs / "are_benchmark.log").open(
+                "a", encoding="utf-8"
+            ) as stream:
+                subprocess.run(
+                    command,
+                    check=True,
+                    cwd=staged_gaia2,
+                    env=are_env,
+                    stdout=stream,
+                    stderr=subprocess.STDOUT,
+                )
+            supervisor.assert_running()
+            round_metrics, _ = validate_trace_round(
+                round_directory,
+                trace_directory=directory,
+                logical_rollout_number=logical_rollout_number,
+                scenario_ids=scenario_ids,
+            )
+            atomic_json(round_directory / "metrics.json", round_metrics)
+            round_status = {
+                "schema_version": 1,
+                "state": "complete",
+                "logical_rollout_number": logical_rollout_number,
+                "native_num_runs": 1,
+                "scenario_count": len(scenario_ids),
+                "attempted_rollouts": round_metrics["rollout_rows"],
+                "concurrency": args.concurrency or experiment.concurrency,
+                "finished_at": utc_now(),
+                "metrics": round_metrics,
+            }
+            if archived_round is not None:
+                round_status["archived_attempt"] = str(archived_round)
+            atomic_json(round_marker, round_status)
+            completed.append(logical_rollout_number)
+            status["completed_logical_rollouts"] = completed
+            atomic_json(status_path, status)
+
+        status.pop("active_logical_rollout", None)
+        status["state"] = "aggregation"
+        atomic_json(status_path, status)
+        metrics, _ = aggregate_trace_manifest(
+            directory,
+            logical_rollout_numbers=logical_rollout_numbers,
+            scenario_ids=scenario_ids,
+        )
+        atomic_json(directory / "metrics.json", metrics)
+        gpu_metadata = (
+            subprocess.run(
+                [
+                    "nvidia-smi",
+                    "--query-gpu=index,name,uuid,memory.total,driver_version",
+                    "--format=csv,noheader,nounits",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            .stdout.strip()
+            .splitlines()
+        )
+    except Exception:
+        status.update(
+            {
+                "state": "failed",
+                "finished_at": utc_now(),
+                "total_seconds": round(time.monotonic() - started, 3),
+            }
+        )
+        atomic_json(status_path, status)
+        raise
+    finally:
+        supervisor.stop()
+
+    status.update(
+        {
+            "state": "complete",
+            "finished_at": utc_now(),
+            "total_seconds": round(time.monotonic() - started, 3),
+            "metrics": metrics,
+            "gpu_metadata": gpu_metadata,
+            "decomposer_commit": git(local_repo, "rev-parse", "HEAD"),
+            "gaia2_commit": git(staged_gaia2, "rev-parse", "HEAD"),
+        }
+    )
+    atomic_json(status_path, status)
+    atomic_json(marker, status)
+    print(json.dumps(status, indent=2, sort_keys=True))
+    return 0
 
 
 def execute(local_repo: Path, args: argparse.Namespace) -> int:
+    if args.purpose == "trace-generation":
+        return execute_trace_generation(local_repo, args)
+    if args.partition != "full":
+        raise ValueError(
+            "Gaia2 evaluation currently uses the full validation partition"
+        )
+    if args.rollout_offset:
+        raise ValueError("--rollout-offset is only valid for trace generation")
     experiment = get_experiment(args.experiment)
     visible_devices = selected_cuda_devices(experiment, args.cuda_visible_devices)
     directory = (
@@ -889,6 +1479,10 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
                     visible_devices,
                     args.num_repeats,
                     args.limit,
+                    purpose=args.purpose,
+                    partition=args.partition,
+                    concurrency=args.concurrency,
+                    rollout_offset=args.rollout_offset,
                 ),
                 indent=2,
                 sort_keys=True,
@@ -922,9 +1516,12 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
         "state": "starting",
         "experiment": experiment.name,
         "kind": experiment.kind,
+        "purpose": args.purpose,
         "split": SPLIT,
         "domain": DOMAIN,
+        "partition": args.partition,
         "num_repeats": args.num_repeats,
+        "concurrency": args.concurrency or experiment.concurrency,
         "limit": args.limit,
         "decomposer_system_prompt_profile": (
             experiment.prompt_profile
@@ -1047,6 +1644,7 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
             num_repeats=args.num_repeats,
             limit=args.limit,
             plugin_config=plugin_config,
+            concurrency=args.concurrency,
         )
         are_env = dict(env)
         for name in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"):
@@ -1118,7 +1716,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--experiment", required=True)
     parser.add_argument("--split", choices=(SPLIT,), default=SPLIT)
     parser.add_argument("--domain", choices=(DOMAIN,), default=DOMAIN)
+    parser.add_argument(
+        "--purpose",
+        choices=("evaluation", "trace-generation"),
+        default="evaluation",
+    )
+    parser.add_argument("--partition", choices=PARTITIONS, default="full")
     parser.add_argument("--num-repeats", type=positive_int, default=3)
+    parser.add_argument("--concurrency", type=positive_int)
+    parser.add_argument("--rollout-offset", type=nonnegative_int, default=0)
     parser.add_argument("--limit", type=positive_int)
     parser.add_argument("--dry", "--dry-run", action="store_true")
     parser.add_argument("--force", action="store_true")

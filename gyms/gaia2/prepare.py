@@ -33,8 +33,10 @@ from gyms.gaia2.experiments import (  # noqa: E402
     GAIA2_REVISION,
     GAIA2_STAGING_ROOT,
     HF_HOME,
+    PARTITIONS,
     PROJECT_VENV,
     SPLIT,
+    SPLIT_MANIFEST_NAME,
     UV_BIN,
     UV_CACHE,
     DecomposerExperiment,
@@ -47,6 +49,11 @@ from gyms.gaia2.experiments import (  # noqa: E402
     filesystem_revision_root,
     gaia2_venv,
     preparation_manifest,
+)
+from gyms.gaia2.partition import (  # noqa: E402
+    SPLIT_MANIFEST_RELPATH,
+    SPLIT_MANIFEST_SHA256,
+    materialize_partition_views,
 )
 from gyms.gaia2.staging import resolve_revision, stage_revision  # noqa: E402
 
@@ -231,6 +238,10 @@ def _prepare_filesystem(*, reuse_source: bool) -> dict[str, Any]:
 
 
 def prepare_eval(args: argparse.Namespace) -> int:
+    if args.purpose == "trace-generation" and args.partition != "train":
+        raise ValueError(
+            "Gaia2 trace generation preparation is restricted to the train partition"
+        )
     experiments = collect_experiments(
         tuple(args.experiment or ()), tuple(args.filter or ())
     )
@@ -246,6 +257,9 @@ def prepare_eval(args: argparse.Namespace) -> int:
     staged_gaia2 = stage_revision(gaia2_source, commit, GAIA2_STAGING_ROOT / commit)
     runtime = prepare_gaia2_runtime(staged_gaia2, create=not args.skip_runtime)
     dataset = _prepare_dataset(reuse_source=args.reuse_source, gaia2_revision=commit)
+    partition_views = None
+    if args.partition != "full" or args.purpose == "trace-generation":
+        partition_views = materialize_partition_views()
     filesystem = _prepare_filesystem(reuse_source=args.reuse_source)
 
     project_tools = {
@@ -276,6 +290,8 @@ def prepare_eval(args: argparse.Namespace) -> int:
             "experiment": {"name": experiment.name, "kind": experiment.kind},
             "split": SPLIT,
             "domain": DOMAIN,
+            "purpose": args.purpose,
+            "partition": args.partition,
             "dataset": {
                 "manifest": str(dataset_manifest()),
                 "dataset_revision": DATASET_REVISION,
@@ -289,6 +305,12 @@ def prepare_eval(args: argparse.Namespace) -> int:
                 "file_count": filesystem["file_count"],
                 "total_bytes": filesystem["total_bytes"],
                 "aggregate_sha256": filesystem["aggregate_sha256"],
+            },
+            "partition_split": {
+                "name": SPLIT_MANIFEST_NAME,
+                "path": SPLIT_MANIFEST_RELPATH,
+                "sha256": SPLIT_MANIFEST_SHA256,
+                "views": partition_views,
             },
             "gaia2": {
                 "source_repo": str(gaia2_source),
@@ -316,6 +338,8 @@ def prepare_eval(args: argparse.Namespace) -> int:
             {
                 "split": SPLIT,
                 "domain": DOMAIN,
+                "purpose": args.purpose,
+                "partition": args.partition,
                 "dataset_revision": DATASET_REVISION,
                 "filesystem_dataset_revision": FILESYSTEM_DATASET_REVISION,
                 "gaia2_revision": commit,
@@ -334,6 +358,12 @@ def build_parser() -> argparse.ArgumentParser:
     eval_parser = subparsers.add_parser("eval", help="Prepare evaluation inputs")
     eval_parser.add_argument("--split", choices=(SPLIT,), default=SPLIT)
     eval_parser.add_argument("--domain", choices=(DOMAIN,), default=DOMAIN)
+    eval_parser.add_argument(
+        "--purpose",
+        choices=("evaluation", "trace-generation"),
+        default="evaluation",
+    )
+    eval_parser.add_argument("--partition", choices=PARTITIONS, default="full")
     eval_parser.add_argument("--experiment", action="append")
     eval_parser.add_argument("--filter", action="append")
     eval_parser.add_argument("--gaia-repo", type=Path, default=DEFAULT_GAIA2_REPO)

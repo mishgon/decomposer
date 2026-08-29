@@ -22,9 +22,16 @@ GAIA2_REVISION = "3bee736488864e028231755ce2ee32a7065e8648"
 SPLIT = "validation"
 DOMAIN = "execution"
 SCENARIO_COUNT = 160
+SPLIT_MANIFEST_NAME = "execution-110-50-v1"
+SPLIT_MANIFEST_SEED = 42
+TRAIN_SCENARIO_COUNT = 110
+TEST_SCENARIO_COUNT = 50
+PARTITIONS = ("train", "test", "full")
 
 DATA_ROOT = ARTIFACTS_ROOT / "evaluation" / "data" / "gaia2"
 RESULTS_ROOT = ARTIFACTS_ROOT / "evaluation" / "gaia2" / "results"
+TRACES_ROOT = ARTIFACTS_ROOT / "evaluation" / "gaia2" / "traces"
+PARTITION_DATA_ROOT = DATA_ROOT / "partitions" / SPLIT_MANIFEST_NAME
 PREPARATION_MANIFEST_ROOT = DATA_ROOT / "manifests" / SPLIT / DOMAIN
 DECOMPOSER_STAGING_ROOT = ARTIFACTS_ROOT / "code" / "decomposer"
 GAIA2_STAGING_ROOT = ARTIFACTS_ROOT / "code" / "gaia2"
@@ -128,6 +135,8 @@ QWEN35_4B_FILTERED_SFT = (
 DecomposerManagerBackend = Literal["local_vllm", "openrouter"]
 DecomposerPromptProfile = Literal["student", "teacher"]
 SimpleAgentBackend = Literal["local_vllm", "openrouter"]
+Purpose = Literal["evaluation", "trace-generation"]
+Partition = Literal["train", "test", "full"]
 
 
 def gaia2_lock_hash(gaia2_root: Path) -> str:
@@ -154,6 +163,14 @@ def scenario_dir() -> Path:
 
 def dataset_manifest() -> Path:
     return dataset_revision_root() / "dataset_manifest.json"
+
+
+def partition_dataset_root(partition: Partition) -> Path:
+    if partition == "full":
+        return dataset_root()
+    if partition not in PARTITIONS:
+        raise ValueError(f"Unknown Gaia2 partition: {partition!r}")
+    return PARTITION_DATA_ROOT / partition
 
 
 def filesystem_revision_root() -> Path:
@@ -621,6 +638,57 @@ def completion_marker(
     limit: int | None = None,
 ) -> Path:
     return output_dir(experiment, num_repeats, limit) / ".eval_done.json"
+
+
+def trace_run_name(
+    experiment: Experiment,
+    num_repeats: int,
+    rollout_offset: int,
+) -> str:
+    if num_repeats < 1:
+        raise ValueError("num_repeats must be at least 1")
+    if rollout_offset < 0:
+        raise ValueError("rollout_offset cannot be negative")
+    first = rollout_offset + 1
+    last = rollout_offset + num_repeats
+    return f"{experiment.name}-r{first:02d}-r{last:02d}"
+
+
+def trace_output_dir(
+    experiment: Experiment,
+    num_repeats: int,
+    rollout_offset: int,
+    partition: Partition,
+    limit: int | None = None,
+) -> Path:
+    if partition not in PARTITIONS:
+        raise ValueError(f"Unknown Gaia2 partition: {partition!r}")
+    base = (
+        TRACES_ROOT
+        / SPLIT_MANIFEST_NAME
+        / partition
+        / trace_run_name(experiment, num_repeats, rollout_offset)
+    )
+    return base if limit is None else base / f"smoke_{limit}"
+
+
+def trace_completion_marker(
+    experiment: Experiment,
+    num_repeats: int,
+    rollout_offset: int,
+    partition: Partition,
+    limit: int | None = None,
+) -> Path:
+    return (
+        trace_output_dir(
+            experiment,
+            num_repeats,
+            rollout_offset,
+            partition,
+            limit,
+        )
+        / ".trace_done.json"
+    )
 
 
 def job_description(

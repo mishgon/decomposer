@@ -21,15 +21,23 @@ from gyms.gaia2.experiments import (  # noqa: E402
     DOMAIN,
     HF_HOME,
     INSTANCE_TYPES_BY_NUM_GPUS,
+    PARTITIONS,
     PROJECT_VENV,
     SPLIT,
+    SPLIT_MANIFEST_NAME,
     Experiment,
     collect_experiments,
     completion_marker,
     job_description,
     run_name,
+    trace_completion_marker,
+    trace_run_name,
 )
-from gyms.gaia2.run import positive_int, validate_preparation  # noqa: E402
+from gyms.gaia2.run import (  # noqa: E402
+    nonnegative_int,
+    positive_int,
+    validate_preparation,
+)
 from gyms.gaia2.staging import git, stage_revision  # noqa: E402
 
 _TAG_RE = re.compile(r"[#@]\S+")
@@ -97,7 +105,19 @@ def build_job_desc(
     num_repeats: int,
     limit: int | None,
     author: str,
+    *,
+    purpose: str = "evaluation",
+    partition: str = "full",
+    rollout_offset: int = 0,
 ) -> str:
+    if purpose == "trace-generation":
+        identity = trace_run_name(experiment, num_repeats, rollout_offset)
+        if limit is not None:
+            identity += f"-smoke-{limit}"
+        return (
+            f"gaia2-trace {SPLIT_MANIFEST_NAME} {partition} "
+            f"{experiment.kind}-agent {identity} #{author}"
+        )
     return f"{job_description(experiment, num_repeats, limit)} #{author}"
 
 
@@ -108,6 +128,10 @@ def build_job_script(
     limit: int | None,
     *,
     force: bool,
+    purpose: str = "evaluation",
+    partition: str = "full",
+    concurrency: int | None = None,
+    rollout_offset: int = 0,
 ) -> str:
     command = [
         str(PROJECT_VENV / "bin" / "python"),
@@ -120,9 +144,17 @@ def build_job_script(
         SPLIT,
         "--domain",
         DOMAIN,
+        "--purpose",
+        purpose,
+        "--partition",
+        partition,
         "--num-repeats",
         str(num_repeats),
     ]
+    if concurrency is not None:
+        command.extend(["--concurrency", str(concurrency)])
+    if purpose == "trace-generation" or rollout_offset:
+        command.extend(["--rollout-offset", str(rollout_offset)])
     if experiment.num_gpus:
         command.extend(
             [
@@ -150,6 +182,10 @@ def build_payload(
     judge_environment: Mapping[str, str],
     proxy_environment: Mapping[str, str],
     openrouter_key: str,
+    purpose: str = "evaluation",
+    partition: str = "full",
+    concurrency: int | None = None,
+    rollout_offset: int = 0,
 ) -> dict[str, Any]:
     if experiment.num_gpus == 0:
         raise ValueError(
@@ -176,8 +212,20 @@ def build_payload(
             num_repeats,
             limit,
             force=force,
+            purpose=purpose,
+            partition=partition,
+            concurrency=concurrency,
+            rollout_offset=rollout_offset,
         ),
-        "job_desc": build_job_desc(experiment, num_repeats, limit, author),
+        "job_desc": build_job_desc(
+            experiment,
+            num_repeats,
+            limit,
+            author,
+            purpose=purpose,
+            partition=partition,
+            rollout_offset=rollout_offset,
+        ),
         "env_variables": env_variables,
         "instance_type": INSTANCE_TYPES_BY_NUM_GPUS[experiment.num_gpus],
         "type": "binary_exp",
@@ -192,18 +240,28 @@ def build_payload(
 
 
 def print_parameter_table(
-    experiments: Sequence[Experiment], num_repeats: int, limit: int | None
+    experiments: Sequence[Experiment],
+    num_repeats: int,
+    limit: int | None,
+    *,
+    purpose: str = "evaluation",
+    partition: str = "full",
+    rollout_offset: int = 0,
 ) -> None:
     print("\nSelected jobs:")
     print("| # | Run | Agent | Split/domain | GPUs |")
     print("| ---: | --- | --- | --- | ---: |")
     for index, experiment in enumerate(experiments, start=1):
-        identity = run_name(experiment, num_repeats)
+        identity = (
+            trace_run_name(experiment, num_repeats, rollout_offset)
+            if purpose == "trace-generation"
+            else run_name(experiment, num_repeats)
+        )
         if limit is not None:
             identity += f"/smoke_{limit}"
         print(
             f"| {index} | `{identity}` | {experiment.kind} | "
-            f"{SPLIT}/{DOMAIN} | {experiment.num_gpus} |"
+            f"{SPLIT}/{DOMAIN}/{partition} | {experiment.num_gpus} |"
         )
 
 
@@ -213,7 +271,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--filter", action="append")
     parser.add_argument("--split", choices=(SPLIT,), default=SPLIT)
     parser.add_argument("--domain", choices=(DOMAIN,), default=DOMAIN)
+    parser.add_argument(
+        "--purpose",
+        choices=("evaluation", "trace-generation"),
+        default="evaluation",
+    )
+    parser.add_argument("--partition", choices=PARTITIONS, default="full")
     parser.add_argument("--num-repeats", type=positive_int, default=3)
+    parser.add_argument("--concurrency", type=positive_int)
+    parser.add_argument("--rollout-offset", type=nonnegative_int, default=0)
     parser.add_argument("--limit", type=positive_int)
     parser.add_argument("--dry", "--dry-run", action="store_true")
     parser.add_argument("--force", action="store_true")
@@ -229,6 +295,12 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    if args.purpose == "trace-generation" and args.partition != "train":
+        parser.error("trace generation is restricted to --partition train")
+    if args.purpose == "evaluation" and args.partition != "full":
+        parser.error("evaluation currently requires --partition full")
+    if args.purpose == "evaluation" and args.rollout_offset:
+        parser.error("--rollout-offset is only valid for trace generation")
     if not args.experiment and not args.filter:
         parser.error("at least one --experiment or --filter is required")
     try:
@@ -246,7 +318,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     candidates: list[Experiment] = []
     skipped_completed = 0
     for experiment in experiments:
-        marker = completion_marker(experiment, args.num_repeats, args.limit)
+        marker = (
+            trace_completion_marker(
+                experiment,
+                args.num_repeats,
+                args.rollout_offset,
+                args.partition,
+                args.limit,
+            )
+            if args.purpose == "trace-generation"
+            else completion_marker(experiment, args.num_repeats, args.limit)
+        )
         if marker.is_file() and not args.force:
             skipped_completed += 1
             print(f"Skip (completed): {marker}")
@@ -259,7 +341,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             "planned": 0,
             "split": SPLIT,
             "domain": DOMAIN,
+            "purpose": args.purpose,
+            "partition": args.partition,
             "num_repeats": args.num_repeats,
+            "concurrency": args.concurrency,
+            "rollout_offset": args.rollout_offset,
             "limit": args.limit,
             "skipped_completed": skipped_completed,
             "skipped_in_progress": 0,
@@ -275,7 +361,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         staged_workdir = repo_root
     else:
         for experiment in experiments:
-            validate_preparation(experiment)
+            validate_preparation(experiment, partition=args.partition)
         dirty = worktree_dirty(repo_root)
         if dirty:
             raise RuntimeError(
@@ -332,6 +418,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             judge_environment=judge_environment,
             proxy_environment=proxy_environment,
             openrouter_key=openrouter_key or "<not-set>",
+            purpose=args.purpose,
+            partition=args.partition,
+            concurrency=args.concurrency,
+            rollout_offset=args.rollout_offset,
         )
         payload["region"] = options["region"]
         if normalize_job_desc(payload["job_desc"]) in in_progress:
@@ -345,6 +435,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             [experiment for experiment, _ in planned],
             args.num_repeats,
             args.limit,
+            purpose=args.purpose,
+            partition=args.partition,
+            rollout_offset=args.rollout_offset,
         )
 
     launched: list[dict[str, Any]] = []
@@ -370,7 +463,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         "planned": len(planned),
         "split": SPLIT,
         "domain": DOMAIN,
+        "purpose": args.purpose,
+        "partition": args.partition,
         "num_repeats": args.num_repeats,
+        "concurrency": args.concurrency,
+        "rollout_offset": args.rollout_offset,
         "limit": args.limit,
         "skipped_completed": skipped_completed,
         "skipped_in_progress": skipped_in_progress,
