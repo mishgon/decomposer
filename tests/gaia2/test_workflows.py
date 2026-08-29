@@ -58,6 +58,7 @@ from gyms.gaia2.run import (
     _dry_plan,
     _runtime_configs,
     aggregate_trace_manifest,
+    archive_attempt,
     are_command,
     decomposer_vllm_commands,
     openrouter_proxy_command,
@@ -1234,6 +1235,19 @@ def test_trace_execution_resumes_completed_round_and_reuses_services(
     )
     if initial_round_state == "partial_unmarked":
         assert Path(round_marker["archived_attempt"]).is_dir()
+
+
+def test_full_run_archive_preserves_nested_smoke_output(tmp_path: Path) -> None:
+    smoke = tmp_path / "smoke_1"
+    smoke.mkdir(parents=True)
+    (smoke / ".eval_done.json").write_text("{}")
+    (tmp_path / "run_status.json").write_text("{}")
+
+    archive = archive_attempt(tmp_path)
+
+    assert archive is not None
+    assert (archive / "run_status.json").is_file()
+    assert (smoke / ".eval_done.json").is_file()
 
 
 def test_trace_mlspace_payload_is_exactly_one_high_priority_gpu(tmp_path) -> None:

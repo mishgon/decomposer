@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shlex
 import shutil
 import signal
@@ -661,7 +662,12 @@ def validate_preparation(
 def archive_attempt(directory: Path) -> Path | None:
     if not directory.exists():
         return None
-    entries = [path for path in directory.iterdir() if path.name != "attempts"]
+    entries = [
+        path
+        for path in directory.iterdir()
+        if path.name != "attempts"
+        and not (path.is_dir() and re.fullmatch(r"smoke_[1-9][0-9]*", path.name))
+    ]
     if not entries:
         return None
     attempt_id = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
