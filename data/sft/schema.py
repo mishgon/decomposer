@@ -175,21 +175,57 @@ class SelectionSpec(SourceSelectionSpec):
         return value
 
 
+class Gaia2SourceSpec(StrictModel):
+    split_manifest: Path
+    scenario_partition: Literal["train"] = "train"
+    expected_scenarios: int
+    logical_rollout_numbers: tuple[int, ...]
+
+    @field_validator("expected_scenarios")
+    @classmethod
+    def validate_expected_scenarios(cls, value: int) -> int:
+        if isinstance(value, bool) or value <= 0:
+            raise ValueError("gaia2.expected_scenarios must be a positive integer")
+        return value
+
+    @field_validator("logical_rollout_numbers")
+    @classmethod
+    def validate_logical_rollout_numbers(
+        cls, value: tuple[int, ...]
+    ) -> tuple[int, ...]:
+        if (
+            not value
+            or any(isinstance(item, bool) or item <= 0 for item in value)
+            or len(value) != len(set(value))
+            or tuple(sorted(value)) != value
+        ):
+            raise ValueError(
+                "gaia2.logical_rollout_numbers must be unique, positive, and sorted"
+            )
+        return value
+
+
 class SourceSpec(StrictModel):
     id: str
-    adapter: Literal["nemo_gym", "toolathlon_gym"]
+    adapter: Literal["gaia2", "nemo_gym", "toolathlon_gym"]
     path: Path | None = None
     benchmark: str
     environment: str
     partition: SourcePartition
     teacher: str
-    trace_format: Literal["native", "toolathlon_legacy_unversioned"] = "native"
+    trace_format: Literal[
+        "native",
+        "toolathlon_legacy_unversioned",
+        "gaia2_evaluation_v1",
+        "gaia2_trace_manifest_v1",
+    ] = "native"
     subagent_type_aliases: dict[str, str] = Field(default_factory=dict)
     sampling: SourceSamplingSpec | None = None
     selection: SourceSelectionSpec | None = None
     expected_native_rollouts: int | None = None
     expected_candidates: int | None = None
     require_completed_run: bool = False
+    gaia2: Gaia2SourceSpec | None = None
 
     @field_validator("id")
     @classmethod
@@ -227,6 +263,7 @@ class SourceSpec(StrictModel):
 
     @model_validator(mode="after")
     def validate_adapter_options(self) -> "SourceSpec":
+        gaia2_formats = {"gaia2_evaluation_v1", "gaia2_trace_manifest_v1"}
         if (
             self.trace_format == "toolathlon_legacy_unversioned"
             and self.adapter != "toolathlon_gym"
@@ -234,10 +271,21 @@ class SourceSpec(StrictModel):
             raise ValueError(
                 "toolathlon_legacy_unversioned is only valid for Toolathlon sources"
             )
+        if (self.trace_format in gaia2_formats) != (self.adapter == "gaia2"):
+            raise ValueError("GAIA2 trace formats are only valid for GAIA2 sources")
+        if (self.gaia2 is not None) != (self.adapter == "gaia2"):
+            raise ValueError("gaia2 options are required only for GAIA2 sources")
         if self.sampling is not None and self.adapter != "nemo_gym":
             raise ValueError("source task sampling is only supported for NeMo Gym")
-        if self.require_completed_run and self.adapter != "toolathlon_gym":
-            raise ValueError("require_completed_run is only valid for Toolathlon")
+        if self.require_completed_run and self.adapter not in {
+            "gaia2",
+            "toolathlon_gym",
+        }:
+            raise ValueError(
+                "require_completed_run is only valid for GAIA2 or Toolathlon"
+            )
+        if self.adapter == "gaia2" and not self.require_completed_run:
+            raise ValueError("GAIA2 SFT sources must require a completed run")
         if (
             self.selection is not None
             and self.selection.policy == "toolathlon_pass_or_quality"
@@ -260,13 +308,20 @@ class SourceSpec(StrictModel):
                 raise ValueError(
                     "expected_candidates must match the sampling task layout"
                 )
+        if self.gaia2 is not None and self.expected_candidates is not None:
+            expected = self.gaia2.expected_scenarios * len(
+                self.gaia2.logical_rollout_numbers
+            )
+            if self.expected_candidates != expected:
+                raise ValueError("expected_candidates must match the GAIA2 task layout")
         return self
 
 
 class SplitSpec(StrictModel):
-    strategy: Literal["prompt_fixed", "preserve"]
+    strategy: Literal["pinned", "prompt_fixed", "preserve"]
     seed: int = 42
     validation_fraction: float | None = None
+    manifest: Path | None = None
 
     @model_validator(mode="after")
     def validate_strategy(self) -> "SplitSpec":
@@ -278,8 +333,17 @@ class SplitSpec(StrictModel):
                 raise ValueError(
                     "prompt_fixed split requires validation_fraction strictly between 0 and 1"
                 )
-        elif self.validation_fraction is not None:
-            raise ValueError("preserve split must not set validation_fraction")
+            if self.manifest is not None:
+                raise ValueError("prompt_fixed split must not set manifest")
+        elif self.strategy == "pinned":
+            if self.validation_fraction is not None or self.manifest is None:
+                raise ValueError(
+                    "pinned split requires manifest and no validation_fraction"
+                )
+        elif self.validation_fraction is not None or self.manifest is not None:
+            raise ValueError(
+                "preserve split must not set validation_fraction or manifest"
+            )
         return self
 
 
@@ -327,8 +391,10 @@ class BuildSpec(StrictModel):
         if any(source.partition == "test" for source in self.sources):
             raise ValueError("SFT dataset builds must not include test partitions")
         partitions = {source.partition for source in self.sources}
-        if self.split.strategy == "prompt_fixed" and partitions != {"train"}:
-            raise ValueError("prompt_fixed split accepts only train sources")
+        if self.split.strategy in {"pinned", "prompt_fixed"} and partitions != {
+            "train"
+        }:
+            raise ValueError(f"{self.split.strategy} split accepts only train sources")
         if self.split.strategy == "preserve" and not {"train", "validation"}.issubset(
             partitions
         ):
@@ -348,6 +414,7 @@ class BuildSpec(StrictModel):
                 or source.expected_candidates is not None
                 or source.require_completed_run
                 or source.selection is not None
+                or source.gaia2 is not None
                 for source in self.sources
             ):
                 raise ValueError("spec_version 1 does not support v2 source options")

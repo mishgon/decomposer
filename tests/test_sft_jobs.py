@@ -83,7 +83,7 @@ def test_sft_experiments_are_unique_and_register_retained_configs() -> None:
         False,
         True,
     }
-    assert len(experiments) == 16
+    assert len(experiments) == 17
     e2b_four_gpu = experiments[2]
     assert e2b_four_gpu.num_gpus == 4
     assert e2b_four_gpu.use_liger_kernel is True
@@ -105,6 +105,10 @@ def test_sft_experiments_are_unique_and_register_retained_configs() -> None:
         (
             "qwen35-4b-nonthinking-mixed-v1-final-493c24c4-404-"
             "filtered-pass-qgt90-32k-full-4gpu"
+        ),
+        (
+            "qwen35-4b-nonthinking-mixed-v2-493c24c4-gaia2-110-n3-"
+            "filtered-32k-full-4gpu"
         ),
         ("qwen35-4b-nonthinking-mixed-v1-partial-3983f605-327-32k-smoke-4gpu"),
         ("qwen35-4b-nonthinking-mixed-v1-partial-3983f605-327-32k-full-4gpu"),
@@ -917,6 +921,10 @@ def test_qwen35_workplace_full_config_is_pinned_and_uses_full_recipe() -> None:
         "qwen35_4b_nonthinking_mixed_v1_32k_smoke_4gpu.yaml",
         "qwen35_4b_nonthinking_mixed_v1_32k_full_4gpu.yaml",
         ("qwen35_4b_nonthinking_mixed_v1_filtered_pass_quality_32k_full_4gpu.yaml"),
+        (
+            "qwen35_4b_nonthinking_mixed_v2_gaia2_execution_110_n3_"
+            "filtered_32k_full_4gpu.yaml"
+        ),
         ("qwen35_4b_nonthinking_mixed_v1_partial_3983f605_327_32k_smoke_4gpu.yaml"),
         ("qwen35_4b_nonthinking_mixed_v1_partial_3983f605_327_32k_full_4gpu.yaml"),
     ],
@@ -990,6 +998,42 @@ def test_qwen35_filtered_mixed_config_pins_release_and_experiment() -> None:
     assert experiments[0].config_path.endswith(
         "qwen35_4b_nonthinking_mixed_v1_filtered_pass_quality_32k_full_4gpu.yaml"
     )
+
+
+def test_qwen35_gaia2_mixed_config_uses_base_four_gpus_and_patience_two() -> None:
+    config = yaml.safe_load(
+        Path(
+            "training/sft/configs/"
+            "qwen35_4b_nonthinking_mixed_v2_gaia2_execution_110_n3_"
+            "filtered_32k_full_4gpu.yaml"
+        ).read_text()
+    )
+    assert config["model"]["name_or_path"] == "Qwen/Qwen3.5-4B"
+    assert config["model"]["revision"] == ("851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a")
+    release = (
+        "datasets/sft/decomposer-mixed-deepseek-qwen35-4b-nonthinking/"
+        "v2-493c24c4-gaia2-execution-110-n3-wp-r1-tool-pass-qgt90-or-"
+        "missing-gaia-r1-32k"
+    )
+    assert release in config["data"]["train_file"]
+    assert release in config["data"]["validation_file"]
+    assert release in config["data"]["manifest_file"]
+    assert config["data"]["include_reasoning"] is False
+    assert config["training"]["global_batch_size"] == 4
+    assert config["training"]["max_length"] == 32768
+    assert config["run"]["expected_world_size"] == 4
+    assert config["run"]["early_stopping"] == {
+        "patience": 2,
+        "threshold": 0.0,
+    }
+
+    experiments = collect_experiments("gaia2-110-n3-filtered-32k-full-4gpu")
+    assert len(experiments) == 1
+    assert experiments[0].num_gpus == 4
+    command = build_train_command(
+        experiments[0], workdir="/staged", output_dir="/artifacts/gaia2-mixed"
+    )
+    assert command[:3] == ["torchrun", "--standalone", "--nproc-per-node=4"]
 
 
 def test_qwen35_partial_mixed_configs_use_snapshot_release_and_32k_recipe() -> None:

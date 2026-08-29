@@ -69,24 +69,35 @@ def load_build_spec(path: str | Path) -> LoadedBuildSpec:
     if not isinstance(raw, Mapping):
         raise ValueError(f"Dataset build specification {path} must contain an object.")
     spec = BuildSpec.model_validate(raw)
-    resolved_sources = tuple(
-        source.model_copy(
-            update={
-                "path": (
-                    None
-                    if source.path is None
-                    else source.path.resolve()
-                    if source.path.is_absolute()
-                    else (path.parent / source.path).resolve()
-                )
-            }
+
+    def resolve(candidate: Path | None) -> Path | None:
+        if candidate is None:
+            return None
+        return (
+            candidate.resolve()
+            if candidate.is_absolute()
+            else (path.parent / candidate).resolve()
         )
-        for source in spec.sources
-    )
+
+    resolved_sources = []
+    for source in spec.sources:
+        gaia2 = source.gaia2
+        if gaia2 is not None:
+            gaia2 = gaia2.model_copy(
+                update={"split_manifest": resolve(gaia2.split_manifest)}
+            )
+        resolved_sources.append(
+            source.model_copy(update={"path": resolve(source.path), "gaia2": gaia2})
+        )
+    split = spec.split
+    if split.manifest is not None:
+        split = split.model_copy(update={"manifest": resolve(split.manifest)})
     return LoadedBuildSpec(
         path=path,
         sha256=sha256_file(path),
-        spec=spec.model_copy(update={"sources": resolved_sources}),
+        spec=spec.model_copy(
+            update={"sources": tuple(resolved_sources), "split": split}
+        ),
     )
 
 
@@ -270,6 +281,126 @@ def _allocate_prompt_fixed_split(
             "validation_groups": len(validation_groups),
             "validation_groups_by_category": dict(sorted(quotas.items())),
             "validation_group_ids": sorted(validation_groups),
+        },
+    )
+
+
+def _allocate_pinned_split(
+    records: Sequence[CanonicalRollout],
+    *,
+    manifest_path: Path,
+    seed: int,
+) -> tuple[list[CanonicalRollout], list[CanonicalRollout], JsonObject]:
+    if not manifest_path.is_file():
+        raise FileNotFoundError(f"Pinned split manifest is missing: {manifest_path}")
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as error:
+        raise ValueError(f"Invalid pinned split manifest: {manifest_path}") from error
+    if not isinstance(manifest, Mapping):
+        raise ValueError("Pinned split manifest must contain an object")
+    expected_keys = {"schema_version", "name", "seed", "parents", "groups", "summary"}
+    if set(manifest) != expected_keys or manifest.get("schema_version") != 1:
+        raise ValueError("Pinned split manifest has an unsupported schema")
+    name = manifest.get("name")
+    parents = manifest.get("parents")
+    groups = manifest.get("groups")
+    summary = manifest.get("summary")
+    if (
+        not isinstance(name, str)
+        or not name
+        or manifest.get("seed") != seed
+        or not isinstance(parents, Mapping)
+        or not isinstance(groups, list)
+        or not groups
+        or not isinstance(summary, Mapping)
+    ):
+        raise ValueError("Pinned split manifest metadata is invalid")
+
+    assignments: dict[str, tuple[str, str, str]] = {}
+    partition_counts: Counter[str] = Counter()
+    source_counts: Counter[str] = Counter()
+    for index, raw_group in enumerate(groups):
+        if not isinstance(raw_group, Mapping) or set(raw_group) != {
+            "category",
+            "group_id",
+            "partition",
+            "source",
+        }:
+            raise ValueError(f"Pinned split group {index} is invalid")
+        group_id = raw_group.get("group_id")
+        category = raw_group.get("category")
+        partition = raw_group.get("partition")
+        source = raw_group.get("source")
+        if (
+            not isinstance(group_id, str)
+            or not group_id
+            or group_id in assignments
+            or not isinstance(category, str)
+            or not category
+            or partition not in {"train", "validation"}
+            or not isinstance(source, str)
+            or not source
+        ):
+            raise ValueError(f"Pinned split group {index} is invalid or duplicated")
+        assignments[group_id] = (partition, category, source)
+        partition_counts[partition] += 1
+        source_counts[source] += 1
+
+    expected_summary = {
+        "groups": len(assignments),
+        "train_groups": partition_counts["train"],
+        "validation_groups": partition_counts["validation"],
+        "groups_by_source": dict(sorted(source_counts.items())),
+    }
+    if dict(summary) != expected_summary:
+        raise ValueError("Pinned split manifest summary changed")
+
+    materialized_groups: set[str] = set()
+    train: list[CanonicalRollout] = []
+    validation: list[CanonicalRollout] = []
+    for record in records:
+        assignment = assignments.get(record.group_id)
+        if assignment is None:
+            raise ValueError(
+                f"Task group {record.group_id!r} is missing from the pinned split"
+            )
+        partition, category, _source = assignment
+        record_category = _record_category(record)
+        if record_category != category:
+            raise ValueError(
+                f"Task group {record.group_id!r} changed category from "
+                f"{category!r} to {record_category!r}"
+            )
+        materialized_groups.add(record.group_id)
+        (train if partition == "train" else validation).append(record)
+    if not train or not validation:
+        raise ValueError("Pinned split must materialize non-empty train and validation")
+
+    missing_groups = sorted(set(assignments) - materialized_groups)
+    return (
+        train,
+        validation,
+        {
+            "strategy": "pinned",
+            "group_key": "adapter-supplied stable task group ID",
+            "seed": seed,
+            "assignment_manifest": {
+                "name": name,
+                "sha256": sha256_file(manifest_path),
+                "parents": dict(parents),
+            },
+            "num_groups": len(assignments),
+            "train_groups": partition_counts["train"],
+            "validation_groups": partition_counts["validation"],
+            "materialized_groups": len(materialized_groups),
+            "unmaterialized_groups": len(missing_groups),
+            "unmaterialized_group_ids": missing_groups,
+            "validation_group_ids": sorted(
+                group_id
+                for group_id, (partition, _category, _source) in assignments.items()
+                if partition == "validation"
+            ),
         },
     )
 
@@ -460,21 +591,30 @@ def _logical_spec(spec: BuildSpec) -> JsonObject:
                 "trace_format",
                 "subagent_type_aliases",
                 "sampling",
+                "gaia2",
                 "expected_native_rollouts",
                 "expected_candidates",
                 "require_completed_run",
             }
         )
+    logical_sources = []
+    for source in spec.sources:
+        value = source.model_dump(mode="json", exclude=source_exclude)
+        gaia2 = value.get("gaia2")
+        if isinstance(gaia2, dict):
+            gaia2.pop("split_manifest", None)
+        else:
+            value.pop("gaia2", None)
+        logical_sources.append(value)
+    logical_split = spec.split.model_dump(mode="json", exclude_none=True)
+    logical_split.pop("manifest", None)
     logical = {
         "spec_version": spec.spec_version,
         "dataset": spec.dataset.model_dump(mode="json"),
         "policy": spec.policy.model_dump(mode="json", exclude=policy_exclude),
-        "sources": [
-            source.model_dump(mode="json", exclude=source_exclude)
-            for source in spec.sources
-        ],
+        "sources": logical_sources,
         "selection": spec.selection.model_dump(mode="json"),
-        "split": spec.split.model_dump(mode="json", exclude_none=True),
+        "split": logical_split,
     }
     if spec.tokenization is not None:
         logical["tokenization"] = spec.tokenization.model_dump(mode="json")
@@ -652,6 +792,14 @@ def prepare_dataset(
                 validation_fraction=float(spec.split.validation_fraction),
                 seed=spec.split.seed,
             )
+        )
+    elif spec.split.strategy == "pinned":
+        if spec.split.manifest is None:
+            raise AssertionError("Pinned split manifest was not resolved")
+        train_records, validation_records, split_manifest = _allocate_pinned_split(
+            retained,
+            manifest_path=spec.split.manifest,
+            seed=spec.split.seed,
         )
     else:
         train_records, validation_records, split_manifest = _preserve_source_split(

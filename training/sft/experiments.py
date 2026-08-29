@@ -195,6 +195,25 @@ def sft_experiments() -> list[ExperimentConfig]:
             pytorch_cuda_alloc_conf="expandable_segments:True",
         ),
         ExperimentConfig(
+            name=(
+                "qwen35-4b-nonthinking-mixed-v2-493c24c4-gaia2-110-n3-"
+                "filtered-32k-full-4gpu"
+            ),
+            config_path=(
+                "training/sft/configs/qwen35_4b_nonthinking_mixed_v2_"
+                "gaia2_execution_110_n3_filtered_32k_full_4gpu.yaml"
+            ),
+            description=(
+                "Qwen3.5-4B Decomposer SFT from base "
+                "(non-thinking, filtered Workplace and Toolathlon plus reward-1 "
+                "GAIA2 execution n=3 traces on the pinned 110-task partition, "
+                "32K, 4 GPU)"
+            ),
+            num_gpus=4,
+            use_liger_kernel=True,
+            pytorch_cuda_alloc_conf="expandable_segments:True",
+        ),
+        ExperimentConfig(
             name=("qwen35-4b-nonthinking-mixed-v1-partial-3983f605-327-32k-smoke-4gpu"),
             config_path=(
                 "training/sft/configs/qwen35_4b_nonthinking_mixed_"

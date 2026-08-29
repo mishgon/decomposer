@@ -133,6 +133,44 @@ This run uses the same optimization settings as the all-rewards comparison:
 early-stopping patience two. It has an independent output directory and does
 not resume or overwrite the all-rewards run.
 
+#### Filtered GAIA2 n=3 extension
+
+The GAIA2 extension adds only binary reward-1 traces from logical rollouts
+1–3 on the immutable `execution-110-50-v1` training partition. Universes 25,
+26, and 28 remain isolated as test holdout. A checked-in assignment manifest
+preserves all 1,251 Workplace/Toolathlon task memberships and pins all 110
+GAIA2 task groups now (99 train, 11 validation), including tasks without a
+correct n=3 trace, so later logical rollouts 4–10 cannot move a task between
+splits.
+
+Build the release from a clean committed checkout:
+
+```bash
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 .venv/bin/python -m data.sft.prepare \
+  --spec data/sft/specs/decomposer_mixed_deepseek_qwen35_4b_nonthinking_v2_gaia2_execution_110_n3_filtered_32k.yaml \
+  --output-root /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/datasets/sft
+```
+
+The expected source grid has 1,989 candidates. Filtering retains 1,347
+structurally valid correct/quality-selected traces before tokenization,
+including 96 GAIA2 reward-1 traces from 330 training-partition attempts. The
+32K limit excludes 13 traces (12 Toolathlon and one GAIA2), producing 1,334
+records: 1,209 train and 125 validation. GAIA2 rewards are strictly validated
+as binary `0` or `1`.
+
+Submit the base Qwen3.5-4B run on four GPUs at high priority:
+
+```bash
+/mnt/shared_ru.ml.SZ-5_000264/sukhorukov/.venv-mls/bin/python \
+  -m training.sft.run_train_jobs \
+  --filter qwen35-4b-nonthinking-mixed-v2-493c24c4-gaia2-110-n3-filtered-32k-full-4gpu \
+  --priority high
+```
+
+The run has a five-epoch ceiling and early-stopping patience two. It uses the
+student prompt, removes teacher reasoning at preprocessing time, and has a
+distinct immutable dataset and checkpoint path.
+
 #### Pinned partial Toolathlon snapshot
 
 The snapshot-specific release
