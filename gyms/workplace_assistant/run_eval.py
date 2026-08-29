@@ -164,6 +164,7 @@ def build_job_script(
     *,
     purpose: RunPurpose,
     force: bool,
+    concurrency: int | None = None,
 ) -> str:
     command = [
         str(PROJECT_VENV / "bin" / "python"),
@@ -179,6 +180,8 @@ def build_job_script(
         "--num-repeats",
         str(num_repeats),
     ]
+    if concurrency is not None:
+        command.extend(["--concurrency", str(concurrency)])
     if limit is not None:
         command.extend(["--limit", str(limit)])
     if force:
@@ -200,6 +203,8 @@ def build_payload(
     force: bool,
     proxy_env: Mapping[str, str],
     openrouter_key: str,
+    llm_proxy_environment: Mapping[str, str] | None = None,
+    concurrency: int | None = None,
 ) -> dict[str, Any]:
     env_variables = {
         "WORKDIR": str(staged_workdir),
@@ -212,6 +217,8 @@ def build_payload(
     if experiment.requires_openrouter:
         env_variables.update(proxy_env)
         env_variables["OPENROUTER_API_KEY_DECOMPOSER"] = openrouter_key
+    if isinstance(experiment, DecomposerExperiment) and experiment.requires_llm_proxy:
+        env_variables.update(dict(llm_proxy_environment or {}))
     payload: dict[str, Any] = {
         "script": build_job_script(
             staged_workdir,
@@ -221,6 +228,7 @@ def build_payload(
             limit,
             purpose=purpose,
             force=force,
+            concurrency=concurrency,
         ),
         "job_desc": build_job_desc(
             experiment,
@@ -270,6 +278,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--purpose", choices=RUN_PURPOSES, required=True)
     parser.add_argument("--split", choices=SPLITS, default="train")
     parser.add_argument("--num-repeats", type=positive_int, default=1)
+    parser.add_argument("--concurrency", type=positive_int)
     parser.add_argument("--limit", type=positive_int)
     parser.add_argument("--dry", "--dry-run", action="store_true")
     parser.add_argument("--force", action="store_true")
@@ -328,6 +337,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             "purpose": args.purpose,
             "split": args.split,
             "num_repeats": args.num_repeats,
+            "concurrency": args.concurrency,
             "limit": args.limit,
             "skipped_completed": skipped_completed,
             "skipped_in_progress": 0,
@@ -367,6 +377,20 @@ def main(argv: Sequence[str] | None = None) -> int:
             for name in _PROXY_ENV_VARIABLES
             if os.environ.get(name)
         }
+    llm_proxy_environment = {
+        name: os.environ.get(name, "")
+        for name in ("LLM_PROXY_URL", "LLM_PROXY_MASTER_KEY")
+    }
+    if any(
+        isinstance(experiment, DecomposerExperiment)
+        and experiment.requires_llm_proxy
+        for experiment in experiments
+    ) and not args.dry:
+        missing = [name for name, value in llm_proxy_environment.items() if not value]
+        if missing:
+            raise RuntimeError(
+                "Remote manager environment is not set: " + ", ".join(missing)
+            )
 
     from mls.manager.job.utils import (
         get_in_progress_jobs,
@@ -395,6 +419,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             force=args.force,
             proxy_env=proxy_env,
             openrouter_key=openrouter_key or "<not-set>",
+            llm_proxy_environment=llm_proxy_environment,
+            concurrency=args.concurrency,
         )
         payload["region"] = options["region"]
         if normalize_job_desc(payload["job_desc"]) in in_progress:
@@ -445,6 +471,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "purpose": args.purpose,
         "split": args.split,
         "num_repeats": args.num_repeats,
+        "concurrency": args.concurrency,
         "limit": args.limit,
         "skipped_completed": skipped_completed,
         "skipped_in_progress": skipped_in_progress,

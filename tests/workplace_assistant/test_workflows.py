@@ -41,14 +41,83 @@ from gyms.qwen_sampling import qwen35_general_sampling
 
 
 def test_registry_is_global_and_unique() -> None:
-    assert len(DECOMPOSER_EXPERIMENTS) == 13
+    assert len(DECOMPOSER_EXPERIMENTS) == 14
     assert len(SIMPLE_EXPERIMENTS) == 28
-    assert len(experiments.EXPERIMENTS) == 41
+    assert len(experiments.EXPERIMENTS) == 42
     assert experiments.BASE_IMAGE.endswith("py3.12-torch2.7.0:0.0.42")
     assert {experiment.kind for experiment in experiments.ALL_EXPERIMENTS} == {
         "decomposer",
         "simple",
     }
+
+
+def test_qwen36_teacher_uses_internal_proxy_and_concurrency_override() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    experiment = get_experiment(
+        "qwen36-35b-a3b-teacher-qwen35-4b-non-thinking"
+    )
+    assert isinstance(experiment, DecomposerExperiment)
+    assert experiment.manager_backend == "llm_proxy"
+    assert experiment.manager_model_id == "Qwen/Qwen3.6-35B-A3B-FP8"
+    assert experiment.manager_reasoning_mode == "service_default"
+    assert experiment.requires_llm_proxy
+    assert experiment.requires_remote_manager
+    assert not experiment.requires_openrouter
+    assert experiment.num_gpus == 1
+    assert experiment.concurrency == 16
+    assert [model.model_id for model in models_for_experiment(experiment)] == [
+        "Qwen/Qwen3.5-4B"
+    ]
+    assert prepare_module.components_for_experiments((experiment,)) == (
+        "resources_servers/workplace_assistant",
+        "responses_api_agents/decomposer_agent",
+        "responses_api_models/openai_model",
+    )
+
+    proxy = run_module.remote_manager_proxy_command(experiment)
+    assert "gyms.remote_model_proxy" in proxy
+    assert proxy[proxy.index("--upstream-url-env") + 1] == "LLM_PROXY_URL"
+    assert proxy[proxy.index("--api-key-env") + 1] == "LLM_PROXY_MASTER_KEY"
+    assert "--no-verify-tls" in proxy
+
+    plan = run_module._dry_plan(
+        repo_root,
+        experiment,
+        "trace-generation",
+        "validation",
+        3,
+        None,
+        Path("/tmp/qwen36-workplace"),
+        ("0",),
+        16,
+    )
+    assert plan["decomposer_system_prompt_profile"] == "teacher"
+    assert "gyms.remote_model_proxy" in plan["services"][0]
+    assert "--concurrency 16" in plan["gym_eval"]
+
+    payload = run_eval.build_payload(
+        experiment,
+        repo_root,
+        purpose="trace-generation",
+        split="validation",
+        num_repeats=3,
+        limit=None,
+        author="alice",
+        base_image=experiments.BASE_IMAGE,
+        priority="high",
+        force=False,
+        proxy_env={},
+        openrouter_key="<not-set>",
+        llm_proxy_environment={
+            "LLM_PROXY_URL": "https://internal/v1",
+            "LLM_PROXY_MASTER_KEY": "secret",
+        },
+        concurrency=16,
+    )
+    assert payload["env_variables"]["LLM_PROXY_URL"] == "https://internal/v1"
+    assert payload["env_variables"]["LLM_PROXY_MASTER_KEY"] == "secret"
+    assert "--concurrency 16" in payload["script"]
+    assert payload["priority_class"] == "high"
 
 
 def test_all_qwen_simple_profiles_use_official_mode_specific_sampling() -> None:

@@ -192,9 +192,9 @@ def components_for_experiments(experiments: Sequence[Experiment]) -> tuple[str, 
     )
     if decomposer_experiments:
         components.add("responses_api_agents/decomposer_agent")
-    if any(experiment.requires_openrouter for experiment in decomposer_experiments):
+    if any(experiment.requires_remote_manager for experiment in decomposer_experiments):
         components.add("responses_api_models/openai_model")
-    if any(not experiment.requires_openrouter for experiment in decomposer_experiments):
+    if any(experiment.requires_local_manager for experiment in decomposer_experiments):
         components.add("responses_api_models/vllm_model")
     return tuple(sorted(components))
 
@@ -355,7 +355,7 @@ def _experiment_models(
                 experiment.checkpoint, full_hashes=full_hashes
             )
         }
-    return {
+    models = {
         "subagents": {
             model.model_id: validate_checkpoint(
                 model.snapshot, full_hashes=full_hashes
@@ -363,6 +363,17 @@ def _experiment_models(
             for model in models_for_experiment(experiment)
         }
     }
+    if experiment.requires_llm_proxy:
+        models["manager"] = {
+            "backend": experiment.manager_backend,
+            "model_id": experiment.manager_model_id,
+            "upstream_url_env": experiment.manager_upstream_url_env,
+            "api_key_env": experiment.manager_api_key_env,
+            "response_tool_parser": experiment.manager_response_tool_parser,
+            "reasoning_mode": experiment.manager_reasoning_mode,
+            "verify_tls": experiment.manager_verify_tls,
+        }
+    return models
 
 
 def _run_upstream_preparer(

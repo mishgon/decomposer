@@ -236,6 +236,42 @@ def decomposer_vllm_command(
     return command
 
 
+def remote_manager_proxy_command(experiment: DecomposerExperiment) -> list[str]:
+    if not experiment.requires_llm_proxy:
+        raise ValueError(f"{experiment.name} does not use the LLM proxy manager")
+    required = {
+        "manager_proxy_port": experiment.manager_proxy_port,
+        "manager_upstream_url_env": experiment.manager_upstream_url_env,
+        "manager_api_key_env": experiment.manager_api_key_env,
+        "manager_response_tool_parser": experiment.manager_response_tool_parser,
+    }
+    missing = [name for name, value in required.items() if value is None]
+    if missing:
+        raise ValueError(f"{experiment.name}: missing remote manager fields: {missing}")
+    command = [
+        str(PROJECT_VENV / "bin" / "python"),
+        "-m",
+        "gyms.remote_model_proxy",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        str(experiment.manager_proxy_port),
+        "--upstream-url-env",
+        str(experiment.manager_upstream_url_env),
+        "--api-key-env",
+        str(experiment.manager_api_key_env),
+        "--response-tool-parser",
+        str(experiment.manager_response_tool_parser),
+        "--timeout-seconds",
+        "3300",
+        "--max-retries",
+        "2",
+    ]
+    if not experiment.manager_verify_tls:
+        command.append("--no-verify-tls")
+    return command
+
+
 def langgraph_command(
     local_repo: Path, experiment: DecomposerExperiment
 ) -> tuple[list[str], Path]:
@@ -379,6 +415,7 @@ def gym_eval_command(
     num_repeats: int,
     limit: int | None,
     resume: bool,
+    concurrency: int | None = None,
 ) -> list[str]:
     dataset = (
         decomposer_dataset(split)
@@ -404,7 +441,7 @@ def gym_eval_command(
         "--num-repeats",
         str(num_repeats),
         "--concurrency",
-        str(experiment.concurrency),
+        str(concurrency or experiment.concurrency),
         "+head_server.host=127.0.0.1",
         "+head_server.port=11000",
     ]
@@ -517,6 +554,20 @@ def validate_preparation(
             if Path(prepared[model_id]["path"]) != model.snapshot:
                 raise ValueError(f"Unexpected model path for {model_id}")
             _validate_file_manifest(model.snapshot, prepared[model_id])
+        if experiment.requires_llm_proxy:
+            expected_manager = {
+                "backend": experiment.manager_backend,
+                "model_id": experiment.manager_model_id,
+                "upstream_url_env": experiment.manager_upstream_url_env,
+                "api_key_env": experiment.manager_api_key_env,
+                "response_tool_parser": experiment.manager_response_tool_parser,
+                "reasoning_mode": experiment.manager_reasoning_mode,
+                "verify_tls": experiment.manager_verify_tls,
+            }
+            if manifest["models"].get("manager") != expected_manager:
+                raise ValueError(
+                    "Preparation manifest points at an unexpected remote manager"
+                )
     return manifest
 
 
@@ -729,6 +780,7 @@ def _dry_plan(
     limit: int | None,
     directory: Path,
     visible_devices: tuple[str, ...],
+    concurrency: int | None = None,
 ) -> dict[str, Any]:
     validate_purpose_for_experiment(experiment, purpose)
     logs = directory / "logs"
@@ -742,7 +794,10 @@ def _dry_plan(
             gpu_assignments = {"policy_vllm": ",".join(visible_devices)}
     else:
         models = models_for_experiment(experiment)
-        services = [decomposer_vllm_command(model, experiment) for model in models]
+        services = []
+        if experiment.requires_llm_proxy:
+            services.append(remote_manager_proxy_command(experiment))
+        services.extend(decomposer_vllm_command(model, experiment) for model in models)
         services.append(langgraph_command(local_repo, experiment)[0])
         gpu_assignments = {
             f"subagent_vllm_{model.port}": visible_devices[model.gpu]
@@ -780,6 +835,7 @@ def _dry_plan(
                 num_repeats=num_repeats,
                 limit=limit,
                 resume=rollout_path.exists(),
+                concurrency=concurrency,
             )
         ),
         "output_dir": str(directory),
@@ -844,6 +900,7 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
                     args.limit,
                     directory,
                     visible_devices,
+                    args.concurrency,
                 ),
                 indent=2,
                 sort_keys=True,
@@ -871,6 +928,16 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
             raise RuntimeError("OPENROUTER_API_KEY_DECOMPOSER is not set")
         if not (os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy")):
             raise RuntimeError("HTTPS_PROXY or https_proxy is required for OpenRouter")
+    if experiment.requires_llm_proxy:
+        required = (
+            experiment.manager_upstream_url_env,
+            experiment.manager_api_key_env,
+        )
+        missing = [name for name in required if not name or not os.environ.get(name)]
+        if missing:
+            raise RuntimeError(
+                "Remote manager environment is not set: " + ", ".join(missing)
+            )
 
     archived_attempt = archive_attempt(directory) if args.force else None
     directory.mkdir(parents=True, exist_ok=True)
@@ -893,6 +960,7 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
         "run_name": run_name(experiment, args.num_repeats),
         "split": args.split,
         "num_repeats": args.num_repeats,
+        "concurrency": args.concurrency or experiment.concurrency,
         "limit": args.limit,
         "output_dir": str(directory),
         "cuda_visible_devices": list(visible_devices),
@@ -900,6 +968,14 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
         "timings_seconds": {},
         "preparation_manifest": str(preparation_manifest(args.split, experiment.name)),
     }
+    if isinstance(experiment, DecomposerExperiment) and experiment.requires_llm_proxy:
+        status["manager"] = {
+            "backend": experiment.manager_backend,
+            "model": experiment.manager_model_id,
+            "endpoint": os.environ.get(experiment.manager_upstream_url_env or "", ""),
+            "response_tool_parser": experiment.manager_response_tool_parser,
+            "reasoning_mode": experiment.manager_reasoning_mode,
+        }
     if archived_attempt is not None:
         status["archived_attempt"] = str(archived_attempt)
     atomic_json(status_path, status)
@@ -941,6 +1017,17 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
                         "http://127.0.0.1:8000/v1/models", [model_process], 1800
                     )
             else:
+                if experiment.requires_llm_proxy:
+                    proxy_process = supervisor.start(
+                        "remote_manager_proxy",
+                        remote_manager_proxy_command(experiment),
+                        cwd=local_repo,
+                    )
+                    wait_http(
+                        f"http://127.0.0.1:{experiment.manager_proxy_port}/health",
+                        [proxy_process],
+                        300,
+                    )
                 model_processes: list[subprocess.Popen[Any]] = []
                 models = models_for_experiment(experiment)
                 for startup_wave in sorted({model.startup_wave for model in models}):
@@ -1021,6 +1108,7 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
                 num_repeats=args.num_repeats,
                 limit=args.limit,
                 resume=resume,
+                concurrency=args.concurrency,
             )
             with (logs / "gym_eval.log").open("a") as stream:
                 subprocess.run(
@@ -1039,6 +1127,21 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
                 rollout_path=rollout_path,
                 limit=args.limit,
             )
+            if (
+                experiment.name
+                == "qwen36-35b-a3b-teacher-qwen35-4b-non-thinking"
+                and purpose == "trace-generation"
+                and args.split == "validation"
+                and args.num_repeats == 3
+                and args.limit is None
+            ):
+                from gyms.workplace_assistant.comparison import (
+                    build_teacher_comparison,
+                )
+
+                comparison_path = directory / "comparison.json"
+                atomic_json(comparison_path, build_teacher_comparison(directory))
+                status["comparison_report"] = str(comparison_path)
             gpu_metadata = (
                 subprocess.run(
                     [
@@ -1109,6 +1212,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--purpose", choices=RUN_PURPOSES, required=True)
     parser.add_argument("--split", choices=SPLITS, default="train")
     parser.add_argument("--num-repeats", type=positive_int, default=1)
+    parser.add_argument("--concurrency", type=positive_int)
     parser.add_argument("--limit", type=positive_int)
     parser.add_argument("--dry", "--dry-run", action="store_true")
     parser.add_argument("--force", action="store_true")

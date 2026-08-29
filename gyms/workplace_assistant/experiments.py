@@ -37,7 +37,7 @@ SPLITS = tuple(SPLIT_ROWS)
 RUN_PURPOSES = ("trace-generation", "evaluation")
 RunPurpose = Literal["trace-generation", "evaluation"]
 DecomposerPromptProfile = Literal["teacher", "student"]
-DecomposerManagerBackend = Literal["openrouter", "local_vllm"]
+DecomposerManagerBackend = Literal["openrouter", "llm_proxy", "local_vllm"]
 SimpleAgentBackend = Literal["openrouter", "local_vllm"]
 
 
@@ -103,6 +103,13 @@ class DecomposerExperiment:
     name: str
     gym_config_filename: str
     manager_backend: DecomposerManagerBackend = "openrouter"
+    manager_model_id: str | None = None
+    manager_proxy_port: int | None = None
+    manager_upstream_url_env: str | None = None
+    manager_api_key_env: str | None = None
+    manager_response_tool_parser: str | None = None
+    manager_reasoning_mode: Literal["service_default"] | None = None
+    manager_verify_tls: bool = True
     concurrency: int = 8
     max_model_len: int = 32768
     max_num_seqs: int = 32
@@ -113,9 +120,40 @@ class DecomposerExperiment:
     subagent_graph: Literal["gym_gemma4", "qwen35"] = "gym_gemma4"
     kind: Literal["decomposer"] = field(init=False, default="decomposer")
 
+    def __post_init__(self) -> None:
+        remote_fields = (
+            self.manager_model_id,
+            self.manager_proxy_port,
+            self.manager_upstream_url_env,
+            self.manager_api_key_env,
+            self.manager_response_tool_parser,
+            self.manager_reasoning_mode,
+        )
+        if self.manager_backend == "llm_proxy":
+            if any(value is None for value in remote_fields):
+                raise ValueError(
+                    f"{self.name}: llm_proxy requires complete remote manager fields"
+                )
+        elif any(value is not None for value in remote_fields):
+            raise ValueError(
+                f"{self.name}: remote manager fields require manager_backend=llm_proxy"
+            )
+
     @property
     def requires_openrouter(self) -> bool:
         return self.manager_backend == "openrouter"
+
+    @property
+    def requires_llm_proxy(self) -> bool:
+        return self.manager_backend == "llm_proxy"
+
+    @property
+    def requires_remote_manager(self) -> bool:
+        return self.manager_backend != "local_vllm"
+
+    @property
+    def requires_local_manager(self) -> bool:
+        return self.manager_backend == "local_vllm"
 
 
 @dataclass(frozen=True)
@@ -578,6 +616,39 @@ DECOMPOSER_EXPERIMENTS = (
         gym_config_filename=(
             "workplace_assistant_deepseek_v4_flash_0731_qwen35_4b_non_thinking.yaml"
         ),
+        num_gpus=1,
+        max_model_len=131072,
+        subagent_graph="qwen35",
+        model_servers=(
+            ModelServer(
+                "Qwen/Qwen3.5-4B",
+                QWEN35_4B_BASE,
+                8025,
+                0,
+                0.90,
+                0,
+                thinking=False,
+                tool_call_parser="qwen3_xml",
+                reasoning_parser=None,
+                gdn_prefill_backend="triton",
+            ),
+        ),
+    ),
+    DecomposerExperiment(
+        name="qwen36-35b-a3b-teacher-qwen35-4b-non-thinking",
+        gym_config_filename=(
+            "workplace_assistant_qwen36_35b_a3b_teacher_"
+            "qwen35_4b_non_thinking.yaml"
+        ),
+        manager_backend="llm_proxy",
+        manager_model_id="Qwen/Qwen3.6-35B-A3B-FP8",
+        manager_proxy_port=8142,
+        manager_upstream_url_env="LLM_PROXY_URL",
+        manager_api_key_env="LLM_PROXY_MASTER_KEY",
+        manager_response_tool_parser="qwen3_xml",
+        manager_reasoning_mode="service_default",
+        manager_verify_tls=False,
+        concurrency=16,
         num_gpus=1,
         max_model_len=131072,
         subagent_graph="qwen35",

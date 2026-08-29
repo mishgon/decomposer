@@ -54,6 +54,18 @@ HTTPS_PROXY=... \
   --experiment glm-5-2-gemma4-26b-a4b-non-thinking \
   --split train
 
+# Qwen3.6-35B-A3B teacher comparison on the complete validation split.
+# The loopback proxy converts the deployment's native Qwen XML tool calls into
+# Responses API function-call items; reasoning is enabled at the deployment's
+# service-default effort, and the local worker remains Qwen3.5-4B.
+.venv/bin/python -m gyms.workplace_assistant.run \
+  --purpose trace-generation \
+  --experiment qwen36-35b-a3b-teacher-qwen35-4b-non-thinking \
+  --split validation \
+  --num-repeats 3 \
+  --concurrency 16 \
+  --cuda-visible-devices 0
+
 # One-task local smoke run. There is no automatic smoke pass.
 .venv/bin/python -m gyms.workplace_assistant.run \
   --purpose evaluation \
@@ -91,6 +103,16 @@ $MLSPY -m gyms.workplace_assistant.run_eval \
   --split train \
   --author-name sukhorukov \
   --dry
+
+# Submit the matched n=3 Qwen3.6 teacher comparison.
+$MLSPY -m gyms.workplace_assistant.run_eval \
+  --purpose trace-generation \
+  --experiment qwen36-35b-a3b-teacher-qwen35-4b-non-thinking \
+  --split validation \
+  --num-repeats 3 \
+  --concurrency 16 \
+  --priority high \
+  --author-name sukhorukov
 
 $MLSPY -m gyms.workplace_assistant.run_eval \
   --purpose evaluation \

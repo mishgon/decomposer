@@ -143,7 +143,7 @@ QWEN35_4B_GAIA2_SFT = (
     / "final"
 )
 
-DecomposerManagerBackend = Literal["local_vllm", "openrouter"]
+DecomposerManagerBackend = Literal["local_vllm", "openrouter", "llm_proxy"]
 DecomposerPromptProfile = Literal["student", "teacher"]
 SimpleAgentBackend = Literal["local_vllm", "openrouter"]
 Purpose = Literal["evaluation", "trace-generation"]
@@ -202,6 +202,11 @@ class DecomposerExperiment:
     worker_checkpoint: Path
     manager_checkpoint: Path | None = None
     manager_backend: DecomposerManagerBackend = "local_vllm"
+    manager_upstream_url_env: str | None = None
+    manager_api_key_env: str | None = None
+    manager_response_tool_parser: str | None = None
+    manager_reasoning_mode: Literal["service_default"] | None = None
+    manager_verify_tls: bool = True
     prompt_profile: DecomposerPromptProfile = "student"
     num_gpus: int = 2
     manager_served_name: str = "decomposer/gemma4-e4b-sft-deepseek-e4b-v1-8k"
@@ -244,6 +249,21 @@ class DecomposerExperiment:
             raise ValueError(
                 f"{self.manager_backend} Decomposer requires {expected_gpus} GPU(s)"
             )
+        remote_fields = (
+            self.manager_upstream_url_env,
+            self.manager_api_key_env,
+            self.manager_response_tool_parser,
+            self.manager_reasoning_mode,
+        )
+        if self.manager_backend == "llm_proxy":
+            if any(value is None for value in remote_fields):
+                raise ValueError(
+                    f"{self.name}: llm_proxy requires complete remote manager fields"
+                )
+        elif any(value is not None for value in remote_fields):
+            raise ValueError(
+                f"{self.name}: remote manager fields require manager_backend=llm_proxy"
+            )
 
     @property
     def requires_local_manager(self) -> bool:
@@ -252,6 +272,14 @@ class DecomposerExperiment:
     @property
     def requires_openrouter(self) -> bool:
         return self.manager_backend == "openrouter"
+
+    @property
+    def requires_llm_proxy(self) -> bool:
+        return self.manager_backend == "llm_proxy"
+
+    @property
+    def requires_remote_manager(self) -> bool:
+        return self.manager_backend != "local_vllm"
 
 
 @dataclass(frozen=True)
@@ -523,6 +551,19 @@ DEEPSEEK_QWEN_EXPERIMENT = DecomposerExperiment(
     worker_trust_remote_code=True,
     worker_gdn_prefill_backend="triton",
 )
+QWEN36_QWEN_EXPERIMENT = replace(
+    DEEPSEEK_QWEN_EXPERIMENT,
+    name="qwen36-35b-a3b-teacher-qwen35-4b-non-thinking",
+    manager_backend="llm_proxy",
+    manager_served_name="Qwen/Qwen3.6-35B-A3B-FP8",
+    manager_port=8142,
+    manager_upstream_url_env="LLM_PROXY_URL",
+    manager_api_key_env="LLM_PROXY_MASTER_KEY",
+    manager_response_tool_parser="qwen3_xml",
+    manager_reasoning_mode="service_default",
+    manager_verify_tls=False,
+    concurrency=16,
+)
 SIMPLE_EXPERIMENT = SimpleExperiment(
     name="gemma4-e4b-it-thinking",
     checkpoint=GEMMA4_E4B_BASE,
@@ -593,6 +634,7 @@ ALL_EXPERIMENTS: tuple[Experiment, ...] = (
     QWEN35_BASE_DECOMPOSER_EXPERIMENT,
     QWEN35_BASE_TEACHER_DECOMPOSER_EXPERIMENT,
     DEEPSEEK_QWEN_EXPERIMENT,
+    QWEN36_QWEN_EXPERIMENT,
     SIMPLE_EXPERIMENT,
     SIMPLE_QWEN_EXPERIMENT,
     SIMPLE_QWEN_2B_EXPERIMENT,

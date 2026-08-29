@@ -339,6 +339,41 @@ def openrouter_proxy_command(experiment: SimpleExperiment) -> list[str]:
     ]
 
 
+def remote_manager_proxy_command(experiment: DecomposerExperiment) -> list[str]:
+    if not experiment.requires_llm_proxy:
+        raise ValueError(f"{experiment.name} does not use the LLM proxy manager")
+    required = {
+        "manager_upstream_url_env": experiment.manager_upstream_url_env,
+        "manager_api_key_env": experiment.manager_api_key_env,
+        "manager_response_tool_parser": experiment.manager_response_tool_parser,
+    }
+    missing = [name for name, value in required.items() if value is None]
+    if missing:
+        raise ValueError(f"{experiment.name}: missing remote manager fields: {missing}")
+    command = [
+        str(PROJECT_VENV / "bin" / "python"),
+        "-m",
+        "gyms.remote_model_proxy",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        str(experiment.manager_port),
+        "--upstream-url-env",
+        str(experiment.manager_upstream_url_env),
+        "--api-key-env",
+        str(experiment.manager_api_key_env),
+        "--response-tool-parser",
+        str(experiment.manager_response_tool_parser),
+        "--timeout-seconds",
+        "3300",
+        "--max-retries",
+        "2",
+    ]
+    if not experiment.manager_verify_tls:
+        command.append("--no-verify-tls")
+    return command
+
+
 def decomposer_vllm_commands(
     experiment: DecomposerExperiment,
 ) -> tuple[list[str] | None, list[str]]:
@@ -607,6 +642,17 @@ def validate_preparation(
         elif manager != {
             "backend": experiment.manager_backend,
             "model": experiment.manager_served_name,
+            **(
+                {
+                    "upstream_url_env": experiment.manager_upstream_url_env,
+                    "api_key_env": experiment.manager_api_key_env,
+                    "response_tool_parser": experiment.manager_response_tool_parser,
+                    "reasoning_mode": experiment.manager_reasoning_mode,
+                    "verify_tls": experiment.manager_verify_tls,
+                }
+                if experiment.requires_llm_proxy
+                else {}
+            ),
         }:
             raise ValueError("Preparation manifest points at an unexpected manager")
     return manifest
@@ -963,6 +1009,17 @@ def _runtime_configs(
             "timeout": 3300,
             "max_retries": 2,
         }
+    elif experiment.requires_llm_proxy:
+        manager = {
+            "model": experiment.manager_served_name,
+            "base_url": f"http://127.0.0.1:{experiment.manager_port}/v1",
+            "api_key": "EMPTY",
+            "temperature": 1.0,
+            "top_p": 1.0,
+            "use_responses_api": True,
+            "timeout": 3300,
+            "max_retries": 2,
+        }
     else:
         manager_extra_body: dict[str, Any] = {
             "top_k": experiment.top_k,
@@ -1023,6 +1080,19 @@ def _runtime_configs(
                 **(
                     {"path": str(experiment.manager_checkpoint)}
                     if experiment.manager_checkpoint is not None
+                    else {}
+                ),
+                **(
+                    {
+                        "endpoint": os.environ.get(
+                            experiment.manager_upstream_url_env or "", ""
+                        ),
+                        "response_tool_parser": (
+                            experiment.manager_response_tool_parser
+                        ),
+                        "reasoning_mode": experiment.manager_reasoning_mode,
+                    }
+                    if experiment.requires_llm_proxy
                     else {}
                 ),
             },
@@ -1124,6 +1194,8 @@ def _dry_plan(
             gpu_assignments = {"policy_vllm": visible_devices[0]}
     else:
         manager_command, worker_command = decomposer_vllm_commands(experiment)
+        if experiment.requires_llm_proxy:
+            services.append(remote_manager_proxy_command(experiment))
         if manager_command is not None:
             services.append(manager_command)
         services.append(worker_command)
@@ -1284,10 +1356,11 @@ def execute_trace_generation(local_repo: Path, args: argparse.Namespace) -> int:
     judge_key = os.environ.get("LLM_PROXY_MASTER_KEY", "")
     if not judge_endpoint or not judge_key:
         raise RuntimeError("LLM_PROXY_URL and LLM_PROXY_MASTER_KEY are required")
-    if not os.environ.get("OPENROUTER_API_KEY_DECOMPOSER"):
-        raise RuntimeError("OPENROUTER_API_KEY_DECOMPOSER is required")
-    if not (os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy")):
-        raise RuntimeError("HTTPS_PROXY or https_proxy is required for OpenRouter")
+    if experiment.requires_openrouter:
+        if not os.environ.get("OPENROUTER_API_KEY_DECOMPOSER"):
+            raise RuntimeError("OPENROUTER_API_KEY_DECOMPOSER is required")
+        if not (os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy")):
+            raise RuntimeError("HTTPS_PROXY or https_proxy is required for OpenRouter")
     check_judge(judge_endpoint, judge_key)
 
     archived = archive_attempt(directory) if args.force and directory.exists() else None
@@ -1325,6 +1398,14 @@ def execute_trace_generation(local_repo: Path, args: argparse.Namespace) -> int:
     }
     if archived is not None:
         status["archived_attempt"] = str(archived)
+    if experiment.requires_llm_proxy:
+        status["manager"] = {
+            "backend": experiment.manager_backend,
+            "model": experiment.manager_served_name,
+            "endpoint": judge_endpoint,
+            "response_tool_parser": experiment.manager_response_tool_parser,
+            "reasoning_mode": experiment.manager_reasoning_mode,
+        }
     atomic_json(status_path, status)
 
     staged_gaia2 = Path(manifest["gaia2"]["staged_repo"])
@@ -1337,6 +1418,17 @@ def execute_trace_generation(local_repo: Path, args: argparse.Namespace) -> int:
         atomic_json(status_path, status)
         manager_command, worker_command = decomposer_vllm_commands(experiment)
         manager_process = None
+        if experiment.requires_llm_proxy:
+            proxy_process = supervisor.start(
+                "remote_manager_proxy",
+                remote_manager_proxy_command(experiment),
+                cwd=local_repo,
+            )
+            wait_http(
+                f"http://127.0.0.1:{experiment.manager_port}/health",
+                [proxy_process],
+                300,
+            )
         if manager_command is not None:
             manager_process = supervisor.start(
                 "manager_vllm",
@@ -1645,6 +1737,14 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
         }
     if archived is not None:
         status["archived_attempt"] = str(archived)
+    if isinstance(experiment, DecomposerExperiment) and experiment.requires_llm_proxy:
+        status["manager"] = {
+            "backend": experiment.manager_backend,
+            "model": experiment.manager_served_name,
+            "endpoint": judge_endpoint,
+            "response_tool_parser": experiment.manager_response_tool_parser,
+            "reasoning_mode": experiment.manager_reasoning_mode,
+        }
     atomic_json(status_path, status)
 
     staged_gaia2 = Path(manifest["gaia2"]["staged_repo"])
@@ -1686,6 +1786,17 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
         else:
             manager_command, worker_command = decomposer_vllm_commands(experiment)
             manager_process = None
+            if experiment.requires_llm_proxy:
+                proxy_process = supervisor.start(
+                    "remote_manager_proxy",
+                    remote_manager_proxy_command(experiment),
+                    cwd=local_repo,
+                )
+                wait_http(
+                    f"http://127.0.0.1:{experiment.manager_port}/health",
+                    [proxy_process],
+                    300,
+                )
             if manager_command is not None:
                 manager_process = supervisor.start(
                     "manager_vllm",

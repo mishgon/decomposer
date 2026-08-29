@@ -73,6 +73,12 @@ The registered experiments are:
   E4B worker on one GPU.
 - `deepseek-v4-flash-0731-teacher-qwen35-4b-non-thinking`: the same remote
   teacher manager with a local non-thinking Qwen3.5-4B worker on one GPU.
+- `qwen36-35b-a3b-teacher-qwen35-4b-non-thinking`: the internal
+  `Qwen/Qwen3.6-35B-A3B-FP8` teacher with the same local worker and teacher
+  prompt. A credential-isolating loopback proxy normalizes the deployment's
+  Qwen XML tool calls into Responses API function calls. The deployment emits
+  reasoning at its service-default effort; unlike DeepSeek, no explicit
+  `reasoning_effort=high` control is sent.
 - `qwen35-4b-sft-workplace-v1-3765-32k-non-thinking-qwen35-4b-non-thinking`:
   the Workplace-trained non-thinking Qwen3.5-4B manager on the first GPU and
   a base non-thinking Qwen3.5-4B worker on the second GPU, using the student
@@ -267,6 +273,26 @@ split namespace without changing the existing full-validation result paths.
 For an n=3 complete test run, `comparison.json` reuses and checksum-pins the
 held-out rows from the completed full-validation baselines; it does not rerun
 or rejudge them.
+
+The matched Qwen3.6 teacher comparison uses three attempts and concurrency 16:
+
+```bash
+.venv/bin/python -m gyms.gaia2.prepare eval \
+  --experiment qwen36-35b-a3b-teacher-qwen35-4b-non-thinking \
+  --purpose evaluation \
+  --partition test \
+  --reuse-source
+
+/mnt/shared_ru.ml.SZ-5_000264/sukhorukov/.venv-mls/bin/python \
+  -m gyms.gaia2.run_eval \
+  --experiment qwen36-35b-a3b-teacher-qwen35-4b-non-thinking \
+  --purpose evaluation \
+  --partition test \
+  --num-repeats 3 \
+  --concurrency 16 \
+  --priority high \
+  --author-name sukhorukov
+```
 
 ```bash
 .venv/bin/python -m gyms.gaia2.prepare eval \

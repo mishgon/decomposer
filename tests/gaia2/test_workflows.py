@@ -31,6 +31,7 @@ from gyms.gaia2.experiments import (
     QWEN35_GAIA2_SFT_EXPERIMENT,
     QWEN35_MIXED_SFT_EXPERIMENT,
     QWEN35_SFT_EXPERIMENT,
+    QWEN36_QWEN_EXPERIMENT,
     SCENARIO_COUNT,
     SIMPLE_DEEPSEEK_EXPERIMENT,
     SIMPLE_EXPERIMENT,
@@ -60,6 +61,7 @@ from gyms.gaia2.run import (
     are_command,
     decomposer_vllm_commands,
     openrouter_proxy_command,
+    remote_manager_proxy_command,
     selected_cuda_devices,
     simple_vllm_command,
     simple_sampling_parameters,
@@ -234,6 +236,7 @@ def test_experiment_registry_contains_local_and_openrouter_profiles() -> None:
         QWEN35_BASE_DECOMPOSER_EXPERIMENT,
         QWEN35_BASE_TEACHER_DECOMPOSER_EXPERIMENT,
         DEEPSEEK_QWEN_EXPERIMENT,
+        QWEN36_QWEN_EXPERIMENT,
         SIMPLE_EXPERIMENT,
         SIMPLE_QWEN_EXPERIMENT,
         SIMPLE_QWEN_2B_EXPERIMENT,
@@ -258,8 +261,52 @@ def test_experiment_registry_contains_local_and_openrouter_profiles() -> None:
             QWEN35_BASE_DECOMPOSER_EXPERIMENT,
             QWEN35_BASE_TEACHER_DECOMPOSER_EXPERIMENT,
             DEEPSEEK_QWEN_EXPERIMENT,
+            QWEN36_QWEN_EXPERIMENT,
         )
     )
+
+
+def test_qwen36_teacher_uses_internal_proxy_and_existing_worker(tmp_path) -> None:
+    experiment = QWEN36_QWEN_EXPERIMENT
+    repo_root = Path(__file__).resolve().parents[2]
+    assert experiment.manager_backend == "llm_proxy"
+    assert experiment.manager_reasoning_mode == "service_default"
+    assert experiment.manager_served_name == "Qwen/Qwen3.6-35B-A3B-FP8"
+    assert experiment.prompt_profile == "teacher"
+    assert experiment.worker_checkpoint == DEEPSEEK_QWEN_EXPERIMENT.worker_checkpoint
+    assert experiment.worker_served_name == "Qwen/Qwen3.5-4B"
+    assert experiment.num_gpus == 1
+    assert experiment.concurrency == 16
+
+    command = remote_manager_proxy_command(experiment)
+    assert "gyms.remote_model_proxy" in command
+    assert command[command.index("--upstream-url-env") + 1] == "LLM_PROXY_URL"
+    assert command[command.index("--api-key-env") + 1] == "LLM_PROXY_MASTER_KEY"
+    assert command[command.index("--response-tool-parser") + 1] == "qwen3_xml"
+    assert "--no-verify-tls" in command
+
+    service_path, _ = _runtime_configs(repo_root, tmp_path / "result", experiment)
+    service = json.loads(service_path.read_text())
+    manager = service["manager"]
+    assert manager["base_url"] == "http://127.0.0.1:8142/v1"
+    assert manager["api_key"] == "EMPTY"
+    assert manager["use_responses_api"] is True
+    assert manager["parallel_tool_calls"] is False
+
+    plan = _dry_plan(
+        repo_root,
+        experiment,
+        tmp_path / "result",
+        ("0",),
+        3,
+        None,
+        purpose="evaluation",
+        partition="test",
+        concurrency=16,
+    )
+    assert plan["concurrency"] == 16
+    assert "gyms.remote_model_proxy" in plan["services"][0]
+    assert plan["gpu_assignments"] == {"worker_vllm": "0"}
     assert output_dir(SIMPLE_EXPERIMENT, 3).parts[-3:] == (
         SPLIT,
         DOMAIN,

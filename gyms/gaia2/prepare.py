@@ -187,6 +187,17 @@ def experiment_models(experiment: Experiment, *, full_hashes: bool) -> dict[str,
         models["manager"] = {
             "backend": experiment.manager_backend,
             "model": experiment.manager_served_name,
+            **(
+                {
+                    "upstream_url_env": experiment.manager_upstream_url_env,
+                    "api_key_env": experiment.manager_api_key_env,
+                    "response_tool_parser": experiment.manager_response_tool_parser,
+                    "reasoning_mode": experiment.manager_reasoning_mode,
+                    "verify_tls": experiment.manager_verify_tls,
+                }
+                if experiment.requires_llm_proxy
+                else {}
+            ),
         }
     return models
 
