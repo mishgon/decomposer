@@ -178,6 +178,41 @@ The run has a five-epoch ceiling and early-stopping patience two. It uses the
 student prompt, removes teacher reasoning at preprocessing time, and has a
 distinct immutable dataset and checkpoint path.
 
+#### Filtered GAIA2 n=7 teacher-prompt extension
+
+The n=7 release combines the immutable logical 1–3 evaluation source with a
+compact snapshot of completed trace rounds 4–7. It intentionally excludes
+round 8 and later rounds so future releases can extend the same pinned task
+split without changing this dataset. The 770-attempt GAIA grid contains 215
+binary reward-1 traces; structural validation retains 210 and the 32K limit
+retains 208.
+
+The complete mixed source grid has 2,429 candidates. Reward, quality, and
+structural filtering retains 1,461 before tokenization. The teacher prompt
+makes 20 records exceed 32K, producing 1,441 records: 1,314 train and 127
+validation. The final environment counts are 953 Workplace, 280 Toolathlon,
+and 208 GAIA2 records.
+
+Build the release with the explicit teacher prompt from a clean checkout:
+
+```bash
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 .venv/bin/python -m data.sft.prepare \
+  --spec data/sft/specs/decomposer_mixed_deepseek_qwen35_4b_nonthinking_v3_gaia2_execution_110_n7_teacher_prompt_filtered_32k.yaml \
+  --output-root /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/datasets/sft
+```
+
+Submit the stable SDPA, global-batch-4 run from the base Qwen3.5-4B checkpoint:
+
+```bash
+/mnt/shared_ru.ml.SZ-5_000264/sukhorukov/.venv-mls/bin/python \
+  -m training.sft.run_train_jobs \
+  --filter qwen35-4b-nonthinking-mixed-v3-493c24c4-gaia2-110-n7-teacher-prompt-filtered-32k-full-4gpu \
+  --priority high
+```
+
+The training config requires the dataset's teacher profile and matching prompt
+hash, removes hidden teacher reasoning, and uses early-stopping patience two.
+
 #### Pinned partial Toolathlon snapshot
 
 The snapshot-specific release
