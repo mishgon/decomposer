@@ -1,4 +1,4 @@
-"""Dry-run or submit Gaia2 execution evaluation jobs to MLSpace."""
+"""Dry-run or submit Gaia2 evaluation jobs to MLSpace."""
 
 from __future__ import annotations
 
@@ -12,8 +12,10 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-if __package__ in (None, ""):
-    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+for _import_root in (_REPO_ROOT, _REPO_ROOT / "src"):
+    if str(_import_root) not in sys.path:
+        sys.path.insert(0, str(_import_root))
 
 from decomposer.prompts import DECOMPOSER_PROMPT_PROFILES  # noqa: E402
 
@@ -21,15 +23,17 @@ from gyms.gaia2.experiments import (  # noqa: E402
     BASE_IMAGE,
     DECOMPOSER_STAGING_ROOT,
     DOMAIN,
+    DOMAINS,
     HF_HOME,
     INSTANCE_TYPES_BY_NUM_GPUS,
     PARTITIONS,
     PROJECT_VENV,
     SPLIT,
-    SPLIT_MANIFEST_NAME,
+    Gaia2Domain,
     Experiment,
     collect_experiments,
     completion_marker,
+    get_domain_spec,
     job_description,
     run_name,
     trace_completion_marker,
@@ -38,6 +42,9 @@ from gyms.gaia2.experiments import (  # noqa: E402
 from gyms.gaia2.run import (  # noqa: E402
     nonnegative_int,
     positive_int,
+    run_identity,
+    select_prompt_profile,
+    validate_run_identity,
     validate_preparation,
 )
 from gyms.gaia2.staging import git, stage_revision  # noqa: E402
@@ -112,7 +119,9 @@ def build_job_desc(
     partition: str = "full",
     rollout_offset: int = 0,
     prompt_profile: str | None = None,
+    domain: Gaia2Domain = DOMAIN,
 ) -> str:
+    spec = get_domain_spec(domain)
     if purpose == "trace-generation":
         identity = trace_run_name(
             experiment,
@@ -123,10 +132,16 @@ def build_job_desc(
         if limit is not None:
             identity += f"-smoke-{limit}"
         return (
-            f"gaia2-trace {SPLIT_MANIFEST_NAME} {partition} "
+            f"gaia2-trace {spec.split_manifest_name} {partition} "
             f"{experiment.kind}-agent {identity} #{author}"
         )
-    description = job_description(experiment, num_repeats, limit, partition=partition)
+    description = job_description(
+        experiment,
+        num_repeats,
+        limit,
+        partition=partition,
+        domain=spec.name,
+    )
     if prompt_profile is not None:
         description += f" prompt-{prompt_profile}"
     return f"{description} #{author}"
@@ -144,6 +159,7 @@ def build_job_script(
     concurrency: int | None = None,
     rollout_offset: int = 0,
     prompt_profile: str | None = None,
+    domain: Gaia2Domain = DOMAIN,
 ) -> str:
     command = [
         str(PROJECT_VENV / "bin" / "python"),
@@ -155,7 +171,7 @@ def build_job_script(
         "--split",
         SPLIT,
         "--domain",
-        DOMAIN,
+        domain,
         "--purpose",
         purpose,
         "--partition",
@@ -201,6 +217,7 @@ def build_payload(
     concurrency: int | None = None,
     rollout_offset: int = 0,
     prompt_profile: str | None = None,
+    domain: Gaia2Domain = DOMAIN,
 ) -> dict[str, Any]:
     if experiment.num_gpus == 0:
         raise ValueError(
@@ -232,6 +249,7 @@ def build_payload(
             concurrency=concurrency,
             rollout_offset=rollout_offset,
             prompt_profile=prompt_profile,
+            domain=domain,
         ),
         "job_desc": build_job_desc(
             experiment,
@@ -242,6 +260,7 @@ def build_payload(
             partition=partition,
             rollout_offset=rollout_offset,
             prompt_profile=prompt_profile,
+            domain=domain,
         ),
         "env_variables": env_variables,
         "instance_type": INSTANCE_TYPES_BY_NUM_GPUS[experiment.num_gpus],
@@ -265,7 +284,9 @@ def print_parameter_table(
     partition: str = "full",
     rollout_offset: int = 0,
     prompt_profile: str | None = None,
+    domain: Gaia2Domain = DOMAIN,
 ) -> None:
+    spec = get_domain_spec(domain)
     print("\nSelected jobs:")
     print("| # | Run | Agent | Split/domain | GPUs |")
     print("| ---: | --- | --- | --- | ---: |")
@@ -284,7 +305,7 @@ def print_parameter_table(
             identity += f"/smoke_{limit}"
         print(
             f"| {index} | `{identity}` | {experiment.kind} | "
-            f"{SPLIT}/{DOMAIN}/{partition} | {experiment.num_gpus} |"
+            f"{SPLIT}/{spec.name}/{partition} | {experiment.num_gpus} |"
         )
 
 
@@ -293,7 +314,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--experiment", action="append")
     parser.add_argument("--filter", action="append")
     parser.add_argument("--split", choices=(SPLIT,), default=SPLIT)
-    parser.add_argument("--domain", choices=(DOMAIN,), default=DOMAIN)
+    parser.add_argument("--domain", choices=DOMAINS, default=DOMAIN)
     parser.add_argument(
         "--purpose",
         choices=("evaluation", "trace-generation"),
@@ -319,8 +340,12 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    if args.purpose == "trace-generation" and args.partition != "train":
-        parser.error("trace generation is restricted to --partition train")
+    spec = get_domain_spec(args.domain)
+    if args.purpose == "trace-generation":
+        if not spec.supports_trace_generation:
+            parser.error(f"{spec.name} does not support trace generation")
+        if args.partition != "train":
+            parser.error("trace generation is restricted to --partition train")
     if args.purpose == "evaluation" and args.partition not in ("full", "test"):
         parser.error("evaluation supports only --partition full or test")
     if args.purpose == "evaluation" and args.rollout_offset:
@@ -354,6 +379,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 args.partition,
                 args.limit,
                 prompt_profile=args.prompt_profile,
+                domain=spec.name,
             )
             if args.purpose == "trace-generation"
             else completion_marker(
@@ -362,9 +388,27 @@ def main(argv: Sequence[str] | None = None) -> int:
                 args.limit,
                 partition=args.partition,
                 prompt_profile=args.prompt_profile,
+                domain=spec.name,
             )
         )
         if marker.is_file() and not args.force:
+            selected_experiment = select_prompt_profile(
+                experiment, args.prompt_profile
+            )
+            validate_run_identity(
+                marker,
+                run_identity(
+                    selected_experiment,
+                    domain=spec.name,
+                    purpose=args.purpose,
+                    partition=args.partition,
+                    num_repeats=args.num_repeats,
+                    concurrency=args.concurrency or experiment.concurrency,
+                    limit=args.limit,
+                    rollout_offset=args.rollout_offset,
+                ),
+                require_complete=True,
+            )
             skipped_completed += 1
             print(f"Skip (completed): {marker}")
         else:
@@ -375,7 +419,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             "selected": selected_count,
             "planned": 0,
             "split": SPLIT,
-            "domain": DOMAIN,
+            "domain": spec.name,
             "purpose": args.purpose,
             "partition": args.partition,
             "num_repeats": args.num_repeats,
@@ -396,7 +440,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         staged_workdir = repo_root
     else:
         for experiment in experiments:
-            validate_preparation(experiment, partition=args.partition)
+            validate_preparation(
+                experiment, partition=args.partition, domain=spec.name
+            )
         dirty = worktree_dirty(repo_root)
         if dirty:
             raise RuntimeError(
@@ -458,6 +504,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             concurrency=args.concurrency,
             rollout_offset=args.rollout_offset,
             prompt_profile=args.prompt_profile,
+            domain=spec.name,
         )
         payload["region"] = options["region"]
         if normalize_job_desc(payload["job_desc"]) in in_progress:
@@ -475,6 +522,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             partition=args.partition,
             rollout_offset=args.rollout_offset,
             prompt_profile=args.prompt_profile,
+            domain=spec.name,
         )
 
     launched: list[dict[str, Any]] = []
@@ -500,7 +548,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "selected": selected_count,
         "planned": len(planned),
         "split": SPLIT,
-        "domain": DOMAIN,
+        "domain": spec.name,
         "purpose": args.purpose,
         "partition": args.partition,
         "num_repeats": args.num_repeats,

@@ -1,4 +1,4 @@
-"""Prepare pinned Gaia2 execution data, runtime, models, and manifests."""
+"""Prepare pinned Gaia2 data, runtime, models, and manifests."""
 
 from __future__ import annotations
 
@@ -28,6 +28,7 @@ from gyms.gaia2.experiments import (  # noqa: E402
     DATASET_REVISION,
     DEFAULT_GAIA2_REPO,
     DOMAIN,
+    DOMAINS,
     FILESYSTEM_DATASET_ID,
     FILESYSTEM_DATASET_REVISION,
     GAIA2_REVISION,
@@ -36,7 +37,6 @@ from gyms.gaia2.experiments import (  # noqa: E402
     PARTITIONS,
     PROJECT_VENV,
     SPLIT,
-    SPLIT_MANIFEST_NAME,
     UV_BIN,
     UV_CACHE,
     DecomposerExperiment,
@@ -48,13 +48,10 @@ from gyms.gaia2.experiments import (  # noqa: E402
     filesystem_manifest,
     filesystem_revision_root,
     gaia2_venv,
+    get_domain_spec,
     preparation_manifest,
 )
-from gyms.gaia2.partition import (  # noqa: E402
-    SPLIT_MANIFEST_RELPATH,
-    SPLIT_MANIFEST_SHA256,
-    materialize_partition_views,
-)
+from gyms.gaia2.partition import materialize_partition_views  # noqa: E402
 from gyms.gaia2.staging import resolve_revision, stage_revision  # noqa: E402
 
 
@@ -202,18 +199,33 @@ def experiment_models(experiment: Experiment, *, full_hashes: bool) -> dict[str,
     return models
 
 
-def _prepare_dataset(*, reuse_source: bool, gaia2_revision: str) -> dict[str, Any]:
-    revision_root = dataset_revision_root()
+def _prepare_dataset(
+    *, reuse_source: bool, gaia2_revision: str, domain: str
+) -> dict[str, Any]:
+    spec = get_domain_spec(domain)
+    revision_root = dataset_revision_root(spec.name)
     if revision_root.exists():
-        return validate_materialized_dataset(revision_root)
-    if reuse_source:
-        raise FileNotFoundError(f"Prepared Gaia2 data is missing: {dataset_manifest()}")
-    rows = load_huggingface_rows(cache_dir=HF_HOME / "datasets")
-    return write_materialized_dataset(
-        rows,
-        revision_root,
-        gaia2_revision=gaia2_revision,
-    )
+        dataset = validate_materialized_dataset(revision_root, domain=spec.name)
+    else:
+        if reuse_source:
+            raise FileNotFoundError(
+                f"Prepared Gaia2 data is missing: {dataset_manifest(spec.name)}"
+            )
+        rows = load_huggingface_rows(
+            cache_dir=HF_HOME / "datasets", domain=spec.name
+        )
+        dataset = write_materialized_dataset(
+            rows,
+            revision_root,
+            gaia2_revision=gaia2_revision,
+            domain=spec.name,
+        )
+    if dataset.get("aggregate_sha256") != spec.dataset_aggregate_sha256:
+        raise ValueError(
+            f"Prepared Gaia2 {spec.name} checksum does not match the pinned "
+            "dataset revision"
+        )
+    return dataset
 
 
 def _prepare_filesystem(*, reuse_source: bool) -> dict[str, Any]:
@@ -249,10 +261,17 @@ def _prepare_filesystem(*, reuse_source: bool) -> dict[str, Any]:
 
 
 def prepare_eval(args: argparse.Namespace) -> int:
-    if args.purpose == "trace-generation" and args.partition != "train":
-        raise ValueError(
-            "Gaia2 trace generation preparation is restricted to the train partition"
-        )
+    spec = get_domain_spec(args.domain)
+    if args.purpose == "trace-generation":
+        if not spec.supports_trace_generation:
+            raise ValueError(
+                f"Gaia2 {spec.name} does not support trace generation"
+            )
+        if args.partition != "train":
+            raise ValueError(
+                "Gaia2 trace generation preparation is restricted to the train "
+                "partition"
+            )
     experiments = collect_experiments(
         tuple(args.experiment or ()), tuple(args.filter or ())
     )
@@ -267,10 +286,14 @@ def prepare_eval(args: argparse.Namespace) -> int:
         )
     staged_gaia2 = stage_revision(gaia2_source, commit, GAIA2_STAGING_ROOT / commit)
     runtime = prepare_gaia2_runtime(staged_gaia2, create=not args.skip_runtime)
-    dataset = _prepare_dataset(reuse_source=args.reuse_source, gaia2_revision=commit)
+    dataset = _prepare_dataset(
+        reuse_source=args.reuse_source,
+        gaia2_revision=commit,
+        domain=spec.name,
+    )
     partition_views = None
     if args.partition != "full" or args.purpose == "trace-generation":
-        partition_views = materialize_partition_views()
+        partition_views = materialize_partition_views(domain=spec.name)
     filesystem = _prepare_filesystem(reuse_source=args.reuse_source)
 
     project_tools = {
@@ -300,11 +323,11 @@ def prepare_eval(args: argparse.Namespace) -> int:
             "created_at": datetime.now(UTC).isoformat(),
             "experiment": {"name": experiment.name, "kind": experiment.kind},
             "split": SPLIT,
-            "domain": DOMAIN,
+            "domain": spec.name,
             "purpose": args.purpose,
             "partition": args.partition,
             "dataset": {
-                "manifest": str(dataset_manifest()),
+                "manifest": str(dataset_manifest(spec.name)),
                 "dataset_revision": DATASET_REVISION,
                 "rows": dataset["rows"],
                 "aggregate_sha256": dataset["aggregate_sha256"],
@@ -318,9 +341,9 @@ def prepare_eval(args: argparse.Namespace) -> int:
                 "aggregate_sha256": filesystem["aggregate_sha256"],
             },
             "partition_split": {
-                "name": SPLIT_MANIFEST_NAME,
-                "path": SPLIT_MANIFEST_RELPATH,
-                "sha256": SPLIT_MANIFEST_SHA256,
+                "name": spec.split_manifest_name,
+                "path": spec.split_manifest_relpath,
+                "sha256": spec.split_manifest_sha256,
                 "views": partition_views,
             },
             "gaia2": {
@@ -335,7 +358,7 @@ def prepare_eval(args: argparse.Namespace) -> int:
                 experiment, full_hashes=args.full_checkpoint_hashes
             ),
         }
-        path = preparation_manifest(experiment)
+        path = preparation_manifest(experiment, spec.name)
         atomic_json(path, manifest)
         summaries.append(
             {
@@ -348,7 +371,7 @@ def prepare_eval(args: argparse.Namespace) -> int:
         json.dumps(
             {
                 "split": SPLIT,
-                "domain": DOMAIN,
+                "domain": spec.name,
                 "purpose": args.purpose,
                 "partition": args.partition,
                 "dataset_revision": DATASET_REVISION,
@@ -368,7 +391,7 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
     eval_parser = subparsers.add_parser("eval", help="Prepare evaluation inputs")
     eval_parser.add_argument("--split", choices=(SPLIT,), default=SPLIT)
-    eval_parser.add_argument("--domain", choices=(DOMAIN,), default=DOMAIN)
+    eval_parser.add_argument("--domain", choices=DOMAINS, default=DOMAIN)
     eval_parser.add_argument(
         "--purpose",
         choices=("evaluation", "trace-generation"),

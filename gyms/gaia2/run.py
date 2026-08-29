@@ -1,4 +1,4 @@
-"""Run one prepared Gaia2 execution evaluation locally, without a job."""
+"""Run one prepared Gaia2 evaluation locally, without a job."""
 
 from __future__ import annotations
 
@@ -33,6 +33,7 @@ from gyms.gaia2.dataset import (  # noqa: E402
 )
 from gyms.gaia2.experiments import (  # noqa: E402
     DOMAIN,
+    DOMAINS,
     GAIA2_REVISION,
     JUDGE_MODEL,
     PARTITIONS,
@@ -40,13 +41,14 @@ from gyms.gaia2.experiments import (  # noqa: E402
     SCENARIO_COUNT,
     SCENARIO_TIMEOUT_SECONDS,
     SPLIT,
-    SPLIT_MANIFEST_NAME,
+    Gaia2Domain,
     DecomposerExperiment,
     Experiment,
     SimpleExperiment,
     dataset_revision_root,
     filesystem_dir,
     filesystem_revision_root,
+    get_domain_spec,
     get_experiment,
     output_dir,
     partition_dataset_root,
@@ -54,8 +56,6 @@ from gyms.gaia2.experiments import (  # noqa: E402
     trace_output_dir,
 )
 from gyms.gaia2.partition import (  # noqa: E402
-    SPLIT_MANIFEST_RELPATH,
-    SPLIT_MANIFEST_SHA256,
     partition_scenario_ids,
     validate_partition_view,
 )
@@ -81,6 +81,82 @@ def prompt_sha256(experiment: Experiment) -> str | None:
         return None
     prompt = resolve_decomposer_system_prompt(experiment.prompt_profile)
     return hashlib.sha256(prompt.encode("utf-8")).hexdigest()
+
+
+def run_identity(
+    experiment: Experiment,
+    *,
+    domain: Gaia2Domain,
+    purpose: str,
+    partition: str,
+    num_repeats: int,
+    concurrency: int,
+    limit: int | None,
+    rollout_offset: int = 0,
+) -> dict[str, Any]:
+    """Return the fields that make an output directory safe to reuse."""
+
+    spec = get_domain_spec(domain)
+    identity: dict[str, Any] = {
+        "purpose": purpose,
+        "experiment": experiment.name,
+        "kind": experiment.kind,
+        "split": SPLIT,
+        "domain": spec.name,
+        "partition": partition,
+        "num_repeats": num_repeats,
+        "concurrency": concurrency,
+        "limit": limit,
+        "decomposer_system_prompt_profile": (
+            experiment.prompt_profile
+            if isinstance(experiment, DecomposerExperiment)
+            else None
+        ),
+        "decomposer_system_prompt_sha256": prompt_sha256(experiment),
+    }
+    if partition != "full":
+        identity["split_manifest"] = {
+            "name": spec.split_manifest_name,
+            "path": spec.split_manifest_relpath,
+            "sha256": spec.split_manifest_sha256,
+        }
+    if purpose == "trace-generation":
+        identity["rollout_offset"] = rollout_offset
+    return identity
+
+
+def validate_run_identity(
+    path: Path,
+    expected: Mapping[str, Any],
+    *,
+    require_complete: bool,
+) -> dict[str, Any]:
+    """Validate a marker/status before skipping or resuming its artifacts."""
+
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise ValueError(f"Invalid Gaia2 run identity file: {path}") from error
+    if not isinstance(value, dict):
+        raise ValueError(f"Gaia2 run identity is not an object: {path}")
+    legacy_optional_fields = {"decomposer_system_prompt_sha256"}
+    mismatches = {
+        key: {"found": value.get(key), "expected": expected_value}
+        for key, expected_value in expected.items()
+        if value.get(key) != expected_value
+        and not (key in legacy_optional_fields and key not in value)
+    }
+    if require_complete and value.get("state") != "complete":
+        mismatches["state"] = {
+            "found": value.get("state"),
+            "expected": "complete",
+        }
+    if mismatches:
+        raise ValueError(
+            f"Gaia2 output identity mismatch in {path}: "
+            f"{json.dumps(mismatches, sort_keys=True)}"
+        )
+    return value
 
 
 def utc_now() -> str:
@@ -512,6 +588,7 @@ def are_command(
     limit: int | None,
     plugin_config: Path | None,
     concurrency: int | None = None,
+    domain: Gaia2Domain = DOMAIN,
 ) -> list[str]:
     command = [
         str(benchmark),
@@ -519,7 +596,7 @@ def are_command(
         "-d",
         str(dataset_root),
         "--config",
-        DOMAIN,
+        domain,
         "--judge_model",
         JUDGE_MODEL,
         "--judge_provider",
@@ -587,9 +664,13 @@ def _validate_file_manifest(root: Path, manifest: Mapping[str, Any]) -> None:
 
 
 def validate_preparation(
-    experiment: Experiment, *, partition: str = "full"
+    experiment: Experiment,
+    *,
+    partition: str = "full",
+    domain: Gaia2Domain = DOMAIN,
 ) -> dict[str, Any]:
-    path = preparation_manifest(experiment)
+    spec = get_domain_spec(domain)
+    path = preparation_manifest(experiment, spec.name)
     if not path.is_file():
         raise FileNotFoundError(
             f"Run `python -m gyms.gaia2.prepare eval --experiment {experiment.name}` first: {path}"
@@ -600,9 +681,18 @@ def validate_preparation(
         "kind": experiment.kind,
     }:
         raise ValueError(f"Preparation manifest does not match {experiment.name}")
-    if manifest.get("split") != SPLIT or manifest.get("domain") != DOMAIN:
-        raise ValueError("Preparation manifest does not match validation/execution")
-    dataset = validate_materialized_dataset(dataset_revision_root())
+    if manifest.get("split") != SPLIT or manifest.get("domain") != spec.name:
+        raise ValueError(
+            f"Preparation manifest does not match validation/{spec.name}"
+        )
+    dataset = validate_materialized_dataset(
+        dataset_revision_root(spec.name), domain=spec.name
+    )
+    if dataset.get("aggregate_sha256") != spec.dataset_aggregate_sha256:
+        raise ValueError(
+            f"Prepared Gaia2 {spec.name} checksum does not match the pinned "
+            "dataset revision"
+        )
     if (
         manifest.get("dataset", {}).get("aggregate_sha256")
         != dataset["aggregate_sha256"]
@@ -610,13 +700,13 @@ def validate_preparation(
         raise ValueError("Preparation manifest dataset checksum changed")
     if partition != "full":
         prepared_split = manifest.get("partition_split") or {}
-        if prepared_split.get("name") != SPLIT_MANIFEST_NAME:
+        if prepared_split.get("name") != spec.split_manifest_name:
             raise ValueError("Preparation manifest does not identify the pinned split")
-        if prepared_split.get("path") != SPLIT_MANIFEST_RELPATH:
+        if prepared_split.get("path") != spec.split_manifest_relpath:
             raise ValueError("Preparation manifest points at an unexpected split")
-        if prepared_split.get("sha256") != SPLIT_MANIFEST_SHA256:
+        if prepared_split.get("sha256") != spec.split_manifest_sha256:
             raise ValueError("Preparation manifest split checksum changed")
-        validate_partition_view(partition)
+        validate_partition_view(partition, domain=spec.name)
     filesystem = validate_materialized_filesystem(filesystem_revision_root())
     prepared_filesystem = manifest.get("filesystem") or {}
     if prepared_filesystem.get("aggregate_sha256") != filesystem["aggregate_sha256"]:
@@ -1200,8 +1290,10 @@ def _dry_plan(
     partition: str = "full",
     concurrency: int | None = None,
     rollout_offset: int = 0,
+    domain: Gaia2Domain = DOMAIN,
 ) -> dict[str, Any]:
-    manifest_path = preparation_manifest(experiment)
+    spec = get_domain_spec(domain)
+    manifest_path = preparation_manifest(experiment, spec.name)
     manifest = (
         json.loads(manifest_path.read_text(encoding="utf-8"))
         if manifest_path.is_file()
@@ -1244,7 +1336,7 @@ def _dry_plan(
             }
         else:
             gpu_assignments = {"worker_vllm": visible_devices[0]}
-    selected_dataset_root = partition_dataset_root(partition)
+    selected_dataset_root = partition_dataset_root(partition, spec.name)
     effective_concurrency = concurrency or experiment.concurrency
     first_round_output = (
         directory / f"round_{rollout_offset + 1:02d}"
@@ -1261,12 +1353,13 @@ def _dry_plan(
         limit=limit,
         plugin_config=plugin_config,
         concurrency=effective_concurrency,
+        domain=spec.name,
     )
     plan = {
         "experiment": experiment.name,
         "kind": experiment.kind,
         "split": SPLIT,
-        "domain": DOMAIN,
+        "domain": spec.name,
         "purpose": purpose,
         "partition": partition,
         "num_repeats": num_repeats,
@@ -1316,6 +1409,7 @@ def _dry_plan(
                             / "are_plugin.json"
                         ),
                         concurrency=effective_concurrency,
+                        domain=spec.name,
                     )
                 ),
             }
@@ -1327,6 +1421,9 @@ def _dry_plan(
 
 
 def execute_trace_generation(local_repo: Path, args: argparse.Namespace) -> int:
+    spec = get_domain_spec(getattr(args, "domain", DOMAIN))
+    if not spec.supports_trace_generation:
+        raise ValueError(f"Gaia2 {spec.name} does not support trace generation")
     requested_prompt_profile = getattr(args, "prompt_profile", None)
     experiment = select_prompt_profile(
         get_experiment(args.experiment), requested_prompt_profile
@@ -1348,6 +1445,7 @@ def execute_trace_generation(local_repo: Path, args: argparse.Namespace) -> int:
             args.partition,
             args.limit,
             prompt_profile=requested_prompt_profile,
+            domain=spec.name,
         )
     )
     logical_rollout_numbers = tuple(
@@ -1356,7 +1454,7 @@ def execute_trace_generation(local_repo: Path, args: argparse.Namespace) -> int:
             args.rollout_offset + args.num_repeats + 1,
         )
     )
-    all_scenario_ids = partition_scenario_ids(args.partition)
+    all_scenario_ids = partition_scenario_ids(args.partition, domain=spec.name)
     scenario_ids = (
         all_scenario_ids[: args.limit] if args.limit is not None else all_scenario_ids
     )
@@ -1374,6 +1472,7 @@ def execute_trace_generation(local_repo: Path, args: argparse.Namespace) -> int:
                     partition=args.partition,
                     concurrency=args.concurrency,
                     rollout_offset=args.rollout_offset,
+                    domain=spec.name,
                 ),
                 indent=2,
                 sort_keys=True,
@@ -1381,11 +1480,33 @@ def execute_trace_generation(local_repo: Path, args: argparse.Namespace) -> int:
         )
         return 0
 
+    identity = run_identity(
+        experiment,
+        domain=spec.name,
+        purpose=args.purpose,
+        partition=args.partition,
+        num_repeats=args.num_repeats,
+        concurrency=args.concurrency or experiment.concurrency,
+        limit=args.limit,
+        rollout_offset=args.rollout_offset,
+    )
     marker = directory / ".trace_done.json"
     if marker.is_file() and not args.force:
+        validate_run_identity(marker, identity, require_complete=True)
         print(f"Skip (completed): {marker}")
         return 0
-    manifest = validate_preparation(experiment, partition=args.partition)
+    previous_status = directory / "run_status.json"
+    if directory.exists() and not args.force:
+        if previous_status.is_file():
+            validate_run_identity(previous_status, identity, require_complete=False)
+        elif any(directory.glob("round_[0-9][0-9]")):
+            raise ValueError(
+                "Gaia2 trace rounds exist without a run identity; use --force to "
+                f"archive them: {directory}"
+            )
+    manifest = validate_preparation(
+        experiment, partition=args.partition, domain=spec.name
+    )
     judge_endpoint = os.environ.get("LLM_PROXY_URL", "").rstrip("/")
     judge_key = os.environ.get("LLM_PROXY_MASTER_KEY", "")
     if not judge_endpoint or not judge_key:
@@ -1405,29 +1526,13 @@ def execute_trace_generation(local_repo: Path, args: argparse.Namespace) -> int:
     status: dict[str, Any] = {
         "schema_version": 1,
         "state": "starting",
-        "purpose": args.purpose,
-        "experiment": experiment.name,
-        "kind": experiment.kind,
-        "split": SPLIT,
-        "domain": DOMAIN,
-        "partition": args.partition,
-        "split_manifest": {
-            "name": SPLIT_MANIFEST_NAME,
-            "path": SPLIT_MANIFEST_RELPATH,
-            "sha256": SPLIT_MANIFEST_SHA256,
-        },
+        **identity,
         "scenario_count": len(scenario_ids),
-        "num_repeats": args.num_repeats,
-        "rollout_offset": args.rollout_offset,
         "logical_rollout_numbers": list(logical_rollout_numbers),
-        "concurrency": args.concurrency or experiment.concurrency,
-        "limit": args.limit,
-        "decomposer_system_prompt_profile": experiment.prompt_profile,
-        "decomposer_system_prompt_sha256": prompt_sha256(experiment),
         "manager_parallel_tool_calls": experiment.manager_parallel_tool_calls,
         "cuda_visible_devices": list(visible_devices),
         "output_dir": str(directory),
-        "preparation_manifest": str(preparation_manifest(experiment)),
+        "preparation_manifest": str(preparation_manifest(experiment, spec.name)),
         "started_at": utc_now(),
         "completed_logical_rollouts": [],
     }
@@ -1573,13 +1678,14 @@ def execute_trace_generation(local_repo: Path, args: argparse.Namespace) -> int:
             command = are_command(
                 experiment,
                 benchmark=benchmark,
-                dataset_root=partition_dataset_root(args.partition),
+                dataset_root=partition_dataset_root(args.partition, spec.name),
                 output=round_directory,
                 judge_endpoint=judge_endpoint,
                 num_repeats=1,
                 limit=args.limit,
                 plugin_config=plugin_config,
                 concurrency=args.concurrency,
+                domain=spec.name,
             )
             with (round_logs / "are_benchmark.log").open(
                 "a", encoding="utf-8"
@@ -1667,6 +1773,7 @@ def execute_trace_generation(local_repo: Path, args: argparse.Namespace) -> int:
 def execute(local_repo: Path, args: argparse.Namespace) -> int:
     if args.purpose == "trace-generation":
         return execute_trace_generation(local_repo, args)
+    spec = get_domain_spec(getattr(args, "domain", DOMAIN))
     if args.partition not in ("full", "test"):
         raise ValueError("Gaia2 evaluation supports only full or pinned test data")
     if args.rollout_offset:
@@ -1685,6 +1792,7 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
             args.limit,
             partition=args.partition,
             prompt_profile=requested_prompt_profile,
+            domain=spec.name,
         )
     )
     if args.dry:
@@ -1701,6 +1809,7 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
                     partition=args.partition,
                     concurrency=args.concurrency,
                     rollout_offset=args.rollout_offset,
+                    domain=spec.name,
                 ),
                 indent=2,
                 sort_keys=True,
@@ -1708,11 +1817,23 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
         )
         return 0
 
+    identity = run_identity(
+        experiment,
+        domain=spec.name,
+        purpose=args.purpose,
+        partition=args.partition,
+        num_repeats=args.num_repeats,
+        concurrency=args.concurrency or experiment.concurrency,
+        limit=args.limit,
+    )
     marker = directory / ".eval_done.json"
     if marker.is_file() and not args.force:
+        validate_run_identity(marker, identity, require_complete=True)
         print(f"Skip (completed): {marker}")
         return 0
-    manifest = validate_preparation(experiment, partition=args.partition)
+    manifest = validate_preparation(
+        experiment, partition=args.partition, domain=spec.name
+    )
     judge_endpoint = os.environ.get("LLM_PROXY_URL", "").rstrip("/")
     judge_key = os.environ.get("LLM_PROXY_MASTER_KEY", "")
     if not judge_endpoint or not judge_key:
@@ -1725,7 +1846,12 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
     check_judge(judge_endpoint, judge_key)
 
     comparison_baselines: list[dict[str, Any]] | None = None
-    if args.partition == "test" and args.limit is None and args.num_repeats == 3:
+    if (
+        spec.name == "execution"
+        and args.partition == "test"
+        and args.limit is None
+        and args.num_repeats == 3
+    ):
         from gyms.gaia2.comparison import collect_baseline_summaries
 
         comparison_baselines = collect_baseline_summaries()
@@ -1738,21 +1864,7 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
     status: dict[str, Any] = {
         "schema_version": 1,
         "state": "starting",
-        "experiment": experiment.name,
-        "kind": experiment.kind,
-        "purpose": args.purpose,
-        "split": SPLIT,
-        "domain": DOMAIN,
-        "partition": args.partition,
-        "num_repeats": args.num_repeats,
-        "concurrency": args.concurrency or experiment.concurrency,
-        "limit": args.limit,
-        "decomposer_system_prompt_profile": (
-            experiment.prompt_profile
-            if isinstance(experiment, DecomposerExperiment)
-            else None
-        ),
-        "decomposer_system_prompt_sha256": prompt_sha256(experiment),
+        **identity,
         "manager_parallel_tool_calls": (
             experiment.manager_parallel_tool_calls
             if isinstance(experiment, DecomposerExperiment)
@@ -1760,15 +1872,9 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
         ),
         "cuda_visible_devices": list(visible_devices),
         "output_dir": str(directory),
-        "preparation_manifest": str(preparation_manifest(experiment)),
+        "preparation_manifest": str(preparation_manifest(experiment, spec.name)),
         "started_at": utc_now(),
     }
-    if args.partition != "full":
-        status["split_manifest"] = {
-            "name": SPLIT_MANIFEST_NAME,
-            "path": SPLIT_MANIFEST_RELPATH,
-            "sha256": SPLIT_MANIFEST_SHA256,
-        }
     if archived is not None:
         status["archived_attempt"] = str(archived)
     if isinstance(experiment, DecomposerExperiment) and experiment.requires_llm_proxy:
@@ -1888,13 +1994,14 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
         command = are_command(
             experiment,
             benchmark=benchmark,
-            dataset_root=partition_dataset_root(args.partition),
+            dataset_root=partition_dataset_root(args.partition, spec.name),
             output=directory,
             judge_endpoint=judge_endpoint,
             num_repeats=args.num_repeats,
             limit=args.limit,
             plugin_config=plugin_config,
             concurrency=args.concurrency,
+            domain=spec.name,
         )
         are_env = dict(env)
         for name in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"):
@@ -1911,7 +2018,9 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
         supervisor.assert_running()
         status["state"] = "validation"
         atomic_json(status_path, status)
-        all_scenario_ids = partition_scenario_ids(args.partition)
+        all_scenario_ids = partition_scenario_ids(
+            args.partition, domain=spec.name
+        )
         metrics = validate_result(
             directory,
             num_repeats=args.num_repeats,
@@ -1979,7 +2088,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--experiment", required=True)
     parser.add_argument("--split", choices=(SPLIT,), default=SPLIT)
-    parser.add_argument("--domain", choices=(DOMAIN,), default=DOMAIN)
+    parser.add_argument("--domain", choices=DOMAINS, default=DOMAIN)
     parser.add_argument(
         "--purpose",
         choices=("evaluation", "trace-generation"),

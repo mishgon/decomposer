@@ -1,9 +1,9 @@
-# Gaia2 execution evaluation
+# Gaia2 evaluation
 
 This package owns Gaia2 evaluation data preparation, the Decomposer external
-agent adapter, local execution, and MLSpace submission. Evaluation uses the
-complete `validation` split of the `execution` domain, while teacher trace
-generation uses the immutable train/test partition described below.
+agent adapter, local execution, and MLSpace submission. Evaluation supports the
+`execution` and `search` domains. Teacher trace generation remains restricted
+to the immutable execution train partition described below.
 
 The Gaia runtime is pinned through `external/gaia2` at commit
 `3bee736488864e028231755ce2ee32a7065e8648`. Preparation materializes a
@@ -17,6 +17,10 @@ run manifest records both repository commits.
   --split validation \
   --domain execution
 ```
+
+Use `--domain search` to prepare Search. Each non-execution domain is stored in
+an isolated dataset-revision subtree, so preparation cannot change the existing
+execution source or results.
 
 Preparation loads revision
 `78ea3bdbdeec2bdcd6afa5420915d8a22f23ed99` of
@@ -276,6 +280,47 @@ split namespace without changing the existing full-validation result paths.
 For an n=3 complete test run, `comparison.json` reuses and checksum-pins the
 held-out rows from the completed full-validation baselines; it does not rerun
 or rejudge them.
+
+## Evaluate the Search domain
+
+Search contains 160 single-turn, static scenarios. The immutable
+`search-118-42-v1` split reserves the same complete universes 25, 26, and 28 as
+execution, which yields 42 Search test tasks and 118 train tasks. The holdout is
+not padded with tasks from exposed universes. `--partition full` remains
+available for complete-domain evaluation.
+
+Prepare a native simple agent and a Decomposer experiment together:
+
+```bash
+.venv/bin/python -m gyms.gaia2.prepare eval \
+  --domain search \
+  --partition test \
+  --experiment qwen35-4b-non-thinking \
+  --experiment qwen35-4b-sft-mixed-v2-493c24c4-gaia2-110-n3-filtered-p2-non-thinking-qwen35-4b-non-thinking
+```
+
+Run either locally by passing the same domain and partition. The simple agent
+uses ARE `native_tools`; the Decomposer uses the broker-backed worker harness:
+
+```bash
+.venv/bin/python -m gyms.gaia2.run \
+  --domain search \
+  --partition test \
+  --experiment qwen35-4b-non-thinking \
+  --num-repeats 3 \
+  --cuda-visible-devices 0
+
+.venv/bin/python -m gyms.gaia2.run \
+  --domain search \
+  --partition test \
+  --experiment qwen35-4b-sft-mixed-v2-493c24c4-gaia2-110-n3-filtered-p2-non-thinking-qwen35-4b-non-thinking \
+  --num-repeats 3 \
+  --cuda-visible-devices 0,1
+```
+
+The MLSpace launcher accepts the same `--domain search` flag. Search does not
+support `--purpose trace-generation`; the CLI rejects that combination before
+preparation or service startup.
 
 The matched Qwen3.6 teacher comparison uses three attempts and concurrency 16:
 

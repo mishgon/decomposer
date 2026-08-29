@@ -17,8 +17,9 @@ from .experiments import (
     DOMAIN,
     FILESYSTEM_DATASET_ID,
     FILESYSTEM_DATASET_REVISION,
-    SCENARIO_COUNT,
     SPLIT,
+    Gaia2Domain,
+    get_domain_spec,
 )
 
 
@@ -63,11 +64,14 @@ def write_materialized_dataset(
     destination_revision_root: Path,
     *,
     gaia2_revision: str,
+    domain: Gaia2Domain = DOMAIN,
 ) -> dict[str, Any]:
     """Write one immutable dataset revision atomically."""
 
+    spec = get_domain_spec(domain)
+
     if destination_revision_root.exists():
-        return validate_materialized_dataset(destination_revision_root)
+        return validate_materialized_dataset(destination_revision_root, domain=domain)
 
     destination_revision_root.parent.mkdir(parents=True, exist_ok=True)
     temporary = destination_revision_root.with_name(
@@ -75,7 +79,7 @@ def write_materialized_dataset(
     )
     if temporary.exists():
         shutil.rmtree(temporary)
-    scenario_directory = temporary / SPLIT / DOMAIN
+    scenario_directory = temporary / SPLIT / spec.name
     scenario_directory.mkdir(parents=True)
     entries: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -98,9 +102,10 @@ def write_materialized_dataset(
                 }
             )
         entries.sort(key=lambda item: item["scenario_id"])
-        if len(entries) != SCENARIO_COUNT:
+        if len(entries) != spec.scenario_count:
             raise ValueError(
-                f"Expected {SCENARIO_COUNT} Gaia2 scenarios, found {len(entries)}"
+                f"Expected {spec.scenario_count} Gaia2 {spec.name} scenarios, "
+                f"found {len(entries)}"
             )
         aggregate = hashlib.sha256()
         for entry in entries:
@@ -113,12 +118,14 @@ def write_materialized_dataset(
             "created_at": datetime.now(UTC).isoformat(),
             "dataset": DATASET_ID,
             "dataset_revision": DATASET_REVISION,
-            "domain": DOMAIN,
+            "domain": spec.name,
             "split": SPLIT,
             "rows": len(entries),
             "aggregate_sha256": aggregate.hexdigest(),
             "gaia2_revision": gaia2_revision,
-            "scenario_directory": str(destination_revision_root / SPLIT / DOMAIN),
+            "scenario_directory": str(
+                destination_revision_root / SPLIT / spec.name
+            ),
             "scenarios": entries,
         }
         (temporary / "dataset_manifest.json").write_text(
@@ -129,7 +136,7 @@ def write_materialized_dataset(
             os.rename(temporary, destination_revision_root)
         except FileExistsError:
             shutil.rmtree(temporary)
-        return validate_materialized_dataset(destination_revision_root)
+        return validate_materialized_dataset(destination_revision_root, domain=domain)
     except Exception:
         shutil.rmtree(temporary, ignore_errors=True)
         raise
@@ -137,7 +144,10 @@ def write_materialized_dataset(
 
 def validate_materialized_dataset(
     revision_root: Path,
+    *,
+    domain: Gaia2Domain = DOMAIN,
 ) -> dict[str, Any]:
+    spec = get_domain_spec(domain)
     manifest_path = revision_root / "dataset_manifest.json"
     if not manifest_path.is_file():
         raise FileNotFoundError(f"Prepared Gaia2 manifest is missing: {manifest_path}")
@@ -145,9 +155,9 @@ def validate_materialized_dataset(
     expected = {
         "dataset": DATASET_ID,
         "dataset_revision": DATASET_REVISION,
-        "domain": DOMAIN,
+        "domain": spec.name,
         "split": SPLIT,
-        "rows": SCENARIO_COUNT,
+        "rows": spec.scenario_count,
     }
     mismatches = {
         key: (manifest.get(key), value)
@@ -156,11 +166,11 @@ def validate_materialized_dataset(
     }
     if mismatches:
         raise ValueError(f"Prepared Gaia2 manifest mismatch: {mismatches}")
-    scenario_directory = revision_root / SPLIT / DOMAIN
+    scenario_directory = revision_root / SPLIT / spec.name
     if Path(manifest.get("scenario_directory", "")) != scenario_directory:
         raise ValueError("Prepared Gaia2 manifest points at an unexpected directory")
     entries = manifest.get("scenarios")
-    if not isinstance(entries, list) or len(entries) != SCENARIO_COUNT:
+    if not isinstance(entries, list) or len(entries) != spec.scenario_count:
         raise ValueError("Prepared Gaia2 manifest has an invalid scenario list")
     expected_files: set[str] = set()
     aggregate = hashlib.sha256()
@@ -187,12 +197,14 @@ def validate_materialized_dataset(
     return manifest
 
 
-def load_huggingface_rows(*, cache_dir: Path) -> Iterable[Mapping[str, Any]]:
+def load_huggingface_rows(
+    *, cache_dir: Path, domain: Gaia2Domain = DOMAIN
+) -> Iterable[Mapping[str, Any]]:
     from datasets import load_dataset
 
     return load_dataset(
         DATASET_ID,
-        DOMAIN,
+        domain,
         split=SPLIT,
         revision=DATASET_REVISION,
         cache_dir=str(cache_dir),

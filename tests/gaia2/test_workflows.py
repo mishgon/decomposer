@@ -32,6 +32,7 @@ from gyms.gaia2.experiments import (
     QWEN35_MIXED_SFT_EXPERIMENT,
     QWEN35_SFT_EXPERIMENT,
     QWEN36_QWEN_EXPERIMENT,
+    SEARCH_DOMAIN,
     SCENARIO_COUNT,
     SIMPLE_DEEPSEEK_EXPERIMENT,
     SIMPLE_EXPERIMENT,
@@ -43,6 +44,7 @@ from gyms.gaia2.experiments import (
     collect_experiments,
     filesystem_dir,
     output_dir,
+    partition_dataset_root,
     trace_output_dir,
 )
 from gyms.gaia2.partition import (
@@ -63,6 +65,7 @@ from gyms.gaia2.run import (
     decomposer_vllm_commands,
     openrouter_proxy_command,
     remote_manager_proxy_command,
+    run_identity,
     selected_cuda_devices,
     simple_vllm_command,
     simple_sampling_parameters,
@@ -71,6 +74,7 @@ from gyms.gaia2.run import (
     execute_trace_generation,
     validate_trace_round,
     validate_result,
+    validate_run_identity,
 )
 from gyms.gaia2.run_eval import build_payload, normalize_job_desc, redact_payload
 from gyms.gaia2.snapshot_trace_prefix import create_trace_prefix_snapshot
@@ -146,6 +150,38 @@ def test_execution_split_is_pinned_disjoint_and_isolates_complete_universes() ->
         validate_split_against_source(manifest, source)
 
 
+def test_search_split_is_pinned_disjoint_and_domain_isolated() -> None:
+    manifest = load_split_manifest(domain="search")
+    train = partition_scenarios(manifest, "train")
+    test = partition_scenarios(manifest, "test")
+
+    assert manifest["name"] == "search-118-42-v1"
+    assert manifest["dataset"]["domain"] == "search"
+    assert manifest["dataset"]["aggregate_sha256"] == (
+        SEARCH_DOMAIN.dataset_aggregate_sha256
+    )
+    assert len(train) == 118
+    assert len(test) == 42
+    assert {item["scenario_id"] for item in train}.isdisjoint(
+        item["scenario_id"] for item in test
+    )
+    assert {item["universe"] for item in test} == {25, 26, 28}
+    assert partition_dataset_root("test", "search") != partition_dataset_root(
+        "test", "execution"
+    )
+    assert output_dir(
+        SIMPLE_QWEN_EXPERIMENT,
+        3,
+        partition="test",
+        domain="search",
+    ).parts[-5:-1] == (
+        "search",
+        "partitions",
+        "search-118-42-v1",
+        "test",
+    )
+
+
 def test_partition_views_are_copies_and_checksum_validated(
     tmp_path, monkeypatch
 ) -> None:
@@ -187,9 +223,15 @@ def test_partition_views_are_copies_and_checksum_validated(
         "scenarios": scenarios,
     }
     monkeypatch.setattr(
-        partition_module, "validate_materialized_dataset", lambda _root: source_manifest
+        partition_module,
+        "validate_materialized_dataset",
+        lambda _root, **_kwargs: source_manifest,
     )
-    monkeypatch.setattr(partition_module, "load_split_manifest", lambda: split_manifest)
+    monkeypatch.setattr(
+        partition_module,
+        "load_split_manifest",
+        lambda **_kwargs: split_manifest,
+    )
 
     root = tmp_path / "views"
     views = materialize_partition_views(root=root, source_root=source_root)
@@ -796,6 +838,39 @@ def test_are_commands_use_local_execution_dataset(tmp_path) -> None:
     assert "thread" in decomposer
 
 
+def test_search_are_commands_support_simple_and_decomposer_agents(tmp_path) -> None:
+    dataset = tmp_path / "search"
+    simple = are_command(
+        SIMPLE_QWEN_EXPERIMENT,
+        benchmark=tmp_path / "are-benchmark",
+        dataset_root=dataset,
+        output=tmp_path / "simple",
+        judge_endpoint="https://judge.test/v1",
+        num_repeats=3,
+        limit=None,
+        plugin_config=None,
+        domain="search",
+    )
+    decomposer = are_command(
+        QWEN35_GAIA2_SFT_EXPERIMENT,
+        benchmark=tmp_path / "are-benchmark",
+        dataset_root=dataset,
+        output=tmp_path / "decomposer",
+        judge_endpoint="https://judge.test/v1",
+        num_repeats=3,
+        limit=None,
+        plugin_config=tmp_path / "plugin.json",
+        domain="search",
+    )
+
+    assert simple[simple.index("--config") + 1] == "search"
+    assert decomposer[decomposer.index("--config") + 1] == "search"
+    assert simple[simple.index("-d") + 1] == str(dataset)
+    assert decomposer[decomposer.index("-d") + 1] == str(dataset)
+    assert "native_tools" in simple
+    assert "gyms.gaia2.plugin:create_plugin" in decomposer
+
+
 def test_runtime_environment_separates_judge_and_local_vllm_credentials(
     tmp_path, monkeypatch
 ) -> None:
@@ -938,6 +1013,72 @@ def test_heldout_mlspace_payload_uses_pinned_test_partition(tmp_path) -> None:
     assert "--partition test" in payload["script"]
     assert "--num-repeats 3" in payload["script"]
     assert "--concurrency 4" in payload["script"]
+
+
+def test_search_mlspace_payload_is_domain_and_holdout_specific(tmp_path) -> None:
+    payload = build_payload(
+        QWEN35_GAIA2_SFT_EXPERIMENT,
+        tmp_path / "staged",
+        num_repeats=3,
+        limit=None,
+        author="sukhorukov",
+        base_image="image",
+        priority="high",
+        force=False,
+        judge_environment={
+            "LLM_PROXY_URL": "https://judge.test/v1",
+            "LLM_PROXY_MASTER_KEY": "secret",
+        },
+        proxy_environment={},
+        openrouter_key="<not-set>",
+        purpose="evaluation",
+        partition="test",
+        concurrency=4,
+        domain="search",
+    )
+
+    assert "gaia2-validation-search" in payload["job_desc"]
+    assert "search-118-42-v1-test" in payload["job_desc"]
+    assert "--domain search" in payload["script"]
+    assert "--partition test" in payload["script"]
+
+
+def test_completion_marker_identity_rejects_cross_domain_reuse(tmp_path) -> None:
+    marker = tmp_path / ".eval_done.json"
+    execution_identity = run_identity(
+        SIMPLE_QWEN_EXPERIMENT,
+        domain="execution",
+        purpose="evaluation",
+        partition="test",
+        num_repeats=3,
+        concurrency=4,
+        limit=None,
+    )
+    marker.write_text(
+        json.dumps({"state": "complete", **execution_identity}) + "\n",
+        encoding="utf-8",
+    )
+    validate_run_identity(marker, execution_identity, require_complete=True)
+
+    search_identity = run_identity(
+        SIMPLE_QWEN_EXPERIMENT,
+        domain="search",
+        purpose="evaluation",
+        partition="test",
+        num_repeats=3,
+        concurrency=4,
+        limit=None,
+    )
+    with pytest.raises(ValueError, match="output identity mismatch"):
+        validate_run_identity(marker, search_identity, require_complete=True)
+
+
+def test_search_trace_generation_is_rejected_before_startup() -> None:
+    with pytest.raises(ValueError, match="search does not support trace generation"):
+        execute_trace_generation(
+            Path.cwd(),
+            Namespace(domain="search"),
+        )
 
 
 def test_openrouter_mlspace_payload_uses_one_gpu_and_redacts_credentials(
@@ -1203,6 +1344,25 @@ def test_trace_execution_resumes_completed_round_and_reuses_services(
         completed=initial_round_state == "marked",
         native_run_number=None,
     )
+    (trace_directory / "run_status.json").write_text(
+        json.dumps(
+            {
+                "state": "failed",
+                **run_identity(
+                    DEEPSEEK_QWEN_EXPERIMENT,
+                    domain=DOMAIN,
+                    purpose="trace-generation",
+                    partition="train",
+                    num_repeats=2,
+                    concurrency=10,
+                    limit=None,
+                    rollout_offset=3,
+                ),
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
     if initial_round_state == "partial_unmarked":
         output = initial_round / "output.jsonl"
         output.write_text(output.read_text().splitlines()[0] + "\n")
@@ -1242,10 +1402,12 @@ def test_trace_execution_resumes_completed_round_and_reuses_services(
         return SimpleNamespace(stdout="")
 
     monkeypatch.setattr(
-        "gyms.gaia2.run.partition_scenario_ids", lambda _part: scenario_ids
+        "gyms.gaia2.run.partition_scenario_ids",
+        lambda _part, **_kwargs: scenario_ids,
     )
     monkeypatch.setattr(
-        "gyms.gaia2.run.partition_dataset_root", lambda _part: tmp_path / "dataset"
+        "gyms.gaia2.run.partition_dataset_root",
+        lambda _part, *_args, **_kwargs: tmp_path / "dataset",
     )
     monkeypatch.setattr(
         "gyms.gaia2.run.validate_preparation",
@@ -1277,6 +1439,7 @@ def test_trace_execution_resumes_completed_round_and_reuses_services(
         force=False,
         output_dir=trace_directory,
         cuda_visible_devices=("0",),
+        domain=DOMAIN,
     )
 
     assert execute_trace_generation(tmp_path, args) == 0

@@ -1,4 +1,4 @@
-"""Immutable train/test partitioning for Gaia2 execution scenarios."""
+"""Immutable train/test partitioning for Gaia2 scenarios."""
 
 from __future__ import annotations
 
@@ -18,15 +18,14 @@ from gyms.gaia2.experiments import (
     DATASET_ID,
     DATASET_REVISION,
     DOMAIN,
-    PARTITION_DATA_ROOT,
-    SCENARIO_COUNT,
     SPLIT,
     SPLIT_MANIFEST_NAME,
     SPLIT_MANIFEST_SEED,
-    TEST_SCENARIO_COUNT,
-    TRAIN_SCENARIO_COUNT,
+    Gaia2Domain,
     Partition,
     dataset_revision_root,
+    get_domain_spec,
+    partition_data_root,
 )
 
 SPLIT_MANIFEST_PATH = (
@@ -58,29 +57,34 @@ def _scenario_aggregate(scenarios: list[Mapping[str, Any]]) -> str:
     return digest.hexdigest()
 
 
-def load_split_manifest(path: Path = SPLIT_MANIFEST_PATH) -> dict[str, Any]:
-    if not path.is_file():
-        raise FileNotFoundError(f"Gaia2 split manifest is missing: {path}")
-    actual_sha256 = sha256_file(path)
-    if actual_sha256 != SPLIT_MANIFEST_SHA256:
+def load_split_manifest(
+    path: Path | None = None, *, domain: Gaia2Domain = DOMAIN
+) -> dict[str, Any]:
+    spec = get_domain_spec(domain)
+    manifest_path = path or (
+        Path(__file__).with_name("split_manifests")
+        / f"{spec.split_manifest_name}.json"
+    )
+    if not manifest_path.is_file():
+        raise FileNotFoundError(f"Gaia2 split manifest is missing: {manifest_path}")
+    actual_sha256 = sha256_file(manifest_path)
+    if actual_sha256 != spec.split_manifest_sha256:
         raise ValueError(
             "Gaia2 split manifest checksum changed: "
-            f"expected {SPLIT_MANIFEST_SHA256}, found {actual_sha256}"
+            f"expected {spec.split_manifest_sha256}, found {actual_sha256}"
         )
-    manifest = json.loads(path.read_text(encoding="utf-8"))
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     expected_dataset = {
         "id": DATASET_ID,
         "revision": DATASET_REVISION,
         "source_split": SPLIT,
-        "domain": DOMAIN,
-        "rows": SCENARIO_COUNT,
-        "aggregate_sha256": (
-            "600818deac34268a261cd846ef3019c6a4c87b068dccfea5e006cd72fe112518"
-        ),
+        "domain": spec.name,
+        "rows": spec.scenario_count,
+        "aggregate_sha256": spec.dataset_aggregate_sha256,
     }
     if manifest.get("schema_version") != 1:
         raise ValueError("Gaia2 split manifest has an unsupported schema version")
-    if manifest.get("name") != SPLIT_MANIFEST_NAME:
+    if manifest.get("name") != spec.split_manifest_name:
         raise ValueError("Gaia2 split manifest has an unexpected name")
     if manifest.get("seed") != SPLIT_MANIFEST_SEED:
         raise ValueError("Gaia2 split manifest has an unexpected seed")
@@ -88,12 +92,12 @@ def load_split_manifest(path: Path = SPLIT_MANIFEST_PATH) -> dict[str, Any]:
         raise ValueError("Gaia2 split manifest dataset identity changed")
     if manifest.get("selection") != {
         "strategy": "complete-universe-holdout",
-        "test_universes": [25, 26, 28],
+        "test_universes": list(spec.test_universes),
     }:
         raise ValueError("Gaia2 split selection policy changed")
 
     scenarios = manifest.get("scenarios")
-    if not isinstance(scenarios, list) or len(scenarios) != SCENARIO_COUNT:
+    if not isinstance(scenarios, list) or len(scenarios) != spec.scenario_count:
         raise ValueError("Gaia2 split manifest has an invalid scenario list")
     scenario_ids: set[str] = set()
     counts: Counter[str] = Counter()
@@ -118,7 +122,9 @@ def load_split_manifest(path: Path = SPLIT_MANIFEST_PATH) -> dict[str, Any]:
         scenario_ids.add(scenario_id)
         counts[partition] += 1
 
-    if counts != Counter(train=TRAIN_SCENARIO_COUNT, test=TEST_SCENARIO_COUNT):
+    if counts != Counter(
+        train=spec.train_scenario_count, test=spec.test_scenario_count
+    ):
         raise ValueError(f"Gaia2 split cardinalities changed: {dict(counts)}")
     assignments = {
         str(universe): partition for universe, partition in sorted(universes.items())
@@ -152,8 +158,10 @@ def partition_scenarios(
     return [item for item in scenarios if item["partition"] == partition]
 
 
-def partition_scenario_ids(partition: Partition) -> tuple[str, ...]:
-    manifest = load_split_manifest()
+def partition_scenario_ids(
+    partition: Partition, *, domain: Gaia2Domain = DOMAIN
+) -> tuple[str, ...]:
+    manifest = load_split_manifest(domain=domain)
     return tuple(
         item["scenario_id"] for item in partition_scenarios(manifest, partition)
     )
@@ -191,12 +199,17 @@ def _views_manifest_path(root: Path) -> Path:
 def validate_partition_view(
     partition: Partition,
     *,
-    root: Path = PARTITION_DATA_ROOT,
+    domain: Gaia2Domain = DOMAIN,
+    root: Path | None = None,
     source_root: Path | None = None,
 ) -> dict[str, Any]:
-    source_revision_root = source_root or dataset_revision_root()
-    source_manifest = validate_materialized_dataset(source_revision_root)
-    split_manifest = load_split_manifest()
+    spec = get_domain_spec(domain)
+    selected_root = root or partition_data_root(domain)
+    source_revision_root = source_root or dataset_revision_root(domain)
+    source_manifest = validate_materialized_dataset(
+        source_revision_root, domain=domain
+    )
+    split_manifest = load_split_manifest(domain=domain)
     validate_split_against_source(split_manifest, source_manifest)
     selected = partition_scenarios(split_manifest, partition)
     if partition == "full":
@@ -204,10 +217,10 @@ def validate_partition_view(
             "partition": partition,
             "rows": len(selected),
             "aggregate_sha256": _scenario_aggregate(selected),
-            "scenario_directory": str(source_revision_root / SPLIT / DOMAIN),
+            "scenario_directory": str(source_revision_root / SPLIT / spec.name),
         }
 
-    views_path = _views_manifest_path(root)
+    views_path = _views_manifest_path(selected_root)
     if not views_path.is_file():
         raise FileNotFoundError(
             f"Prepared Gaia2 partition manifest is missing: {views_path}"
@@ -216,21 +229,21 @@ def validate_partition_view(
     expected_view = {
         "rows": len(selected),
         "aggregate_sha256": _scenario_aggregate(selected),
-        "scenario_directory": str(root / partition / DOMAIN),
+        "scenario_directory": str(selected_root / partition / spec.name),
     }
     if views.get("schema_version") != 1:
         raise ValueError("Prepared Gaia2 partition views use an unsupported schema")
     if views.get("split_manifest") != {
-        "name": SPLIT_MANIFEST_NAME,
-        "path": SPLIT_MANIFEST_RELPATH,
-        "sha256": SPLIT_MANIFEST_SHA256,
+        "name": spec.split_manifest_name,
+        "path": spec.split_manifest_relpath,
+        "sha256": spec.split_manifest_sha256,
     }:
         raise ValueError("Prepared Gaia2 partition views use an unexpected split")
     if (views.get("partitions") or {}).get(partition) != expected_view:
         raise ValueError(f"Prepared Gaia2 {partition} view manifest changed")
 
-    source_directory = source_revision_root / SPLIT / DOMAIN
-    scenario_directory = root / partition / DOMAIN
+    source_directory = source_revision_root / SPLIT / spec.name
+    scenario_directory = selected_root / partition / spec.name
     expected_files = {f"{item['scenario_id']}.json" for item in selected}
     actual_files = {path.name for path in scenario_directory.glob("*.json")}
     if actual_files != expected_files:
@@ -252,33 +265,43 @@ def validate_partition_view(
 
 def materialize_partition_views(
     *,
-    root: Path = PARTITION_DATA_ROOT,
+    domain: Gaia2Domain = DOMAIN,
+    root: Path | None = None,
     source_root: Path | None = None,
 ) -> dict[str, Any]:
-    source_revision_root = source_root or dataset_revision_root()
-    source_manifest = validate_materialized_dataset(source_revision_root)
-    split_manifest = load_split_manifest()
+    spec = get_domain_spec(domain)
+    selected_root = root or partition_data_root(domain)
+    source_revision_root = source_root or dataset_revision_root(domain)
+    source_manifest = validate_materialized_dataset(
+        source_revision_root, domain=domain
+    )
+    split_manifest = load_split_manifest(domain=domain)
     validate_split_against_source(split_manifest, source_manifest)
-    if root.exists():
+    if selected_root.exists():
         return {
             partition: validate_partition_view(
-                partition, root=root, source_root=source_revision_root
+                partition,
+                domain=domain,
+                root=selected_root,
+                source_root=source_revision_root,
             )
             for partition in ("train", "test")
         }
 
-    root.parent.mkdir(parents=True, exist_ok=True)
-    temporary = root.with_name(f".{root.name}.tmp.{os.getpid()}")
+    selected_root.parent.mkdir(parents=True, exist_ok=True)
+    temporary = selected_root.with_name(
+        f".{selected_root.name}.tmp.{os.getpid()}"
+    )
     if temporary.exists():
         raise RuntimeError(
             f"Incomplete Gaia2 partition preparation exists: {temporary}"
         )
-    source_directory = source_revision_root / SPLIT / DOMAIN
+    source_directory = source_revision_root / SPLIT / spec.name
     try:
         partition_values: dict[str, Any] = {}
         for partition in ("train", "test"):
             selected = partition_scenarios(split_manifest, partition)
-            destination = temporary / partition / DOMAIN
+            destination = temporary / partition / spec.name
             destination.mkdir(parents=True)
             for item in selected:
                 filename = f"{item['scenario_id']}.json"
@@ -286,7 +309,9 @@ def materialize_partition_views(
             partition_values[partition] = {
                 "rows": len(selected),
                 "aggregate_sha256": _scenario_aggregate(selected),
-                "scenario_directory": str(root / partition / DOMAIN),
+                "scenario_directory": str(
+                    selected_root / partition / spec.name
+                ),
             }
         _atomic_json(
             _views_manifest_path(temporary),
@@ -297,20 +322,23 @@ def materialize_partition_views(
                     source_revision_root / "dataset_manifest.json"
                 ),
                 "split_manifest": {
-                    "name": SPLIT_MANIFEST_NAME,
-                    "path": SPLIT_MANIFEST_RELPATH,
-                    "sha256": SPLIT_MANIFEST_SHA256,
+                    "name": spec.split_manifest_name,
+                    "path": spec.split_manifest_relpath,
+                    "sha256": spec.split_manifest_sha256,
                 },
                 "partitions": partition_values,
             },
         )
-        os.rename(temporary, root)
+        os.rename(temporary, selected_root)
     except Exception:
         shutil.rmtree(temporary, ignore_errors=True)
         raise
     return {
         partition: validate_partition_view(
-            partition, root=root, source_root=source_revision_root
+            partition,
+            domain=domain,
+            root=selected_root,
+            source_root=source_revision_root,
         )
         for partition in ("train", "test")
     }

@@ -1,4 +1,4 @@
-"""Experiments-as-code and artifact layout for Gaia2 execution evaluation."""
+"""Experiments-as-code and artifact layout for Gaia2 evaluation."""
 
 from __future__ import annotations
 
@@ -20,13 +20,78 @@ FILESYSTEM_DATASET_ID = "meta-agents-research-environments/gaia2_filesystem"
 FILESYSTEM_DATASET_REVISION = "132e26376f5e963bb59f64bcccdd02188cb08dee"
 GAIA2_REVISION = "3bee736488864e028231755ce2ee32a7065e8648"
 SPLIT = "validation"
-DOMAIN = "execution"
-SCENARIO_COUNT = 160
-SPLIT_MANIFEST_NAME = "execution-110-50-v1"
 SPLIT_MANIFEST_SEED = 42
-TRAIN_SCENARIO_COUNT = 110
-TEST_SCENARIO_COUNT = 50
 PARTITIONS = ("train", "test", "full")
+
+Gaia2Domain = Literal["execution", "search"]
+
+
+@dataclass(frozen=True)
+class Gaia2DomainSpec:
+    name: Gaia2Domain
+    scenario_count: int
+    split_manifest_name: str
+    split_manifest_sha256: str
+    dataset_aggregate_sha256: str
+    train_scenario_count: int
+    test_scenario_count: int
+    test_universes: tuple[int, ...] = (25, 26, 28)
+    supports_trace_generation: bool = False
+
+    @property
+    def split_manifest_relpath(self) -> str:
+        return f"gyms/gaia2/split_manifests/{self.split_manifest_name}.json"
+
+
+EXECUTION_DOMAIN = Gaia2DomainSpec(
+    name="execution",
+    scenario_count=160,
+    split_manifest_name="execution-110-50-v1",
+    split_manifest_sha256=(
+        "79f2725c48afc2c18db9a6266992bb27705ed86d5f8939dbee13964a768c5a20"
+    ),
+    dataset_aggregate_sha256=(
+        "600818deac34268a261cd846ef3019c6a4c87b068dccfea5e006cd72fe112518"
+    ),
+    train_scenario_count=110,
+    test_scenario_count=50,
+    supports_trace_generation=True,
+)
+SEARCH_DOMAIN = Gaia2DomainSpec(
+    name="search",
+    scenario_count=160,
+    split_manifest_name="search-118-42-v1",
+    split_manifest_sha256=(
+        "2770ae571e37d89f7240232929c4f2bac7ede0dd5c3ce69d9b429edadb8cb105"
+    ),
+    dataset_aggregate_sha256=(
+        "8cc67f8334d72e1dd760685cf4c5e274cd225b5cc63369fdabf1d5e3c84ee6df"
+    ),
+    train_scenario_count=118,
+    test_scenario_count=42,
+)
+DOMAIN_SPECS: dict[Gaia2Domain, Gaia2DomainSpec] = {
+    spec.name: spec for spec in (EXECUTION_DOMAIN, SEARCH_DOMAIN)
+}
+DOMAINS = tuple(DOMAIN_SPECS)
+DOMAIN: Gaia2Domain = "execution"
+
+# Backward-compatible execution aliases. New code should resolve the selected
+# domain through ``get_domain_spec`` instead of reading these constants.
+SCENARIO_COUNT = EXECUTION_DOMAIN.scenario_count
+SPLIT_MANIFEST_NAME = EXECUTION_DOMAIN.split_manifest_name
+TRAIN_SCENARIO_COUNT = EXECUTION_DOMAIN.train_scenario_count
+TEST_SCENARIO_COUNT = EXECUTION_DOMAIN.test_scenario_count
+
+
+def get_domain_spec(domain: str) -> Gaia2DomainSpec:
+    try:
+        return DOMAIN_SPECS[domain]  # type: ignore[index]
+    except KeyError as error:
+        expected = ", ".join(DOMAINS)
+        raise ValueError(
+            f"Unknown Gaia2 domain {domain!r}; expected one of: {expected}"
+        ) from error
 
 DATA_ROOT = ARTIFACTS_ROOT / "evaluation" / "data" / "gaia2"
 RESULTS_ROOT = ARTIFACTS_ROOT / "evaluation" / "gaia2" / "results"
@@ -158,30 +223,44 @@ def gaia2_venv(gaia2_root: Path) -> Path:
     return GAIA2_VENV_ROOT / gaia2_lock_hash(gaia2_root)
 
 
-def dataset_revision_root() -> Path:
-    return DATA_ROOT / DATASET_REVISION
+def dataset_revision_root(domain: Gaia2Domain = DOMAIN) -> Path:
+    """Return the immutable source root for one domain.
+
+    Execution keeps its historical layout. Additional domains use an isolated
+    subtree so preparing them cannot rewrite the completed execution source.
+    """
+
+    spec = get_domain_spec(domain)
+    root = DATA_ROOT / DATASET_REVISION
+    return root if spec.name == DOMAIN else root / "domains" / spec.name
 
 
-def dataset_root() -> Path:
-    """Root passed to ARE with ``--config execution``."""
+def dataset_root(domain: Gaia2Domain = DOMAIN) -> Path:
+    """Root passed to ARE with the selected ``--config``."""
 
-    return dataset_revision_root() / SPLIT
-
-
-def scenario_dir() -> Path:
-    return dataset_root() / DOMAIN
+    return dataset_revision_root(domain) / SPLIT
 
 
-def dataset_manifest() -> Path:
-    return dataset_revision_root() / "dataset_manifest.json"
+def scenario_dir(domain: Gaia2Domain = DOMAIN) -> Path:
+    return dataset_root(domain) / domain
 
 
-def partition_dataset_root(partition: Partition) -> Path:
+def dataset_manifest(domain: Gaia2Domain = DOMAIN) -> Path:
+    return dataset_revision_root(domain) / "dataset_manifest.json"
+
+
+def partition_data_root(domain: Gaia2Domain = DOMAIN) -> Path:
+    return DATA_ROOT / "partitions" / get_domain_spec(domain).split_manifest_name
+
+
+def partition_dataset_root(
+    partition: Partition, domain: Gaia2Domain = DOMAIN
+) -> Path:
     if partition == "full":
-        return dataset_root()
+        return dataset_root(domain)
     if partition not in PARTITIONS:
         raise ValueError(f"Unknown Gaia2 partition: {partition!r}")
-    return PARTITION_DATA_ROOT / partition
+    return partition_data_root(domain) / partition
 
 
 def filesystem_revision_root() -> Path:
@@ -676,8 +755,10 @@ def collect_experiments(
     return [experiment for experiment in ALL_EXPERIMENTS if experiment.name in selected]
 
 
-def preparation_manifest(experiment: Experiment) -> Path:
-    return PREPARATION_MANIFEST_ROOT / f"{experiment.name}.json"
+def preparation_manifest(
+    experiment: Experiment, domain: Gaia2Domain = DOMAIN
+) -> Path:
+    return DATA_ROOT / "manifests" / SPLIT / domain / f"{experiment.name}.json"
 
 
 def run_name(
@@ -699,12 +780,14 @@ def output_dir(
     *,
     partition: Partition = "full",
     prompt_profile: DecomposerPromptProfile | None = None,
+    domain: Gaia2Domain = DOMAIN,
 ) -> Path:
+    spec = get_domain_spec(domain)
     if partition not in PARTITIONS:
         raise ValueError(f"Unknown Gaia2 partition: {partition!r}")
-    root = RESULTS_ROOT / SPLIT / DOMAIN
+    root = RESULTS_ROOT / SPLIT / spec.name
     if partition != "full":
-        root = root / "partitions" / SPLIT_MANIFEST_NAME / partition
+        root = root / "partitions" / spec.split_manifest_name / partition
     base = root / run_name(experiment, num_repeats, prompt_profile=prompt_profile)
     return base if limit is None else base / f"smoke_{limit}"
 
@@ -716,6 +799,7 @@ def completion_marker(
     *,
     partition: Partition = "full",
     prompt_profile: DecomposerPromptProfile | None = None,
+    domain: Gaia2Domain = DOMAIN,
 ) -> Path:
     return (
         output_dir(
@@ -724,6 +808,7 @@ def completion_marker(
             limit,
             partition=partition,
             prompt_profile=prompt_profile,
+            domain=domain,
         )
         / ".eval_done.json"
     )
@@ -754,12 +839,14 @@ def trace_output_dir(
     limit: int | None = None,
     *,
     prompt_profile: DecomposerPromptProfile | None = None,
+    domain: Gaia2Domain = DOMAIN,
 ) -> Path:
+    spec = get_domain_spec(domain)
     if partition not in PARTITIONS:
         raise ValueError(f"Unknown Gaia2 partition: {partition!r}")
     base = (
         TRACES_ROOT
-        / SPLIT_MANIFEST_NAME
+        / spec.split_manifest_name
         / partition
         / trace_run_name(
             experiment,
@@ -779,6 +866,7 @@ def trace_completion_marker(
     limit: int | None = None,
     *,
     prompt_profile: DecomposerPromptProfile | None = None,
+    domain: Gaia2Domain = DOMAIN,
 ) -> Path:
     return (
         trace_output_dir(
@@ -788,6 +876,7 @@ def trace_completion_marker(
             partition,
             limit,
             prompt_profile=prompt_profile,
+            domain=domain,
         )
         / ".trace_done.json"
     )
@@ -799,13 +888,15 @@ def job_description(
     limit: int | None = None,
     *,
     partition: Partition = "full",
+    domain: Gaia2Domain = DOMAIN,
 ) -> str:
+    spec = get_domain_spec(domain)
     identity = run_name(experiment, num_repeats)
     if limit is not None:
         identity += f"-smoke-{limit}"
     if partition == "full":
-        return f"gaia2-{SPLIT}-{DOMAIN} {experiment.kind}-agent {identity}"
+        return f"gaia2-{SPLIT}-{spec.name} {experiment.kind}-agent {identity}"
     return (
-        f"gaia2-{SPLIT}-{DOMAIN} {SPLIT_MANIFEST_NAME}-{partition} "
+        f"gaia2-{SPLIT}-{spec.name} {spec.split_manifest_name}-{partition} "
         f"{experiment.kind}-agent {identity}"
     )
