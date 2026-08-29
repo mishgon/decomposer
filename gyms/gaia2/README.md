@@ -86,6 +86,9 @@ The registered experiments are:
 - `qwen35-4b-sft-mixed-v1-final-493c24c4-404-filtered-p1-s279-non-thinking-qwen35-4b-non-thinking`:
   the filtered final-snapshot patience-1 best checkpoint at step 279, with the
   same student prompt, base worker, and two-GPU topology.
+- `qwen35-4b-sft-mixed-v2-493c24c4-gaia2-110-n3-filtered-p2-non-thinking-qwen35-4b-non-thinking`:
+  the patience-2 mixed Workplace, Toolathlon, and reward-1 Gaia2 checkpoint,
+  with the same student prompt, base worker, and two-GPU topology.
 - `qwen35-4b-base-non-thinking-qwen35-4b-non-thinking`: untuned non-thinking
   Qwen3.5-4B manager and worker using the compact student prompt.
 - `qwen35-4b-base-non-thinking-teacher-qwen35-4b-non-thinking`: the same
@@ -257,6 +260,31 @@ It skips completed results and matching Pending/Running jobs, refuses a dirty
 worktree for real submissions, stages Decomposer by Git SHA, and reuses the
 independently staged Gaia SHA. Dry-run payloads redact credentials and submit
 nothing.
+
+Held-out evaluation uses `--purpose evaluation --partition test`. It runs only
+the 50 scenarios from universes 25, 26, and 28 and writes under the pinned
+split namespace without changing the existing full-validation result paths.
+For an n=3 complete test run, `comparison.json` reuses and checksum-pins the
+held-out rows from the completed full-validation baselines; it does not rerun
+or rejudge them.
+
+```bash
+.venv/bin/python -m gyms.gaia2.prepare eval \
+  --experiment qwen35-4b-sft-mixed-v2-493c24c4-gaia2-110-n3-filtered-p2-non-thinking-qwen35-4b-non-thinking \
+  --purpose evaluation \
+  --partition test \
+  --reuse-source
+
+/mnt/shared_ru.ml.SZ-5_000264/sukhorukov/.venv-mls/bin/python \
+  -m gyms.gaia2.run_eval \
+  --experiment qwen35-4b-sft-mixed-v2-493c24c4-gaia2-110-n3-filtered-p2-non-thinking-qwen35-4b-non-thinking \
+  --purpose evaluation \
+  --partition test \
+  --num-repeats 3 \
+  --concurrency 4 \
+  --priority high \
+  --author-name sukhorukov
+```
 
 ### Generate seven additional teacher traces per training scenario
 

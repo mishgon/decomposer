@@ -650,6 +650,7 @@ def validate_result(
     num_repeats: int,
     limit: int | None,
     scenario_count: int = SCENARIO_COUNT,
+    scenario_ids: Sequence[str] | None = None,
 ) -> dict[str, Any]:
     rows = _read_jsonl(directory / "output.jsonl")
     task_count = min(scenario_count, limit) if limit is not None else scenario_count
@@ -659,6 +660,31 @@ def validate_result(
             f"Expected {expected} Gaia2 rollout records, found {len(rows)}"
         )
     scores = [float(row.get("score") or 0.0) for row in rows]
+    if any(score not in (0.0, 1.0) for score in scores):
+        raise ValueError("GAIA2 evaluation scores must be binary")
+    if scenario_ids is not None:
+        selected_ids = tuple(scenario_ids[:task_count])
+        expected_counts = Counter(
+            {scenario_id: num_repeats for scenario_id in selected_ids}
+        )
+        observed_counts = Counter(str(row.get("task_id")) for row in rows)
+        if observed_counts != expected_counts:
+            raise ValueError("GAIA2 rollout coverage does not match the selected tasks")
+        expected_runs = set(range(1, num_repeats + 1))
+        observed_runs: dict[str, set[int]] = {
+            scenario_id: set() for scenario_id in selected_ids
+        }
+        for row in rows:
+            task_id = str(row.get("task_id"))
+            metadata = row.get("metadata") or {}
+            run_number = metadata.get("run_number")
+            if isinstance(run_number, bool) or not isinstance(run_number, int):
+                raise ValueError("GAIA2 rollout run_number must be an integer")
+            if run_number in observed_runs[task_id]:
+                raise ValueError(f"Duplicate GAIA2 rollout ({task_id}, {run_number})")
+            observed_runs[task_id].add(run_number)
+        if any(run_numbers != expected_runs for run_numbers in observed_runs.values()):
+            raise ValueError("GAIA2 logical rollout numbers are incomplete")
     exceptions = Counter(
         str((row.get("metadata") or {}).get("exception_type") or "unknown")
         for row in rows
@@ -1456,10 +1482,8 @@ def execute_trace_generation(local_repo: Path, args: argparse.Namespace) -> int:
 def execute(local_repo: Path, args: argparse.Namespace) -> int:
     if args.purpose == "trace-generation":
         return execute_trace_generation(local_repo, args)
-    if args.partition != "full":
-        raise ValueError(
-            "Gaia2 evaluation currently uses the full validation partition"
-        )
+    if args.partition not in ("full", "test"):
+        raise ValueError("Gaia2 evaluation supports only full or pinned test data")
     if args.rollout_offset:
         raise ValueError("--rollout-offset is only valid for trace generation")
     experiment = get_experiment(args.experiment)
@@ -1467,7 +1491,12 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
     directory = (
         args.output_dir.expanduser().resolve()
         if args.output_dir is not None
-        else output_dir(experiment, args.num_repeats, args.limit)
+        else output_dir(
+            experiment,
+            args.num_repeats,
+            args.limit,
+            partition=args.partition,
+        )
     )
     if args.dry:
         print(
@@ -1494,7 +1523,7 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
     if marker.is_file() and not args.force:
         print(f"Skip (completed): {marker}")
         return 0
-    manifest = validate_preparation(experiment)
+    manifest = validate_preparation(experiment, partition=args.partition)
     judge_endpoint = os.environ.get("LLM_PROXY_URL", "").rstrip("/")
     judge_key = os.environ.get("LLM_PROXY_MASTER_KEY", "")
     if not judge_endpoint or not judge_key:
@@ -1505,6 +1534,16 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
         if not (os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy")):
             raise RuntimeError("HTTPS_PROXY or https_proxy is required for OpenRouter")
     check_judge(judge_endpoint, judge_key)
+
+    comparison_baselines: list[dict[str, Any]] | None = None
+    if (
+        args.partition == "test"
+        and args.limit is None
+        and args.num_repeats == 3
+    ):
+        from gyms.gaia2.comparison import collect_baseline_summaries
+
+        comparison_baselines = collect_baseline_summaries()
 
     archived = archive_attempt(directory) if directory.exists() else None
     directory.mkdir(parents=True, exist_ok=True)
@@ -1538,6 +1577,12 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
         "preparation_manifest": str(preparation_manifest(experiment)),
         "started_at": utc_now(),
     }
+    if args.partition != "full":
+        status["split_manifest"] = {
+            "name": SPLIT_MANIFEST_NAME,
+            "path": SPLIT_MANIFEST_RELPATH,
+            "sha256": SPLIT_MANIFEST_SHA256,
+        }
     if archived is not None:
         status["archived_attempt"] = str(archived)
     atomic_json(status_path, status)
@@ -1638,7 +1683,7 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
         command = are_command(
             experiment,
             benchmark=benchmark,
-            dataset_root=dataset_revision_root() / SPLIT,
+            dataset_root=partition_dataset_root(args.partition),
             output=directory,
             judge_endpoint=judge_endpoint,
             num_repeats=args.num_repeats,
@@ -1661,12 +1706,26 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
         supervisor.assert_running()
         status["state"] = "validation"
         atomic_json(status_path, status)
+        all_scenario_ids = partition_scenario_ids(args.partition)
         metrics = validate_result(
             directory,
             num_repeats=args.num_repeats,
             limit=args.limit,
+            scenario_count=len(all_scenario_ids),
+            scenario_ids=all_scenario_ids,
         )
         atomic_json(directory / "metrics.json", metrics)
+        if comparison_baselines is not None:
+            from gyms.gaia2.comparison import build_heldout_comparison
+
+            comparison = build_heldout_comparison(
+                experiment,
+                directory,
+                baselines=comparison_baselines,
+            )
+            comparison_path = directory / "comparison.json"
+            atomic_json(comparison_path, comparison)
+            status["comparison_report"] = str(comparison_path)
         gpu_metadata = (
             subprocess.run(
                 [

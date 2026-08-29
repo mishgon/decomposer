@@ -118,7 +118,10 @@ def build_job_desc(
             f"gaia2-trace {SPLIT_MANIFEST_NAME} {partition} "
             f"{experiment.kind}-agent {identity} #{author}"
         )
-    return f"{job_description(experiment, num_repeats, limit)} #{author}"
+    return (
+        f"{job_description(experiment, num_repeats, limit, partition=partition)} "
+        f"#{author}"
+    )
 
 
 def build_job_script(
@@ -297,8 +300,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.purpose == "trace-generation" and args.partition != "train":
         parser.error("trace generation is restricted to --partition train")
-    if args.purpose == "evaluation" and args.partition != "full":
-        parser.error("evaluation currently requires --partition full")
+    if args.purpose == "evaluation" and args.partition not in ("full", "test"):
+        parser.error("evaluation supports only --partition full or test")
     if args.purpose == "evaluation" and args.rollout_offset:
         parser.error("--rollout-offset is only valid for trace generation")
     if not args.experiment and not args.filter:
@@ -327,7 +330,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                 args.limit,
             )
             if args.purpose == "trace-generation"
-            else completion_marker(experiment, args.num_repeats, args.limit)
+            else completion_marker(
+                experiment,
+                args.num_repeats,
+                args.limit,
+                partition=args.partition,
+            )
         )
         if marker.is_file() and not args.force:
             skipped_completed += 1

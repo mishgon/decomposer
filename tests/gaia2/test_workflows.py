@@ -28,6 +28,7 @@ from gyms.gaia2.experiments import (
     QWEN35_BASE_TEACHER_DECOMPOSER_EXPERIMENT,
     QWEN35_FINAL_MIXED_SFT_EXPERIMENT,
     QWEN35_FILTERED_SFT_EXPERIMENT,
+    QWEN35_GAIA2_SFT_EXPERIMENT,
     QWEN35_MIXED_SFT_EXPERIMENT,
     QWEN35_SFT_EXPERIMENT,
     SCENARIO_COUNT,
@@ -37,6 +38,7 @@ from gyms.gaia2.experiments import (
     SIMPLE_QWEN_9B_EXPERIMENT,
     SIMPLE_QWEN_EXPERIMENT,
     SPLIT,
+    SPLIT_MANIFEST_NAME,
     collect_experiments,
     filesystem_dir,
     output_dir,
@@ -228,6 +230,7 @@ def test_experiment_registry_contains_local_and_openrouter_profiles() -> None:
         QWEN35_MIXED_SFT_EXPERIMENT,
         QWEN35_FINAL_MIXED_SFT_EXPERIMENT,
         QWEN35_FILTERED_SFT_EXPERIMENT,
+        QWEN35_GAIA2_SFT_EXPERIMENT,
         QWEN35_BASE_DECOMPOSER_EXPERIMENT,
         QWEN35_BASE_TEACHER_DECOMPOSER_EXPERIMENT,
         DEEPSEEK_QWEN_EXPERIMENT,
@@ -251,6 +254,7 @@ def test_experiment_registry_contains_local_and_openrouter_profiles() -> None:
             QWEN35_MIXED_SFT_EXPERIMENT,
             QWEN35_FINAL_MIXED_SFT_EXPERIMENT,
             QWEN35_FILTERED_SFT_EXPERIMENT,
+            QWEN35_GAIA2_SFT_EXPERIMENT,
             QWEN35_BASE_DECOMPOSER_EXPERIMENT,
             QWEN35_BASE_TEACHER_DECOMPOSER_EXPERIMENT,
             DEEPSEEK_QWEN_EXPERIMENT,
@@ -272,6 +276,16 @@ def test_experiment_registry_contains_local_and_openrouter_profiles() -> None:
     )
     assert output_dir(SIMPLE_DEEPSEEK_EXPERIMENT, 3).parts[-1] == (
         "deepseek-v4-flash-0731-n3"
+    )
+    assert output_dir(
+        SIMPLE_EXPERIMENT,
+        3,
+        partition="test",
+    ).parts[-4:] == (
+        "partitions",
+        SPLIT_MANIFEST_NAME,
+        "test",
+        "gemma4-e4b-it-thinking-n3",
     )
 
 
@@ -363,6 +377,7 @@ def test_openrouter_decomposer_starts_only_the_configured_worker() -> None:
         QWEN35_MIXED_SFT_EXPERIMENT,
         QWEN35_FINAL_MIXED_SFT_EXPERIMENT,
         QWEN35_FILTERED_SFT_EXPERIMENT,
+        QWEN35_GAIA2_SFT_EXPERIMENT,
     ],
 )
 def test_qwen_sft_decomposer_uses_qwen_manager_and_worker_profiles(
@@ -513,6 +528,13 @@ def test_qwen_worker_uses_official_non_thinking_sampling() -> None:
                 "filtered-p1-s279"
             ),
         ),
+        (
+            QWEN35_GAIA2_SFT_EXPERIMENT,
+            (
+                "decomposer/qwen35-4b-sft-mixed-v2-493c24c4-"
+                "gaia2-110-n3-filtered-p2"
+            ),
+        ),
     ],
 )
 def test_qwen_sft_manager_uses_official_non_thinking_sampling(
@@ -626,6 +648,7 @@ def test_openrouter_preparation_hashes_only_the_local_worker(monkeypatch) -> Non
         QWEN35_MIXED_SFT_EXPERIMENT,
         QWEN35_FINAL_MIXED_SFT_EXPERIMENT,
         QWEN35_FILTERED_SFT_EXPERIMENT,
+        QWEN35_GAIA2_SFT_EXPERIMENT,
     ],
 )
 def test_qwen_sft_preparation_hashes_manager_and_worker(
@@ -769,6 +792,47 @@ def test_result_validation_keeps_failed_rollouts_in_fixed_denominator(tmp_path) 
     assert metrics["exception_types"] == {"RemoteError": 1}
 
 
+def test_result_validation_checks_partition_coverage_and_logical_runs(tmp_path) -> None:
+    output = tmp_path / "output"
+    output.mkdir()
+    rows = [
+        {
+            "task_id": scenario_id,
+            "score": float(run_number == 1),
+            "metadata": {"run_number": run_number},
+        }
+        for scenario_id in ("a", "b")
+        for run_number in (1, 2, 3)
+    ]
+    (output / "output.jsonl").write_text(
+        "".join(json.dumps(row) + "\n" for row in reversed(rows)),
+        encoding="utf-8",
+    )
+
+    metrics = validate_result(
+        output,
+        num_repeats=3,
+        limit=None,
+        scenario_count=2,
+        scenario_ids=("a", "b"),
+    )
+    assert metrics["rollout_rows"] == 6
+
+    rows[-1]["metadata"]["run_number"] = 2
+    (output / "output.jsonl").write_text(
+        "".join(json.dumps(row) + "\n" for row in rows),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="Duplicate GAIA2 rollout"):
+        validate_result(
+            output,
+            num_repeats=3,
+            limit=None,
+            scenario_count=2,
+            scenario_ids=("a", "b"),
+        )
+
+
 def test_mlspace_payload_uses_registry_gpu_type_and_redactable_judge_key(
     tmp_path,
 ) -> None:
@@ -797,6 +861,36 @@ def test_mlspace_payload_uses_registry_gpu_type_and_redactable_judge_key(
     assert normalize_job_desc(payload["job_desc"]) == normalize_job_desc(
         payload["job_desc"] + " @someone"
     )
+
+
+def test_heldout_mlspace_payload_uses_pinned_test_partition(tmp_path) -> None:
+    payload = build_payload(
+        QWEN35_GAIA2_SFT_EXPERIMENT,
+        tmp_path / "staged",
+        num_repeats=3,
+        limit=None,
+        author="sukhorukov",
+        base_image="image",
+        priority="high",
+        force=False,
+        judge_environment={
+            "LLM_PROXY_URL": "https://judge.test/v1",
+            "LLM_PROXY_MASTER_KEY": "secret",
+        },
+        proxy_environment={},
+        openrouter_key="<not-set>",
+        purpose="evaluation",
+        partition="test",
+        concurrency=4,
+    )
+
+    assert payload["instance_type"] == INSTANCE_TYPES_BY_NUM_GPUS[2]
+    assert payload["priority_class"] == "high"
+    assert f"{SPLIT_MANIFEST_NAME}-test" in payload["job_desc"]
+    assert "--purpose evaluation" in payload["script"]
+    assert "--partition test" in payload["script"]
+    assert "--num-repeats 3" in payload["script"]
+    assert "--concurrency 4" in payload["script"]
 
 
 def test_openrouter_mlspace_payload_uses_one_gpu_and_redacts_credentials(

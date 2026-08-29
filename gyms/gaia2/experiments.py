@@ -131,6 +131,17 @@ QWEN35_4B_FILTERED_SFT = (
     )
     / "final-patience1-best-step279"
 )
+QWEN35_4B_GAIA2_SFT_SERVED_NAME = (
+    "decomposer/qwen35-4b-sft-mixed-v2-493c24c4-gaia2-110-n3-filtered-p2"
+)
+QWEN35_4B_GAIA2_SFT = (
+    ARTIFACTS_ROOT
+    / "training"
+    / "sft"
+    / "jobs"
+    / "qwen35-4b-nonthinking-mixed-v2-493c24c4-gaia2-110-n3-filtered-32k-full-4gpu"
+    / "final"
+)
 
 DecomposerManagerBackend = Literal["local_vllm", "openrouter"]
 DecomposerPromptProfile = Literal["student", "teacher"]
@@ -442,6 +453,15 @@ QWEN35_FINAL_MIXED_SFT_EXPERIMENT = DecomposerExperiment(
     worker_trust_remote_code=True,
     worker_gdn_prefill_backend="triton",
 )
+QWEN35_GAIA2_SFT_EXPERIMENT = replace(
+    QWEN35_FINAL_MIXED_SFT_EXPERIMENT,
+    name=(
+        "qwen35-4b-sft-mixed-v2-493c24c4-gaia2-110-n3-filtered-p2-"
+        "non-thinking-qwen35-4b-non-thinking"
+    ),
+    manager_checkpoint=QWEN35_4B_GAIA2_SFT,
+    manager_served_name=QWEN35_4B_GAIA2_SFT_SERVED_NAME,
+)
 QWEN35_BASE_DECOMPOSER_EXPERIMENT = DecomposerExperiment(
     name="qwen35-4b-base-non-thinking-qwen35-4b-non-thinking",
     worker_checkpoint=QWEN35_4B_BASE,
@@ -569,6 +589,7 @@ ALL_EXPERIMENTS: tuple[Experiment, ...] = (
     QWEN35_MIXED_SFT_EXPERIMENT,
     QWEN35_FINAL_MIXED_SFT_EXPERIMENT,
     QWEN35_FILTERED_SFT_EXPERIMENT,
+    QWEN35_GAIA2_SFT_EXPERIMENT,
     QWEN35_BASE_DECOMPOSER_EXPERIMENT,
     QWEN35_BASE_TEACHER_DECOMPOSER_EXPERIMENT,
     DEEPSEEK_QWEN_EXPERIMENT,
@@ -627,8 +648,15 @@ def output_dir(
     experiment: Experiment,
     num_repeats: int,
     limit: int | None = None,
+    *,
+    partition: Partition = "full",
 ) -> Path:
-    base = RESULTS_ROOT / SPLIT / DOMAIN / run_name(experiment, num_repeats)
+    if partition not in PARTITIONS:
+        raise ValueError(f"Unknown Gaia2 partition: {partition!r}")
+    root = RESULTS_ROOT / SPLIT / DOMAIN
+    if partition != "full":
+        root = root / "partitions" / SPLIT_MANIFEST_NAME / partition
+    base = root / run_name(experiment, num_repeats)
     return base if limit is None else base / f"smoke_{limit}"
 
 
@@ -636,8 +664,13 @@ def completion_marker(
     experiment: Experiment,
     num_repeats: int,
     limit: int | None = None,
+    *,
+    partition: Partition = "full",
 ) -> Path:
-    return output_dir(experiment, num_repeats, limit) / ".eval_done.json"
+    return (
+        output_dir(experiment, num_repeats, limit, partition=partition)
+        / ".eval_done.json"
+    )
 
 
 def trace_run_name(
@@ -695,8 +728,15 @@ def job_description(
     experiment: Experiment,
     num_repeats: int,
     limit: int | None = None,
+    *,
+    partition: Partition = "full",
 ) -> str:
     identity = run_name(experiment, num_repeats)
     if limit is not None:
         identity += f"-smoke-{limit}"
-    return f"gaia2-{SPLIT}-{DOMAIN} {experiment.kind}-agent {identity}"
+    if partition == "full":
+        return f"gaia2-{SPLIT}-{DOMAIN} {experiment.kind}-agent {identity}"
+    return (
+        f"gaia2-{SPLIT}-{DOMAIN} {SPLIT_MANIFEST_NAME}-{partition} "
+        f"{experiment.kind}-agent {identity}"
+    )
