@@ -15,7 +15,10 @@ from typing import Any
 import torch
 import yaml
 from accelerate.utils import merge_fsdp_weights, save_fsdp_model
-from datasets import Dataset, load_dataset
+from datasets import Dataset, Features
+from datasets import Json as DatasetJson
+from datasets import List as DatasetList
+from datasets import Value
 from transformers import (
     AutoConfig,
     AutoTokenizer,
@@ -51,6 +54,18 @@ from .preprocessing import (
 JsonObject = dict[str, Any]
 _LAUNCHER_LOG_FILENAMES = frozenset({"console.log", "mlspace.log"})
 _GEMMA4_REQUIRED_STOP_TOKENS = ("<turn|>", "<|tool_response>")
+_PREPARED_SPLIT_FEATURES = Features(
+    {
+        "schema_version": Value("int64"),
+        "id": Value("string"),
+        "group_id": Value("string"),
+        "messages": DatasetList(DatasetJson()),
+        "tools": DatasetList(DatasetJson()),
+        "source": DatasetJson(),
+        "outcome": DatasetJson(),
+        "attributes": DatasetJson(),
+    }
+)
 
 
 def _load_yaml(path: Path) -> JsonObject:
@@ -132,7 +147,30 @@ def _load_prepared_split(
 ) -> Dataset:
     if not path.is_file():
         raise FileNotFoundError(f"Prepared split does not exist: {path}")
-    dataset = load_dataset("json", data_files=str(path), split="train")
+    records: list[JsonObject] = []
+    with path.open(encoding="utf-8") as file:
+        for line_number, line in enumerate(file, start=1):
+            if not line.strip():
+                continue
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError as error:
+                raise ValueError(
+                    f"Invalid prepared JSON in {path} at line {line_number}: {error}"
+                ) from error
+            if not isinstance(record, dict):
+                raise ValueError(
+                    f"Prepared JSON in {path} at line {line_number} must be an object."
+                )
+            records.append(record)
+    if not records:
+        raise ValueError(f"Prepared split is empty: {path}")
+
+    # Dynamic canonical fields stay as JSON instead of Arrow structs. The
+    # streaming JSON loader fixes nested structs from its first chunk, making
+    # heterogeneous source metadata depend on record ordering; inferred structs
+    # also inject null message keys and change prepared chat tokenization.
+    dataset = Dataset.from_list(records, features=_PREPARED_SPLIT_FEATURES)
     dataset = _limit_dataset(dataset, sample_limit)
     workers = min(max(1, num_proc), len(dataset))
     return dataset.map(

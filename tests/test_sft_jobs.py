@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -28,6 +29,7 @@ from training.sft.train import (
     _configure_gemma4_generation,
     _configure_sdpa_backends,
     _has_existing_run_output,
+    _load_prepared_split,
     _resolve_train_batch_config,
     _save_final_configuration,
     _select_longest_by_token_length,
@@ -42,6 +44,42 @@ EARLY_STOPPING_TRAINING_CONFIG = {
     "metric_for_best_model": "eval_loss",
     "greater_is_better": False,
 }
+
+
+def _prepared_loader_record(
+    index: int,
+    *,
+    metrics: dict[str, float],
+    padding: str = "",
+) -> dict[str, object]:
+    return {
+        "schema_version": 1,
+        "id": f"record-{index}",
+        "group_id": f"group-{index}",
+        "messages": [
+            {"role": "system", "content": "System."},
+            {"role": "user", "content": "Task."},
+            {
+                "role": "assistant",
+                "content": "Done.",
+                "teacher_reasoning": "Hidden reasoning.",
+            },
+        ],
+        "tools": [],
+        "source": {
+            "adapter": "fixture",
+            "adapter_version": 1,
+            "source_id": "fixture",
+            "benchmark": "fixture",
+            "environment": "fixture",
+            "partition": "train",
+            "teacher": "fixture",
+            "task_id": str(index),
+            "rollout_id": "0",
+        },
+        "outcome": {"success": True, "reward": 1.0, "metrics": metrics},
+        "attributes": {"padding": padding},
+    }
 
 
 class _FakeGemmaTokenizer:
@@ -119,6 +157,68 @@ def test_sft_experiments_are_unique_and_register_retained_configs() -> None:
         assert experiment.num_gpus == 4
         assert experiment.use_liger_kernel is True
         assert experiment.pytorch_cuda_alloc_conf == "expandable_segments:True"
+
+
+def test_prepared_loader_preserves_dynamic_json_across_reader_chunks(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "mixed.jsonl"
+    padding = "x" * 13_000
+    records = [
+        _prepared_loader_record(index, metrics={"reward": 1.0}, padding=padding)
+        for index in range(900)
+    ]
+    records.append(
+        _prepared_loader_record(
+            900,
+            metrics={
+                "reward": 1.0,
+                "binary_pass": 1.0,
+                "check_passed": 9.0,
+                "check_total": 10.0,
+                "check_pass_ratio": 0.9,
+            },
+        )
+    )
+    with path.open("w", encoding="utf-8") as file:
+        for record in records:
+            file.write(json.dumps(record) + "\n")
+
+    dataset = _load_prepared_split(
+        path,
+        include_reasoning=False,
+        sample_limit=None,
+        num_proc=1,
+    )
+
+    assert len(dataset) == 901
+    assert dataset[0]["outcome"]["metrics"] == {"reward": 1.0}
+    assert dataset[-1]["outcome"]["metrics"] == records[-1]["outcome"]["metrics"]
+    assert "teacher_reasoning" not in dataset[0]["messages"][-1]
+    assert "reasoning" not in dataset[0]["messages"][-1]
+
+
+@pytest.mark.parametrize(
+    ("content", "match"),
+    [
+        ('{"schema_version": 1}\n{not-json}\n', r"line 2"),
+        ('{"schema_version": 1}\n[]\n', r"line 2 must be an object"),
+        ("\n", r"split is empty"),
+    ],
+)
+def test_prepared_loader_rejects_invalid_jsonl(
+    tmp_path: Path, content: str, match: str
+) -> None:
+    path = tmp_path / "invalid.jsonl"
+    path.write_text(content, encoding="utf-8")
+
+    with pytest.raises(ValueError, match=match):
+        _load_prepared_split(
+            path,
+            include_reasoning=False,
+            sample_limit=None,
+            num_proc=1,
+        )
 
 
 def test_build_train_command_uses_torchrun_and_explicit_liger_mode() -> None:
