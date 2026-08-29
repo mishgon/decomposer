@@ -210,6 +210,26 @@ $MLSPY -m gyms.workplace_assistant.run_eval \
   --author-name sukhorukov
 ```
 
+The patience-2 checkpoint trained on filtered Workplace, Toolathlon, and the
+pinned 110-task GAIA2 training partition uses the same student prompt and base
+non-thinking Qwen3.5-4B worker:
+
+```bash
+.venv/bin/python -m gyms.workplace_assistant.prepare eval \
+  --split validation \
+  --experiment qwen35-4b-sft-mixed-v2-493c24c4-gaia2-110-n3-filtered-p2-non-thinking-qwen35-4b-non-thinking \
+  --reuse-source
+
+$MLSPY -m gyms.workplace_assistant.run_eval \
+  --purpose evaluation \
+  --experiment qwen35-4b-sft-mixed-v2-493c24c4-gaia2-110-n3-filtered-p2-non-thinking-qwen35-4b-non-thinking \
+  --split validation \
+  --num-repeats 3 \
+  --concurrency 8 \
+  --priority high \
+  --author-name sukhorukov
+```
+
 After the Workplace E4B SFT run has exported its merged `final/` checkpoint,
 evaluate the tuned non-thinking manager and vanilla thinking E4B subagent on
 dedicated GPUs:

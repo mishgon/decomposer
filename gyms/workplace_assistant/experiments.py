@@ -399,6 +399,20 @@ WORKPLACE_QWEN35_4B_FILTERED_SFT_FINAL = (
     )
     / "final-patience1-best-step279"
 )
+WORKPLACE_QWEN35_4B_GAIA2_SFT_MODEL_ID = (
+    "decomposer/qwen35-4b-sft-mixed-v2-493c24c4-gaia2-110-n3-filtered-p2"
+)
+WORKPLACE_QWEN35_4B_GAIA2_SFT_FINAL = (
+    ARTIFACTS_ROOT
+    / "training"
+    / "sft"
+    / "jobs"
+    / (
+        "qwen35-4b-nonthinking-mixed-v2-493c24c4-gaia2-110-n3-"
+        "filtered-32k-full-4gpu"
+    )
+    / "final"
+)
 
 DECOMPOSER_EXPERIMENTS = (
     DecomposerExperiment(
@@ -586,6 +600,48 @@ DECOMPOSER_EXPERIMENTS = (
             ModelServer(
                 WORKPLACE_QWEN35_4B_FILTERED_SFT_MODEL_ID,
                 WORKPLACE_QWEN35_4B_FILTERED_SFT_FINAL,
+                8026,
+                0,
+                0.90,
+                0,
+                thinking=False,
+                tool_call_parser="qwen3_xml",
+                reasoning_parser=None,
+                gdn_prefill_backend="triton",
+                dtype="bfloat16",
+            ),
+            ModelServer(
+                "Qwen/Qwen3.5-4B",
+                QWEN35_4B_BASE,
+                8025,
+                1,
+                0.90,
+                0,
+                thinking=False,
+                tool_call_parser="qwen3_xml",
+                reasoning_parser=None,
+                gdn_prefill_backend="triton",
+                dtype="bfloat16",
+            ),
+        ),
+    ),
+    DecomposerExperiment(
+        name=(
+            "qwen35-4b-sft-mixed-v2-493c24c4-gaia2-110-n3-filtered-p2-"
+            "non-thinking-qwen35-4b-non-thinking"
+        ),
+        gym_config_filename=(
+            "workplace_assistant_qwen35_4b_sft_mixed_v2_493c24c4_gaia2_"
+            "110_n3_filtered_p2_non_thinking_qwen35_4b_non_thinking.yaml"
+        ),
+        manager_backend="local_vllm",
+        num_gpus=2,
+        max_model_len=131072,
+        subagent_graph="qwen35",
+        model_servers=(
+            ModelServer(
+                WORKPLACE_QWEN35_4B_GAIA2_SFT_MODEL_ID,
+                WORKPLACE_QWEN35_4B_GAIA2_SFT_FINAL,
                 8026,
                 0,
                 0.90,
