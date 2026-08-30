@@ -520,27 +520,32 @@ def decomposer_vllm_commands(
     return manager, worker
 
 
+def langgraph_runtime_paths(directory: Path) -> tuple[Path, Path]:
+    return (
+        directory / "configuration" / "langgraph.json",
+        directory / "cache" / "langgraph_runtime",
+    )
+
+
 def langgraph_command(
-    local_repo: Path, experiment: DecomposerExperiment
+    experiment: DecomposerExperiment, directory: Path
 ) -> tuple[list[str], Path]:
-    directory = local_repo / "gyms" / "gaia2" / "subagents"
+    config_path, runtime_directory = langgraph_runtime_paths(directory)
     return (
         [
-            str(PROJECT_VENV / "bin" / "langgraph"),
-            "dev",
+            str(PROJECT_VENV / "bin" / "python"),
+            "-m",
+            "gyms.gaia2.langgraph_server",
             "--config",
-            str(directory / "langgraph.json"),
+            str(config_path),
             "--host",
             "127.0.0.1",
             "--port",
             str(experiment.subagent_port),
             "--n-jobs-per-worker",
             "16",
-            "--no-browser",
-            "--no-reload",
-            "--allow-blocking",
         ],
-        directory,
+        runtime_directory,
     )
 
 
@@ -1124,6 +1129,7 @@ def _runtime_configs(
     config_dir = directory / "configuration"
     service_path = config_dir / "service.json"
     plugin_path = config_dir / "are_plugin.json"
+    langgraph_path, langgraph_runtime_directory = langgraph_runtime_paths(directory)
     if experiment.requires_openrouter:
         manager = {
             "model": experiment.manager_served_name,
@@ -1235,6 +1241,18 @@ def _runtime_configs(
     }
     atomic_json(service_path, service)
     atomic_json(plugin_path, plugin)
+    atomic_json(
+        langgraph_path,
+        {
+            "dependencies": ["."],
+            "graphs": {
+                "gaia2_worker": "gyms.gaia2.subagents.graphs:gaia2_worker",
+            },
+            "python_version": "3.12",
+            "disable_persistence": True,
+        },
+    )
+    langgraph_runtime_directory.mkdir(parents=True, exist_ok=True)
     return service_path, plugin_path
 
 
@@ -1338,7 +1356,8 @@ def _dry_plan(
             else directory
         )
         plugin_config = plugin_directory / "configuration" / "are_plugin.json"
-        services.append(langgraph_command(local_repo, experiment)[0])
+        langgraph_argv, langgraph_cwd = langgraph_command(experiment, directory)
+        services.append(langgraph_argv)
         services.append(service_command(experiment, service_config))
         if experiment.requires_local_manager:
             gpu_assignments = {
@@ -1402,6 +1421,15 @@ def _dry_plan(
         "are_benchmark": shlex.join(first_are_command),
         "output_dir": str(directory),
     }
+    if isinstance(experiment, DecomposerExperiment):
+        langgraph_config, langgraph_runtime_directory = langgraph_runtime_paths(
+            directory
+        )
+        plan["langgraph_runtime"] = {
+            "config": str(langgraph_config),
+            "working_directory": str(langgraph_runtime_directory),
+            "file_persistence": False,
+        }
     if purpose == "trace-generation":
         plan["are_rounds"] = [
             {
@@ -1614,7 +1642,7 @@ def execute_trace_generation(local_repo: Path, args: argparse.Namespace) -> int:
             local_repo, directory, experiment
         )
         subagent_env = subagent_environment(experiment)
-        langgraph_argv, langgraph_cwd = langgraph_command(local_repo, experiment)
+        langgraph_argv, langgraph_cwd = langgraph_command(experiment, directory)
         langgraph_process = supervisor.start(
             "langgraph_subagent",
             langgraph_argv,
@@ -1982,7 +2010,7 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
                 local_repo, directory, experiment
             )
             subagent_env = subagent_environment(experiment)
-            langgraph_argv, langgraph_cwd = langgraph_command(local_repo, experiment)
+            langgraph_argv, langgraph_cwd = langgraph_command(experiment, directory)
             langgraph_process = supervisor.start(
                 "langgraph_subagent",
                 langgraph_argv,

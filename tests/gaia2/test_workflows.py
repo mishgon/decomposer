@@ -10,6 +10,7 @@ import pytest
 
 from gyms.gaia2 import partition as partition_module
 from gyms.gaia2 import prepare
+from gyms.gaia2 import langgraph_server
 from gyms.gaia2.dataset import (
     validate_materialized_dataset,
     validate_materialized_filesystem,
@@ -65,6 +66,8 @@ from gyms.gaia2.run import (
     archive_attempt,
     are_command,
     decomposer_vllm_commands,
+    langgraph_command,
+    langgraph_runtime_paths,
     openrouter_proxy_command,
     prompt_sha256,
     remote_manager_proxy_command,
@@ -413,6 +416,108 @@ def test_qwen36_teacher_uses_internal_proxy_and_existing_worker(tmp_path) -> Non
         "test",
         "gemma4-e4b-it-thinking-n3",
     )
+
+
+def test_langgraph_runtime_is_private_and_disables_file_persistence(tmp_path) -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    student_output = tmp_path / "student"
+    teacher_output = tmp_path / "teacher"
+
+    _runtime_configs(repo_root, student_output, QWEN35_BASE_DECOMPOSER_EXPERIMENT)
+    _runtime_configs(
+        repo_root,
+        teacher_output,
+        QWEN35_BASE_TEACHER_DECOMPOSER_EXPERIMENT,
+    )
+
+    student_config, student_cwd = langgraph_runtime_paths(student_output)
+    teacher_config, teacher_cwd = langgraph_runtime_paths(teacher_output)
+    student_command, command_cwd = langgraph_command(
+        QWEN35_BASE_DECOMPOSER_EXPERIMENT,
+        student_output,
+    )
+
+    assert student_config != teacher_config
+    assert student_cwd != teacher_cwd
+    assert command_cwd == student_cwd
+    assert student_command[student_command.index("--config") + 1] == str(
+        student_config
+    )
+    assert repo_root not in student_cwd.parents
+
+    for config_path in (student_config, teacher_config):
+        config = langgraph_server.load_runtime_config(config_path)
+        assert config == {
+            "dependencies": ["."],
+            "disable_persistence": True,
+            "graphs": {
+                "gaia2_worker": "gyms.gaia2.subagents.graphs:gaia2_worker",
+            },
+            "python_version": "3.12",
+        }
+
+    student_config.write_text(
+        json.dumps({"graphs": {"gaia2_worker": "module:graph"}}),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="persistence must be disabled"):
+        langgraph_server.load_runtime_config(student_config)
+
+    plan = _dry_plan(
+        repo_root,
+        QWEN35_BASE_DECOMPOSER_EXPERIMENT,
+        student_output,
+        ("0", "1"),
+        3,
+        None,
+        purpose="evaluation",
+        partition="full",
+        concurrency=4,
+        domain="ambiguity",
+    )
+    assert plan["langgraph_runtime"] == {
+        "config": str(student_config),
+        "working_directory": str(student_cwd),
+        "file_persistence": False,
+    }
+
+
+def test_langgraph_server_forces_in_memory_runtime(tmp_path, monkeypatch) -> None:
+    config_path = tmp_path / "langgraph.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "disable_persistence": True,
+                "graphs": {"gaia2_worker": "module:graph"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    captured = {}
+
+    def fake_run_server(**kwargs):
+        captured.update(kwargs)
+
+    monkeypatch.setattr("langgraph_api.cli.run_server", fake_run_server)
+
+    assert (
+        langgraph_server.main(
+            [
+                "--config",
+                str(config_path),
+                "--port",
+                "2028",
+                "--n-jobs-per-worker",
+                "16",
+            ]
+        )
+        == 0
+    )
+    assert captured["graphs"] == {"gaia2_worker": "module:graph"}
+    assert captured["disable_persistence"] is True
+    assert captured["reload"] is False
+    assert captured["open_browser"] is False
+    assert captured["allow_blocking"] is True
 
 
 def test_vllm_commands_use_current_e4b_thinking_profiles() -> None:
@@ -1518,6 +1623,7 @@ def test_trace_execution_resumes_completed_round_and_reuses_services(
         output = initial_round / "output.jsonl"
         output.write_text(output.read_text().splitlines()[0] + "\n")
     started_services: list[str] = []
+    started_service_details: dict[str, tuple[list[str], Path]] = {}
     are_commands: list[list[str]] = []
 
     class Process:
@@ -1528,8 +1634,9 @@ def test_trace_execution_resumes_completed_round_and_reuses_services(
         def __init__(self, _logs, _env):
             pass
 
-        def start(self, name, _command, *, cwd, env=None):
+        def start(self, name, command, *, cwd, env=None):
             started_services.append(name)
+            started_service_details[name] = (command, cwd)
             return Process()
 
         def assert_running(self):
@@ -1600,6 +1707,17 @@ def test_trace_execution_resumes_completed_round_and_reuses_services(
         "langgraph_subagent",
         "decomposer_service",
     ]
+    langgraph_config, langgraph_cwd = langgraph_runtime_paths(trace_directory)
+    langgraph_command_argv, started_langgraph_cwd = started_service_details[
+        "langgraph_subagent"
+    ]
+    assert started_langgraph_cwd == langgraph_cwd
+    assert langgraph_command_argv[langgraph_command_argv.index("--config") + 1] == str(
+        langgraph_config
+    )
+    assert langgraph_server.load_runtime_config(langgraph_config)[
+        "disable_persistence"
+    ] is True
     expected_are_commands = 2 if initial_round_state == "partial_unmarked" else 1
     assert len(are_commands) == expected_are_commands
     assert all(
