@@ -8,6 +8,7 @@ import pytest
 import yaml
 
 from gyms.workplace_assistant import experiments, run_eval
+from gyms.workplace_assistant import migrate_call_limit_artifacts as migration_module
 from gyms.workplace_assistant import prepare as prepare_module
 from gyms.workplace_assistant import run as run_module
 from gyms.workplace_assistant.experiments import (
@@ -48,8 +49,8 @@ from gyms.qwen_sampling import qwen35_general_sampling
 
 def test_registry_is_global_and_unique() -> None:
     assert len(DECOMPOSER_EXPERIMENTS) == 17
-    assert len(SIMPLE_EXPERIMENTS) == 29
-    assert len(experiments.EXPERIMENTS) == 46
+    assert len(SIMPLE_EXPERIMENTS) == 28
+    assert len(experiments.EXPERIMENTS) == 45
     assert experiments.BASE_IMAGE.endswith("py3.12-torch2.7.0:0.0.42")
     assert {experiment.kind for experiment in experiments.ALL_EXPERIMENTS} == {
         "decomposer",
@@ -227,17 +228,16 @@ def test_qwen35_9b_simple_profile_uses_cached_non_thinking_checkpoint() -> None:
     )
 
 
-def test_qwen35_4b_maxsteps100_simple_profile_is_isolated() -> None:
+def test_simple_profiles_default_to_calls100_and_use_isolated_output() -> None:
     repo_root = Path(__file__).resolve().parents[2]
-    legacy = get_experiment("qwen35-4b-base-non-thinking")
-    experiment = get_experiment("qwen35-4b-base-non-thinking-maxsteps100")
-    assert isinstance(legacy, SimpleExperiment)
+    experiment = get_experiment("qwen35-4b-base-non-thinking")
     assert isinstance(experiment, SimpleExperiment)
-    assert legacy.max_steps == 6
+    assert all(item.max_steps == 100 for item in SIMPLE_EXPERIMENTS)
     assert experiment.max_steps == 100
-    assert experiment.checkpoint == legacy.checkpoint == experiments.QWEN35_4B_BASE
-    assert experiment.thinking is legacy.thinking is False
-    assert experiment.extra_body == legacy.extra_body
+    assert experiment.checkpoint == experiments.QWEN35_4B_BASE
+    assert experiment.thinking is False
+    with pytest.raises(ValueError, match="Unknown Workplace Assistant experiment"):
+        get_experiment("qwen35-4b-base-non-thinking-maxsteps100")
 
     start = run_module.gym_start_command(
         repo_root,
@@ -250,8 +250,7 @@ def test_qwen35_4b_maxsteps100_simple_profile_is_isolated() -> None:
     assert any(argument.endswith("simple_agent.max_steps=100") for argument in start)
 
     path = output_dir(experiment, "validation", 3, purpose="evaluation")
-    assert path.name == "qwen35-4b-base-non-thinking-maxsteps100-n3"
-    assert path != output_dir(legacy, "validation", 3, purpose="evaluation")
+    assert path.name == "qwen35-4b-base-non-thinking-calls100-n3"
 
     plan = run_module._dry_plan(
         repo_root,
@@ -284,12 +283,12 @@ def test_qwen35_4b_maxsteps100_simple_profile_is_isolated() -> None:
     assert payload["priority_class"] == "high"
     assert payload["job_desc"] == (
         "workplace-assistant-validation simple-agent "
-        "qwen35-4b-base-non-thinking-maxsteps100-n3 #sukhorukov"
+        "qwen35-4b-base-non-thinking-calls100-n3 #sukhorukov"
     )
 
 
 def test_simple_output_identity_includes_max_steps(tmp_path: Path) -> None:
-    experiment = get_experiment("qwen35-4b-base-non-thinking-maxsteps100")
+    experiment = get_experiment("qwen35-4b-base-non-thinking")
     (tmp_path / "run_status.json").write_text(
         json.dumps(
             {
@@ -321,7 +320,7 @@ def test_simple_execute_does_not_read_decomposer_proxy_fields(
     class PreflightComplete(RuntimeError):
         pass
 
-    experiment = get_experiment("qwen35-4b-base-non-thinking-maxsteps100")
+    experiment = get_experiment("qwen35-4b-base-non-thinking")
     output = tmp_path / "simple-run"
     args = run_module.build_parser().parse_args(
         [
@@ -414,7 +413,7 @@ def test_deepseek_simple_profile_is_remote_and_does_not_start_vllm() -> None:
     assert payload["env_variables"]["OPENROUTER_API_KEY_DECOMPOSER"] == "secret"
     assert payload["job_desc"] == (
         "workplace-assistant-validation simple-agent "
-        "deepseek-v4-flash-0731-n3 #alice"
+        "deepseek-v4-flash-0731-calls100-n3 #alice"
     )
 
 
@@ -434,6 +433,43 @@ def test_decomposer_base_profiles_use_student_prompt() -> None:
         assert agent["decomposer_system_prompt_profile"] == "student"
 
 
+def test_decomposer_call_limits_reach_runtime_and_identity() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    experiment = get_experiment("deepseek-v4-flash-0731-gemma4-e4b-thinking")
+    assert isinstance(experiment, DecomposerExperiment)
+    assert experiment.manager_max_model_calls == 100
+    assert experiment.subagent_max_model_calls == 100
+    assert experiment.subagent_recursion_limit == 1000
+
+    start = run_module.gym_start_command(
+        repo_root,
+        experiment,
+        purpose="evaluation",
+        gym_bin=Path("/gym"),
+        component_root=Path("/components"),
+        logs=Path("/logs"),
+    )
+    assert any(argument.endswith("manager_max_model_calls=100") for argument in start)
+    assert any(argument.endswith("subagent_recursion_limit=1000") for argument in start)
+
+    plan = run_module._dry_plan(
+        repo_root,
+        experiment,
+        "evaluation",
+        "validation",
+        3,
+        None,
+        Path("/tmp/workplace-decomposer-calls100"),
+        ("0",),
+    )
+    assert plan["decomposer_manager_max_model_calls"] == 100
+    assert plan["decomposer_subagent_max_model_calls"] == 100
+    assert plan["decomposer_subagent_recursion_limit"] == 1000
+
+    environment = run_module._base_environment(repo_root, experiment, "test-run")
+    assert environment["DECOMPOSER_SUBAGENT_MAX_MODEL_CALLS"] == "100"
+
+
 def test_selectors_form_a_deduplicated_registry_ordered_union() -> None:
     selected = collect_experiments(
         names=("gemma4-e2b-it-thinking",),
@@ -451,19 +487,22 @@ def test_selectors_form_a_deduplicated_registry_ordered_union() -> None:
 def test_split_repeat_and_smoke_paths_are_isolated() -> None:
     simple = get_experiment("qwen35-2b-base-non-thinking")
     decomposer = get_experiment("glm-5-2-gemma4-26b-a4b-non-thinking")
-    assert run_name(simple) == simple.name
-    assert run_name(simple, 5) == f"{simple.name}-n5"
+    assert run_name(simple) == f"{simple.name}-calls100"
+    assert run_name(simple, 5) == f"{simple.name}-calls100-n5"
     assert output_dir(simple, "train", 5, purpose="evaluation").parts[-2:] == (
         "train",
-        f"{simple.name}-n5",
+        f"{simple.name}-calls100-n5",
     )
     teacher = output_dir(decomposer, "train", 3, purpose="trace-generation")
     student = output_dir(decomposer, "train", 3, purpose="evaluation")
-    assert teacher.parts[-2:] == ("train", f"{decomposer.name}-n3")
+    decomposer_identity = (
+        f"{decomposer.name}-managercalls100-subagentcalls100-n3"
+    )
+    assert teacher.parts[-2:] == ("train", decomposer_identity)
     assert student.parts[-3:] == (
         "train",
         "evaluation",
-        f"{decomposer.name}-n3",
+        decomposer_identity,
     )
     assert (
         completion_marker(
@@ -489,7 +528,8 @@ def test_run_purpose_controls_prompt_and_preserves_teacher_job_identity() -> Non
         purpose="trace-generation",
     ) == (
         "workplace-assistant-train decomposer-agent "
-        "glm-5-2-gemma4-26b-a4b-non-thinking-n3"
+        "glm-5-2-gemma4-26b-a4b-non-thinking-"
+        "managercalls100-subagentcalls100-n3"
     )
     assert "train-evaluation" in job_description(
         decomposer,
@@ -573,10 +613,11 @@ def test_deepseek_e4b_thinking_profile_is_single_type_and_single_gpu() -> None:
     assert payload["instance_type"] == INSTANCE_TYPES_BY_NUM_GPUS[1]
     assert "--purpose trace-generation" in payload["script"]
     assert "--num-repeats 3" in payload["script"]
-    assert "deepseek-v4-flash-0731-gemma4-e4b-thinking-n3" in payload["job_desc"]
+    assert run_name(experiment, 3) in payload["job_desc"]
     assert payload["job_desc"] == (
         "workplace-assistant-train decomposer-agent "
-        "deepseek-v4-flash-0731-gemma4-e4b-thinking-n3 #alice"
+        "deepseek-v4-flash-0731-gemma4-e4b-thinking-"
+        "managercalls100-subagentcalls100-n3 #alice"
     )
 
 
@@ -749,7 +790,8 @@ def test_sft_qwen_manager_and_base_worker_use_dedicated_gpus(
     assert "--num-repeats 3" in payload["script"]
     assert "OPENROUTER_API_KEY_DECOMPOSER" not in payload["env_variables"]
     assert payload["job_desc"] == (
-        f"workplace-assistant-validation-evaluation decomposer-agent {name}-n3 "
+        "workplace-assistant-validation-evaluation decomposer-agent "
+        f"{run_name(experiment, 3)} "
         "#alice"
     )
 
@@ -862,7 +904,8 @@ def test_untuned_qwen_manager_matches_tuned_two_gpu_topology() -> None:
     assert "--num-repeats 3" in payload["script"]
     assert "OPENROUTER_API_KEY_DECOMPOSER" not in payload["env_variables"]
     assert payload["job_desc"] == (
-        f"workplace-assistant-validation-evaluation decomposer-agent {name}-n3 "
+        "workplace-assistant-validation-evaluation decomposer-agent "
+        f"{run_name(experiment, 3)} "
         "#alice"
     )
 
@@ -933,7 +976,8 @@ def test_local_e4b_manager_shares_thinking_subagent_server() -> None:
     assert "OPENROUTER_API_KEY_DECOMPOSER" not in payload["env_variables"]
     assert "HTTPS_PROXY" not in payload["env_variables"]
     assert payload["job_desc"] == (
-        f"workplace-assistant-validation-evaluation decomposer-agent {name}-n3 #alice"
+        "workplace-assistant-validation-evaluation decomposer-agent "
+        f"{run_name(experiment, 3)} #alice"
     )
 
 
@@ -1027,7 +1071,8 @@ def test_sft_e4b_manager_and_vanilla_subagent_use_dedicated_gpus() -> None:
     assert "--num-repeats 3" in payload["script"]
     assert "OPENROUTER_API_KEY_DECOMPOSER" not in payload["env_variables"]
     assert payload["job_desc"] == (
-        f"workplace-assistant-validation-evaluation decomposer-agent {name}-n3 #alice"
+        "workplace-assistant-validation-evaluation decomposer-agent "
+        f"{run_name(experiment, 3)} #alice"
     )
 
 
@@ -1295,6 +1340,59 @@ def test_force_archives_previous_attempt(tmp_path: Path) -> None:
     assert not (output / "run_status.json").exists()
 
 
+def test_call_limit_artifact_migration_preserves_raw_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    spec = migration_module.Migration(
+        source="old-n3",
+        destination="new-calls100-n3",
+        source_experiment="old-profile",
+        destination_experiment="canonical-profile",
+        num_repeats=3,
+        max_steps=100,
+    )
+    monkeypatch.setattr(migration_module, "MIGRATIONS", (spec,))
+    source = tmp_path / spec.source
+    source.mkdir()
+    raw = source / "rollouts.jsonl"
+    raw.write_bytes(b'{"reward": 1}\n')
+    metadata = {
+        "schema_version": 3,
+        "state": "complete",
+        "experiment": spec.source_experiment,
+        "run_name": spec.source,
+        "kind": "simple",
+        "purpose": "evaluation",
+        "split": "validation",
+        "num_repeats": 3,
+        "limit": None,
+        "output_dir": str(source),
+        "result": {"rollouts": str(raw)},
+    }
+    for filename in ("run_status.json", ".eval_done.json"):
+        (source / filename).write_text(json.dumps(metadata))
+
+    dry = migration_module.migrate(tmp_path, apply=False)
+    assert dry["records"][0]["action"] == "move"
+    assert source.is_dir()
+
+    before = raw.read_bytes()
+    applied = migration_module.migrate(tmp_path, apply=True)
+    destination = tmp_path / spec.destination
+    assert applied["applied"] is True
+    assert not source.exists()
+    assert (destination / "rollouts.jsonl").read_bytes() == before
+    marker = json.loads((destination / ".eval_done.json").read_text())
+    assert marker["experiment"] == spec.destination_experiment
+    assert marker["run_name"] == spec.destination
+    assert marker["simple_agent_max_steps"] == 100
+    assert marker["result"]["rollouts"] == str(destination / "rollouts.jsonl")
+    assert (tmp_path / migration_module.MIGRATION_MANIFEST).is_file()
+
+    resumed = migration_module.migrate(tmp_path, apply=True)
+    assert resumed["records"][0]["action"] == "already-migrated"
+
+
 def test_full_run_ignores_and_preserves_nested_smoke_output(tmp_path: Path) -> None:
     experiment = get_experiment("qwen36-35b-a3b-teacher-qwen35-4b-non-thinking")
     smoke = tmp_path / "smoke_1"
@@ -1329,7 +1427,7 @@ def test_run_commands_require_explicit_purpose() -> None:
         )
 
 
-def test_legacy_teacher_output_cannot_be_reused_for_student_evaluation(
+def test_legacy_teacher_output_without_call_identity_cannot_be_reused(
     tmp_path: Path,
 ) -> None:
     experiment = get_experiment("glm-5-2-gemma4-26b-a4b-non-thinking")
@@ -1344,15 +1442,16 @@ def test_legacy_teacher_output_cannot_be_reused_for_student_evaluation(
             limit=None,
             force=False,
         )
-    run_module.validate_existing_attempt_identity(
-        tmp_path,
-        experiment,
-        purpose="trace-generation",
-        split="train",
-        num_repeats=1,
-        limit=None,
-        force=False,
-    )
+    with pytest.raises(RuntimeError, match="missing required identity field"):
+        run_module.validate_existing_attempt_identity(
+            tmp_path,
+            experiment,
+            purpose="trace-generation",
+            split="train",
+            num_repeats=1,
+            limit=None,
+            force=False,
+        )
     run_module.validate_existing_attempt_identity(
         tmp_path,
         experiment,
@@ -1371,7 +1470,18 @@ def test_existing_completion_marker_skips_without_new_manifest(
     experiment = get_experiment("gemma4-e2b-it-non-thinking")
     marker = completion_marker(experiment, "train", purpose="evaluation")
     marker.parent.mkdir(parents=True)
-    marker.write_text("{}")
+    marker.write_text(
+        json.dumps(
+            {
+                "experiment": experiment.name,
+                "purpose": "evaluation",
+                "split": "train",
+                "num_repeats": 1,
+                "limit": None,
+                "simple_agent_max_steps": 100,
+            }
+        )
+    )
     args = run_module.build_parser().parse_args(
         [
             "--experiment",
@@ -1392,7 +1502,18 @@ def test_custom_output_completion_marker_is_isolated(
     experiment = get_experiment("gemma4-e2b-it-non-thinking")
     custom_output = tmp_path / "local" / experiment.name
     custom_output.mkdir(parents=True)
-    (custom_output / ".eval_done.json").write_text("{}")
+    (custom_output / ".eval_done.json").write_text(
+        json.dumps(
+            {
+                "experiment": experiment.name,
+                "purpose": "evaluation",
+                "split": "train",
+                "num_repeats": 1,
+                "limit": None,
+                "simple_agent_max_steps": 100,
+            }
+        )
+    )
     args = run_module.build_parser().parse_args(
         [
             "--experiment",

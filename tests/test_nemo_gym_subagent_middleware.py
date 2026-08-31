@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import httpx
+from langchain.agents.middleware import ModelCallLimitMiddleware
 
 
 GYM_DIR = Path(__file__).parents[1] / "external" / "Gym"
@@ -39,6 +40,25 @@ TOOLS = [
         "strict": False,
     }
 ]
+
+
+def test_gemma_subagent_uses_exact_erroring_model_call_limit(monkeypatch) -> None:
+    captured: dict[str, Any] = {}
+
+    def fake_create_agent(**kwargs: Any) -> object:
+        captured.update(kwargs)
+        return object()
+
+    monkeypatch.setattr(graph, "create_agent", fake_create_agent)
+    graph._create_subagent(object())
+
+    limiter = next(
+        item
+        for item in captured["middleware"]
+        if isinstance(item, ModelCallLimitMiddleware)
+    )
+    assert limiter.run_limit == 100
+    assert limiter.exit_behavior == "error"
 
 
 def test_converts_responses_tool_to_chat_completions_tool() -> None:

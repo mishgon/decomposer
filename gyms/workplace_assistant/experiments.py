@@ -35,6 +35,8 @@ INSTANCE_TYPES_BY_NUM_GPUS = {
 SPLIT_ROWS = {"train": 1255, "validation": 545}
 SPLITS = tuple(SPLIT_ROWS)
 RUN_PURPOSES = ("trace-generation", "evaluation")
+WORKPLACE_MODEL_CALL_LIMIT = 100
+WORKPLACE_SUBAGENT_RECURSION_LIMIT = 1000
 RunPurpose = Literal["trace-generation", "evaluation"]
 DecomposerPromptProfile = Literal["teacher", "student"]
 DecomposerManagerBackend = Literal["openrouter", "llm_proxy", "local_vllm"]
@@ -118,9 +120,19 @@ class DecomposerExperiment:
     model_ids: tuple[str, ...] | None = None
     model_servers: tuple[ModelServer, ...] | None = None
     subagent_graph: Literal["gym_gemma4", "qwen35"] = "gym_gemma4"
+    manager_max_model_calls: int = WORKPLACE_MODEL_CALL_LIMIT
+    subagent_max_model_calls: int = WORKPLACE_MODEL_CALL_LIMIT
+    subagent_recursion_limit: int = WORKPLACE_SUBAGENT_RECURSION_LIMIT
     kind: Literal["decomposer"] = field(init=False, default="decomposer")
 
     def __post_init__(self) -> None:
+        for field_name in (
+            "manager_max_model_calls",
+            "subagent_max_model_calls",
+            "subagent_recursion_limit",
+        ):
+            if getattr(self, field_name) < 1:
+                raise ValueError(f"{self.name}: {field_name} must be at least 1")
         remote_fields = (
             self.manager_model_id,
             self.manager_proxy_port,
@@ -177,7 +189,7 @@ class SimpleExperiment:
     max_model_len: int = 131072
     max_output_tokens: int = 32768
     gpu_memory_utilization: float = 0.90
-    max_steps: int = 6
+    max_steps: int = WORKPLACE_MODEL_CALL_LIMIT
     gym_wait_timeout: int = 360
     tool_call_parser: str = "qwen3_xml"
     reasoning_parser: str | None = None
@@ -936,14 +948,12 @@ def _qwen35_simple_experiment(
     checkpoint: Path,
     *,
     thinking: bool = False,
-    max_steps: int = 6,
 ) -> SimpleExperiment:
     sampling = qwen35_general_sampling(thinking=thinking)
     return SimpleExperiment(
         name=name,
         checkpoint=checkpoint,
         thinking=thinking,
-        max_steps=max_steps,
         temperature=sampling.temperature,
         top_p=sampling.top_p,
         top_k=sampling.top_k,
@@ -988,11 +998,6 @@ def _simple_experiments() -> tuple[SimpleExperiment, ...]:
                 "qwen35-2b-base-thinking", QWEN35_2B_BASE, thinking=True
             ),
             _qwen35_simple_experiment("qwen35-4b-base-non-thinking", QWEN35_4B_BASE),
-            _qwen35_simple_experiment(
-                "qwen35-4b-base-non-thinking-maxsteps100",
-                QWEN35_4B_BASE,
-                max_steps=100,
-            ),
             _qwen35_simple_experiment(
                 "qwen35-4b-base-thinking", QWEN35_4B_BASE, thinking=True
             ),
@@ -1107,7 +1112,16 @@ def run_name(
     prompt_profile: DecomposerPromptProfile | None = None,
 ) -> str:
     validate_num_repeats(num_repeats)
-    name = experiment.name if num_repeats == 1 else f"{experiment.name}-n{num_repeats}"
+    if isinstance(experiment, SimpleExperiment):
+        call_identity = f"calls{experiment.max_steps}"
+    else:
+        call_identity = (
+            f"managercalls{experiment.manager_max_model_calls}-"
+            f"subagentcalls{experiment.subagent_max_model_calls}"
+        )
+    name = f"{experiment.name}-{call_identity}"
+    if num_repeats != 1:
+        name = f"{name}-n{num_repeats}"
     return name if prompt_profile is None else f"{name}-prompt-{prompt_profile}"
 
 

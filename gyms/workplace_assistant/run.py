@@ -343,6 +343,14 @@ def gym_start_command(
             "++decomposer.responses_api_agents.decomposer_agent."
             f"decomposer_system_prompt_profile={prompt_profile}"
         )
+        manager_call_limit_override = (
+            "++decomposer.responses_api_agents.decomposer_agent."
+            f"manager_max_model_calls={experiment.manager_max_model_calls}"
+        )
+        subagent_recursion_limit_override = (
+            "++decomposer.responses_api_agents.decomposer_agent."
+            f"subagent_recursion_limit={experiment.subagent_recursion_limit}"
+        )
         return [
             str(gym_bin),
             "env",
@@ -350,6 +358,8 @@ def gym_start_command(
             "--config",
             str(config),
             prompt_override,
+            manager_call_limit_override,
+            subagent_recursion_limit_override,
             *common,
         ]
     if experiment.requires_openrouter:
@@ -697,9 +707,31 @@ def validate_existing_attempt_identity(
     }
     if isinstance(experiment, SimpleExperiment):
         expected["simple_agent_max_steps"] = experiment.max_steps
+    else:
+        expected.update(
+            {
+                "decomposer_manager_max_model_calls": (
+                    experiment.manager_max_model_calls
+                ),
+                "decomposer_subagent_max_model_calls": (
+                    experiment.subagent_max_model_calls
+                ),
+                "decomposer_subagent_recursion_limit": (
+                    experiment.subagent_recursion_limit
+                ),
+            }
+        )
     observed = {**metadata, "purpose": existing_purpose}
     for field, expected_value in expected.items():
-        if field in observed and observed[field] != expected_value:
+        if field not in observed:
+            if field in {
+                "simple_agent_max_steps",
+                "decomposer_manager_max_model_calls",
+                "decomposer_subagent_max_model_calls",
+                "decomposer_subagent_recursion_limit",
+            }:
+                mismatches.append(f"missing required identity field {field}")
+        elif observed[field] != expected_value:
             mismatches.append(
                 f"{field}={observed[field]!r} (requested {expected_value!r})"
             )
@@ -779,6 +811,10 @@ def _base_environment(
         ),
         **{name: str(path) for name, path in caches.items()},
     }
+    if isinstance(experiment, DecomposerExperiment):
+        env["DECOMPOSER_SUBAGENT_MAX_MODEL_CALLS"] = str(
+            experiment.subagent_max_model_calls
+        )
     if isinstance(experiment, SimpleExperiment) and not experiment.requires_openrouter:
         for name in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"):
             env.pop(name, None)
@@ -839,6 +875,21 @@ def _dry_plan(
         "kind": experiment.kind,
         "simple_agent_max_steps": (
             experiment.max_steps if isinstance(experiment, SimpleExperiment) else None
+        ),
+        "decomposer_manager_max_model_calls": (
+            experiment.manager_max_model_calls
+            if isinstance(experiment, DecomposerExperiment)
+            else None
+        ),
+        "decomposer_subagent_max_model_calls": (
+            experiment.subagent_max_model_calls
+            if isinstance(experiment, DecomposerExperiment)
+            else None
+        ),
+        "decomposer_subagent_recursion_limit": (
+            experiment.subagent_recursion_limit
+            if isinstance(experiment, DecomposerExperiment)
+            else None
         ),
         "purpose": purpose,
         "split": split,
@@ -988,12 +1039,27 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
     status_path = directory / "run_status.json"
     started = time.monotonic()
     status: dict[str, Any] = {
-        "schema_version": 3,
+        "schema_version": 4,
         "state": "starting",
         "experiment": experiment.name,
         "kind": experiment.kind,
         "simple_agent_max_steps": (
             experiment.max_steps if isinstance(experiment, SimpleExperiment) else None
+        ),
+        "decomposer_manager_max_model_calls": (
+            experiment.manager_max_model_calls
+            if isinstance(experiment, DecomposerExperiment)
+            else None
+        ),
+        "decomposer_subagent_max_model_calls": (
+            experiment.subagent_max_model_calls
+            if isinstance(experiment, DecomposerExperiment)
+            else None
+        ),
+        "decomposer_subagent_recursion_limit": (
+            experiment.subagent_recursion_limit
+            if isinstance(experiment, DecomposerExperiment)
+            else None
         ),
         "purpose": purpose,
         "decomposer_system_prompt_profile": (

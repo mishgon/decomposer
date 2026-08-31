@@ -89,6 +89,19 @@ processes. `--output-dir` routes every result, log, status file, and completion
 marker beneath an explicit directory. Partial outputs resume by default.
 `--force` archives the previous attempt before starting fresh.
 
+Every Workplace simple agent has a 100-step cap. Every Workplace Decomposer
+manager and every spawned subagent independently has an exact 100-model-call
+cap. Manager exhaustion is stored as a reward-0 rollout with failure class
+`decomposer_manager_model_call_limit`, so a single overflow does not abort the
+evaluation or trace collection. Subagent exhaustion terminates that LangGraph
+run with an error; the normal `wait` result delivers the error report to the
+manager, which may recover by delegating again. The subagent recursion guard is
+1,000 so it cannot preempt the exact model-call limiter.
+
+Call budgets are part of the artifact identity: simple runs use `calls100` and
+Decomposer runs use `managercalls100-subagentcalls100`. This prevents an old
+six-step or uncapped result from being silently reused.
+
 ## Submit MLSpace jobs
 
 The launcher selects experiments from the same registry, skips completed and
@@ -122,19 +135,30 @@ $MLSPY -m gyms.workplace_assistant.run_eval \
   --author-name sukhorukov
 ```
 
-Run the Qwen3.5-4B simple-agent control with a 100-model-step safety cap on
-the complete validation split. This experiment has a distinct identity and
-does not overwrite the original six-step baseline:
+Run the Qwen3.5-4B simple-agent control on the complete validation split:
 
 ```bash
 $MLSPY -m gyms.workplace_assistant.run_eval \
   --purpose evaluation \
-  --experiment qwen35-4b-base-non-thinking-maxsteps100 \
+  --experiment qwen35-4b-base-non-thinking \
   --split validation \
   --num-repeats 3 \
   --priority high \
   --author-name sukhorukov
 ```
+
+Historical six-step results can be renamed once, without modifying rollout or
+metric bytes. The command is a dry run by default and refuses to overwrite any
+destination:
+
+```bash
+.venv/bin/python -m gyms.workplace_assistant.migrate_call_limit_artifacts
+.venv/bin/python -m gyms.workplace_assistant.migrate_call_limit_artifacts --apply
+```
+
+The applied migration writes a checksum manifest beside the validation result
+directories and normalizes the completed Qwen3.5-4B 100-step run to the
+canonical `qwen35-4b-base-non-thinking-calls100-n3` identity.
 
 Run the one-GPU E4B comparison on the complete validation split with three
 rollouts per task:
