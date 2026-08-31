@@ -210,6 +210,26 @@ def migrate(root: Path, *, apply: bool) -> dict[str, Any]:
         existing = json.loads(manifest_path.read_text())
         if existing.get("migration_id") != MIGRATION_ID:
             raise RuntimeError(f"Unexpected migration manifest: {manifest_path}")
+        if apply:
+            existing_records = {
+                record["destination"]: record for record in existing.get("records", [])
+            }
+            for spec in MIGRATIONS:
+                source = root / spec.source
+                destination = root / spec.destination
+                if source.exists() or not destination.is_dir():
+                    raise RuntimeError(
+                        f"Applied migration state is inconsistent for {spec.source}"
+                    )
+                _load_and_validate_metadata(destination, spec)
+                record = existing_records.get(str(destination))
+                if record is None or record.get("raw_files") != _raw_file_manifest(
+                    destination
+                ):
+                    raise RuntimeError(
+                        f"Applied migration integrity check failed for {destination}"
+                    )
+            return existing
 
     records = []
     for spec in MIGRATIONS:

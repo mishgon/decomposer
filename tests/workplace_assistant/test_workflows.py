@@ -1390,7 +1390,7 @@ def test_call_limit_artifact_migration_preserves_raw_files(
     assert (tmp_path / migration_module.MIGRATION_MANIFEST).is_file()
 
     resumed = migration_module.migrate(tmp_path, apply=True)
-    assert resumed["records"][0]["action"] == "already-migrated"
+    assert resumed == applied
 
 
 def test_full_run_ignores_and_preserves_nested_smoke_output(tmp_path: Path) -> None:
