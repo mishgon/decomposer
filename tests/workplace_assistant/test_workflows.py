@@ -21,12 +21,16 @@ from gyms.workplace_assistant.experiments import (
     WORKPLACE_QWEN35_4B_FILTERED_SFT_MODEL_ID,
     WORKPLACE_QWEN35_4B_FINAL_MIXED_SFT_FINAL,
     WORKPLACE_QWEN35_4B_FINAL_MIXED_SFT_MODEL_ID,
+    WORKPLACE_QWEN35_4B_GAIA2_EXECUTION_ONLY_SFT_FINAL,
+    WORKPLACE_QWEN35_4B_GAIA2_EXECUTION_ONLY_SFT_MODEL_ID,
     WORKPLACE_QWEN35_4B_GAIA2_SFT_FINAL,
     WORKPLACE_QWEN35_4B_GAIA2_SFT_MODEL_ID,
     WORKPLACE_QWEN35_4B_MIXED_SFT_FINAL,
     WORKPLACE_QWEN35_4B_MIXED_SFT_MODEL_ID,
     WORKPLACE_QWEN35_4B_SFT_FINAL,
     WORKPLACE_QWEN35_4B_SFT_MODEL_ID,
+    WORKPLACE_QWEN35_4B_TOOLATHLON_ONLY_SFT_FINAL,
+    WORKPLACE_QWEN35_4B_TOOLATHLON_ONLY_SFT_MODEL_ID,
     WORKPLACE_QWEN35_4B_BASE_MANAGER_MODEL_ID,
     DecomposerExperiment,
     SimpleExperiment,
@@ -43,9 +47,9 @@ from gyms.qwen_sampling import qwen35_general_sampling
 
 
 def test_registry_is_global_and_unique() -> None:
-    assert len(DECOMPOSER_EXPERIMENTS) == 15
+    assert len(DECOMPOSER_EXPERIMENTS) == 17
     assert len(SIMPLE_EXPERIMENTS) == 28
-    assert len(experiments.EXPERIMENTS) == 43
+    assert len(experiments.EXPERIMENTS) == 45
     assert experiments.BASE_IMAGE.endswith("py3.12-torch2.7.0:0.0.42")
     assert {experiment.kind for experiment in experiments.ALL_EXPERIMENTS} == {
         "decomposer",
@@ -496,6 +500,18 @@ def test_deepseek_qwen_profile_uses_128k_context() -> None:
             "non-thinking-qwen35-4b-non-thinking",
             WORKPLACE_QWEN35_4B_GAIA2_SFT_MODEL_ID,
             WORKPLACE_QWEN35_4B_GAIA2_SFT_FINAL,
+        ),
+        (
+            "qwen35-4b-sft-toolathlon-only-v1-493c24c4-teacher-prompt-"
+            "filtered-32k-non-thinking-qwen35-4b-non-thinking",
+            WORKPLACE_QWEN35_4B_TOOLATHLON_ONLY_SFT_MODEL_ID,
+            WORKPLACE_QWEN35_4B_TOOLATHLON_ONLY_SFT_FINAL,
+        ),
+        (
+            "qwen35-4b-sft-gaia2-execution-only-v1-110-n10-teacher-prompt-"
+            "r1-balanced-32k-non-thinking-qwen35-4b-non-thinking",
+            WORKPLACE_QWEN35_4B_GAIA2_EXECUTION_ONLY_SFT_MODEL_ID,
+            WORKPLACE_QWEN35_4B_GAIA2_EXECUTION_ONLY_SFT_FINAL,
         ),
     ],
 )

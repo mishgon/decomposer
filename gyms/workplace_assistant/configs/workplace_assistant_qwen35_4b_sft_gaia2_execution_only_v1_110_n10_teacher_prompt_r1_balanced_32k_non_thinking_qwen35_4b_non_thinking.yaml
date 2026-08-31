@@ -1,0 +1,50 @@
+responses_create_params:
+  temperature: 0.7
+  top_p: 0.8
+  presence_penalty: 1.5
+
+workplace_assistant:
+  resources_servers:
+    workplace_assistant:
+      entrypoint: app.py
+      domain: agent
+      verified: false
+      description: Workplace assistant multi-step tool-using environment.
+      value: Improve multi-step tool use capability.
+
+policy_model:
+  responses_api_models:
+    vllm_model:
+      entrypoint: app.py
+      base_url: http://127.0.0.1:8026/v1
+      api_key: EMPTY
+      model: decomposer/qwen35-4b-sft-gaia2-execution-only-v1-110-n10-teacher-prompt-r1-balanced-32k
+      return_token_id_information: false
+      uses_reasoning_parser: false
+      chat_template_kwargs:
+        enable_thinking: false
+        preserve_thinking: false
+      extra_body:
+        top_k: 20
+        min_p: 0.0
+        repetition_penalty: 1.0
+        include_reasoning: false
+
+decomposer:
+  responses_api_agents:
+    decomposer_agent:
+      entrypoint: app.py
+      resources_server:
+        type: resources_servers
+        name: workplace_assistant
+      model_server:
+        type: responses_api_models
+        name: policy_model
+      join_gym_system_and_user_prompts: true
+      decomposer_system_prompt_profile: student
+      response_for_verifier_factory: responses_api_agents.decomposer_agent.app:_subagent_tool_calls_and_final_message
+      subagent_types:
+        - subagent_type_id: qwen35_4b_non_thinking
+          assistant_id: qwen35_4b_non_thinking
+          url: http://127.0.0.1:2024
+          description: Qwen3.5-4B non-thinking workplace agent with access to the environment tools.
