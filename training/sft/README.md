@@ -231,6 +231,38 @@ runtime at high priority:
   --priority high
 ```
 
+#### Accelerated GAIA2 execution-only ablation
+
+The GAIA2 execution-only release combines ten logical rollouts for each of
+the 110 training scenarios. Of 1,100 attempts, 316 have exact binary reward
+one, strict structural validation retains 293, and the 32K token limit retains
+290. Its pinned task-level split assigns 99 scenarios to train and 11 to
+validation, yielding 261 train and 29 validation records with no task overlap.
+The validation tasks are selected deterministically to land on the exact
+10-percent record target while keeping every task wholly in one partition.
+
+Build the immutable teacher-prompt release from a clean checkout:
+
+```bash
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 .venv/bin/python -m data.sft.prepare \
+  --spec data/sft/specs/decomposer_gaia2_execution_deepseek_qwen35_4b_nonthinking_v1_110_n10_teacher_prompt_r1_balanced_32k.yaml \
+  --output-root /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/datasets/sft
+```
+
+Submit the four-H100 accelerated run at high priority:
+
+```bash
+/mnt/shared_ru.ml.SZ-5_000264/sukhorukov/.venv-mls/bin/python \
+  -m training.sft.run_train_jobs \
+  --filter qwen35-4b-nonthinking-gaia2-execution-only-v1-110-n10-teacher-prompt-r1-balanced-32k-hf-fa2-fla-b8-e24-full-4gpu \
+  --priority high
+```
+
+The 24-epoch ceiling approximately matches the supervised-token exposure of
+the mixed run. Validation and checkpointing happen after every epoch; early
+stopping uses patience two and the final export reloads the checkpoint with
+the lowest validation loss.
+
 #### Pinned partial Toolathlon snapshot
 
 The snapshot-specific release

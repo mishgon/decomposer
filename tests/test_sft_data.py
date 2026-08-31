@@ -1313,6 +1313,68 @@ def test_qwen35_n7_mixed_spec_pins_teacher_prompt_and_exact_gaia_grid() -> None:
     assert prefix_gaia.expected_candidates == 440
 
 
+def test_qwen35_gaia2_execution_n10_spec_pins_balanced_task_split() -> None:
+    spec = load_build_spec(
+        Path(
+            "data/sft/specs/"
+            "decomposer_gaia2_execution_deepseek_qwen35_4b_nonthinking_"
+            "v1_110_n10_teacher_prompt_r1_balanced_32k.yaml"
+        )
+    ).spec
+
+    assert spec.spec_version == 3
+    assert spec.dataset.id == (
+        "decomposer-gaia2-execution-deepseek-qwen35-4b-nonthinking"
+    )
+    assert spec.dataset.version == (
+        "v1-execution-110-n10-teacher-prompt-r1-balanced-32k"
+    )
+    assert spec.policy.resolved_system_prompt_profile == "teacher"
+    assert spec.selection.policy == "exact_reward"
+    assert spec.selection.success_reward == 1.0
+    assert spec.selection.invalid_policy == "exclude"
+    assert spec.split.strategy == "pinned"
+    assert spec.split.seed == 42
+    assert spec.tokenization is not None
+    assert spec.tokenization.max_tokens == 32768
+
+    first_three, last_seven = spec.sources
+    assert first_three.gaia2 is not None
+    assert last_seven.gaia2 is not None
+    assert first_three.gaia2.logical_rollout_numbers == (1, 2, 3)
+    assert last_seven.gaia2.logical_rollout_numbers == (4, 5, 6, 7, 8, 9, 10)
+    assert first_three.expected_candidates == 330
+    assert last_seven.expected_candidates == 770
+    assert last_seven.path is not None
+    assert "sft_snapshots" in last_seven.path.parts
+
+    split_path = Path(
+        "data/sft/split_manifests/"
+        "qwen35-gaia2-execution-110-n10-balanced-90-10.json"
+    )
+    split = json.loads(split_path.read_text(encoding="utf-8"))
+    assert split["summary"] == {
+        "groups": 110,
+        "groups_by_source": {
+            "gaia2-execution-deepseek-v4-flash-0731-"
+            "qwen35-4b-nonthinking-n10": 110
+        },
+        "train_groups": 99,
+        "validation_groups": 11,
+    }
+    train_groups = {
+        group["group_id"] for group in split["groups"] if group["partition"] == "train"
+    }
+    validation_groups = {
+        group["group_id"]
+        for group in split["groups"]
+        if group["partition"] == "validation"
+    }
+    assert len(train_groups) == 99
+    assert len(validation_groups) == 11
+    assert train_groups.isdisjoint(validation_groups)
+
+
 def test_qwen35_partial_mixed_spec_pins_snapshot_cardinality() -> None:
     spec = load_build_spec(
         Path(

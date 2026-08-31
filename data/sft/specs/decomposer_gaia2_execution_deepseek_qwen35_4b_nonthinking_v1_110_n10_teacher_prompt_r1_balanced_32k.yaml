@@ -1,0 +1,68 @@
+spec_version: 3
+
+dataset:
+  id: decomposer-gaia2-execution-deepseek-qwen35-4b-nonthinking
+  version: v1-execution-110-n10-teacher-prompt-r1-balanced-32k
+
+policy:
+  id: decomposer-teacher
+  system_prompt_profile: teacher
+  subagent_types:
+    - id: qwen35_4b_non_thinking
+      description: General-purpose tool-calling agent with access to the environment tools.
+
+sources:
+  - id: gaia2-execution-deepseek-v4-flash-0731-qwen35-4b-nonthinking-r01-r03
+    adapter: gaia2
+    path: /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/evaluation/gaia2/results/validation/execution/deepseek-v4-flash-0731-teacher-qwen35-4b-non-thinking-n3
+    benchmark: gaia2
+    environment: gaia2_execution
+    partition: train
+    teacher: deepseek-v4-flash-0731
+    trace_format: gaia2_evaluation_v1
+    subagent_type_aliases:
+      gaia2_worker: qwen35_4b_non_thinking
+    expected_native_rollouts: 480
+    expected_candidates: 330
+    require_completed_run: true
+    gaia2:
+      split_manifest: ../../../gyms/gaia2/split_manifests/execution-110-50-v1.json
+      scenario_partition: train
+      expected_scenarios: 110
+      logical_rollout_numbers: [1, 2, 3]
+  - id: gaia2-execution-deepseek-v4-flash-0731-qwen35-4b-nonthinking-r04-r10
+    adapter: gaia2
+    path: /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/evaluation/gaia2/traces/sft_snapshots/execution-110-50-v1/train/deepseek-v4-flash-0731-teacher-qwen35-4b-non-thinking-r04-r10
+    benchmark: gaia2
+    environment: gaia2_execution
+    partition: train
+    teacher: deepseek-v4-flash-0731
+    trace_format: gaia2_trace_manifest_v1
+    subagent_type_aliases:
+      gaia2_worker: qwen35_4b_non_thinking
+    expected_native_rollouts: 770
+    expected_candidates: 770
+    require_completed_run: true
+    gaia2:
+      split_manifest: ../../../gyms/gaia2/split_manifests/execution-110-50-v1.json
+      scenario_partition: train
+      expected_scenarios: 110
+      logical_rollout_numbers: [4, 5, 6, 7, 8, 9, 10]
+
+selection:
+  policy: exact_reward
+  success_reward: 1.0
+  invalid_policy: exclude
+  max_traces_per_prompt_per_teacher: null
+
+split:
+  strategy: pinned
+  manifest: ../split_manifests/qwen35-gaia2-execution-110-n10-balanced-90-10.json
+  seed: 42
+
+tokenization:
+  profile: qwen35_sft_non_thinking
+  tokenizer: Qwen/Qwen3.5-4B
+  revision: 851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a
+  max_tokens: 32768
+  trust_remote_code: false

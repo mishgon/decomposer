@@ -296,6 +296,27 @@ def sft_experiments() -> list[ExperimentConfig]:
             runtime_profile="qwen35-hf-fa2-fla-v1",
         ),
         ExperimentConfig(
+            name=(
+                "qwen35-4b-nonthinking-gaia2-execution-only-v1-110-n10-"
+                "teacher-prompt-r1-balanced-32k-hf-fa2-fla-b8-e24-full-4gpu"
+            ),
+            config_path=(
+                "training/sft/configs/qwen35_4b_nonthinking_gaia2_execution_"
+                "only_v1_110_n10_teacher_prompt_r1_balanced_32k_hf_fa2_fla_"
+                "b8_e24_full_4gpu.yaml"
+            ),
+            description=(
+                "Qwen3.5-4B accelerated Decomposer SFT from base "
+                "(teacher prompt, GAIA2 execution-only n=10 reward-1 traces, "
+                "balanced task split, pinned HF FA2 plus FLA/causal, global "
+                "batch 8, 24 epochs, 4 GPU)"
+            ),
+            num_gpus=4,
+            use_liger_kernel=True,
+            pytorch_cuda_alloc_conf="expandable_segments:True",
+            runtime_profile="qwen35-hf-fa2-fla-v1",
+        ),
+        ExperimentConfig(
             name=("qwen35-4b-nonthinking-mixed-v1-partial-3983f605-327-32k-smoke-4gpu"),
             config_path=(
                 "training/sft/configs/qwen35_4b_nonthinking_mixed_"
