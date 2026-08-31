@@ -315,6 +315,42 @@ def test_simple_output_identity_includes_max_steps(tmp_path: Path) -> None:
         )
 
 
+def test_simple_execute_does_not_read_decomposer_proxy_fields(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class PreflightComplete(RuntimeError):
+        pass
+
+    experiment = get_experiment("qwen35-4b-base-non-thinking-maxsteps100")
+    output = tmp_path / "simple-run"
+    args = run_module.build_parser().parse_args(
+        [
+            "--experiment",
+            experiment.name,
+            "--purpose",
+            "evaluation",
+            "--split",
+            "validation",
+            "--num-repeats",
+            "3",
+            "--output-dir",
+            str(output),
+        ]
+    )
+    monkeypatch.setattr(run_module, "validate_preparation", lambda *_: {})
+
+    def stop_after_preflight(*_: object) -> dict[str, str]:
+        raise PreflightComplete
+
+    monkeypatch.setattr(run_module, "_base_environment", stop_after_preflight)
+    with pytest.raises(PreflightComplete):
+        run_module.execute(Path(__file__).resolve().parents[2], args)
+
+    status = json.loads((output / "run_status.json").read_text())
+    assert status["experiment"] == experiment.name
+    assert status["simple_agent_max_steps"] == 100
+
+
 def test_deepseek_simple_profile_is_remote_and_does_not_start_vllm() -> None:
     repo_root = Path(__file__).resolve().parents[2]
     experiment = get_experiment("deepseek-v4-flash-0731")

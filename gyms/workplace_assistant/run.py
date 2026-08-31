@@ -969,7 +969,7 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
             raise RuntimeError("OPENROUTER_API_KEY_DECOMPOSER is not set")
         if not (os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy")):
             raise RuntimeError("HTTPS_PROXY or https_proxy is required for OpenRouter")
-    if experiment.requires_llm_proxy:
+    if isinstance(experiment, DecomposerExperiment) and experiment.requires_llm_proxy:
         required = (
             experiment.manager_upstream_url_env,
             experiment.manager_api_key_env,
