@@ -3,11 +3,15 @@ from __future__ import annotations
 import argparse
 import gc
 import hashlib
+import importlib.metadata
+import importlib.util
+import inspect
 import json
 import math
 import os
 import shutil
 import subprocess
+import time
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -15,10 +19,9 @@ from typing import Any
 import torch
 import yaml
 from accelerate.utils import merge_fsdp_weights, save_fsdp_model
-from datasets import Dataset, Features
+from datasets import Dataset, Features, Value
 from datasets import Json as DatasetJson
 from datasets import List as DatasetList
-from datasets import Value
 from transformers import (
     AutoConfig,
     AutoTokenizer,
@@ -122,6 +125,157 @@ def _summarize_tokenization(dataset: Dataset) -> JsonObject:
     }
 
 
+def _callable_identity(value: Any) -> str | None:
+    if value is None:
+        return None
+    module = getattr(value, "__module__", None)
+    name = getattr(value, "__qualname__", None) or getattr(value, "__name__", None)
+    if module and name:
+        return f"{module}.{name}"
+    return repr(value)
+
+
+def _file_runtime(path: str | os.PathLike[str] | None) -> JsonObject | None:
+    if path is None:
+        return None
+    candidate = Path(path).resolve()
+    if not candidate.is_file():
+        return {"path": str(candidate), "exists": False}
+    digest = hashlib.sha256()
+    with candidate.open("rb") as file:
+        for chunk in iter(lambda: file.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return {
+        "path": str(candidate),
+        "exists": True,
+        "size_bytes": candidate.stat().st_size,
+        "sha256": digest.hexdigest(),
+    }
+
+
+def _callable_runtime(value: Any) -> JsonObject | None:
+    if value is None:
+        return None
+    module = inspect.getmodule(value)
+    module_file = getattr(module, "__file__", None)
+    return {
+        "identity": _callable_identity(value),
+        "module_file": _file_runtime(module_file),
+    }
+
+
+def _module_runtime(module_name: str) -> JsonObject | None:
+    try:
+        spec = importlib.util.find_spec(module_name)
+    except (ImportError, ModuleNotFoundError, ValueError):
+        return None
+    if spec is None:
+        return None
+    return {
+        "name": module_name,
+        "origin": _file_runtime(spec.origin),
+    }
+
+
+def _optional_distribution_version(distribution: str) -> str | None:
+    try:
+        return importlib.metadata.version(distribution)
+    except importlib.metadata.PackageNotFoundError:
+        return None
+
+
+def _qwen35_linear_attention_runtime() -> JsonObject:
+    """Describe the implementations selected by Qwen3.5's optional fast path."""
+    from transformers.models.qwen3_5 import modeling_qwen3_5
+
+    return {
+        "packages": {
+            distribution: _optional_distribution_version(distribution)
+            for distribution in (
+                "flash-linear-attention",
+                "fla-core",
+                "causal-conv1d",
+            )
+        },
+        "fast_path_available": bool(modeling_qwen3_5.is_fast_path_available),
+        "causal_conv1d": _callable_identity(modeling_qwen3_5.causal_conv1d_fn),
+        "causal_conv1d_update": _callable_identity(
+            modeling_qwen3_5.causal_conv1d_update
+        ),
+        "chunk_gated_delta_rule": _callable_identity(
+            modeling_qwen3_5.chunk_gated_delta_rule
+        ),
+        "fused_recurrent_gated_delta_rule": _callable_identity(
+            modeling_qwen3_5.fused_recurrent_gated_delta_rule
+        ),
+        "gated_rms_norm": _callable_identity(modeling_qwen3_5.FusedRMSNormGated),
+    }
+
+
+def _attention_backend_runtime(
+    requested_implementation: str,
+    *,
+    resolved_implementation: str | None = None,
+) -> JsonObject:
+    """Record the actual SDPA, Hub-kernel, or native FlashAttention callables."""
+    from transformers.modeling_utils import ALL_ATTENTION_FUNCTIONS
+
+    runtime: JsonObject = {
+        "requested_implementation": requested_implementation,
+        "resolved_implementation": resolved_implementation,
+        "packages": {
+            distribution: _optional_distribution_version(distribution)
+            for distribution in (
+                "flash-attn",
+                "kernels",
+                "kernels-data",
+                "torch",
+                "transformers",
+            )
+        },
+        "modules": {
+            module: _module_runtime(module)
+            for module in (
+                "flash_attn",
+                "flash_attn_2_cuda",
+                "kernels",
+            )
+        },
+    }
+    if "flash" not in requested_implementation:
+        interface = ALL_ATTENTION_FUNCTIONS.get_interface(
+            requested_implementation,
+            lambda *args, **kwargs: None,
+        )
+        runtime["attention_interface"] = _callable_runtime(interface)
+        return runtime
+
+    from transformers.integrations.flash_attention import flash_attention_forward
+    from transformers.modeling_flash_attention_utils import lazy_import_flash_attention
+
+    functions, process_kwargs = lazy_import_flash_attention(
+        requested_implementation,
+        attention_wrapper=flash_attention_forward,
+    )
+    interface = ALL_ATTENTION_FUNCTIONS.get_interface(
+        requested_implementation,
+        flash_attention_forward,
+    )
+    runtime["attention_interface"] = _callable_runtime(interface)
+    names = (
+        "flash_attn_func",
+        "flash_attn_varlen_func",
+        "flash_attn_with_kvcache",
+        "pad_input",
+        "unpad_input",
+    )
+    runtime["resolved_callables"] = {
+        name: _callable_runtime(value) for name, value in zip(names, functions)
+    }
+    runtime["process_kwargs"] = _callable_runtime(process_kwargs)
+    return runtime
+
+
 def _limit_dataset(dataset: Dataset, limit: int | None) -> Dataset:
     if limit is None:
         return dataset
@@ -144,6 +298,82 @@ def _select_longest_by_token_length(
         key=lambda index: (-int(dataset[index]["_token_length"]), index),
     )
     return dataset.select(indices[: min(limit, len(indices))])
+
+
+def _select_stratified_by_environment_and_length(
+    dataset: Dataset,
+    limit: int | None,
+) -> Dataset:
+    """Select a deterministic environment-proportional length-stratified sample."""
+    if limit is None:
+        return dataset
+    if not isinstance(limit, int) or isinstance(limit, bool) or limit <= 0:
+        raise ValueError("data.stratified_train_samples must be a positive integer.")
+    limit = min(limit, len(dataset))
+    groups: dict[str, list[int]] = {}
+    for index in range(len(dataset)):
+        source = dataset[index].get("source") or {}
+        environment = str(source.get("environment", "unknown"))
+        groups.setdefault(environment, []).append(index)
+
+    exact_quotas = {
+        environment: limit * len(indices) / len(dataset)
+        for environment, indices in groups.items()
+    }
+    quotas = {
+        environment: math.floor(exact_quota)
+        for environment, exact_quota in exact_quotas.items()
+    }
+    remaining = limit - sum(quotas.values())
+    for environment in sorted(
+        groups,
+        key=lambda name: (-(exact_quotas[name] - quotas[name]), name),
+    )[:remaining]:
+        quotas[environment] += 1
+
+    selected: list[int] = []
+    for environment in sorted(groups):
+        indices = sorted(
+            groups[environment],
+            key=lambda index: (int(dataset[index]["_token_length"]), index),
+        )
+        quota = quotas[environment]
+        if quota == 0:
+            continue
+        # Midpoints of equal-width bins cover the complete length distribution
+        # without favoring either tail.
+        positions = [
+            min(
+                len(indices) - 1,
+                math.floor((i + 0.5) * len(indices) / quota),
+            )
+            for i in range(quota)
+        ]
+        selected.extend(indices[position] for position in positions)
+    return dataset.select(selected)
+
+
+def _benchmark_sample_manifest(dataset: Dataset) -> JsonObject:
+    """Return a portable identity for the exact ordered benchmark sample."""
+    records = [
+        {
+            "id": str(dataset[index]["id"]),
+            "token_length": int(dataset[index]["_token_length"]),
+            "supervised_tokens": int(dataset[index]["_supervised_tokens"]),
+        }
+        for index in range(len(dataset))
+    ]
+    ids = [record["id"] for record in records]
+    return {
+        "records": len(records),
+        "ordered_record_ids": ids,
+        "ordered_record_ids_sha256": sha256_text(
+            json.dumps(ids, ensure_ascii=False, separators=(",", ":"))
+        ),
+        "ordered_records_sha256": sha256_text(
+            json.dumps(records, ensure_ascii=False, separators=(",", ":"))
+        ),
+    }
 
 
 def _load_prepared_split(
@@ -951,6 +1181,7 @@ def _initialize_clearml(config: Mapping[str, Any], resolved_config: JsonObject):
 
 def _resolve_config(config: JsonObject, args: argparse.Namespace) -> JsonObject:
     config = json.loads(json.dumps(config))
+    model = _nested_mapping(config, "model")
     data = _nested_mapping(config, "data")
     training = _nested_mapping(config, "training")
     clearml = _nested_mapping(config, "clearml")
@@ -974,6 +1205,43 @@ def _resolve_config(config: JsonObject, args: argparse.Namespace) -> JsonObject:
         data["max_train_samples"] = args.max_train_samples
     if args.max_eval_samples is not None:
         data["max_eval_samples"] = args.max_eval_samples
+    if args.train_file is not None:
+        data["train_file"] = args.train_file
+    if args.validation_file is not None:
+        data["validation_file"] = args.validation_file
+    if args.manifest_file is not None:
+        data["manifest_file"] = args.manifest_file
+    if args.longest_train_samples is not None:
+        data["longest_train_samples"] = args.longest_train_samples
+    if args.stratified_train_samples is not None:
+        data["stratified_train_samples"] = args.stratified_train_samples
+    if args.per_device_train_batch_size is not None:
+        training["per_device_train_batch_size"] = args.per_device_train_batch_size
+    if args.global_batch_size is not None:
+        training["global_batch_size"] = args.global_batch_size
+    if args.group_by_length is not None:
+        training["train_sampling_strategy"] = (
+            "group_by_length" if args.group_by_length else "random"
+        )
+        if args.group_by_length:
+            training["length_column_name"] = "_token_length"
+    if args.attn_implementation is not None:
+        model["attn_implementation"] = args.attn_implementation
+    if args.benchmark:
+        if (
+            data.get("longest_train_samples") is not None
+            and data.get("stratified_train_samples") is not None
+        ):
+            raise ValueError(
+                "Benchmark selection accepts either longest or stratified samples, not both."
+            )
+        run["benchmark"] = True
+        run["early_stopping"] = None
+        training["num_train_epochs"] = 1
+        training["eval_strategy"] = "no"
+        training["save_strategy"] = "no"
+        training["load_best_model_at_end"] = False
+        clearml["enabled"] = False
 
     clearml["weight_norm_interval_steps"] = validate_weight_norm_interval(
         clearml.get("weight_norm_interval_steps", 10)
@@ -984,6 +1252,7 @@ def _resolve_config(config: JsonObject, args: argparse.Namespace) -> JsonObject:
         training.get("loss_type"),
     )
 
+    config["model"] = model
     config["data"] = data
     config["training"] = training
     config["clearml"] = clearml
@@ -1015,6 +1284,21 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--resume-from-checkpoint")
     parser.add_argument("--max-train-samples", type=int)
     parser.add_argument("--max-eval-samples", type=int)
+    parser.add_argument("--train-file")
+    parser.add_argument("--validation-file")
+    parser.add_argument("--manifest-file")
+    parser.add_argument("--longest-train-samples", type=int)
+    parser.add_argument("--stratified-train-samples", type=int)
+    parser.add_argument("--per-device-train-batch-size", type=int)
+    parser.add_argument("--global-batch-size", type=int)
+    parser.add_argument(
+        "--group-by-length",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Group similarly sized examples in the Trainer sampler.",
+    )
+    parser.add_argument("--attn-implementation")
+    parser.add_argument("--benchmark", action="store_true")
     return parser
 
 
@@ -1174,9 +1458,16 @@ def main(argv: Sequence[str] | None = None) -> None:
         train_dataset,
         longest_train_samples,
     )
+    stratified_train_samples = data_config.get("stratified_train_samples")
+    train_dataset = _select_stratified_by_environment_and_length(
+        train_dataset,
+        stratified_train_samples,
+    )
     train_token_stats = (
         _summarize_tokenization(train_dataset)
-        if train_overlength_exclusions or longest_train_samples is not None
+        if train_overlength_exclusions
+        or longest_train_samples is not None
+        or stratified_train_samples is not None
         else raw_train_token_stats
     )
     validation_token_stats = (
@@ -1289,11 +1580,73 @@ def main(argv: Sequence[str] | None = None) -> None:
     trainer.model.generation_config = generation_config
 
     try:
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+            torch.cuda.reset_peak_memory_stats()
+        benchmark_started = time.perf_counter()
         train_output = trainer.train(resume_from_checkpoint=resume_from_checkpoint)
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+        benchmark_elapsed = time.perf_counter() - benchmark_started
         training_state = _summarize_trainer_state(
             trainer,
             early_stopping_enabled=early_stopping_callback is not None,
         )
+        local_runtime = {
+            "rank": _rank(),
+            "elapsed_seconds": benchmark_elapsed,
+            "peak_allocated_bytes": (
+                torch.cuda.max_memory_allocated() if torch.cuda.is_available() else 0
+            ),
+            "peak_reserved_bytes": (
+                torch.cuda.max_memory_reserved() if torch.cuda.is_available() else 0
+            ),
+            "allocated_bytes_after_train": (
+                torch.cuda.memory_allocated() if torch.cuda.is_available() else 0
+            ),
+            "reserved_bytes_after_train": (
+                torch.cuda.memory_reserved() if torch.cuda.is_available() else 0
+            ),
+        }
+        rank_runtimes: list[JsonObject | None] = [None] * _world_size()
+        if torch.distributed.is_available() and torch.distributed.is_initialized():
+            torch.distributed.all_gather_object(rank_runtimes, local_runtime)
+        else:
+            rank_runtimes = [local_runtime]
+
+        if run_config.get("benchmark", False):
+            if _is_rank_zero():
+                summary = {
+                    "benchmark": True,
+                    "train_metrics": train_output.metrics,
+                    "training_state": training_state,
+                    "rank_runtimes": rank_runtimes,
+                    "train_token_stats": train_token_stats,
+                    "train_batch": batch_runtime,
+                    "train_sampling_strategy": training_config.get(
+                        "train_sampling_strategy", "random"
+                    ),
+                    "sample": _benchmark_sample_manifest(train_dataset),
+                    "attention_implementation": model_config.get(
+                        "attn_implementation", "sdpa"
+                    ),
+                    "attention_backend_runtime": _attention_backend_runtime(
+                        str(model_config.get("attn_implementation", "sdpa")),
+                        resolved_implementation=getattr(
+                            trainer.model.config,
+                            "_attn_implementation",
+                            None,
+                        ),
+                    ),
+                    "linear_attention_runtime": _qwen35_linear_attention_runtime(),
+                    "effective_data": {
+                        "train": len(train_dataset),
+                        "validation": len(validation_dataset),
+                    },
+                }
+                _write_json(output_dir / "benchmark_summary.json", summary)
+            return
+
         tokenizer.chat_template = canonical_template
         final_dir = output_dir / "final"
         fsdp_plugin = trainer.accelerator.state.fsdp_plugin

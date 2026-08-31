@@ -25,14 +25,20 @@ from training.sft.run_train_jobs import (
 )
 from training.sft.train import (
     _apply_overlength_policy,
+    _attention_backend_runtime,
+    _benchmark_sample_manifest,
     _build_early_stopping_callback,
+    _build_parser,
     _configure_gemma4_generation,
     _configure_sdpa_backends,
     _has_existing_run_output,
     _load_prepared_split,
+    _qwen35_linear_attention_runtime,
+    _resolve_config,
     _resolve_train_batch_config,
     _save_final_configuration,
     _select_longest_by_token_length,
+    _select_stratified_by_environment_and_length,
     _summarize_trainer_state,
     _validate_prepared_tokenization,
 )
@@ -144,10 +150,7 @@ def test_sft_experiments_are_unique_and_register_retained_configs() -> None:
             "qwen35-4b-nonthinking-mixed-v1-final-493c24c4-404-"
             "filtered-pass-qgt90-32k-full-4gpu"
         ),
-        (
-            "qwen35-4b-nonthinking-mixed-v2-493c24c4-gaia2-110-n3-"
-            "filtered-32k-full-4gpu"
-        ),
+        ("qwen35-4b-nonthinking-mixed-v2-493c24c4-gaia2-110-n3-filtered-32k-full-4gpu"),
         (
             "qwen35-4b-nonthinking-mixed-v3-493c24c4-gaia2-110-n7-"
             "teacher-prompt-filtered-32k-full-4gpu"
@@ -307,6 +310,143 @@ def test_global_batch_derives_gradient_accumulation() -> None:
         "per_device_train_batch_size": 1,
         "gradient_accumulation_steps": 2,
     }
+
+
+def test_stratified_benchmark_sample_preserves_environments_and_lengths() -> None:
+    rows = []
+    for environment, count in (("workplace", 6), ("gaia", 3), ("toolathlon", 3)):
+        for index in range(count):
+            rows.append(
+                {
+                    "id": f"{environment}-{index}",
+                    "source": {"environment": environment},
+                    "_token_length": (index + 1) * 100,
+                    "_supervised_tokens": index + 1,
+                }
+            )
+    selected = _select_stratified_by_environment_and_length(
+        Dataset.from_list(rows),
+        6,
+    )
+    environments = list(selected["source"])
+    counts = {
+        name: sum(source["environment"] == name for source in environments)
+        for name in ("workplace", "gaia", "toolathlon")
+    }
+    assert counts == {"workplace": 3, "gaia": 2, "toolathlon": 1}
+    assert len(set(selected["_token_length"])) > 2
+
+
+def test_benchmark_sample_manifest_pins_order_and_lengths() -> None:
+    rows = [
+        {
+            "id": f"record-{index}",
+            "_token_length": 100 + index,
+            "_supervised_tokens": 10 + index,
+        }
+        for index in range(3)
+    ]
+    sample = Dataset.from_list(rows)
+    forward = _benchmark_sample_manifest(sample)
+    repeated = _benchmark_sample_manifest(sample)
+    reversed_sample = _benchmark_sample_manifest(sample.select([2, 1, 0]))
+    assert forward == repeated
+    assert forward["ordered_record_ids"] == [
+        "record-0",
+        "record-1",
+        "record-2",
+    ]
+    assert len(forward["ordered_record_ids_sha256"]) == 64
+    assert len(forward["ordered_records_sha256"]) == 64
+    assert (
+        forward["ordered_records_sha256"] != reversed_sample["ordered_records_sha256"]
+    )
+
+
+def test_benchmark_cli_can_override_prepared_dataset_paths() -> None:
+    args = _build_parser().parse_args(
+        [
+            "--config",
+            "unused.yaml",
+            "--train-file",
+            "/candidate/train.jsonl",
+            "--validation-file",
+            "/candidate/validation.jsonl",
+            "--manifest-file",
+            "/candidate/manifest.json",
+        ]
+    )
+    resolved = _resolve_config(
+        {
+            "model": {},
+            "data": {},
+            "training": {},
+            "clearml": {},
+            "run": {},
+        },
+        args,
+    )
+    assert resolved["data"] == {
+        "train_file": "/candidate/train.jsonl",
+        "validation_file": "/candidate/validation.jsonl",
+        "manifest_file": "/candidate/manifest.json",
+    }
+
+
+def test_qwen35_linear_attention_runtime_reports_bound_implementations() -> None:
+    runtime = _qwen35_linear_attention_runtime()
+    assert set(runtime["packages"]) == {
+        "flash-linear-attention",
+        "fla-core",
+        "causal-conv1d",
+    }
+    assert isinstance(runtime["fast_path_available"], bool)
+    assert {
+        "causal_conv1d",
+        "causal_conv1d_update",
+        "chunk_gated_delta_rule",
+        "fused_recurrent_gated_delta_rule",
+        "gated_rms_norm",
+    } <= runtime.keys()
+
+
+def test_attention_backend_runtime_reports_sdpa_callable_provenance() -> None:
+    runtime = _attention_backend_runtime("sdpa", resolved_implementation="sdpa")
+    assert runtime["requested_implementation"] == "sdpa"
+    assert runtime["resolved_implementation"] == "sdpa"
+    assert runtime["packages"]["torch"] == torch.__version__
+    interface = runtime["attention_interface"]
+    assert interface["identity"].endswith("sdpa_attention_forward")
+    assert interface["module_file"]["exists"] is True
+    assert len(interface["module_file"]["sha256"]) == 64
+
+
+@pytest.mark.parametrize(
+    ("flag", "expected_strategy", "expected_length_column"),
+    [
+        ("--group-by-length", "group_by_length", "_token_length"),
+        ("--no-group-by-length", "random", None),
+    ],
+)
+def test_benchmark_group_by_length_uses_transformers_5_sampling_api(
+    flag: str,
+    expected_strategy: str,
+    expected_length_column: str | None,
+) -> None:
+    args = _build_parser().parse_args(["--config", "unused.yaml", flag])
+    resolved = _resolve_config(
+        {
+            "model": {},
+            "data": {},
+            "training": {},
+            "clearml": {},
+            "run": {},
+        },
+        args,
+    )
+    training = resolved["training"]
+    assert training["train_sampling_strategy"] == expected_strategy
+    assert training.get("length_column_name") == expected_length_column
 
 
 def test_global_batch_derives_e4b_gb4() -> None:

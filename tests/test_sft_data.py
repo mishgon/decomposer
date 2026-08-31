@@ -12,6 +12,7 @@ from pydantic import ValidationError
 
 from data.sft import builder as builder_module
 from data.sft.builder import LoadedBuildSpec, load_build_spec, prepare_dataset
+from data.sft.derive_source_view import derive_source_view
 from data.sft.schema import (
     EXCLUSION_REASONS,
     BuildSpec,
@@ -355,6 +356,61 @@ def test_prepare_groups_teacher_variants_and_writes_manifest_v3(tmp_path: Path) 
         metadata = prepared.manifest["prepared_files"][filename]
         assert len(metadata["sha256"]) == 64
         assert metadata["bytes"] > 0
+
+
+def test_derive_source_view_preserves_exact_records_and_split(tmp_path: Path) -> None:
+    prepared = _prepare_fixture_dataset(
+        [_source(tmp_path, "teacher-a"), _source(tmp_path, "teacher-b")],
+        tmp_path / "parent",
+        validation_fraction=0.2,
+    )
+    parent_train = _read_jsonl(prepared.train_path)
+    parent_validation = _read_jsonl(prepared.validation_path)
+    selected_train = [
+        record
+        for record in parent_train
+        if record["source"]["source_id"] == "teacher-a"
+    ]
+    selected_validation = [
+        record
+        for record in parent_validation
+        if record["source"]["source_id"] == "teacher-a"
+    ]
+    output_dir = tmp_path / "derived"
+    derived = derive_source_view(
+        prepared.release_dir,
+        output_dir,
+        dataset_id="teacher-a-only",
+        dataset_version="candidate-v1",
+        environment="workplace",
+        source_id="teacher-a",
+        expected_train_records=len(selected_train),
+        expected_validation_records=len(selected_validation),
+    )
+
+    assert _read_jsonl(derived.train_path) == selected_train
+    assert _read_jsonl(derived.validation_path) == selected_validation
+    assert derived.manifest["records"]["train"] == len(selected_train)
+    assert derived.manifest["records"]["validation"] == len(selected_validation)
+    assert derived.manifest["preparation"]["candidate_view"] is True
+    assert (
+        derived.manifest["derivation"]["parent_dataset"] == prepared.manifest["dataset"]
+    )
+    assert derived.manifest["dataset"]["fingerprint"] == (
+        builder_module.compute_dataset_fingerprint(derived.manifest)
+    )
+    assert {record["group_id"] for record in selected_train}.isdisjoint(
+        record["group_id"] for record in selected_validation
+    )
+    with pytest.raises(FileExistsError, match="already exists"):
+        derive_source_view(
+            prepared.release_dir,
+            output_dir,
+            dataset_id="teacher-a-only",
+            dataset_version="candidate-v1",
+            environment="workplace",
+            source_id="teacher-a",
+        )
 
 
 def test_teacher_prompt_profile_is_materialized_and_training_validated(
