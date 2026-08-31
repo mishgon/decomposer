@@ -122,6 +122,20 @@ $MLSPY -m gyms.workplace_assistant.run_eval \
   --author-name sukhorukov
 ```
 
+Run the Qwen3.5-4B simple-agent control with a 100-model-step safety cap on
+the complete validation split. This experiment has a distinct identity and
+does not overwrite the original six-step baseline:
+
+```bash
+$MLSPY -m gyms.workplace_assistant.run_eval \
+  --purpose evaluation \
+  --experiment qwen35-4b-base-non-thinking-maxsteps100 \
+  --split validation \
+  --num-repeats 3 \
+  --priority high \
+  --author-name sukhorukov
+```
+
 Run the one-GPU E4B comparison on the complete validation split with three
 rollouts per task:
 

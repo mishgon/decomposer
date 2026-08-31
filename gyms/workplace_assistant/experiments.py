@@ -936,12 +936,14 @@ def _qwen35_simple_experiment(
     checkpoint: Path,
     *,
     thinking: bool = False,
+    max_steps: int = 6,
 ) -> SimpleExperiment:
     sampling = qwen35_general_sampling(thinking=thinking)
     return SimpleExperiment(
         name=name,
         checkpoint=checkpoint,
         thinking=thinking,
+        max_steps=max_steps,
         temperature=sampling.temperature,
         top_p=sampling.top_p,
         top_k=sampling.top_k,
@@ -986,6 +988,11 @@ def _simple_experiments() -> tuple[SimpleExperiment, ...]:
                 "qwen35-2b-base-thinking", QWEN35_2B_BASE, thinking=True
             ),
             _qwen35_simple_experiment("qwen35-4b-base-non-thinking", QWEN35_4B_BASE),
+            _qwen35_simple_experiment(
+                "qwen35-4b-base-non-thinking-maxsteps100",
+                QWEN35_4B_BASE,
+                max_steps=100,
+            ),
             _qwen35_simple_experiment(
                 "qwen35-4b-base-thinking", QWEN35_4B_BASE, thinking=True
             ),

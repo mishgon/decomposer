@@ -695,6 +695,8 @@ def validate_existing_attempt_identity(
         "limit": limit,
         "purpose": purpose,
     }
+    if isinstance(experiment, SimpleExperiment):
+        expected["simple_agent_max_steps"] = experiment.max_steps
     observed = {**metadata, "purpose": existing_purpose}
     for field, expected_value in expected.items():
         if field in observed and observed[field] != expected_value:
@@ -835,6 +837,9 @@ def _dry_plan(
         "experiment": experiment.name,
         "gpu_assignments": gpu_assignments,
         "kind": experiment.kind,
+        "simple_agent_max_steps": (
+            experiment.max_steps if isinstance(experiment, SimpleExperiment) else None
+        ),
         "purpose": purpose,
         "split": split,
         "services": [shlex.join(command) for command in services],
@@ -987,6 +992,9 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
         "state": "starting",
         "experiment": experiment.name,
         "kind": experiment.kind,
+        "simple_agent_max_steps": (
+            experiment.max_steps if isinstance(experiment, SimpleExperiment) else None
+        ),
         "purpose": purpose,
         "decomposer_system_prompt_profile": (
             resolved_prompt_profile

@@ -48,8 +48,8 @@ from gyms.qwen_sampling import qwen35_general_sampling
 
 def test_registry_is_global_and_unique() -> None:
     assert len(DECOMPOSER_EXPERIMENTS) == 17
-    assert len(SIMPLE_EXPERIMENTS) == 28
-    assert len(experiments.EXPERIMENTS) == 45
+    assert len(SIMPLE_EXPERIMENTS) == 29
+    assert len(experiments.EXPERIMENTS) == 46
     assert experiments.BASE_IMAGE.endswith("py3.12-torch2.7.0:0.0.42")
     assert {experiment.kind for experiment in experiments.ALL_EXPERIMENTS} == {
         "decomposer",
@@ -225,6 +225,94 @@ def test_qwen35_9b_simple_profile_uses_cached_non_thinking_checkpoint() -> None:
     assert command[command.index("--default-chat-template-kwargs") + 1] == (
         '{"enable_thinking":false}'
     )
+
+
+def test_qwen35_4b_maxsteps100_simple_profile_is_isolated() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    legacy = get_experiment("qwen35-4b-base-non-thinking")
+    experiment = get_experiment("qwen35-4b-base-non-thinking-maxsteps100")
+    assert isinstance(legacy, SimpleExperiment)
+    assert isinstance(experiment, SimpleExperiment)
+    assert legacy.max_steps == 6
+    assert experiment.max_steps == 100
+    assert experiment.checkpoint == legacy.checkpoint == experiments.QWEN35_4B_BASE
+    assert experiment.thinking is legacy.thinking is False
+    assert experiment.extra_body == legacy.extra_body
+
+    start = run_module.gym_start_command(
+        repo_root,
+        experiment,
+        purpose="evaluation",
+        gym_bin=Path("/gym"),
+        component_root=Path("/components"),
+        logs=Path("/logs"),
+    )
+    assert any(argument.endswith("simple_agent.max_steps=100") for argument in start)
+
+    path = output_dir(experiment, "validation", 3, purpose="evaluation")
+    assert path.name == "qwen35-4b-base-non-thinking-maxsteps100-n3"
+    assert path != output_dir(legacy, "validation", 3, purpose="evaluation")
+
+    plan = run_module._dry_plan(
+        repo_root,
+        experiment,
+        "evaluation",
+        "validation",
+        3,
+        None,
+        path,
+        ("0",),
+    )
+    assert plan["simple_agent_max_steps"] == 100
+    assert "simple_agent.max_steps=100" in plan["gym_start"]
+
+    payload = run_eval.build_payload(
+        experiment,
+        repo_root,
+        purpose="evaluation",
+        split="validation",
+        num_repeats=3,
+        limit=None,
+        author="sukhorukov",
+        base_image=experiments.BASE_IMAGE,
+        priority="high",
+        force=False,
+        proxy_env={},
+        openrouter_key="",
+    )
+    assert payload["instance_type"] == INSTANCE_TYPES_BY_NUM_GPUS[1]
+    assert payload["priority_class"] == "high"
+    assert payload["job_desc"] == (
+        "workplace-assistant-validation simple-agent "
+        "qwen35-4b-base-non-thinking-maxsteps100-n3 #sukhorukov"
+    )
+
+
+def test_simple_output_identity_includes_max_steps(tmp_path: Path) -> None:
+    experiment = get_experiment("qwen35-4b-base-non-thinking-maxsteps100")
+    (tmp_path / "run_status.json").write_text(
+        json.dumps(
+            {
+                "experiment": experiment.name,
+                "kind": "simple",
+                "purpose": "evaluation",
+                "split": "validation",
+                "num_repeats": 3,
+                "limit": None,
+                "simple_agent_max_steps": 6,
+            }
+        )
+    )
+    with pytest.raises(RuntimeError, match="simple_agent_max_steps=6"):
+        run_module.validate_existing_attempt_identity(
+            tmp_path,
+            experiment,
+            purpose="evaluation",
+            split="validation",
+            num_repeats=3,
+            limit=None,
+            force=False,
+        )
 
 
 def test_deepseek_simple_profile_is_remote_and_does_not_start_vllm() -> None:
