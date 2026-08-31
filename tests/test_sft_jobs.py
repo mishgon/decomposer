@@ -138,7 +138,7 @@ def test_sft_experiments_are_unique_and_register_retained_configs() -> None:
         False,
         True,
     }
-    assert len(experiments) == 20
+    assert len(experiments) == 21
     e2b_four_gpu = experiments[2]
     assert e2b_four_gpu.num_gpus == 4
     assert e2b_four_gpu.use_liger_kernel is True
@@ -173,6 +173,10 @@ def test_sft_experiments_are_unique_and_register_retained_configs() -> None:
         (
             "qwen35-4b-nonthinking-mixed-v3-493c24c4-gaia2-110-n7-"
             "teacher-prompt-filtered-32k-hf-fa2-fla-b8-full-4gpu"
+        ),
+        (
+            "qwen35-4b-nonthinking-toolathlon-only-v1-493c24c4-"
+            "teacher-prompt-filtered-32k-hf-fa2-fla-b8-e8-full-4gpu"
         ),
         ("qwen35-4b-nonthinking-mixed-v1-partial-3983f605-327-32k-smoke-4gpu"),
         ("qwen35-4b-nonthinking-mixed-v1-partial-3983f605-327-32k-full-4gpu"),
@@ -1491,6 +1495,52 @@ def test_qwen35_gaia2_n7_fast_configs_are_distinct_and_pinned() -> None:
     assert command[-1] == "--benchmark"
     assert full_experiment[0].runtime_profile == QWEN35_FAST_PROFILE
     assert full_experiment[0].benchmark is False
+
+
+def test_qwen35_toolathlon_only_fast_config_is_isolated_and_pinned() -> None:
+    config = yaml.safe_load(
+        Path(
+            "training/sft/configs/"
+            "qwen35_4b_nonthinking_toolathlon_only_v1_493c24c4_"
+            "teacher_prompt_filtered_32k_hf_fa2_fla_b8_e8_full_4gpu.yaml"
+        ).read_text()
+    )
+    release = (
+        "datasets/sft/decomposer-toolathlon-gym-deepseek-qwen35-4b-nonthinking/"
+        "candidate-v1-493c24c4-teacher-prompt-pass-or-qgt90-32k"
+    )
+    assert config["model"]["name_or_path"] == "Qwen/Qwen3.5-4B"
+    assert config["model"]["revision"] == "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a"
+    assert config["model"]["attn_implementation"] == HF_FA2_IMPLEMENTATION
+    for key in ("train_file", "validation_file", "manifest_file"):
+        assert release in config["data"][key]
+    assert config["data"]["expected_system_prompt_profile"] == "teacher"
+    assert config["data"]["include_reasoning"] is False
+    training = config["training"]
+    assert training["per_device_train_batch_size"] == 2
+    assert training["global_batch_size"] == 8
+    assert training["train_sampling_strategy"] == "group_by_length"
+    assert training["length_column_name"] == "_token_length"
+    assert training["num_train_epochs"] == 8
+    assert training["learning_rate"] == 1.0e-5
+    assert config["run"]["expected_world_size"] == 4
+    assert config["run"]["required_runtime_profile"] == QWEN35_FAST_PROFILE
+    assert config["run"]["early_stopping"] == {
+        "patience": 2,
+        "threshold": 0.0,
+    }
+
+    experiments = collect_experiments("toolathlon-only-v1-493c24c4")
+    assert len(experiments) == 1
+    experiment = experiments[0]
+    assert experiment.num_gpus == 4
+    assert experiment.runtime_profile == QWEN35_FAST_PROFILE
+    assert experiment.benchmark is False
+    command = build_train_command(
+        experiment, workdir="/staged", output_dir="/artifacts/toolathlon-only"
+    )
+    assert command[:3] == ["torchrun", "--standalone", "--nproc-per-node=4"]
+    assert "--benchmark" not in command
 
 
 def test_qwen35_partial_mixed_configs_use_snapshot_release_and_32k_recipe() -> None:

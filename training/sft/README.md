@@ -213,6 +213,24 @@ Submit the stable SDPA, global-batch-4 run from the base Qwen3.5-4B checkpoint:
 The training config requires the dataset's teacher profile and matching prompt
 hash, removes hidden teacher reasoning, and uses early-stopping patience two.
 
+#### Accelerated Toolathlon-only ablation
+
+The checksum-pinned Toolathlon-only candidate view contains 252 training and
+28 validation records inherited byte-for-byte from the mixed v3 release. Its
+eight-epoch ceiling approximately matches the supervised-token exposure of
+the five-epoch mixed run. It starts independently from the pinned base
+Qwen3.5-4B checkpoint and retains early-stopping patience two.
+
+Submit the four-H100 run with the pinned HF FlashAttention-2 and FLA/causal
+runtime at high priority:
+
+```bash
+/mnt/shared_ru.ml.SZ-5_000264/sukhorukov/.venv-mls/bin/python \
+  -m training.sft.run_train_jobs \
+  --filter qwen35-4b-nonthinking-toolathlon-only-v1-493c24c4-teacher-prompt-filtered-32k-hf-fa2-fla-b8-e8-full-4gpu \
+  --priority high
+```
+
 #### Pinned partial Toolathlon snapshot
 
 The snapshot-specific release
