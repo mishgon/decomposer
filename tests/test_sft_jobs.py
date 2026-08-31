@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -11,13 +12,17 @@ import yaml
 from datasets import Dataset
 from transformers import GenerationConfig
 
+from training.sft import train as train_module
+
 from training.sft.experiments import (
     INSTANCE_TYPES_BY_NUM_GPUS,
     build_train_command,
     collect_experiments,
+    has_experiment_artifacts,
     has_training_artifacts,
 )
 from training.sft.run_train_jobs import (
+    _archive_output_dir,
     _build_job_script,
     _latest_checkpoint,
     _require_latest_checkpoint,
@@ -34,6 +39,7 @@ from training.sft.train import (
     _has_existing_run_output,
     _load_prepared_split,
     _qwen35_linear_attention_runtime,
+    _validate_required_runtime_profile,
     _resolve_config,
     _resolve_train_batch_config,
     _save_final_configuration,
@@ -41,6 +47,11 @@ from training.sft.train import (
     _select_stratified_by_environment_and_length,
     _summarize_trainer_state,
     _validate_prepared_tokenization,
+)
+from training.sft.qwen35_fast_runtime import (
+    EXPECTED_RUNTIME,
+    HF_FA2_IMPLEMENTATION,
+    PROFILE_NAME as QWEN35_FAST_PROFILE,
 )
 
 EARLY_STOPPING_TRAINING_CONFIG = {
@@ -127,7 +138,7 @@ def test_sft_experiments_are_unique_and_register_retained_configs() -> None:
         False,
         True,
     }
-    assert len(experiments) == 18
+    assert len(experiments) == 20
     e2b_four_gpu = experiments[2]
     assert e2b_four_gpu.num_gpus == 4
     assert e2b_four_gpu.use_liger_kernel is True
@@ -154,6 +165,14 @@ def test_sft_experiments_are_unique_and_register_retained_configs() -> None:
         (
             "qwen35-4b-nonthinking-mixed-v3-493c24c4-gaia2-110-n7-"
             "teacher-prompt-filtered-32k-full-4gpu"
+        ),
+        (
+            "qwen35-4b-nonthinking-mixed-v3-493c24c4-gaia2-110-n7-"
+            "teacher-prompt-filtered-32k-hf-fa2-fla-b8-smoke-4gpu"
+        ),
+        (
+            "qwen35-4b-nonthinking-mixed-v3-493c24c4-gaia2-110-n7-"
+            "teacher-prompt-filtered-32k-hf-fa2-fla-b8-full-4gpu"
         ),
         ("qwen35-4b-nonthinking-mixed-v1-partial-3983f605-327-32k-smoke-4gpu"),
         ("qwen35-4b-nonthinking-mixed-v1-partial-3983f605-327-32k-full-4gpu"),
@@ -270,6 +289,60 @@ def test_job_script_captures_console_log_without_hiding_training_failure() -> No
     assert "bash -o pipefail -c" in script
     assert "/venv/bin/torchrun --standalone train.py" in script
     assert "tee -a /artifacts/run/console.log" in script
+
+
+def test_job_script_adds_qwen35_runtime_overlays_and_fail_closed_environment() -> None:
+    script = _build_job_script(
+        ["torchrun", "--standalone", "train.py"],
+        workdir=Path("/staged"),
+        venv=Path("/venv"),
+        triton_cache=Path("/cache/triton"),
+        output_dir=Path("/artifacts/run"),
+        runtime_bundle=Path("/runtime/qwen35"),
+    )
+    assert 'PYTHONPATH="/runtime/qwen35/triton:/runtime/qwen35/causal:' in script
+    assert "export FLA_TILELANG=0" in script
+    assert "DECOMPOSER_SFT_RUNTIME_PROFILE=qwen35-hf-fa2-fla-v1" in script
+    assert "DECOMPOSER_SFT_RUNTIME_BUNDLE=/runtime/qwen35" in script
+
+
+def test_force_archive_is_atomic_and_recoverable(tmp_path: Path) -> None:
+    output = tmp_path / "jobs" / "experiment"
+    output.mkdir(parents=True)
+    (output / "training_summary.json").write_text("{}")
+    archived = _archive_output_dir(
+        output,
+        archive_root=tmp_path / "jobs" / "_archive" / "experiment",
+        commit="1234567890abcdef",
+        timestamp=datetime(2026, 8, 31, 12, 0, tzinfo=UTC),
+    )
+    assert archived == (
+        tmp_path
+        / "jobs/_archive/experiment/20260831T120000Z-1234567890ab"
+    )
+    assert not output.exists()
+    assert (archived / "training_summary.json").is_file()
+
+
+def test_force_archive_ignores_missing_or_empty_output(tmp_path: Path) -> None:
+    output = tmp_path / "empty"
+    assert (
+        _archive_output_dir(
+            output,
+            archive_root=tmp_path / "archive",
+            commit="abc",
+        )
+        is None
+    )
+    output.mkdir()
+    assert (
+        _archive_output_dir(
+            output,
+            archive_root=tmp_path / "archive",
+            commit="abc",
+        )
+        is None
+    )
 
 
 def test_clearml_config_must_be_private(tmp_path: Path) -> None:
@@ -419,6 +492,69 @@ def test_attention_backend_runtime_reports_sdpa_callable_provenance() -> None:
     assert interface["identity"].endswith("sdpa_attention_forward")
     assert interface["module_file"]["exists"] is True
     assert len(interface["module_file"]["sha256"]) == 64
+
+
+def test_required_qwen35_runtime_profile_validates_actual_bound_kernels(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("FLA_TILELANG", "0")
+    monkeypatch.setenv("DECOMPOSER_SFT_RUNTIME_PROFILE", QWEN35_FAST_PROFILE)
+    monkeypatch.setenv("DECOMPOSER_SFT_RUNTIME_BUNDLE", "/runtime/qwen35")
+    monkeypatch.setattr(
+        train_module,
+        "validate_runtime_bundle",
+        lambda *_args, **_kwargs: {"profile": QWEN35_FAST_PROFILE},
+    )
+    monkeypatch.setattr(
+        train_module,
+        "_optional_distribution_version",
+        lambda name: EXPECTED_RUNTIME["packages"].get(name),
+    )
+    monkeypatch.setattr(
+        train_module,
+        "_qwen35_linear_attention_runtime",
+        lambda: {
+            "fast_path_available": True,
+            "causal_conv1d": "causal_conv1d.interface.causal_conv1d_fn",
+            "causal_conv1d_update": "causal_conv1d.interface.causal_conv1d_update",
+            "chunk_gated_delta_rule": "fla.ops.gated_delta_rule.chunk",
+            "fused_recurrent_gated_delta_rule": "fla.ops.gated_delta_rule.recurrent",
+            "gated_rms_norm": "fla.modules.FusedRMSNormGated",
+        },
+    )
+    monkeypatch.setattr(
+        train_module,
+        "_attention_backend_runtime",
+        lambda *_args, **_kwargs: {
+            "resolved_callables": {
+                "flash_attn_func": {
+                    "identity": "_flash_attn2_cuda_f12afc9.flash_attn_func"
+                }
+            }
+        },
+    )
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.cuda, "get_device_capability", lambda: (9, 0))
+    monkeypatch.setattr(torch.cuda, "get_device_name", lambda: "NVIDIA H100")
+
+    runtime = _validate_required_runtime_profile(
+        {"required_runtime_profile": QWEN35_FAST_PROFILE},
+        {"attn_implementation": HF_FA2_IMPLEMENTATION},
+    )
+    assert runtime is not None
+    assert runtime["profile"] == QWEN35_FAST_PROFILE
+    assert runtime["cuda_capability"] == "9.0"
+
+
+def test_required_qwen35_runtime_profile_rejects_tilelang_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("FLA_TILELANG", raising=False)
+    with pytest.raises(RuntimeError, match="FLA_TILELANG=0"):
+        _validate_required_runtime_profile(
+            {"required_runtime_profile": QWEN35_FAST_PROFILE},
+            {"attn_implementation": HF_FA2_IMPLEMENTATION},
+        )
 
 
 @pytest.mark.parametrize(
@@ -1004,6 +1140,15 @@ def test_training_completion_accepts_sharded_safetensors_index(tmp_path: Path) -
     assert has_training_artifacts(output)
 
 
+def test_benchmark_experiment_completion_uses_benchmark_summary(tmp_path: Path) -> None:
+    smoke = collect_experiments("hf-fa2-fla-b8-smoke-4gpu")[0]
+    output = tmp_path / "smoke"
+    output.mkdir()
+    assert not has_experiment_artifacts(smoke, output)
+    (output / "benchmark_summary.json").write_text("{}")
+    assert has_experiment_artifacts(smoke, output)
+
+
 @pytest.mark.parametrize(
     (
         "config_name",
@@ -1300,9 +1445,52 @@ def test_qwen35_gaia2_n7_teacher_prompt_config_is_isolated_and_stable() -> None:
         "patience": 2,
         "threshold": 0.0,
     }
-    experiments = collect_experiments("gaia2-110-n7-teacher-prompt")
+    experiments = collect_experiments(
+        "gaia2-110-n7-teacher-prompt-filtered-32k-full-4gpu"
+    )
     assert len(experiments) == 1
     assert experiments[0].num_gpus == 4
+
+
+def test_qwen35_gaia2_n7_fast_configs_are_distinct_and_pinned() -> None:
+    config_dir = Path("training/sft/configs")
+    prefix = (
+        "qwen35_4b_nonthinking_mixed_v3_gaia2_execution_110_n7_"
+        "teacher_prompt_filtered_32k_hf_fa2_fla_b8_"
+    )
+    smoke = yaml.safe_load((config_dir / f"{prefix}smoke_4gpu.yaml").read_text())
+    full = yaml.safe_load((config_dir / f"{prefix}full_4gpu.yaml").read_text())
+    for config in (smoke, full):
+        assert config["model"]["attn_implementation"] == HF_FA2_IMPLEMENTATION
+        assert config["data"]["expected_system_prompt_profile"] == "teacher"
+        assert "gaia2-execution-110-n7-teacher-prompt" in config["data"]["train_file"]
+        training = config["training"]
+        assert training["per_device_train_batch_size"] == 2
+        assert training["global_batch_size"] == 8
+        assert training["train_sampling_strategy"] == "group_by_length"
+        assert training["length_column_name"] == "_token_length"
+        assert training["num_train_epochs"] == 5
+        assert training["learning_rate"] == 1.0e-5
+        assert config["run"]["required_runtime_profile"] == QWEN35_FAST_PROFILE
+        assert config["run"]["early_stopping"]["patience"] == 2
+        resolved, runtime = _resolve_train_batch_config(training, world_size=4)
+        assert resolved["gradient_accumulation_steps"] == 1
+        assert runtime["global_batch_size"] == 8
+    assert smoke["data"]["longest_train_samples"] == 8
+    assert smoke["data"]["max_eval_samples"] == 1
+    assert full["data"].get("longest_train_samples") is None
+
+    smoke_experiment = collect_experiments("hf-fa2-fla-b8-smoke-4gpu")
+    full_experiment = collect_experiments("hf-fa2-fla-b8-full-4gpu")
+    assert len(smoke_experiment) == len(full_experiment) == 1
+    assert smoke_experiment[0].runtime_profile == QWEN35_FAST_PROFILE
+    assert smoke_experiment[0].benchmark is True
+    command = build_train_command(
+        smoke_experiment[0], workdir="/staged", output_dir="/artifacts/smoke"
+    )
+    assert command[-1] == "--benchmark"
+    assert full_experiment[0].runtime_profile == QWEN35_FAST_PROFILE
+    assert full_experiment[0].benchmark is False
 
 
 def test_qwen35_partial_mixed_configs_use_snapshot_release_and_32k_recipe() -> None:

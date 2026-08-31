@@ -106,3 +106,14 @@ Put dependencies imported by `src/decomposer` in the root `pyproject.toml`; put 
 ```bash
 uvx --with . pytest
 ```
+
+## Accelerated Qwen3.5 SFT
+
+The current four-H100 Qwen3.5 recipe uses batch 2 per GPU, length grouping,
+FLA plus causal-conv1d for linear-attention layers, and a pinned HF Hub
+FlashAttention-2 kernel for full-attention layers. Normal training jobs do not
+need NVCC; it is needed only once to build the reusable causal-conv1d bundle.
+
+See [the Qwen3.5 fast-runtime guide](docs/sft_qwen35_fast_runtime.md) for exact
+environment preparation, local smoke, MLSpace dry-run/submission commands,
+artifact paths, and troubleshooting.

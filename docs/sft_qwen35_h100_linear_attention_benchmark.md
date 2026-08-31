@@ -1,5 +1,9 @@
 # Qwen3.5-4B SFT linear-attention kernel benchmark
 
+> Historical decision: the later grouped batch-2 HF FA2 benchmark supersedes
+> this report's batch-1 production recommendation. See
+> `docs/sft_qwen35_h100_grouped_batch_toolathlon_only_benchmark.md`.
+
 Date: 2026-08-30
 
 ## Decision

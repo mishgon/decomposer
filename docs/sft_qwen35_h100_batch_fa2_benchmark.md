@@ -1,5 +1,8 @@
 # Qwen3.5-4B SFT batch-size and FlashAttention-2 benchmark
 
+> Historical benchmark: the final production decision is recorded in
+> `docs/sft_qwen35_h100_grouped_batch_toolathlon_only_benchmark.md`.
+
 Date: 2026-08-30
 
 ## Decision

@@ -22,6 +22,8 @@ class ExperimentConfig:
     num_gpus: int = 2
     use_liger_kernel: bool = False
     pytorch_cuda_alloc_conf: str | None = None
+    runtime_profile: str | None = None
+    benchmark: bool = False
 
 
 def sft_experiments() -> list[ExperimentConfig]:
@@ -233,6 +235,47 @@ def sft_experiments() -> list[ExperimentConfig]:
             pytorch_cuda_alloc_conf="expandable_segments:True",
         ),
         ExperimentConfig(
+            name=(
+                "qwen35-4b-nonthinking-mixed-v3-493c24c4-gaia2-110-n7-"
+                "teacher-prompt-filtered-32k-hf-fa2-fla-b8-smoke-4gpu"
+            ),
+            config_path=(
+                "training/sft/configs/qwen35_4b_nonthinking_mixed_v3_"
+                "gaia2_execution_110_n7_teacher_prompt_filtered_32k_"
+                "hf_fa2_fla_b8_smoke_4gpu.yaml"
+            ),
+            description=(
+                "Qwen3.5-4B accelerated Decomposer SFT smoke "
+                "(teacher prompt, mixed v3, pinned HF FA2 plus FLA/causal, "
+                "batch 8, longest records, 4 GPU)"
+            ),
+            num_gpus=4,
+            use_liger_kernel=True,
+            pytorch_cuda_alloc_conf="expandable_segments:True",
+            runtime_profile="qwen35-hf-fa2-fla-v1",
+            benchmark=True,
+        ),
+        ExperimentConfig(
+            name=(
+                "qwen35-4b-nonthinking-mixed-v3-493c24c4-gaia2-110-n7-"
+                "teacher-prompt-filtered-32k-hf-fa2-fla-b8-full-4gpu"
+            ),
+            config_path=(
+                "training/sft/configs/qwen35_4b_nonthinking_mixed_v3_"
+                "gaia2_execution_110_n7_teacher_prompt_filtered_32k_"
+                "hf_fa2_fla_b8_full_4gpu.yaml"
+            ),
+            description=(
+                "Qwen3.5-4B accelerated Decomposer SFT "
+                "(teacher prompt, mixed v3, pinned HF FA2 plus FLA/causal, "
+                "global batch 8, 4 GPU)"
+            ),
+            num_gpus=4,
+            use_liger_kernel=True,
+            pytorch_cuda_alloc_conf="expandable_segments:True",
+            runtime_profile="qwen35-hf-fa2-fla-v1",
+        ),
+        ExperimentConfig(
             name=("qwen35-4b-nonthinking-mixed-v1-partial-3983f605-327-32k-smoke-4gpu"),
             config_path=(
                 "training/sft/configs/qwen35_4b_nonthinking_mixed_"
@@ -327,6 +370,8 @@ def build_train_command(
     command.append(
         "--use-liger-kernel" if experiment.use_liger_kernel else "--no-use-liger-kernel"
     )
+    if experiment.benchmark:
+        command.append("--benchmark")
     if resume_from_checkpoint is not None:
         command.extend(["--resume-from-checkpoint", str(Path(resume_from_checkpoint))])
     return command
@@ -339,3 +384,12 @@ def has_training_artifacts(output_dir: str | Path) -> bool:
         final_dir / "model.safetensors.index.json"
     ).is_file()
     return (output_dir / "training_summary.json").is_file() and weights_exist
+
+
+def has_experiment_artifacts(
+    experiment: ExperimentConfig, output_dir: str | Path
+) -> bool:
+    output_dir = Path(output_dir)
+    if experiment.benchmark:
+        return (output_dir / "benchmark_summary.json").is_file()
+    return has_training_artifacts(output_dir)

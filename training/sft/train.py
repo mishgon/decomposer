@@ -61,6 +61,13 @@ from .preprocessing import (
 from .preprocessing import (
     tokenization_stats as _tokenization_stats,
 )
+from .qwen35_fast_runtime import (
+    DEFAULT_BUNDLE_DIR,
+    EXPECTED_RUNTIME,
+    HF_FA2_IMPLEMENTATION,
+    PROFILE_NAME as QWEN35_FAST_PROFILE,
+    validate_runtime_bundle,
+)
 
 JsonObject = dict[str, Any]
 _LAUNCHER_LOG_FILENAMES = frozenset({"console.log", "mlspace.log"})
@@ -274,6 +281,114 @@ def _attention_backend_runtime(
     }
     runtime["process_kwargs"] = _callable_runtime(process_kwargs)
     return runtime
+
+
+def _validate_required_runtime_profile(
+    run_config: Mapping[str, Any],
+    model_config: Mapping[str, Any],
+) -> JsonObject | None:
+    """Fail closed when an accelerated recipe did not load its pinned kernels."""
+    profile = run_config.get("required_runtime_profile")
+    if profile is None:
+        return None
+    if profile != QWEN35_FAST_PROFILE:
+        raise ValueError(f"Unsupported run.required_runtime_profile: {profile!r}.")
+    launcher_profile = os.environ.get("DECOMPOSER_SFT_RUNTIME_PROFILE")
+    if launcher_profile is not None and launcher_profile != profile:
+        raise RuntimeError(
+            f"Launcher runtime profile is {launcher_profile!r}, expected {profile!r}."
+        )
+    if os.environ.get("FLA_TILELANG") != "0":
+        raise RuntimeError(
+            "The Qwen3.5 fast runtime requires FLA_TILELANG=0 to select the "
+            "validated Triton backend."
+        )
+
+    bundle_dir = Path(
+        os.environ.get("DECOMPOSER_SFT_RUNTIME_BUNDLE", str(DEFAULT_BUNDLE_DIR))
+    ).resolve()
+    bundle = validate_runtime_bundle(bundle_dir, verify_checksums=False)
+    if str(model_config.get("attn_implementation")) != HF_FA2_IMPLEMENTATION:
+        raise RuntimeError(
+            "The Qwen3.5 fast runtime requires the pinned HF FlashAttention-2 "
+            f"implementation {HF_FA2_IMPLEMENTATION!r}."
+        )
+    if torch.__version__ != EXPECTED_RUNTIME["torch"]:
+        raise RuntimeError(
+            f"Qwen3.5 fast runtime requires torch {EXPECTED_RUNTIME['torch']}, "
+            f"found {torch.__version__}."
+        )
+    if torch.version.cuda != EXPECTED_RUNTIME["torch_cuda"]:
+        raise RuntimeError(
+            f"Qwen3.5 fast runtime requires CUDA {EXPECTED_RUNTIME['torch_cuda']}, "
+            f"found {torch.version.cuda}."
+        )
+    if not torch.cuda.is_available():
+        raise RuntimeError("The Qwen3.5 fast runtime requires an H100 CUDA device.")
+    capability = ".".join(str(value) for value in torch.cuda.get_device_capability())
+    if capability != EXPECTED_RUNTIME["gpu_arch"]:
+        raise RuntimeError(
+            f"Qwen3.5 fast runtime requires compute capability "
+            f"{EXPECTED_RUNTIME['gpu_arch']}, found {capability}."
+        )
+
+    expected_packages = EXPECTED_RUNTIME["packages"]
+    actual_packages = {
+        name: _optional_distribution_version(name) for name in expected_packages
+    }
+    mismatches = {
+        name: {"expected": expected, "actual": actual_packages[name]}
+        for name, expected in expected_packages.items()
+        if actual_packages[name] != expected
+    }
+    if mismatches:
+        raise RuntimeError(
+            "Qwen3.5 fast runtime package mismatch: "
+            + json.dumps(mismatches, sort_keys=True)
+        )
+
+    linear_attention = _qwen35_linear_attention_runtime()
+    required_linear_identities = {
+        "causal_conv1d": "causal_conv1d",
+        "causal_conv1d_update": "causal_conv1d",
+        "chunk_gated_delta_rule": "fla.",
+        "fused_recurrent_gated_delta_rule": "fla.",
+        "gated_rms_norm": "fla.",
+    }
+    invalid_linear = {
+        key: linear_attention.get(key)
+        for key, fragment in required_linear_identities.items()
+        if not isinstance(linear_attention.get(key), str)
+        or fragment not in str(linear_attention[key])
+    }
+    if not linear_attention.get("fast_path_available") or invalid_linear:
+        raise RuntimeError(
+            "Transformers did not bind the complete Qwen3.5 FLA/causal fast path: "
+            + json.dumps(invalid_linear, sort_keys=True)
+        )
+
+    attention = _attention_backend_runtime(HF_FA2_IMPLEMENTATION)
+    resolved_callables = attention.get("resolved_callables")
+    flash_identity = None
+    if isinstance(resolved_callables, Mapping):
+        flash = resolved_callables.get("flash_attn_func")
+        if isinstance(flash, Mapping):
+            flash_identity = flash.get("identity")
+    if not isinstance(flash_identity, str) or "_flash_attn2_cuda_" not in flash_identity:
+        raise RuntimeError(
+            "Transformers did not load the pinned HF FlashAttention-2 CUDA callable; "
+            f"resolved {flash_identity!r}."
+        )
+    return {
+        "profile": profile,
+        "bundle_dir": str(bundle_dir),
+        "bundle": bundle,
+        "packages": actual_packages,
+        "linear_attention": linear_attention,
+        "full_attention": attention,
+        "cuda_device": torch.cuda.get_device_name(),
+        "cuda_capability": capability,
+    }
 
 
 def _limit_dataset(dataset: Dataset, limit: int | None) -> Dataset:
@@ -1335,6 +1450,21 @@ def main(argv: Sequence[str] | None = None) -> None:
             f"{_world_size()}. Launch it with torchrun --nproc-per-node={expected_world_size}."
         )
 
+    required_runtime = _validate_required_runtime_profile(run_config, model_config)
+    if _is_rank_zero() and required_runtime is not None:
+        print(
+            "Validated required runtime profile: "
+            + json.dumps(
+                {
+                    "profile": required_runtime["profile"],
+                    "packages": required_runtime["packages"],
+                    "cuda_device": required_runtime["cuda_device"],
+                    "cuda_capability": required_runtime["cuda_capability"],
+                },
+                sort_keys=True,
+            )
+        )
+
     model_name_or_path = str(model_config["name_or_path"])
     include_reasoning = bool(data_config.get("include_reasoning", False))
     model_revision = str(model_config.get("revision", "main"))
@@ -1532,6 +1662,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             "train_batch": batch_runtime,
             "generation_config": generation_runtime,
             "sdpa_backends": sdpa_backends,
+            "required_runtime_profile": required_runtime,
             "liger_kernel": liger_runtime,
             "include_reasoning": include_reasoning,
             "system_prompt": system_prompt_runtime,

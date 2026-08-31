@@ -11,6 +11,7 @@ import shutil
 import stat
 import subprocess
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 
 from mls.manager.job.dedup import in_progress_descs, normalize_job_desc
@@ -23,7 +24,13 @@ from .experiments import (
     INSTANCE_TYPES_BY_NUM_GPUS,
     build_train_command,
     collect_experiments,
-    has_training_artifacts,
+    has_experiment_artifacts,
+)
+from .qwen35_fast_runtime import (
+    DEFAULT_BUNDLE_DIR,
+    PROFILE_NAME as QWEN35_FAST_PROFILE,
+    runtime_pythonpath_entries,
+    validate_runtime_bundle,
 )
 
 
@@ -43,7 +50,7 @@ _CHECKPOINT_NAME = re.compile(r"^checkpoint-(\d+)$")
 
 
 def _ensure_training_venv(repo_root: str, venv: Path) -> None:
-    """Sync only base + train dependencies; none require the absent nvcc."""
+    """Sync base + train dependencies; binary overlays are prepared separately."""
     uv = shutil.which("uv")
     if uv is None:
         raise FileNotFoundError("uv is required to create the shared training venv.")
@@ -114,6 +121,7 @@ def _build_job_script(
     venv: Path,
     triton_cache: Path,
     output_dir: Path,
+    runtime_bundle: Path | None = None,
 ) -> str:
     if not command or command[0] != "torchrun":
         raise ValueError("SFT job commands must start with torchrun.")
@@ -122,17 +130,65 @@ def _build_job_script(
     logged_command = (
         f"{shlex.join(command)} 2>&1 | tee -a {shlex.quote(str(console_log))}"
     )
+    pythonpath_entries = ["$WORKDIR/src", "$WORKDIR"]
+    if runtime_bundle is not None:
+        pythonpath_entries = [
+            *(str(path) for path in runtime_pythonpath_entries(runtime_bundle)),
+            *pythonpath_entries,
+        ]
+    pythonpath = ":".join(pythonpath_entries)
+    exports = [
+        f"cd {shlex.quote(str(workdir))}",
+        f"export VIRTUAL_ENV={shlex.quote(str(venv))}",
+        'export PATH="$VIRTUAL_ENV/bin:$PATH"',
+        f'export PYTHONPATH="{pythonpath}:${{PYTHONPATH:-}}"',
+        f"export TRITON_CACHE_DIR={shlex.quote(str(triton_cache))}",
+    ]
+    if runtime_bundle is not None:
+        exports.extend(
+            [
+                "export FLA_TILELANG=0",
+                (
+                    "export DECOMPOSER_SFT_RUNTIME_PROFILE="
+                    f"{shlex.quote(QWEN35_FAST_PROFILE)}"
+                ),
+                (
+                    "export DECOMPOSER_SFT_RUNTIME_BUNDLE="
+                    f"{shlex.quote(str(runtime_bundle))}"
+                ),
+            ]
+        )
     return " && ".join(
         [
-            f"cd {shlex.quote(str(workdir))}",
-            f"export VIRTUAL_ENV={shlex.quote(str(venv))}",
-            'export PATH="$VIRTUAL_ENV/bin:$PATH"',
-            'export PYTHONPATH="$WORKDIR/src:$WORKDIR:${PYTHONPATH:-}"',
-            f"export TRITON_CACHE_DIR={shlex.quote(str(triton_cache))}",
+            *exports,
             f"mkdir -p {shlex.quote(str(output_dir))}",
             f"bash -o pipefail -c {shlex.quote(logged_command)}",
         ]
     )
+
+
+def _archive_output_dir(
+    output_dir: Path,
+    *,
+    archive_root: Path,
+    commit: str,
+    timestamp: datetime | None = None,
+) -> Path | None:
+    """Atomically preserve non-empty output before a forced fresh run."""
+    if not output_dir.exists():
+        return None
+    if not output_dir.is_dir():
+        raise NotADirectoryError(f"Training output is not a directory: {output_dir}")
+    if not any(output_dir.iterdir()):
+        return None
+    timestamp = timestamp or datetime.now(UTC)
+    label = f"{timestamp.strftime('%Y%m%dT%H%M%SZ')}-{commit[:12]}"
+    target = archive_root / label
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if target.exists():
+        raise FileExistsError(f"Training archive already exists: {target}")
+    output_dir.rename(target)
+    return target
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -179,7 +235,7 @@ def main(argv: list[str] | None = None) -> int:
 
     for experiment in selected:
         output_dir = artifacts_root / experiment.name
-        if has_training_artifacts(output_dir) and not args.force:
+        if has_experiment_artifacts(experiment, output_dir) and not args.force:
             print(f"Skip (completed): {experiment.name}")
             continue
         if experiment.num_gpus not in INSTANCE_TYPES_BY_NUM_GPUS:
@@ -189,6 +245,15 @@ def main(argv: list[str] | None = None) -> int:
         if args.resume_latest:
             resume_from_checkpoint = _require_latest_checkpoint(output_dir)
             print(f"Resume {experiment.name}: {resume_from_checkpoint}")
+
+        runtime_bundle = None
+        if experiment.runtime_profile is not None:
+            if experiment.runtime_profile != QWEN35_FAST_PROFILE:
+                raise ValueError(
+                    f"Unsupported runtime profile: {experiment.runtime_profile!r}."
+                )
+            validate_runtime_bundle(DEFAULT_BUNDLE_DIR)
+            runtime_bundle = DEFAULT_BUNDLE_DIR
 
         command = build_train_command(
             experiment,
@@ -203,11 +268,26 @@ def main(argv: list[str] | None = None) -> int:
             venv=venv,
             triton_cache=triton_cache,
             output_dir=output_dir,
+            runtime_bundle=runtime_bundle,
         )
         job_desc = f"🏋️ {experiment.description} #{args.author_name}"
         if normalize_job_desc(job_desc) in queued_descriptions:
             print(f"Skip (already queued): {experiment.name}")
             continue
+
+        if args.force and not args.resume_latest and output_dir.exists():
+            archive_root = artifacts_root / "_archive" / experiment.name
+            if args.dry:
+                if output_dir.is_dir() and any(output_dir.iterdir()):
+                    print(f"Would archive existing output under {archive_root}")
+            else:
+                archived = _archive_output_dir(
+                    output_dir,
+                    archive_root=archive_root,
+                    commit=commit,
+                )
+                if archived is not None:
+                    print(f"Archived existing output: {archived}")
 
         payload = {
             "script": script,

@@ -1,5 +1,9 @@
 # Qwen3.5-4B SFT FlashAttention-2 benchmark after FLA
 
+> Historical decision: the later representative grouped-batch benchmark
+> supersedes this report's batch-1 recommendation. See
+> `docs/sft_qwen35_h100_grouped_batch_toolathlon_only_benchmark.md`.
+
 Date: 2026-08-31
 
 ## Decision

@@ -1,5 +1,8 @@
 # Qwen3.5-4B grouped-batch and Toolathlon-only SFT benchmark
 
+> Production integration, environment preparation, and job commands are in
+> `docs/sft_qwen35_fast_runtime.md`.
+
 Date: 2026-08-31
 
 ## Decision
