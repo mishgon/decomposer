@@ -235,9 +235,9 @@ runtime at high priority:
 
 The GAIA2 execution-only release combines ten logical rollouts for each of
 the 110 training scenarios. Of 1,100 attempts, 316 have exact binary reward
-one, strict structural validation retains 293, and the 32K token limit retains
-290. Its pinned task-level split assigns 99 scenarios to train and 11 to
-validation, yielding 261 train and 29 validation records with no task overlap.
+one, strict structural validation retains 306, and the 32K token limit retains
+303. Its pinned task-level split assigns 99 scenarios to train and 11 to
+validation, yielding 273 train and 30 validation records with no task overlap.
 The validation tasks are selected deterministically to land on the exact
 10-percent record target while keeping every task wholly in one partition.
 
