@@ -148,14 +148,21 @@ def summarize_result(
         source=output,
     )
     score_sum = sum(float(row["score"]) for row in selected)
+    scores_by_task: dict[str, list[float]] = {
+        scenario_id: [] for scenario_id in selected_scenario_ids
+    }
+    for row in selected:
+        scores_by_task[row["task_id"]].append(float(row["score"]))
     passed_tasks = len(
-        {
-            row["task_id"]
-            for row in selected
-            if float(row["score"]) == 1.0
-        }
+        [scores for scores in scores_by_task.values() if any(scores)]
+    )
+    consistently_passed_tasks = len(
+        [scores for scores in scores_by_task.values() if all(scores)]
     )
     expected_selected_rows = len(selected_scenario_ids) * num_repeats
+    pass_at_1 = score_sum / expected_selected_rows
+    pass_at_n = passed_tasks / len(selected_scenario_ids)
+    pass_pow_n = consistently_passed_tasks / len(selected_scenario_ids)
     source_metadata: dict[str, Any] = {
         "output_jsonl": str(output),
         "output_jsonl_sha256": sha256_file(output),
@@ -174,9 +181,12 @@ def summarize_result(
             "scenario_count": len(selected_scenario_ids),
             "rollout_rows": expected_selected_rows,
             "passed_rollouts": int(score_sum),
-            "rollout_success_rate": score_sum / expected_selected_rows,
+            "rollout_success_rate": pass_at_1,
             "passed_tasks": passed_tasks,
-            "task_pass_at_3": passed_tasks / len(selected_scenario_ids),
+            "task_pass_at_3": pass_at_n,
+            "pass_at_1": pass_at_1,
+            "pass_at_3": pass_at_n,
+            "pass_pow_3": pass_pow_n,
         },
     }
 

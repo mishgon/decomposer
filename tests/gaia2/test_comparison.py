@@ -56,6 +56,9 @@ def test_completed_full_result_is_reused_for_heldout_metrics(tmp_path) -> None:
         "rollout_success_rate": pytest.approx(2 / 3),
         "passed_tasks": 1,
         "task_pass_at_3": 1.0,
+        "pass_at_1": pytest.approx(2 / 3),
+        "pass_at_3": 1.0,
+        "pass_pow_3": 0.0,
     }
     assert summary["source"]["output_jsonl_sha256"]
     assert summary["source"]["completion_marker_sha256"]

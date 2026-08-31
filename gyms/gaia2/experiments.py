@@ -222,6 +222,36 @@ QWEN35_4B_GAIA2_SFT = (
     / "qwen35-4b-nonthinking-mixed-v2-493c24c4-gaia2-110-n3-filtered-32k-full-4gpu"
     / "final"
 )
+QWEN35_4B_TOOLATHLON_ONLY_SFT_SERVED_NAME = (
+    "decomposer/qwen35-4b-sft-toolathlon-only-v1-493c24c4-"
+    "teacher-prompt-filtered-32k"
+)
+QWEN35_4B_TOOLATHLON_ONLY_SFT = (
+    ARTIFACTS_ROOT
+    / "training"
+    / "sft"
+    / "jobs"
+    / (
+        "qwen35-4b-nonthinking-toolathlon-only-v1-493c24c4-teacher-prompt-"
+        "filtered-32k-hf-fa2-fla-b8-e8-full-4gpu"
+    )
+    / "final"
+)
+QWEN35_4B_GAIA2_EXECUTION_ONLY_SFT_SERVED_NAME = (
+    "decomposer/qwen35-4b-sft-gaia2-execution-only-v1-110-n10-"
+    "teacher-prompt-r1-balanced-32k"
+)
+QWEN35_4B_GAIA2_EXECUTION_ONLY_SFT = (
+    ARTIFACTS_ROOT
+    / "training"
+    / "sft"
+    / "jobs"
+    / (
+        "qwen35-4b-nonthinking-gaia2-execution-only-v1-110-n10-teacher-"
+        "prompt-r1-balanced-32k-hf-fa2-fla-b8-e24-full-4gpu"
+    )
+    / "final"
+)
 
 DecomposerManagerBackend = Literal["local_vllm", "openrouter", "llm_proxy"]
 DecomposerPromptProfile = Literal["student", "teacher"]
@@ -585,6 +615,24 @@ QWEN35_GAIA2_SFT_EXPERIMENT = replace(
     manager_checkpoint=QWEN35_4B_GAIA2_SFT,
     manager_served_name=QWEN35_4B_GAIA2_SFT_SERVED_NAME,
 )
+QWEN35_TOOLATHLON_ONLY_SFT_EXPERIMENT = replace(
+    QWEN35_FINAL_MIXED_SFT_EXPERIMENT,
+    name=(
+        "qwen35-4b-sft-toolathlon-only-v1-493c24c4-teacher-prompt-"
+        "filtered-32k-non-thinking-qwen35-4b-non-thinking"
+    ),
+    manager_checkpoint=QWEN35_4B_TOOLATHLON_ONLY_SFT,
+    manager_served_name=QWEN35_4B_TOOLATHLON_ONLY_SFT_SERVED_NAME,
+)
+QWEN35_GAIA2_EXECUTION_ONLY_SFT_EXPERIMENT = replace(
+    QWEN35_FINAL_MIXED_SFT_EXPERIMENT,
+    name=(
+        "qwen35-4b-sft-gaia2-execution-only-v1-110-n10-teacher-prompt-"
+        "r1-balanced-32k-non-thinking-qwen35-4b-non-thinking"
+    ),
+    manager_checkpoint=QWEN35_4B_GAIA2_EXECUTION_ONLY_SFT,
+    manager_served_name=QWEN35_4B_GAIA2_EXECUTION_ONLY_SFT_SERVED_NAME,
+)
 QWEN35_BASE_DECOMPOSER_EXPERIMENT = DecomposerExperiment(
     name="qwen35-4b-base-non-thinking-qwen35-4b-non-thinking",
     worker_checkpoint=QWEN35_4B_BASE,
@@ -734,6 +782,8 @@ ALL_EXPERIMENTS: tuple[Experiment, ...] = (
     QWEN35_FINAL_MIXED_SFT_EXPERIMENT,
     QWEN35_FILTERED_SFT_EXPERIMENT,
     QWEN35_GAIA2_SFT_EXPERIMENT,
+    QWEN35_TOOLATHLON_ONLY_SFT_EXPERIMENT,
+    QWEN35_GAIA2_EXECUTION_ONLY_SFT_EXPERIMENT,
     QWEN35_BASE_DECOMPOSER_EXPERIMENT,
     QWEN35_BASE_TEACHER_DECOMPOSER_EXPERIMENT,
     DEEPSEEK_QWEN_EXPERIMENT,

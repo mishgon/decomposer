@@ -103,6 +103,12 @@ The registered experiments are:
 - `qwen35-4b-sft-mixed-v2-493c24c4-gaia2-110-n3-filtered-p2-non-thinking-qwen35-4b-non-thinking`:
   the patience-2 mixed Workplace, Toolathlon, and reward-1 Gaia2 checkpoint,
   with the same student prompt, base worker, and two-GPU topology.
+- `qwen35-4b-sft-toolathlon-only-v1-493c24c4-teacher-prompt-filtered-32k-non-thinking-qwen35-4b-non-thinking`:
+  the filtered Toolathlon-only checkpoint with the same non-thinking base
+  worker and two-GPU topology.
+- `qwen35-4b-sft-gaia2-execution-only-v1-110-n10-teacher-prompt-r1-balanced-32k-non-thinking-qwen35-4b-non-thinking`:
+  the reward-1 balanced GAIA2 execution-only checkpoint with the same base
+  worker and two-GPU topology.
 - `qwen35-4b-base-non-thinking-qwen35-4b-non-thinking`: untuned non-thinking
   Qwen3.5-4B manager and worker using the compact student prompt.
 - `qwen35-4b-base-non-thinking-teacher-qwen35-4b-non-thinking`: the same

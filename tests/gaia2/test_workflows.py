@@ -31,9 +31,11 @@ from gyms.gaia2.experiments import (
     QWEN35_BASE_TEACHER_DECOMPOSER_EXPERIMENT,
     QWEN35_FINAL_MIXED_SFT_EXPERIMENT,
     QWEN35_FILTERED_SFT_EXPERIMENT,
+    QWEN35_GAIA2_EXECUTION_ONLY_SFT_EXPERIMENT,
     QWEN35_GAIA2_SFT_EXPERIMENT,
     QWEN35_MIXED_SFT_EXPERIMENT,
     QWEN35_SFT_EXPERIMENT,
+    QWEN35_TOOLATHLON_ONLY_SFT_EXPERIMENT,
     QWEN36_QWEN_EXPERIMENT,
     SEARCH_DOMAIN,
     SCENARIO_COUNT,
@@ -313,6 +315,8 @@ def test_experiment_registry_contains_local_and_openrouter_profiles() -> None:
         QWEN35_FINAL_MIXED_SFT_EXPERIMENT,
         QWEN35_FILTERED_SFT_EXPERIMENT,
         QWEN35_GAIA2_SFT_EXPERIMENT,
+        QWEN35_TOOLATHLON_ONLY_SFT_EXPERIMENT,
+        QWEN35_GAIA2_EXECUTION_ONLY_SFT_EXPERIMENT,
         QWEN35_BASE_DECOMPOSER_EXPERIMENT,
         QWEN35_BASE_TEACHER_DECOMPOSER_EXPERIMENT,
         DEEPSEEK_QWEN_EXPERIMENT,
@@ -763,6 +767,20 @@ def test_qwen_worker_uses_official_non_thinking_sampling() -> None:
             QWEN35_GAIA2_SFT_EXPERIMENT,
             ("decomposer/qwen35-4b-sft-mixed-v2-493c24c4-" "gaia2-110-n3-filtered-p2"),
         ),
+        (
+            QWEN35_TOOLATHLON_ONLY_SFT_EXPERIMENT,
+            (
+                "decomposer/qwen35-4b-sft-toolathlon-only-v1-493c24c4-"
+                "teacher-prompt-filtered-32k"
+            ),
+        ),
+        (
+            QWEN35_GAIA2_EXECUTION_ONLY_SFT_EXPERIMENT,
+            (
+                "decomposer/qwen35-4b-sft-gaia2-execution-only-v1-110-n10-"
+                "teacher-prompt-r1-balanced-32k"
+            ),
+        ),
     ],
 )
 def test_qwen_sft_manager_uses_official_non_thinking_sampling(
@@ -919,6 +937,8 @@ def test_openrouter_preparation_hashes_only_the_local_worker(monkeypatch) -> Non
         QWEN35_FINAL_MIXED_SFT_EXPERIMENT,
         QWEN35_FILTERED_SFT_EXPERIMENT,
         QWEN35_GAIA2_SFT_EXPERIMENT,
+        QWEN35_TOOLATHLON_ONLY_SFT_EXPERIMENT,
+        QWEN35_GAIA2_EXECUTION_ONLY_SFT_EXPERIMENT,
     ],
 )
 def test_qwen_sft_preparation_hashes_manager_and_worker(
