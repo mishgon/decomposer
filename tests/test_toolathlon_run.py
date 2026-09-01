@@ -16,7 +16,7 @@ from gyms.toolathlon import batch, mlspace_serve, run, settings
 
 
 def test_evaluation_runtime_settings_are_uniform() -> None:
-    assert settings.SUBAGENT_CONTEXT_TOKENS == 265_000
+    assert settings.SUBAGENT_CONTEXT_TOKENS == 256_000
     assert settings.SUBAGENT_RECURSION_LIMIT == 410
     assert settings.DECOMPOSER_RECURSION_LIMIT == 410
     assert settings.DEEPSEEK_REASONING_EFFORT == "high"
