@@ -19,10 +19,17 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from langchain_core.messages import message_to_dict
-from langchain_openrouter import ChatOpenRouter
-
+from decomposer.chat_vllm import ChatVLLM
 from decomposer.core import create_decomposer_agent
-from decomposer.prompts import DECOMPOSER_TEACHER_SYSTEM_PROMPT
+from decomposer.prompts import (
+    DECOMPOSER_SYSTEM_PROMPT,
+    DECOMPOSER_TEACHER_SYSTEM_PROMPT,
+)
+
+try:
+    from .subagents.openrouter_compat import create_openrouter_model
+except ImportError:  # Executed directly as ``python gyms/toolathlon/run.py``.
+    from subagents.openrouter_compat import create_openrouter_model
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -39,6 +46,9 @@ DEFAULT_BASE_IMAGE = "docker.io/lockon0927/toolathlon-task-image:1016beta"
 DEFAULT_EVAL_CONFIG = "scripts/formal_run_v0.json"
 DEFAULT_MAX_STEPS = 200
 DEFAULT_CONTAINER_SLEEP = 7200
+PODMAN_SHORTNAMES_FILE = Path(__file__).with_name("podman-shortnames.conf")
+PORT_LOCK_DIR = Path("/tmp/decomposer-toolathlon-port-locks")
+CONTAINER_PODMAN_SHORTNAMES_FILE = "/workspace/configs/podman-shortnames.conf"
 CONTAINER_DOCKER_API_VERSION = "1.44"
 CONTAINER_TASK_ROOT_TEMPLATE = "/workspace/tasks/{task}"
 TASK_PATH_RE = re.compile(r"^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$")
@@ -46,6 +56,13 @@ SUBAGENT_TYPES = (
     # subagent_type_id, assistant_id, model_description
     ("qwen_3_5_4b_non_thinking", "qwen_3_5_4b_non_thinking", "Qwen-3.5-4B non-thinking"),
 )
+AGENT_MODES = ("simple", "decomposer")
+SUBAGENT_PROVIDERS = ("vllm", "openrouter")
+DECOMPOSER_PROVIDERS = ("openrouter", "vllm")
+DECOMPOSER_PROMPTS = {
+    "student": DECOMPOSER_SYSTEM_PROMPT,
+    "teacher": DECOMPOSER_TEACHER_SYSTEM_PROMPT,
+}
 # Untracked, user-provided files that the benchmark copies from its host
 # checkout into the task container at run time.
 USER_CONFIG_FILES = (
@@ -58,6 +75,34 @@ USER_CONFIG_FILES = (
     "configs/snowflake_rsa_key.p8",
     "configs/snowflake_rsa_key.pub",
 )
+K8S_TASK_CLEANUP_COMMANDS = {
+    "finalpool/k8s-deployment-cleanup": (
+        "bash",
+        "/workspace/tasks/finalpool/k8s-deployment-cleanup/scripts/k8s_deployment_cleanup.sh",
+        "stop",
+    ),
+    "finalpool/k8s-mysql": (
+        "bash",
+        "/workspace/tasks/finalpool/k8s-mysql/scripts/k8s_mysql.sh",
+        "stop",
+    ),
+    "finalpool/k8s-pr-preview-testing": (
+        "bash",
+        "/workspace/tasks/finalpool/k8s-pr-preview-testing/scripts/k8s_pr_preview_testing.sh",
+        "_",
+        "stop",
+    ),
+    "finalpool/k8s-redis-helm-upgrade": (
+        "bash",
+        "/workspace/tasks/finalpool/k8s-redis-helm-upgrade/scripts/init_redis_helm.sh",
+        "stop",
+    ),
+    "finalpool/k8s-safety-audit": (
+        "bash",
+        "/workspace/tasks/finalpool/k8s-safety-audit/scripts/k8s_safety_audit.sh",
+        "stop",
+    ),
+}
 
 
 DOCKER_SOCKET_CANDIDATES = (
@@ -66,14 +111,31 @@ DOCKER_SOCKET_CANDIDATES = (
     "/run/podman/podman.sock",
 )
 XDG_DOCKER_SOCKET_CANDIDATES = ("docker.sock", "podman/podman.sock")
+DOCKER_COMMAND_TIMEOUT = 60.0
+DOCKER_EXEC_TIMEOUT = 1800.0
 
 
-def _docker(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
-    process = subprocess.run(
-        ["docker", *args],
-        capture_output=True,
-        text=True,
+def _docker(
+    *args: str,
+    check: bool = True,
+    timeout: float | None = None,
+) -> subprocess.CompletedProcess[str]:
+    effective_timeout = (
+        timeout
+        if timeout is not None
+        else DOCKER_EXEC_TIMEOUT if args and args[0] == "exec" else DOCKER_COMMAND_TIMEOUT
     )
+    try:
+        process = subprocess.run(
+            ["docker", *args],
+            capture_output=True,
+            text=True,
+            timeout=effective_timeout,
+        )
+    except subprocess.TimeoutExpired as error:
+        raise RuntimeError(
+            f"docker {' '.join(args)} timed out after {effective_timeout:g}s"
+        ) from error
     if check and process.returncode != 0:
         detail = (process.stderr or process.stdout or "").strip()
         raise RuntimeError(
@@ -94,9 +156,6 @@ def resolve_docker_socket(explicit: str | None = None) -> str:
         candidate = docker_host.removeprefix("unix://")
         if Path(candidate).exists():
             return candidate
-    for candidate in DOCKER_SOCKET_CANDIDATES:
-        if Path(candidate).exists():
-            return candidate
     xdg_runtime_dir = os.environ.get("XDG_RUNTIME_DIR")
     xdg_candidates = (
         [
@@ -106,10 +165,14 @@ def resolve_docker_socket(explicit: str | None = None) -> str:
         if xdg_runtime_dir
         else []
     )
-    for candidate in xdg_candidates:
+    # Prefer the current user's rootless engine.  On hosts with both rootful
+    # and rootless Podman sockets, the Docker-compatible CLI normally uses the
+    # latter; mounting the former would give tools in the task container a
+    # different image/container store from the outer runner.
+    for candidate in (*xdg_candidates, *DOCKER_SOCKET_CANDIDATES):
         if Path(candidate).exists():
             return candidate
-    tried = [*DOCKER_SOCKET_CANDIDATES, *xdg_candidates]
+    tried = [*xdg_candidates, *DOCKER_SOCKET_CANDIDATES]
     raise RuntimeError(
         "No Docker socket found (tried: "
         + ", ".join(tried)
@@ -117,6 +180,16 @@ def resolve_docker_socket(explicit: str | None = None) -> str:
         + "; on rootless podman start the API service first: "
         + "systemctl --user enable --now podman.socket"
     )
+
+
+def container_socket_mounts(docker_socket: str) -> list[str]:
+    """Expose one engine socket at both Docker- and Podman-native paths."""
+    return [
+        "-v",
+        f"{docker_socket}:/var/run/docker.sock",
+        "-v",
+        f"{docker_socket}:/run/podman/podman.sock",
+    ]
 
 
 def ensure_benchmark_checkout(toolathlon_root: Path) -> None:
@@ -144,6 +217,16 @@ def ensure_benchmark_checkout(toolathlon_root: Path) -> None:
                 "seed it from; the checkout is incomplete — run: git submodule "
                 "update --init external/toolathlon"
             )
+    token_config = configs / "token_key_session.py"
+    token_example = configs / "token_key_session_example.py"
+    if not token_config.is_file() and token_example.is_file():
+        shutil.copyfile(token_example, token_config)
+        print(
+            f"First-run setup: created {token_config} from "
+            "token_key_session_example.py (fill in credentials needed by the "
+            "selected tasks)",
+            flush=True,
+        )
     (configs / ".mcp-auth").mkdir(parents=True, exist_ok=True)
     _warn_submodule_drift(toolathlon_root)
 
@@ -208,6 +291,7 @@ def _exec_in_container(
     env: dict[str, str] | None = None,
     detach: bool = False,
     check: bool = True,
+    timeout: float | None = None,
 ) -> subprocess.CompletedProcess[str]:
     args = ["exec"]
     if detach:
@@ -218,7 +302,7 @@ def _exec_in_container(
         args.extend(["--env", f"DOCKER_API_VERSION={CONTAINER_DOCKER_API_VERSION}"])
     args.append(container)
     args.extend(command)
-    return _docker(*args, check=check)
+    return _docker(*args, check=check, timeout=timeout)
 
 
 def vllm_command(
@@ -227,8 +311,9 @@ def vllm_command(
     *,
     max_model_len: int,
     gpu_memory_utilization: float,
+    data_parallel_size: int = 1,
 ) -> list[str]:
-    return [
+    command = [
         str(Path(sys.executable).with_name("vllm")),
         "serve",
         model,
@@ -249,6 +334,19 @@ def vllm_command(
         "--default-chat-template-kwargs",
         '{"enable_thinking":false}',
     ]
+    if data_parallel_size > 1:
+        command.extend(
+            [
+                "--data-parallel-size",
+                str(data_parallel_size),
+                # A single frontend dispatches every turn across all DP
+                # engines. The default one-frontend-per-engine topology can
+                # pin a persistent episode connection to one GPU.
+                "--api-server-count",
+                "1",
+            ]
+        )
+    return command
 
 
 def wait_for_vllm(
@@ -292,6 +390,7 @@ def start_vllm(
     timeout: float,
     log_path: Path,
     reuse: bool,
+    data_parallel_size: int = 1,
 ) -> subprocess.Popen[bytes] | None:
     no_proxy = {
         item
@@ -315,12 +414,23 @@ def start_vllm(
         )
         return None
 
+    reservation = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        reservation.bind(("127.0.0.1", port))
+    except OSError as error:
+        reservation.close()
+        raise RuntimeError(
+            f"Refusing to start vLLM: port {port} is already in use; choose a "
+            "dedicated --subagent-port or pass --reuse-vllm intentionally"
+        ) from error
+
     log_path.parent.mkdir(parents=True, exist_ok=True)
     command = vllm_command(
         model,
         port,
         max_model_len=max_model_len,
         gpu_memory_utilization=gpu_memory_utilization,
+        data_parallel_size=data_parallel_size,
     )
     environment = {
         **os.environ,
@@ -328,6 +438,7 @@ def start_vllm(
         "VLLM_ENGINE_READY_TIMEOUT_S": str(max(1, int(timeout))),
     }
     with log_path.open("ab") as log:
+        reservation.close()
         process = subprocess.Popen(
             command,
             env=environment,
@@ -374,17 +485,73 @@ def stop_vllm(process: subprocess.Popen[bytes] | None) -> None:
         return
 
 
-def allocate_port() -> tuple[int, socket.socket]:
-    """Reserve a free host port; the caller must keep holding `sock` until the
-    in-container listener is confirmed, then close it."""
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.bind(("127.0.0.1", 0))
-    return sock.getsockname()[1], sock
+def allocate_port() -> tuple[int, socket.socket, object]:
+    """Reserve a host port and lease it across concurrent episode processes."""
+    PORT_LOCK_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
+    while True:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+        lock_file = (PORT_LOCK_DIR / f"{port}.lock").open("a+")
+        try:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            lock_file.close()
+            sock.close()
+            continue
+        return port, sock, lock_file
 
 
-def wait_for_url(url: str, *, timeout: float, hint: str) -> None:
+def start_host_subagent_server(
+    *,
+    port: int,
+    gateway_port: int,
+    model: str,
+    n_jobs_per_worker: int,
+    log_path: Path,
+) -> subprocess.Popen[bytes]:
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    command = [
+        str(Path(sys.executable).with_name("langgraph")),
+        "dev",
+        "--config",
+        "langgraph.json",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        str(port),
+        "--n-jobs-per-worker",
+        str(n_jobs_per_worker),
+        "--no-browser",
+        "--no-reload",
+    ]
+    environment = {
+        **os.environ,
+        "TOOLATHLON_GATEWAY_URL": f"http://127.0.0.1:{gateway_port}/sse",
+        "TOOLATHLON_OPENROUTER_MODEL": model,
+    }
+    with log_path.open("ab") as log:
+        return subprocess.Popen(
+            command,
+            cwd=Path(__file__).with_name("subagents"),
+            env=environment,
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+
+
+def wait_for_url(
+    url: str,
+    *,
+    timeout: float,
+    hint: str,
+    process: subprocess.Popen[bytes] | None = None,
+) -> None:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
+        if process is not None and process.poll() is not None:
+            raise RuntimeError(f"{hint} exited with code {process.returncode}")
         try:
             with urllib.request.urlopen(url, timeout=2) as response:
                 if response.status == 200:
@@ -618,12 +785,33 @@ def write_trajectory(
     )
 
 
-def _cleanup_episode(*, episode_dir: Path, task_container: str) -> None:
+def _cleanup_episode(
+    *, episode_dir: Path, task_container: str, task: str = ""
+) -> None:
     cleanup: dict[str, object] = {
         "started_at": datetime.now(timezone.utc).isoformat(),
         "captures": [],
         "removals": [],
     }
+    task_cleanup = K8S_TASK_CLEANUP_COMMANDS.get(task)
+    if task_cleanup is not None:
+        try:
+            completed = _exec_in_container(
+                task_container,
+                *task_cleanup,
+                env={
+                    "CONTAINERS_REGISTRIES_CONF": CONTAINER_PODMAN_SHORTNAMES_FILE,
+                },
+                check=False,
+            )
+            cleanup["task_cleanup"] = {
+                "command": task_cleanup,
+                "returncode": completed.returncode,
+                "stdout": completed.stdout,
+                "stderr": completed.stderr,
+            }
+        except BaseException as error:
+            cleanup["task_cleanup"] = {"command": task_cleanup, "error": repr(error)}
     for kind, command in (
         ("log", ("logs", task_container)),
         ("inspect.json", ("inspect", task_container)),
@@ -641,14 +829,21 @@ def _cleanup_episode(*, episode_dir: Path, task_container: str) -> None:
                 {"container": "task", "kind": kind, "error": repr(error)}
             )
     try:
-        completed = _docker("rm", "--force", task_container, check=False)
+        completed = _docker(
+            "rm", "--force", "--time", "0", task_container, check=False
+        )
         cleanup["removals"].append(
-            {"command": ("rm", "--force", task_container),
+            {"command": ("rm", "--force", "--time", "0", task_container),
              "returncode": completed.returncode,
              "stdout": completed.stdout, "stderr": completed.stderr}
         )
     except BaseException as error:
-        cleanup["removals"].append({"command": ("rm", "--force", task_container), "error": repr(error)})
+        cleanup["removals"].append(
+            {
+                "command": ("rm", "--force", "--time", "0", task_container),
+                "error": repr(error),
+            }
+        )
     cleanup["finished_at"] = datetime.now(timezone.utc).isoformat()
     try:
         (episode_dir / "cleanup.json").write_text(
@@ -659,10 +854,15 @@ def _cleanup_episode(*, episode_dir: Path, task_container: str) -> None:
 
 
 def _copy_user_configs(container: str) -> None:
+    _docker(
+        "cp",
+        str(PODMAN_SHORTNAMES_FILE),
+        f"{container}:{CONTAINER_PODMAN_SHORTNAMES_FILE}",
+    )
     for relative in USER_CONFIG_FILES:
         source = (TOOLATHLON_ROOT / relative).resolve()
         if source.is_file():
-            _docker("cp", str(source), f"{container}/{relative}")
+            _docker("cp", str(source), f"{container}:/workspace/{relative}")
     gcp_keys = TOOLATHLON_ROOT / "configs" / "gcp-oauth.keys.json"
     gcp_credentials = TOOLATHLON_ROOT / "configs" / "google_credentials.json"
     if gcp_keys.is_file() and gcp_credentials.is_file():
@@ -679,6 +879,38 @@ def _copy_user_configs(container: str) -> None:
         )
 
 
+async def _run_simple_agent(
+    task: str,
+    *,
+    provider: str,
+    model: str,
+    gateway_port: int,
+    subagent_port: int,
+    max_steps: int,
+) -> dict:
+    os.environ["TOOLATHLON_GATEWAY_URL"] = (
+        f"http://127.0.0.1:{gateway_port}/sse"
+    )
+    os.environ["QWEN_3_5_4B_BASE_URL"] = (
+        f"http://127.0.0.1:{subagent_port}/v1"
+    )
+    if __package__:
+        from .subagents import graph, webapp
+    else:
+        from subagents import graph, webapp
+
+    async with webapp.lifespan(webapp.app):
+        if provider == "vllm":
+            agent = graph.qwen_3_5_4b_non_thinking()
+        else:
+            os.environ["TOOLATHLON_OPENROUTER_MODEL"] = model
+            agent = graph.deepseek_openrouter()
+        return await agent.ainvoke(
+            {"messages": [{"role": "user", "content": task}]},
+            config={"recursion_limit": max_steps * 2 + 10},
+        )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("task", help="Benchmark task path: domain/task_name")
@@ -689,12 +921,29 @@ def main() -> None:
     parser.add_argument(
         "--purpose", choices=("trace-generation", "evaluation"), required=True
     )
+    parser.add_argument("--agent-mode", choices=AGENT_MODES, default="decomposer")
     parser.add_argument("--model", default=DEFAULT_MODEL)
+    parser.add_argument(
+        "--decomposer-provider", choices=DECOMPOSER_PROVIDERS, default="openrouter"
+    )
+    parser.add_argument(
+        "--decomposer-base-url", default="http://127.0.0.1:8040/v1"
+    )
+    parser.add_argument(
+        "--decomposer-prompt",
+        choices=tuple(DECOMPOSER_PROMPTS),
+        default="teacher",
+        help="System prompt used by the decomposer model (default: teacher).",
+    )
+    parser.add_argument(
+        "--subagent-provider", choices=SUBAGENT_PROVIDERS, default="vllm"
+    )
     parser.add_argument("--subagent-model", default=DEFAULT_SUBAGENT_MODEL)
     parser.add_argument("--subagent-port", type=int, default=DEFAULT_SUBAGENT_PORT)
     parser.add_argument("--subagent-gpu", default="0")
     parser.add_argument("--vllm-max-model-len", type=int, default=256000)
     parser.add_argument("--vllm-gpu-memory-utilization", type=float, default=0.9)
+    parser.add_argument("--vllm-data-parallel-size", type=int, default=1)
     parser.add_argument("--vllm-startup-timeout", type=float, default=1800)
     parser.add_argument("--reuse-vllm", action="store_true")
     parser.add_argument("--image", default=DEFAULT_IMAGE)
@@ -706,7 +955,8 @@ def main() -> None:
     parser.add_argument("--evals-dir", type=Path, default=DEFAULT_EVALS_DIR)
     parser.add_argument("--stashes-dir", type=Path, default=DEFAULT_STASHES_DIR)
     parser.add_argument("--startup-timeout", type=float, default=180)
-    parser.add_argument("--n-jobs-per-worker", type=int, default=1000)
+    parser.add_argument("--n-jobs-per-worker", type=int, default=16)
+    parser.add_argument("--agent-timeout", type=float, default=1800)
     parser.add_argument("--max-steps", type=int, default=DEFAULT_MAX_STEPS)
     parser.add_argument("--eval-config", default=DEFAULT_EVAL_CONFIG)
     parser.add_argument("--container-sleep", type=int, default=DEFAULT_CONTAINER_SLEEP)
@@ -716,6 +966,18 @@ def main() -> None:
         parser.error("--n-jobs-per-worker must be at least 1")
     if args.max_steps < 1:
         parser.error("--max-steps must be at least 1")
+    if args.agent_timeout <= 0:
+        parser.error("--agent-timeout must be positive")
+    if args.vllm_data_parallel_size < 1:
+        parser.error("--vllm-data-parallel-size must be at least 1")
+    visible_gpus = [item for item in args.subagent_gpu.split(",") if item]
+    if (
+        args.subagent_provider == "vllm"
+        and len(visible_gpus) != args.vllm_data_parallel_size
+    ):
+        parser.error(
+            "--subagent-gpu must list exactly --vllm-data-parallel-size GPU IDs"
+        )
     ensure_benchmark_checkout(TOOLATHLON_ROOT)
     if not TASK_PATH_RE.fullmatch(args.task):
         raise ValueError(
@@ -725,8 +987,11 @@ def main() -> None:
     task_dir = (tasks_root / args.task).resolve()
     if task_dir.parent.parent != tasks_root or not task_dir.is_dir():
         raise ValueError(f"Unknown Toolathlon task: {args.task!r}")
-    if not os.environ.get("OPENROUTER_API_KEY"):
-        raise RuntimeError("Set OPENROUTER_API_KEY for the Decomposer model")
+    needs_openrouter = args.subagent_provider == "openrouter" or (
+        args.agent_mode == "decomposer" and args.decomposer_provider == "openrouter"
+    )
+    if needs_openrouter and not os.environ.get("OPENROUTER_API_KEY"):
+        raise RuntimeError("Set OPENROUTER_API_KEY for the selected model")
     docker_socket = resolve_docker_socket(args.docker_socket)
 
     try:
@@ -758,22 +1023,26 @@ def main() -> None:
     os.chmod(trusted_stash_dir, 0o700)
     trusted_bundle_file = trusted_stash_dir / "task_bundle.json"
 
-    print(f"Starting vLLM on GPU {args.subagent_gpu}...", flush=True)
-    vllm_process = start_vllm(
-        model=args.subagent_model,
-        port=args.subagent_port,
-        gpu=args.subagent_gpu,
-        max_model_len=args.vllm_max_model_len,
-        gpu_memory_utilization=args.vllm_gpu_memory_utilization,
-        timeout=args.vllm_startup_timeout,
-        log_path=vllm_log,
-        reuse=args.reuse_vllm,
-    )
+    vllm_process = None
+    if args.subagent_provider == "vllm":
+        print(f"Starting vLLM on GPU {args.subagent_gpu}...", flush=True)
+        vllm_process = start_vllm(
+            model=args.subagent_model,
+            port=args.subagent_port,
+            gpu=args.subagent_gpu,
+            max_model_len=args.vllm_max_model_len,
+            gpu_memory_utilization=args.vllm_gpu_memory_utilization,
+            timeout=args.vllm_startup_timeout,
+            log_path=vllm_log,
+            reuse=args.reuse_vllm,
+            data_parallel_size=args.vllm_data_parallel_size,
+        )
 
     container_lock = _open_container_lock(args.container_lock_file)
     container_lock_held = False
-    gateway_port, gateway_sock = None, None
-    subagent_webapp_port, subagent_sock = None, None
+    gateway_port, gateway_sock, gateway_port_lock = None, None, None
+    subagent_webapp_port, subagent_sock, subagent_port_lock = None, None, None
+    subagent_server_process: subprocess.Popen[bytes] | None = None
     container_bundle_path: str | None = None
     stash_dir: str | None = None
     agent_exit_code = 1
@@ -785,7 +1054,7 @@ def main() -> None:
 
         print("Starting task environment...", flush=True)
         mounts: list[str] = [
-            "-v", f"{docker_socket}:/var/run/docker.sock",
+            *container_socket_mounts(docker_socket),
             "-v", f"{episode_dir.resolve()}:/workspace/dumps",
             "-v", f"{episode_dir.resolve()}:/workspace/logs",
         ]
@@ -860,7 +1129,11 @@ def main() -> None:
             "--host_output_folder",
             str(episode_dir.resolve()),
             "--debug",
+            env={
+                "CONTAINERS_REGISTRIES_CONF": CONTAINER_PODMAN_SHORTNAMES_FILE,
+            },
             check=False,
+            timeout=600,
         )
         with (episode_dir / "preprocess.log").open("w", encoding="utf-8") as log:
             log.write(preprocess.stdout)
@@ -899,8 +1172,10 @@ def main() -> None:
             raise RuntimeError("Artifact guard stash did not report a stash directory")
 
         print("Starting container MCP gateway...", flush=True)
-        gateway_port, gateway_sock = allocate_port()
+        gateway_port, gateway_sock, gateway_port_lock = allocate_port()
         container_bundle_path = _stage_bundle(container, trusted_bundle_file)
+        gateway_sock.close()
+        gateway_sock = None
         _exec_in_container(
             container,
             "bash",
@@ -921,78 +1196,129 @@ def main() -> None:
         finally:
             _discard_bundle(container, container_bundle_path)
             container_bundle_path = None
-            gateway_sock.close()
-            gateway_sock = None
         print(f"Gateway is ready: http://127.0.0.1:{gateway_port}/sse", flush=True)
 
-        print("Starting subagent server...", flush=True)
-        subagent_webapp_port, subagent_sock = allocate_port()
-        try:
-            _exec_in_container(
-                container,
-                "bash",
-                "-c",
-                "exec /opt/decomposer/gyms/toolathlon/subagents/serve.sh "
-                ">> /workspace/dumps/subagent_server.log 2>&1",
-                detach=True,
-                env={
-                    "QWEN_3_5_4B_BASE_URL": f"http://127.0.0.1:{args.subagent_port}/v1",
-                    "TOOLATHLON_GATEWAY_URL": f"http://127.0.0.1:{gateway_port}/sse",
-                    "HOST": "0.0.0.0",
-                    "PORT": str(subagent_webapp_port),
-                    "N_JOBS_PER_WORKER": str(args.n_jobs_per_worker),
-                },
-            )
+        if args.agent_mode == "decomposer":
+            print("Starting subagent server...", flush=True)
+            subagent_webapp_port, subagent_sock, subagent_port_lock = allocate_port()
+            subagent_sock.close()
+            subagent_sock = None
+            if args.subagent_provider == "openrouter":
+                subagent_server_process = start_host_subagent_server(
+                    port=subagent_webapp_port,
+                    gateway_port=gateway_port,
+                    model=args.subagent_model,
+                    n_jobs_per_worker=args.n_jobs_per_worker,
+                    log_path=episode_dir / "subagent_server.log",
+                )
+            else:
+                _exec_in_container(
+                    container,
+                    "bash",
+                    "-c",
+                    "exec bash /opt/decomposer/gyms/toolathlon/subagents/serve.sh "
+                    ">> /workspace/dumps/subagent_server.log 2>&1",
+                    detach=True,
+                    env={
+                        "QWEN_3_5_4B_BASE_URL": f"http://127.0.0.1:{args.subagent_port}/v1",
+                        "TOOLATHLON_GATEWAY_URL": f"http://127.0.0.1:{gateway_port}/sse",
+                        "HOST": "0.0.0.0",
+                        "PORT": str(subagent_webapp_port),
+                        "N_JOBS_PER_WORKER": str(args.n_jobs_per_worker),
+                    },
+                )
             wait_for_url(
                 f"http://127.0.0.1:{subagent_webapp_port}/ok",
                 timeout=args.startup_timeout,
                 hint=f"Subagent server for {container}",
+                process=subagent_server_process,
             )
-        finally:
-            subagent_sock.close()
-            subagent_sock = None
-        print(
-            f"Subagent server is ready: http://127.0.0.1:{subagent_webapp_port}",
-            flush=True,
-        )
+            print(
+                f"Subagent server is ready: http://127.0.0.1:{subagent_webapp_port}",
+                flush=True,
+            )
 
         _release_container_lock(container_lock)
         container_lock_held = False
 
-        print("Running Decomposer...", flush=True)
-        agent = create_decomposer_agent(
-            decomposer_model=ChatOpenRouter(
-                model=args.model,
-                temperature=1.0,
-                top_p=1.0,
-                reasoning={"effort": "high"},
-            ),
-            subagent_types=[
-                {
-                    "subagent_type_id": subagent_type_id,
-                    "description": (
-                        f"Tool-calling agent based on a {model_description} model. "
-                        "Has access to all the available tools."
-                    ),
-                    "assistant_id": assistant_id,
-                    "url": f"http://127.0.0.1:{subagent_webapp_port}",
-                }
-                for subagent_type_id, assistant_id, model_description in SUBAGENT_TYPES
-            ],
-            decomposer_system_prompt=DECOMPOSER_TEACHER_SYSTEM_PROMPT,
-        )
         agent_error: str | None = None
         try:
-            agent_state = asyncio.run(
-                agent.ainvoke(
-                    {
-                        "messages": [
-                            {"role": "user", "content": bundle["task_str"]}
-                        ]
-                    },
-                    config={"recursion_limit": 200},
+            if args.agent_mode == "simple":
+                print(f"Running simple {args.subagent_model} agent...", flush=True)
+                agent_state = asyncio.run(
+                    asyncio.wait_for(
+                        _run_simple_agent(
+                            bundle["task_str"],
+                            provider=args.subagent_provider,
+                            model=args.subagent_model,
+                            gateway_port=gateway_port,
+                            subagent_port=args.subagent_port,
+                            max_steps=args.max_steps,
+                        ),
+                        timeout=args.agent_timeout,
+                    )
                 )
-            )
+            else:
+                print("Running Decomposer...", flush=True)
+                agent = create_decomposer_agent(
+                    decomposer_model=(
+                        ChatVLLM(
+                            model=args.model,
+                            api_key="EMPTY",
+                            base_url=args.decomposer_base_url,
+                            temperature=1,
+                            top_p=1,
+                            max_tokens=8192,
+                            timeout=180,
+                            max_retries=5,
+                        )
+                        if args.decomposer_provider == "vllm"
+                        else create_openrouter_model(
+                            model=args.model,
+                            reasoning={"enabled": False},
+                            max_tokens=8192,
+                            # A single stalled OpenRouter response must not consume
+                            # ten minutes and fail the whole episode. DeepSeek's
+                            # normal responses are comfortably below this bound;
+                            # more retry opportunities handle transient backend
+                            # stalls without changing the episode wall-clock cap.
+                            timeout=180,
+                            max_retries=5,
+                        )
+                    ),
+                    subagent_types=[
+                        {
+                            "subagent_type_id": subagent_type_id,
+                            "description": (
+                                f"Tool-calling agent based on a {model_description} model. "
+                                "Has access to all the available tools."
+                            ),
+                            "assistant_id": assistant_id,
+                            "url": f"http://127.0.0.1:{subagent_webapp_port}",
+                        }
+                        for subagent_type_id, assistant_id, model_description in (
+                            SUBAGENT_TYPES
+                            if args.subagent_provider == "vllm"
+                            else (("deepseek_openrouter", "deepseek_openrouter", args.subagent_model),)
+                        )
+                    ],
+                    decomposer_system_prompt=DECOMPOSER_PROMPTS[
+                        args.decomposer_prompt
+                    ],
+                    # LangGraph counts model and tool nodes separately. Match
+                    # the allowance used by the direct/simple agent so a
+                    # delegated Qwen run gets args.max_steps actual turns.
+                    subagent_recursion_limit=args.max_steps * 2 + 10,
+                )
+                agent_state = asyncio.run(
+                    asyncio.wait_for(
+                        agent.ainvoke(
+                            {"messages": [{"role": "user", "content": bundle["task_str"]}]},
+                            config={"recursion_limit": args.max_steps * 2 + 10},
+                        ),
+                        timeout=args.agent_timeout,
+                    )
+                )
         except BaseException as error:
             agent_error = repr(error)
             if agent_state is None:
@@ -1024,6 +1350,7 @@ def main() -> None:
                     "repetition": args.repetition,
                     "attempt": args.attempt,
                     "purpose": args.purpose,
+                    "agent_mode": args.agent_mode,
                     "decomposer_model": args.model,
                     "subagent_model": args.subagent_model,
                     "started_at": started_at,
@@ -1137,7 +1464,7 @@ def main() -> None:
         # code semantics (host loop failure overrides a passing eval).
         if not agent_success:
             raise RuntimeError(
-                "Decomposer agent loop failed: "
+                f"{args.agent_mode.capitalize()} agent loop failed: "
                 + (agent_error or "the agent produced no final answer")
             )
     finally:
@@ -1149,16 +1476,25 @@ def main() -> None:
             gateway_sock.close()
         if subagent_sock is not None:
             subagent_sock.close()
+        if gateway_port_lock is not None:
+            gateway_port_lock.close()
+        if subagent_port_lock is not None:
+            subagent_port_lock.close()
         artifacts_stash = trusted_stash_dir / "artifacts"
         if artifacts_stash.exists():
             shutil.rmtree(artifacts_stash, ignore_errors=True)
         print("Cleaning up...", flush=True)
         try:
-            _cleanup_episode(episode_dir=episode_dir, task_container=container)
+            _cleanup_episode(
+                episode_dir=episode_dir,
+                task_container=container,
+                task=args.task,
+            )
         finally:
             _release_container_lock(container_lock)
             if container_lock is not None:
                 container_lock.close()
+            stop_vllm(subagent_server_process)
             stop_vllm(vllm_process)
 
 

@@ -1,4 +1,6 @@
+import asyncio
 import json
+import socket
 import subprocess
 import sys
 import threading
@@ -11,6 +13,8 @@ import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
 from gyms.toolathlon import batch, mlspace_serve, run
+from gyms.toolathlon.subagents import graph as subagent_graph
+from gyms.toolathlon.subagents.webapp import truncate_mcp_tool_output
 
 
 def test_configured_subagents_are_registered() -> None:
@@ -21,9 +25,84 @@ def test_configured_subagents_are_registered() -> None:
     assert {
         assistant_id for _, assistant_id, _ in run.SUBAGENT_TYPES
     } <= registered.keys()
+    assert "deepseek_openrouter" in registered
     assert [item[0] for item in run.SUBAGENT_TYPES] == [
         "qwen_3_5_4b_non_thinking"
     ]
+
+
+def test_decomposer_prompt_modes_select_student_and_teacher_prompts() -> None:
+    assert run.DECOMPOSER_PROMPTS["student"] == run.DECOMPOSER_SYSTEM_PROMPT
+    assert (
+        run.DECOMPOSER_PROMPTS["teacher"]
+        == run.DECOMPOSER_TEACHER_SYSTEM_PROMPT
+    )
+
+
+def test_subagent_reconnects_model_requests_for_data_parallel_balance(
+    monkeypatch,
+) -> None:
+    captured = {}
+    compiled = object()
+
+    class FakeChatVLLM:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr(subagent_graph, "ChatVLLM", FakeChatVLLM)
+    monkeypatch.setattr(subagent_graph, "get_tools", lambda: [])
+    monkeypatch.setattr(
+        subagent_graph, "create_agent", lambda **_kwargs: compiled
+    )
+
+    result = subagent_graph._create_subagent(
+        "model", "UNSET_TEST_BASE_URL", 9999, thinking=False
+    )
+
+    client = captured["http_async_client"]
+    assert client._transport._pool._max_keepalive_connections == 0
+    assert captured["max_tokens"] == subagent_graph.MAX_OUTPUT_TOKENS
+    asyncio.run(client.aclose())
+    assert result is compiled
+
+
+def test_deepseek_subagent_uses_configured_openrouter_model(monkeypatch) -> None:
+    captured = {}
+    compiled = object()
+
+    def fake_create_openrouter_model(**kwargs):
+        captured.update(kwargs)
+        return object()
+
+    monkeypatch.setenv("TOOLATHLON_OPENROUTER_MODEL", "deepseek/test")
+    monkeypatch.setattr(
+        subagent_graph, "create_openrouter_model", fake_create_openrouter_model
+    )
+    monkeypatch.setattr(subagent_graph, "get_tools", lambda: [])
+    monkeypatch.setattr(
+        subagent_graph, "create_agent", lambda **_kwargs: compiled
+    )
+
+    result = subagent_graph.deepseek_openrouter()
+
+    assert captured["model"] == "deepseek/test"
+    assert captured["max_tokens"] == subagent_graph.MAX_OUTPUT_TOKENS
+    assert captured["reasoning"] == {"enabled": False}
+    assert result is compiled
+
+
+def test_subagent_turns_mcp_failures_into_tool_errors() -> None:
+    async def failing_handler(_request):
+        raise RuntimeError("ping")
+
+    request = SimpleNamespace(tool_call={"id": "call-1"})
+    response = asyncio.run(
+        truncate_mcp_tool_output.awrap_tool_call(request, failing_handler)
+    )
+
+    assert response.tool_call_id == "call-1"
+    assert response.status == "error"
+    assert response.content == "Tool call failed: ping"
 
 
 def test_docker(monkeypatch) -> None:
@@ -38,7 +117,20 @@ def test_docker(monkeypatch) -> None:
     result = run._docker("ps", check=False)
 
     assert result.stdout == "output"
-    assert calls == [((["docker", "ps"],), {"capture_output": True, "text": True})]
+    assert calls == [
+        (
+            (["docker", "ps"],),
+            {
+                "capture_output": True,
+                "text": True,
+                "timeout": run.DOCKER_COMMAND_TIMEOUT,
+            },
+        )
+    ]
+
+    calls.clear()
+    run._docker("exec", "container", "true")
+    assert calls[0][1]["timeout"] == run.DOCKER_EXEC_TIMEOUT
 
 
 def test_docker_failure_includes_stderr(monkeypatch) -> None:
@@ -55,6 +147,46 @@ def test_docker_failure_includes_stderr(monkeypatch) -> None:
         "Error: statfs /x: no such file",
     ):
         run._docker("run", "x")
+
+
+def test_docker_timeout_names_the_command(monkeypatch) -> None:
+    def fake_run(*args, **kwargs):
+        raise subprocess.TimeoutExpired(args[0], kwargs["timeout"])
+
+    monkeypatch.setattr(run.subprocess, "run", fake_run)
+
+    with pytest.raises(RuntimeError, match="docker inspect x timed out after 60s"):
+        run._docker("inspect", "x")
+
+
+def test_copy_user_configs_uses_absolute_container_destinations(
+    tmp_path, monkeypatch
+) -> None:
+    config = tmp_path / "configs" / "global_configs.py"
+    config.parent.mkdir()
+    config.write_text("global_configs = {}\n")
+    shortnames = tmp_path / "podman-shortnames.conf"
+    shortnames.write_text('[aliases]\n"mysql" = "docker.io/library/mysql"\n')
+    calls = []
+    monkeypatch.setattr(run, "TOOLATHLON_ROOT", tmp_path)
+    monkeypatch.setattr(run, "PODMAN_SHORTNAMES_FILE", shortnames)
+    monkeypatch.setattr(run, "USER_CONFIG_FILES", ("configs/global_configs.py",))
+    monkeypatch.setattr(run, "_docker", lambda *args, **kwargs: calls.append(args))
+
+    run._copy_user_configs("task-container")
+
+    assert calls == [
+        (
+            "cp",
+            str(shortnames),
+            "task-container:/workspace/configs/podman-shortnames.conf",
+        ),
+        (
+            "cp",
+            str(config),
+            "task-container:/workspace/configs/global_configs.py",
+        )
+    ]
 
 
 def test_vllm_command_uses_qwen_parsers() -> None:
@@ -74,6 +206,40 @@ def test_vllm_command_uses_qwen_parsers() -> None:
     assert command[command.index("--default-chat-template-kwargs") + 1] == (
         '{"enable_thinking":false}'
     )
+
+    data_parallel_command = run.vllm_command(
+        "/models/qwen",
+        8030,
+        max_model_len=32768,
+        gpu_memory_utilization=0.8,
+        data_parallel_size=4,
+    )
+    assert data_parallel_command[
+        data_parallel_command.index("--data-parallel-size") + 1
+    ] == "4"
+    assert data_parallel_command[
+        data_parallel_command.index("--api-server-count") + 1
+    ] == "1"
+
+
+def test_start_vllm_refuses_an_occupied_port(tmp_path) -> None:
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    listener.bind(("127.0.0.1", 0))
+    port = listener.getsockname()[1]
+    try:
+        with pytest.raises(RuntimeError, match=f"port {port} is already in use"):
+            run.start_vllm(
+                model="model",
+                port=port,
+                gpu="0",
+                max_model_len=1024,
+                gpu_memory_utilization=0.5,
+                timeout=1,
+                log_path=tmp_path / "vllm.log",
+                reuse=False,
+            )
+    finally:
+        listener.close()
 
 
 def test_main_requires_explicit_purpose(monkeypatch) -> None:
@@ -123,6 +289,7 @@ def test_main_bootstraps_global_configs_from_example(tmp_path, monkeypatch) -> N
     configs = tmp_path / "configs"
     configs.mkdir()
     (configs / "global_configs_example.py").write_text("global_configs = {}\n")
+    (configs / "token_key_session_example.py").write_text("tokens = {}\n")
     monkeypatch.setattr(run, "TOOLATHLON_ROOT", tmp_path)
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     monkeypatch.setattr(
@@ -133,6 +300,7 @@ def test_main_bootstraps_global_configs_from_example(tmp_path, monkeypatch) -> N
         run.main()
 
     assert (configs / "global_configs.py").read_text() == "global_configs = {}\n"
+    assert (configs / "token_key_session.py").read_text() == "tokens = {}\n"
     assert (configs / ".mcp-auth").is_dir()
 
 
@@ -239,6 +407,22 @@ def test_resolve_docker_socket_uses_rootless_podman_socket(tmp_path, monkeypatch
     assert run.resolve_docker_socket() == str(socket_path)
 
 
+def test_resolve_docker_socket_prefers_rootless_over_system_podman(
+    tmp_path, monkeypatch
+) -> None:
+    xdg_dir = tmp_path / "xdg"
+    rootless_socket = xdg_dir / "podman" / "podman.sock"
+    rootless_socket.parent.mkdir(parents=True)
+    rootless_socket.touch()
+    system_socket = tmp_path / "system-podman.sock"
+    system_socket.touch()
+    monkeypatch.delenv("DOCKER_HOST", raising=False)
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(xdg_dir))
+    monkeypatch.setattr(run, "DOCKER_SOCKET_CANDIDATES", (str(system_socket),))
+
+    assert run.resolve_docker_socket() == str(rootless_socket)
+
+
 def test_resolve_docker_socket_fails_when_absent(tmp_path, monkeypatch) -> None:
     monkeypatch.delenv("DOCKER_HOST", raising=False)
     monkeypatch.delenv("XDG_RUNTIME_DIR", raising=False)
@@ -250,9 +434,34 @@ def test_resolve_docker_socket_fails_when_absent(tmp_path, monkeypatch) -> None:
         run.resolve_docker_socket()
 
 
+def test_container_socket_is_available_to_docker_and_podman() -> None:
+    assert run.container_socket_mounts("/run/user/123/podman/podman.sock") == [
+        "-v",
+        "/run/user/123/podman/podman.sock:/var/run/docker.sock",
+        "-v",
+        "/run/user/123/podman/podman.sock:/run/podman/podman.sock",
+    ]
+
+
+def test_k8s_tasks_have_post_evaluation_cluster_cleanup() -> None:
+    assert set(run.K8S_TASK_CLEANUP_COMMANDS) == {
+        "finalpool/k8s-deployment-cleanup",
+        "finalpool/k8s-mysql",
+        "finalpool/k8s-pr-preview-testing",
+        "finalpool/k8s-redis-helm-upgrade",
+        "finalpool/k8s-safety-audit",
+    }
+    assert run.K8S_TASK_CLEANUP_COMMANDS["finalpool/k8s-pr-preview-testing"][-2:] == (
+        "_",
+        "stop",
+    )
+
+
 def test_episode_command_passes_docker_socket(tmp_path) -> None:
     args = SimpleNamespace(
         purpose="evaluation",
+        agent_mode="simple",
+        decomposer_prompt="student",
         model="model",
         subagent_model="subagent-model",
         subagent_port=8030,
@@ -273,6 +482,24 @@ def test_episode_command_passes_docker_socket(tmp_path) -> None:
     )
 
     assert command[command.index("--docker-socket") + 1] == "/custom/docker.sock"
+    assert command[command.index("--agent-mode") + 1] == "simple"
+    assert command[command.index("--decomposer-prompt") + 1] == "student"
+
+    args.container_slots = 2
+    slotted = batch.episode_command(
+        args,
+        Path("run.py"),
+        "finalpool/example",
+        "run-1",
+        1,
+        1,
+        "ep-1",
+        tmp_path,
+        container_slot=1,
+    )
+    assert slotted[slotted.index("--container-lock-file") + 1].endswith(
+        "container-01.lock"
+    )
 
     args.docker_socket = None
     command = batch.episode_command(
@@ -321,6 +548,41 @@ def test_task_selection_lists_domain_task_pairs_and_validates_subset(tmp_path) -
 
     assert batch.wants_batch(["--repetitions=2"])
     assert batch.wants_batch(["-n2"])
+
+
+def test_batch_manifest_spreads_repetitions_across_rounds() -> None:
+    defaults = {
+        "model": "decomposer-model",
+        "subagent_model": "subagent-model",
+        "subagent_port": 8000,
+        "image": "image",
+        "artifacts_dir": Path("artifacts"),
+    }
+    args = batch.parse_args(
+        [
+            "--tasks",
+            "finalpool/alpha",
+            "finalpool/beta",
+            "--purpose",
+            "evaluation",
+            "-n",
+            "3",
+        ],
+        defaults,
+    )
+
+    manifest = batch.create_manifest(
+        "run-1", ["finalpool/alpha", "finalpool/beta"], 3, args
+    )
+
+    assert [episode["key"] for episode in manifest["episodes"]] == [
+        "finalpool/alpha::rep-001",
+        "finalpool/beta::rep-001",
+        "finalpool/alpha::rep-002",
+        "finalpool/beta::rep-002",
+        "finalpool/alpha::rep-003",
+        "finalpool/beta::rep-003",
+    ]
 
 
 def test_validate_bundle_accepts_trusted_bundle_and_rejects_tampering(tmp_path) -> None:
@@ -503,8 +765,8 @@ def test_batch_repetitions_and_resume_skip_completed(tmp_path, monkeypatch) -> N
     )
 
     assert len(episode_calls) == 1
-    assert episode_calls[0]["episode"]["task"] == "finalpool/alpha"
-    assert episode_calls[0]["episode"]["repetition"] == 2
+    assert episode_calls[0]["episode"]["task"] == "finalpool/beta"
+    assert episode_calls[0]["episode"]["repetition"] == 1
     assert episode_calls[0]["attempt"] == 2
     assert resumed["counts"]["completed"] == 4
     assert len(resumed["episodes"][1]["attempts"]) == 2
@@ -691,7 +953,7 @@ def test_cleanup_continues_when_log_capture_fails(tmp_path, monkeypatch) -> None
     monkeypatch.setattr(run, "_docker", fake_docker)
     run._cleanup_episode(episode_dir=tmp_path, task_container="task-container")
 
-    assert ("rm", "--force", "task-container") in calls
+    assert ("rm", "--force", "--time", "0", "task-container") in calls
     cleanup = json.loads((tmp_path / "cleanup.json").read_text())
     assert cleanup["captures"][0]["error"] == "OSError('capture failed')"
 
@@ -785,6 +1047,7 @@ def test_execute_episode_maps_deterministic_trace_and_eval_paths(
     monkeypatch.setattr(batch.subprocess, "Popen", fake_popen)
     args = SimpleNamespace(
         purpose="trace-generation",
+        agent_mode="simple",
         model="decomposer-model",
         subagent_model="subagent-model",
         subagent_port=8030,

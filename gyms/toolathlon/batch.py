@@ -20,7 +20,12 @@ from typing import Any, Callable, Sequence
 
 SCHEMA_VERSION = 1
 RESUME_CONFIG_FIELDS = (
+    "agent_mode",
     "model",
+    "decomposer_provider",
+    "decomposer_base_url",
+    "decomposer_prompt",
+    "subagent_provider",
     "subagent_model",
     "subagent_port",
     "subagent_ports",
@@ -30,8 +35,12 @@ RESUME_CONFIG_FIELDS = (
     "reuse_vllm",
     "vllm_max_model_len",
     "vllm_gpu_memory_utilization",
+    "vllm_data_parallel_size",
     "vllm_startup_timeout",
     "startup_timeout",
+    "container_slots",
+    "agent_timeout",
+    "episode_timeout",
     "max_steps",
     "eval_config",
 )
@@ -84,7 +93,29 @@ def parse_args(argv: Sequence[str], defaults: dict[str, Any]) -> argparse.Namesp
     parser.add_argument(
         "--purpose", choices=("trace-generation", "evaluation"), required=True
     )
+    parser.add_argument(
+        "--agent-mode", choices=("simple", "decomposer"), default="decomposer"
+    )
     parser.add_argument("--model", default=defaults["model"])
+    parser.add_argument(
+        "--decomposer-provider", choices=("openrouter", "vllm"), default="openrouter"
+    )
+    parser.add_argument(
+        "--decomposer-base-url",
+        default="http://127.0.0.1:8040/v1",
+        help="OpenAI-compatible endpoint used by a local vLLM decomposer.",
+    )
+    parser.add_argument(
+        "--decomposer-prompt",
+        choices=("student", "teacher"),
+        default="teacher",
+        help="System prompt used by the decomposer model (default: teacher).",
+    )
+    parser.add_argument(
+        "--subagent-provider",
+        choices=("vllm", "openrouter"),
+        default="vllm",
+    )
     parser.add_argument("--subagent-model", default=defaults["subagent_model"])
     parser.add_argument("--subagent-port", type=int, default=defaults["subagent_port"])
     parser.add_argument(
@@ -99,6 +130,7 @@ def parse_args(argv: Sequence[str], defaults: dict[str, Any]) -> argparse.Namesp
     parser.add_argument("--subagent-gpu", default="0")
     parser.add_argument("--vllm-max-model-len", type=int, default=256000)
     parser.add_argument("--vllm-gpu-memory-utilization", type=float, default=0.9)
+    parser.add_argument("--vllm-data-parallel-size", type=int, default=1)
     parser.add_argument("--vllm-startup-timeout", type=float, default=1800)
     parser.add_argument("--reuse-vllm", action="store_true")
     parser.add_argument("--image", default=defaults["image"])
@@ -110,7 +142,7 @@ def parse_args(argv: Sequence[str], defaults: dict[str, Any]) -> argparse.Namesp
         "--bench-artifacts-dir", type=Path, default=defaults["artifacts_dir"]
     )
     parser.add_argument("--startup-timeout", type=float, default=180)
-    parser.add_argument("--n-jobs-per-worker", type=int, default=1000)
+    parser.add_argument("--n-jobs-per-worker", type=int, default=16)
     parser.add_argument("--max-steps", type=int, default=200)
     parser.add_argument(
         "--eval-config",
@@ -118,6 +150,19 @@ def parse_args(argv: Sequence[str], defaults: dict[str, Any]) -> argparse.Namesp
         help="Evaluation config path inside the task container.",
     )
     parser.add_argument("--concurrency", type=int, default=1)
+    parser.add_argument("--container-slots", type=int, default=1)
+    parser.add_argument(
+        "--agent-timeout",
+        type=float,
+        default=1800,
+        help="Maximum seconds spent in the agent loop (default: 1800).",
+    )
+    parser.add_argument(
+        "--episode-timeout",
+        type=float,
+        default=2400,
+        help="Maximum total wall-clock seconds for one episode (default: 2400).",
+    )
     args = parser.parse_args(argv)
     if args.resume and (args.all or args.tasks):
         parser.error("--resume cannot be combined with --all or --tasks")
@@ -131,8 +176,22 @@ def parse_args(argv: Sequence[str], defaults: dict[str, Any]) -> argparse.Namesp
         parser.error("--n-jobs-per-worker must be at least 1")
     if args.concurrency < 1:
         parser.error("--concurrency must be at least 1")
+    if args.container_slots < 1:
+        parser.error("--container-slots must be at least 1")
+    if args.agent_timeout <= 0 or args.episode_timeout <= 0:
+        parser.error("--agent-timeout and --episode-timeout must be positive")
     if args.max_steps < 1:
         parser.error("--max-steps must be at least 1")
+    if args.vllm_data_parallel_size < 1:
+        parser.error("--vllm-data-parallel-size must be at least 1")
+    visible_gpus = [item for item in args.subagent_gpu.split(",") if item]
+    if (
+        args.subagent_provider == "vllm"
+        and len(visible_gpus) != args.vllm_data_parallel_size
+    ):
+        parser.error(
+            "--subagent-gpu must list exactly --vllm-data-parallel-size GPU IDs"
+        )
     if args.subagent_ports:
         if len(set(args.subagent_ports)) != len(args.subagent_ports):
             parser.error("--subagent-ports must not contain duplicates")
@@ -205,8 +264,11 @@ def create_manifest(
             "error": None,
             "attempts": [],
         }
-        for task in tasks
+        # Schedule one full benchmark round at a time.  Toolathlon tasks share
+        # backing services, so launching several repetitions of the same task
+        # together races their preprocess/cleanup state.
         for repetition in range(1, repetitions + 1)
+        for task in tasks
     ]
     config = {name: getattr(args, name) for name in RESUME_CONFIG_FIELDS}
     config.update(tasks=list(tasks), repetitions=repetitions, purpose=args.purpose)
@@ -245,18 +307,27 @@ def episode_command(
     episode_id: str,
     root: Path,
     subagent_port: int | None = None,
+    container_slot: int = 0,
 ) -> list[str]:
     port = args.subagent_port if subagent_port is None else subagent_port
+    container_slots = getattr(args, "container_slots", 1)
     command = [
         sys.executable, str(runner_path), task,
         "--episode-id", episode_id, "--run-id", run_id,
         "--repetition", str(repetition), "--attempt", str(attempt),
         "--purpose", args.purpose, "--model", args.model,
+        "--agent-mode", args.agent_mode,
+        "--decomposer-provider", getattr(args, "decomposer_provider", "openrouter"),
+        "--decomposer-base-url",
+        getattr(args, "decomposer_base_url", "http://127.0.0.1:8040/v1"),
+        "--decomposer-prompt", getattr(args, "decomposer_prompt", "teacher"),
+        "--subagent-provider", getattr(args, "subagent_provider", "vllm"),
         "--subagent-model", args.subagent_model,
         "--subagent-port", str(port),
         "--subagent-gpu", args.subagent_gpu,
         "--vllm-max-model-len", str(args.vllm_max_model_len),
         "--vllm-gpu-memory-utilization", str(args.vllm_gpu_memory_utilization),
+        "--vllm-data-parallel-size", str(getattr(args, "vllm_data_parallel_size", 1)),
         "--vllm-startup-timeout", str(args.vllm_startup_timeout),
         "--reuse-vllm", "--image", args.image,
         "--artifacts-dir", str(root / "traces"),
@@ -264,9 +335,20 @@ def episode_command(
         "--stashes-dir", str(root / "stashes"),
         "--startup-timeout", str(args.startup_timeout),
         "--n-jobs-per-worker", str(args.n_jobs_per_worker),
+        "--agent-timeout", str(getattr(args, "agent_timeout", 1800)),
         "--max-steps", str(args.max_steps),
         "--eval-config", args.eval_config,
-        "--container-lock-file", str(root / "runs" / run_id / "container.lock"),
+        "--container-lock-file",
+        str(
+            root
+            / "runs"
+            / run_id
+            / (
+                "container.lock"
+                if container_slots == 1
+                else f"container-{container_slot:02d}.lock"
+            )
+        ),
     ]
     if args.docker_socket is not None:
         command.extend(["--docker-socket", args.docker_socket])
@@ -282,6 +364,7 @@ def execute_episode(
     attempt: int,
     stop_event: threading.Event | None = None,
     subagent_port: int | None = None,
+    container_slot: int = 0,
 ) -> dict[str, Any]:
     task, repetition = episode["task"], episode["repetition"]
     attempt_dir = run_dir / "attempts" / task / f"rep-{repetition:03d}" / f"attempt-{attempt:03d}"
@@ -297,8 +380,10 @@ def execute_episode(
         episode_id,
         root,
         subagent_port,
+        container_slot,
     )
     started_at, started = utc_now(), time.monotonic()
+    timed_out = False
     write_json(attempt_dir / "attempt.json", {
         "status": "running", "task": task, "repetition": repetition,
         "attempt": attempt, "command": command, "started_at": started_at,
@@ -313,6 +398,17 @@ def execute_episode(
                     returncode = process.wait(timeout=0.5)
                     break
                 except subprocess.TimeoutExpired:
+                    if time.monotonic() - started >= getattr(
+                        args, "episode_timeout", 2400
+                    ):
+                        timed_out = True
+                        process.send_signal(signal.SIGINT)
+                        try:
+                            returncode = process.wait(timeout=120)
+                        except subprocess.TimeoutExpired:
+                            process.kill()
+                            returncode = process.wait()
+                        break
                     if stop_event is not None and stop_event.is_set():
                         raise KeyboardInterrupt("batch interrupted")
         except BaseException:
@@ -340,8 +436,12 @@ def execute_episode(
             encoding="utf-8", errors="replace"
         )[-8000:]
         error = {
-            "type": "EpisodeProcessError",
-            "message": f"Episode runner exited with code {returncode}",
+            "type": "EpisodeTimeout" if timed_out else "EpisodeProcessError",
+            "message": (
+                f"Episode exceeded {getattr(args, 'episode_timeout', 2400):g}s"
+                if timed_out
+                else f"Episode runner exited with code {returncode}"
+            ),
             "returncode": returncode,
             "stderr_tail": stderr_tail,
         }
@@ -449,8 +549,27 @@ def main(
         if args.purpose != manifest["config"]["purpose"]:
             raise ValueError("Resume purpose does not match the manifest")
         for name in RESUME_CONFIG_FIELDS:
-            if name == "subagent_ports" and name not in manifest["config"]:
+            if name in {
+                "agent_mode", "decomposer_provider", "subagent_provider"
+            } and name not in manifest["config"]:
+                defaults_by_name = {
+                    "agent_mode": "decomposer",
+                    "decomposer_provider": "openrouter",
+                    "subagent_provider": "vllm",
+                }
+                setattr(args, name, defaults_by_name[name])
+            elif name == "decomposer_base_url" and name not in manifest["config"]:
+                setattr(args, name, "http://127.0.0.1:8040/v1")
+            elif name == "decomposer_prompt" and name not in manifest["config"]:
+                setattr(args, name, "teacher")
+            elif name == "subagent_ports" and name not in manifest["config"]:
                 setattr(args, name, [manifest["config"]["subagent_port"]])
+            elif name == "container_slots" and name not in manifest["config"]:
+                setattr(args, name, 1)
+            elif name == "episode_timeout" and name not in manifest["config"]:
+                setattr(args, name, 2400)
+            elif name == "agent_timeout" and name not in manifest["config"]:
+                setattr(args, name, 1800)
             else:
                 setattr(args, name, manifest["config"][name])
     else:
@@ -463,8 +582,11 @@ def main(
         save_manifest(run_dir, manifest)
         append_event(run_dir, "run_created", tasks=tasks, repetitions=args.repetitions)
 
-    if not os.environ.get("OPENROUTER_API_KEY"):
-        raise RuntimeError("Set OPENROUTER_API_KEY for the Decomposer model")
+    needs_openrouter = args.subagent_provider == "openrouter" or (
+        args.agent_mode == "decomposer" and args.decomposer_provider == "openrouter"
+    )
+    if needs_openrouter and not os.environ.get("OPENROUTER_API_KEY"):
+        raise RuntimeError("Set OPENROUTER_API_KEY for the selected model")
     docker("image", "inspect", args.image)
     manifest.update(status="running", finished_at=None)
     manifest.setdefault("invocations", []).append(
@@ -482,19 +604,21 @@ def main(
     processes: list[subprocess.Popen[bytes] | None] = []
     interrupted = False
     try:
-        for port in args.subagent_ports:
-            processes.append(
-                start_vllm(
-                    model=args.subagent_model,
-                    port=port,
-                    gpu=args.subagent_gpu,
-                    max_model_len=args.vllm_max_model_len,
-                    gpu_memory_utilization=args.vllm_gpu_memory_utilization,
-                    timeout=args.vllm_startup_timeout,
-                    log_path=run_dir / f"vllm-{port}.log",
-                    reuse=args.reuse_vllm,
+        if args.subagent_provider == "vllm":
+            for port in args.subagent_ports:
+                processes.append(
+                    start_vllm(
+                        model=args.subagent_model,
+                        port=port,
+                        gpu=args.subagent_gpu,
+                        max_model_len=args.vllm_max_model_len,
+                        gpu_memory_utilization=args.vllm_gpu_memory_utilization,
+                        timeout=args.vllm_startup_timeout,
+                        log_path=run_dir / f"vllm-{port}.log",
+                        reuse=args.reuse_vllm,
+                        data_parallel_size=args.vllm_data_parallel_size,
+                    )
                 )
-            )
         append_event(
             run_dir,
             "vllm_ready",
@@ -523,6 +647,20 @@ def main(
         ] = {}
         remaining = iter(work)
         next_endpoint = 0
+        k8s_episode_lock = threading.Lock()
+        task_episode_locks = {
+            episode["task"]: threading.Lock() for episode in manifest["episodes"]
+        }
+
+        def execute_scheduled_episode(
+            batch_args: argparse.Namespace, **kwargs: Any
+        ) -> dict[str, Any]:
+            episode = kwargs["episode"]
+            with task_episode_locks[episode["task"]]:
+                if episode["task"].startswith("finalpool/k8s-"):
+                    with k8s_episode_lock:
+                        return execute_episode(batch_args, **kwargs)
+                return execute_episode(batch_args, **kwargs)
 
         def record_result(
             episode: dict[str, Any], result: dict[str, Any], *, interrupted_run: bool = False
@@ -558,7 +696,7 @@ def main(
             save_manifest(run_dir, manifest)
             append_event(run_dir, "episode_started", key=episode["key"], attempt=attempt)
             future = executor.submit(
-                execute_episode,
+                execute_scheduled_episode,
                 args,
                 runner_path=repo_root / "gyms" / "toolathlon" / "run.py",
                 root=root,
@@ -567,6 +705,7 @@ def main(
                 attempt=attempt,
                 stop_event=stop_event,
                 subagent_port=args.subagent_ports[next_endpoint],
+                container_slot=(index - 1) % args.container_slots,
             )
             next_endpoint = (next_endpoint + 1) % len(args.subagent_ports)
             active[future] = (index, episode, attempt)
