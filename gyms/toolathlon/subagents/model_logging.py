@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import fcntl
 import json
 import os
@@ -72,7 +73,8 @@ async def durable_model_call_log(request, handler):
     try:
         response = await handler(request)
     except BaseException as error:
-        _append_record(
+        await asyncio.to_thread(
+            _append_record,
             {
                 **base,
                 "finished_at": datetime.now(timezone.utc).isoformat(),
@@ -82,7 +84,8 @@ async def durable_model_call_log(request, handler):
             }
         )
         raise
-    _append_record(
+    await asyncio.to_thread(
+        _append_record,
         {
             **base,
             "finished_at": datetime.now(timezone.utc).isoformat(),
