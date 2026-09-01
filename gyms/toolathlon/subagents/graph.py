@@ -83,6 +83,15 @@ def qwen_3_5_4b_non_thinking() -> CompiledStateGraph:
     )
 
 
+def gemma_4_e4b_thinking() -> CompiledStateGraph:
+    return _create_subagent(
+        "google/gemma-4-E4B-it",
+        "GEMMA_4_E4B_BASE_URL",
+        8030,
+        thinking=True,
+    )
+
+
 def deepseek_openrouter() -> CompiledStateGraph:
     model = create_openrouter_model(
         model=os.environ.get(

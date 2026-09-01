@@ -71,6 +71,7 @@ TASK_PATH_RE = re.compile(r"^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$")
 SUBAGENT_TYPES = (
     # subagent_type_id, assistant_id, model_description
     ("qwen_3_5_4b_non_thinking", "qwen_3_5_4b_non_thinking", "Qwen-3.5-4B non-thinking"),
+    ("gemma_4_e4b_thinking", "gemma_4_e4b_thinking", "Gemma-4-E4B thinking"),
 )
 AGENT_MODES = ("simple", "decomposer")
 SUBAGENT_PROVIDERS = ("vllm", "openrouter")
@@ -363,12 +364,19 @@ def vllm_command(
     gpu_memory_utilization: float,
     data_parallel_size: int = 1,
 ) -> list[str]:
+    model_lower = model.lower()
+    is_gemma = "gemma-4" in model_lower
+    served_model = (
+        "google/gemma-4-E4B-it"
+        if "e4b" in model_lower
+        else DEFAULT_SUBAGENT_MODEL
+    )
     command = [
         str(Path(sys.executable).with_name("vllm")),
         "serve",
         model,
         "--served-model-name",
-        DEFAULT_SUBAGENT_MODEL,
+        served_model,
         "--host",
         "0.0.0.0",
         "--port",
@@ -380,10 +388,14 @@ def vllm_command(
         "--language-model-only",
         "--enable-auto-tool-choice",
         "--tool-call-parser",
-        "qwen3_xml",
-        "--default-chat-template-kwargs",
-        '{"enable_thinking":false}',
+        "gemma4" if is_gemma else "qwen3_xml",
     ]
+    if is_gemma:
+        command.extend(["--reasoning-parser", "gemma4"])
+    else:
+        command.extend(
+            ["--default-chat-template-kwargs", '{"enable_thinking":false}']
+        )
     if data_parallel_size > 1:
         command.extend(
             [
@@ -458,7 +470,11 @@ def start_vllm(
         wait_for_vllm(
             None,
             port=port,
-            expected_model=DEFAULT_SUBAGENT_MODEL,
+            expected_model=(
+                "google/gemma-4-E4B-it"
+                if "gemma-4" in model.lower() and "e4b" in model.lower()
+                else DEFAULT_SUBAGENT_MODEL
+            ),
             timeout=2,
             log_path=log_path,
         )
@@ -508,7 +524,11 @@ def start_vllm(
         wait_for_vllm(
             process,
             port=port,
-            expected_model=DEFAULT_SUBAGENT_MODEL,
+            expected_model=(
+                "google/gemma-4-E4B-it"
+                if "gemma-4" in model.lower() and "e4b" in model.lower()
+                else DEFAULT_SUBAGENT_MODEL
+            ),
             timeout=timeout,
             log_path=log_path,
         )
@@ -954,6 +974,9 @@ async def _run_simple_agent(
     os.environ["QWEN_3_5_4B_BASE_URL"] = (
         f"http://127.0.0.1:{subagent_port}/v1"
     )
+    os.environ["GEMMA_4_E4B_BASE_URL"] = (
+        f"http://127.0.0.1:{subagent_port}/v1"
+    )
     if __package__:
         from .subagents import graph, webapp
     else:
@@ -961,7 +984,11 @@ async def _run_simple_agent(
 
     async with webapp.lifespan(webapp.app):
         if provider == "vllm":
-            agent = graph.qwen_3_5_4b_non_thinking()
+            agent = (
+                graph.gemma_4_e4b_thinking()
+                if "gemma-4" in model.lower()
+                else graph.qwen_3_5_4b_non_thinking()
+            )
         else:
             os.environ["TOOLATHLON_OPENROUTER_MODEL"] = model
             agent = graph.deepseek_openrouter()
@@ -1341,6 +1368,10 @@ def main() -> None:
                             args.subagent_base_url
                             or f"http://127.0.0.1:{args.subagent_port}/v1"
                         ),
+                        "GEMMA_4_E4B_BASE_URL": (
+                            args.subagent_base_url
+                            or f"http://127.0.0.1:{args.subagent_port}/v1"
+                        ),
                         "TOOLATHLON_GATEWAY_URL": f"http://127.0.0.1:{gateway_port}/sse",
                         "HOST": "0.0.0.0",
                         "PORT": str(subagent_webapp_port),
@@ -1397,6 +1428,7 @@ def main() -> None:
                             max_tokens=8192,
                             timeout=180,
                             max_retries=5,
+                            preserve_reasoning="gemma-4" in args.model.lower(),
                         )
                         if args.decomposer_provider == "vllm"
                         else create_lmrouter_teacher(
@@ -1430,7 +1462,14 @@ def main() -> None:
                             "url": f"http://127.0.0.1:{subagent_webapp_port}",
                         }
                         for subagent_type_id, assistant_id, model_description in (
-                            SUBAGENT_TYPES
+                            tuple(
+                                spec
+                                for spec in SUBAGENT_TYPES
+                                if (
+                                    ("gemma" in spec[0])
+                                    == ("gemma-4" in args.subagent_model.lower())
+                                )
+                            )
                             if args.subagent_provider == "vllm"
                             else (("deepseek_openrouter", "deepseek_openrouter", args.subagent_model),)
                         )
@@ -1495,7 +1534,11 @@ def main() -> None:
                         else None
                     ),
                     "decomposer_thinking_enabled": (
-                        False if args.decomposer_provider == "lmrouter" else None
+                        False
+                        if args.decomposer_provider == "lmrouter"
+                        else "gemma-4" in args.model.lower()
+                        if args.decomposer_provider == "vllm"
+                        else None
                     ),
                     "decomposer_recursion_limit": DECOMPOSER_RECURSION_LIMIT,
                     "subagent_model": args.subagent_model,

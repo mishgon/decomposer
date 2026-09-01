@@ -123,7 +123,8 @@ def test_configured_subagents_are_registered() -> None:
     } <= registered.keys()
     assert "deepseek_openrouter" in registered
     assert [item[0] for item in run.SUBAGENT_TYPES] == [
-        "qwen_3_5_4b_non_thinking"
+        "qwen_3_5_4b_non_thinking",
+        "gemma_4_e4b_thinking",
     ]
 
 
@@ -414,6 +415,22 @@ def test_vllm_command_uses_qwen_parsers() -> None:
     assert data_parallel_command[
         data_parallel_command.index("--api-server-count") + 1
     ] == "1"
+
+
+def test_vllm_command_uses_gemma_thinking_parsers() -> None:
+    command = run.vllm_command(
+        "/models/gemma-4-E4B-it",
+        8030,
+        max_model_len=256000,
+        gpu_memory_utilization=0.9,
+    )
+
+    assert command[command.index("--served-model-name") + 1] == (
+        "google/gemma-4-E4B-it"
+    )
+    assert command[command.index("--tool-call-parser") + 1] == "gemma4"
+    assert command[command.index("--reasoning-parser") + 1] == "gemma4"
+    assert "--default-chat-template-kwargs" not in command
 
 
 def test_start_vllm_refuses_an_occupied_port(tmp_path) -> None:
