@@ -74,7 +74,7 @@ def stop_group(process: subprocess.Popen | None) -> None:
             pass
 
 
-def batch_command(*extra: str) -> list[str]:
+def batch_command(*extra: str, context_tokens: int = 256000) -> list[str]:
     return [
         PYTHON,
         str(ROOT / "gyms/toolathlon/run.py"),
@@ -86,11 +86,11 @@ def batch_command(*extra: str) -> list[str]:
         "--subagent-provider",
         "vllm",
         "--subagent-gpu",
-        "1",
+        "4",
         "--vllm-data-parallel-size",
         "1",
         "--vllm-max-model-len",
-        "256000",
+        str(context_tokens),
         "--subagent-recursion-limit",
         "410",
         "--concurrency",
@@ -116,7 +116,12 @@ def main() -> None:
     state = {
         "matrix_id": MATRIX_ID,
         "status": "running",
-        "gpu_policy": {"subagent": 1, "local_decomposer": 2},
+        "gpu_policy": {"subagent": 4, "local_decomposer": 5},
+        "context_policy": {
+            "qwen_subagent": 256000,
+            "gemma_e4b_subagent_native_limit": 131072,
+            "gemma_26b_decomposer": 256000,
+        },
         "modes": {},
     }
     write_state(state)
@@ -160,6 +165,7 @@ def main() -> None:
             batch_command(
                 "--agent-mode", "simple",
                 "--subagent-model", str(E4B_DIR),
+                context_tokens=131072,
             ),
             env,
         )
@@ -199,7 +205,7 @@ def main() -> None:
 
     server_log_path = MATRIX_DIR / "04-gemma26b-decomposer-vllm.log"
     server_log = server_log_path.open("ab")
-    server_env = {**env, "CUDA_VISIBLE_DEVICES": "2"}
+    server_env = {**env, "CUDA_VISIBLE_DEVICES": "5"}
     server = subprocess.Popen(
         [
             str(Path(PYTHON).with_name("vllm")), "serve", str(GEMMA_26B_DIR),
@@ -229,6 +235,7 @@ def main() -> None:
                 "--decomposer-prompt", "teacher",
                 "--model", "google/gemma-4-26B-A4B-it",
                 "--subagent-model", str(E4B_DIR),
+                context_tokens=131072,
             ),
             env,
         )
