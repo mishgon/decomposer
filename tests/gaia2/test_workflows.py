@@ -643,7 +643,7 @@ def test_qwen36_text_defaults_are_explicitly_non_thinking(tmp_path) -> None:
     service = json.loads(service_path.read_text())
     assert service["manager"]["temperature"] == 0.7
     assert service["manager"]["top_p"] == 0.8
-    assert service["manager"]["presence_penalty"] == 1.5
+    assert "presence_penalty" not in service["manager"]
     assert service["manager"]["max_completion_tokens"] == 32768
     assert service["manager"]["extra_body"] == expected_proxy_body
     assert service["manager_max_model_calls"] == 200

@@ -1353,7 +1353,6 @@ def _runtime_configs(
         if experiment.remote_manager_extra_body:
             manager.update(
                 {
-                    "presence_penalty": experiment.presence_penalty,
                     "max_completion_tokens": experiment.max_completion_tokens,
                     "extra_body": experiment.remote_manager_extra_body,
                 }
