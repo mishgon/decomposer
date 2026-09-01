@@ -5,6 +5,7 @@ import pytest
 pytest.importorskip("are")
 
 import json
+import os
 import threading
 import time
 import urllib.error
@@ -434,5 +435,38 @@ def test_broker_invocation_creates_one_native_are_event():
         assert session.invoke("Counter__increment", {"amount": 2}) == 2
         assert environment.get_event_log_size() == 1
         assert len(session.trace) == 1
+    finally:
+        broker.close()
+
+
+def test_broker_sanitizes_bound_app_paths_in_response_and_trace(tmp_path):
+    private_root = os.fspath(tmp_path / "are_simulation_fs_sandbox_private")
+
+    class SanitizingApp:
+        @staticmethod
+        def sanitize_error_message(message):
+            return message.replace(private_root + os.sep, "/").replace(
+                private_root, "/"
+            )
+
+    def fail(self, value):
+        raise FileNotFoundError(f"missing {private_root}/Documents/{value}")
+
+    failing_tool = tool("Files__read", fail)
+    failing_tool.class_instance = SanitizingApp()
+    broker = ToolStateBroker()
+    try:
+        session = broker.register(Scenario([failing_tool]), notification_system())
+        url = (
+            f"{broker.base_url}/sessions/{session.session_id}/tools/Files__read/invoke"
+        )
+        with pytest.raises(urllib.error.HTTPError) as failed:
+            request("POST", url, session.token, {"arguments": {"value": "lost.txt"}})
+        response = json.loads(failed.value.read())
+
+        assert response == {"error": "FileNotFoundError: missing /Documents/lost.txt"}
+        assert private_root not in json.dumps(response)
+        assert private_root not in json.dumps(session.trace)
+        assert session.trace[0]["ok"] is False
     finally:
         broker.close()

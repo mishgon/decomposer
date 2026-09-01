@@ -5,12 +5,11 @@ import json
 
 import httpx
 import pytest
-from pydantic import ValidationError
+from langchain_core.utils.function_calling import convert_to_openai_tool
 
 pytest.importorskip("langchain_openai")
 
 from gyms.gaia2.subagents import graphs
-
 
 TYPED_PARAMETERS = {
     "type": "object",
@@ -95,24 +94,7 @@ def test_worker_does_not_hide_broker_authentication_errors():
         graphs._broker_tool_result(response)
 
 
-def test_worker_argument_model_preserves_types_and_rejects_stringified_values():
-    model = graphs._arguments_model("Typed", TYPED_PARAMETERS)
-
-    assert model.model_validate(
-        {"age": 24, "recipients": ["a@example.com"]}
-    ).model_dump() == {
-        "age": 24,
-        "recipients": ["a@example.com"],
-    }
-    with pytest.raises(ValidationError):
-        model.model_validate({"age": "24", "recipients": ["a@example.com"]})
-    with pytest.raises(ValidationError):
-        model.model_validate({"age": 24, "recipients": '["a@example.com"]'})
-    with pytest.raises(ValidationError):
-        model.model_validate({"age": 24, "unexpected": True})
-
-
-def test_worker_returns_argument_validation_as_correctable_tool_feedback():
+def test_worker_preserves_canonical_json_schema_without_rebuilding_it():
     schema = {
         "type": "function",
         "function": {
@@ -132,9 +114,53 @@ def test_worker_returns_argument_validation_as_correctable_tool_feedback():
     }
     tool = graphs._tool_from_schema(schema, context)
 
+    assert tool.args_schema == TYPED_PARAMETERS
+    assert convert_to_openai_tool(tool) == schema
+
+
+def test_worker_returns_broker_argument_validation_as_correctable_tool_feedback(
+    monkeypatch,
+):
+    schema = {
+        "type": "function",
+        "function": {
+            "name": "Contacts__lookup",
+            "description": "Look up contacts.",
+            "parameters": TYPED_PARAMETERS,
+        },
+    }
+    context = {
+        "tool_schemas": [schema],
+        "broker_url": "http://broker.test",
+        "session_token": "token",
+        "policy": "shared_serialized",
+        "scenario_id": "scenario",
+        "run_number": 1,
+        "notification_cursor": 0,
+    }
+    requests = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            400,
+            json={"error": "Argument 'age' must be of type int"},
+        )
+
+    transport = httpx.MockTransport(handler)
+    async_client = httpx.AsyncClient
+
+    def client_factory(*args, **kwargs):
+        return async_client(transport=transport)
+
+    monkeypatch.setattr(graphs.httpx, "AsyncClient", client_factory)
+    tool = graphs._tool_from_schema(schema, context)
     result = asyncio.run(tool.ainvoke({"age": "24", "recipients": "[]"}))
 
-    assert '"error": "Invalid tool arguments"' in result
+    assert '"error": "Argument \'age\' must be of type int"' in result
+    assert json.loads(requests[0].content) == {
+        "arguments": {"age": "24", "recipients": "[]"}
+    }
 
 
 def test_worker_wait_adapter_starts_from_context_and_advances_shared_cursor(

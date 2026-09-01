@@ -7,7 +7,6 @@ service processes.
 
 from __future__ import annotations
 
-import inspect
 import json
 import secrets
 import threading
@@ -17,12 +16,15 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from types import NoneType, UnionType
-from typing import Any, Literal, Union, get_args, get_origin
+from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 from are.simulation.notification_system import Message, MessageType
-from are.simulation.tool_utils import AppTool
+from are.simulation.tool_utils import (
+    AppTool,
+    app_tool_to_openai_schema,
+    sanitize_app_tool_error,
+)
 
 HIDDEN_AUI_TOOLS = frozenset(
     {
@@ -36,139 +38,7 @@ HIDDEN_AUI_TOOLS = frozenset(
 WAIT_FOR_NOTIFICATION_TOOL = "SystemApp__wait_for_notification"
 
 
-def _legacy_type(type_name: str) -> Any:
-    """Resolve the small legacy type vocabulary used by hand-built AppTools."""
-
-    scalar_types = {
-        "Any": Any,
-        "str": str,
-        "string": str,
-        "int": int,
-        "integer": int,
-        "float": float,
-        "number": float,
-        "bool": bool,
-        "boolean": bool,
-        "None": NoneType,
-    }
-    if type_name in scalar_types:
-        return scalar_types[type_name]
-    if " | " in type_name:
-        members = [_legacy_type(item) for item in type_name.split(" | ")]
-        result = members[0]
-        for member in members[1:]:
-            result = result | member
-        return result
-    if type_name.startswith("list[") and type_name.endswith("]"):
-        return list[_legacy_type(type_name[5:-1])]
-    if type_name.startswith("dict[") and type_name.endswith("]"):
-        key_name, separator, value_name = type_name[5:-1].partition(", ")
-        if not separator:
-            raise TypeError(f"Unsupported ARE argument type {type_name!r}")
-        return dict[_legacy_type(key_name), _legacy_type(value_name)]
-    if type_name == "dict":
-        return dict[str, Any]
-    raise TypeError(f"Unsupported ARE argument type {type_name!r}")
-
-
-def _json_schema_for_type(type_obj: Any) -> dict[str, Any]:
-    """Convert one runtime Python annotation into strict JSON Schema."""
-
-    if type_obj is Any:
-        return {}
-    if type_obj in {None, NoneType}:
-        return {"type": "null"}
-    primitive_types = {
-        str: "string",
-        int: "integer",
-        float: "number",
-        bool: "boolean",
-    }
-    if type_obj in primitive_types:
-        return {"type": primitive_types[type_obj]}
-    if type_obj is list:
-        return {"type": "array", "items": {}}
-    if type_obj is dict:
-        return {"type": "object", "additionalProperties": {}}
-
-    origin = get_origin(type_obj)
-    arguments = get_args(type_obj)
-    if origin in {Union, UnionType}:
-        return {"anyOf": [_json_schema_for_type(item) for item in arguments]}
-    if origin is list:
-        item_type = arguments[0] if arguments else Any
-        return {"type": "array", "items": _json_schema_for_type(item_type)}
-    if origin is dict:
-        key_type, value_type = arguments if arguments else (str, Any)
-        if key_type not in {str, Any}:
-            raise TypeError(f"JSON object keys must be strings, received {key_type!r}")
-        return {
-            "type": "object",
-            "additionalProperties": _json_schema_for_type(value_type),
-        }
-    if origin is Literal:
-        values = list(arguments)
-        schema: dict[str, Any] = {"enum": _jsonable(values)}
-        non_null = [item for item in values if item is not None]
-        value_types = {type(item) for item in non_null}
-        if len(value_types) == 1:
-            schema.update(_json_schema_for_type(value_types.pop()))
-        return schema
-    raise TypeError(f"Unsupported ARE argument annotation {type_obj!r}")
-
-
-def app_tool_schema(tool: AppTool) -> dict[str, Any]:
-    """Build a standards-compliant public schema from an ARE AppTool."""
-
-    parameter_kinds: dict[str, inspect._ParameterKind] = {}
-    if tool.function is not None:
-        parameter_kinds = {
-            name: parameter.kind
-            for name, parameter in inspect.signature(tool.function).parameters.items()
-        }
-
-    properties: dict[str, Any] = {}
-    required: list[str] = []
-    for argument in tool.args:
-        if parameter_kinds.get(argument.name) in {
-            inspect.Parameter.VAR_POSITIONAL,
-            inspect.Parameter.VAR_KEYWORD,
-        }:
-            continue
-        type_obj = argument.type_obj
-        if type_obj in {None, "Any"}:
-            type_obj = _legacy_type(argument.arg_type)
-        try:
-            property_schema = _json_schema_for_type(type_obj)
-        except TypeError as error:
-            public_name = tool._public_name or tool.name
-            raise TypeError(
-                f"Cannot expose Gaia2 tool {public_name!r} argument "
-                f"{argument.name!r}: {error}"
-            ) from error
-        if argument.description:
-            property_schema["description"] = argument.description
-        if argument.has_default:
-            property_schema["default"] = _jsonable(argument.default)
-        else:
-            required.append(argument.name)
-        properties[argument.name] = property_schema
-
-    parameters: dict[str, Any] = {
-        "type": "object",
-        "properties": properties,
-        "additionalProperties": False,
-    }
-    if required:
-        parameters["required"] = required
-    return {
-        "type": "function",
-        "function": {
-            "name": tool._public_name or tool.name,
-            "description": tool._public_description or tool.function_description or "",
-            "parameters": parameters,
-        },
-    }
+app_tool_schema = app_tool_to_openai_schema
 
 
 def _jsonable(value: Any) -> Any:
@@ -210,6 +80,10 @@ class BrokerSession:
     lock: threading.RLock = field(default_factory=threading.RLock)
     journal: list[dict[str, Any]] = field(default_factory=list)
     trace: list[dict[str, Any]] = field(default_factory=list)
+
+    def sanitize_error(self, tool_name: str, error: Exception) -> str:
+        tool = self.tools.get(tool_name)
+        return sanitize_app_tool_error(tool, error) if tool is not None else str(error)
 
     def sync_notifications(self) -> None:
         """Move ready native notifications into the persistent broker journal."""
@@ -280,7 +154,9 @@ class BrokerSession:
                 return result
             except Exception as exc:
                 record["ok"] = False
-                record["error"] = f"{type(exc).__name__}: {exc}"
+                record["error"] = (
+                    f"{type(exc).__name__}: {self.sanitize_error(tool_name, exc)}"
+                )
                 raise
             finally:
                 record["latency_seconds"] = time.monotonic() - started
@@ -420,12 +296,24 @@ class ToolStateBroker:
                         )
                         return
                     except (ValueError, TypeError, json.JSONDecodeError) as exc:
-                        self._write(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+                        self._write(
+                            HTTPStatus.BAD_REQUEST,
+                            {
+                                "error": session.sanitize_error(
+                                    WAIT_FOR_NOTIFICATION_TOOL, exc
+                                )
+                            },
+                        )
                         return
                     except Exception as exc:
                         self._write(
                             HTTPStatus.UNPROCESSABLE_ENTITY,
-                            {"error": f"{type(exc).__name__}: {exc}"},
+                            {
+                                "error": (
+                                    f"{type(exc).__name__}: "
+                                    f"{session.sanitize_error(WAIT_FOR_NOTIFICATION_TOOL, exc)}"
+                                )
+                            },
                         )
                         return
                     self._write(HTTPStatus.OK, result)
@@ -453,12 +341,20 @@ class ToolStateBroker:
                         raise ValueError("arguments must be an object")
                     result = session.invoke(tool_name, arguments)
                 except (ValueError, TypeError, json.JSONDecodeError) as exc:
-                    self._write(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+                    self._write(
+                        HTTPStatus.BAD_REQUEST,
+                        {"error": session.sanitize_error(tool_name, exc)},
+                    )
                     return
                 except Exception as exc:
                     self._write(
                         HTTPStatus.UNPROCESSABLE_ENTITY,
-                        {"error": f"{type(exc).__name__}: {exc}"},
+                        {
+                            "error": (
+                                f"{type(exc).__name__}: "
+                                f"{session.sanitize_error(tool_name, exc)}"
+                            )
+                        },
                     )
                     return
                 self._write(HTTPStatus.OK, {"result": result})

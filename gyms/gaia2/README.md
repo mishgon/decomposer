@@ -6,7 +6,7 @@ agent adapter, local execution, and MLSpace submission. Evaluation supports the
 restricted to the immutable execution train partition described below.
 
 The Gaia runtime is pinned through `external/gaia2` at commit
-`3bee736488864e028231755ce2ee32a7065e8648`. Preparation materializes a
+`f17f997a55e1e695fca4ce25cf9209d79eb1b457`. Preparation materializes a
 clean, immutable checkout under Decomposer artifacts. Every preparation and
 run manifest records both repository commits.
 
@@ -47,6 +47,41 @@ does not lazily fetch execution-task files from Hugging Face.
 The Gaia runtime is created with `uv sync --frozen` under
 `decomposer_artifacts/venvs/gaia2/<uv-lock-hash>`. Evaluation never falls back
 to a live Hugging Face dataset.
+
+## Audit tool schemas before evaluation
+
+GAIA2 owns the canonical `AppTool` to OpenAI JSON Schema converter. Native
+simple agents and broker-backed Decomposer workers consume the same output;
+registered `AppTool`s never fall back to ARE's legacy scalar-only converter.
+The converter recursively supports unions, lists, string-keyed dictionaries,
+`Literal`, and closed `TypedDict` objects. It omits variadic Python arguments,
+preserves explicit defaults, and rejects unsupported annotations with the tool
+and argument name.
+
+Run the complete read-only gate after any tool or schema change:
+
+```bash
+.venv/bin/python -m gyms.gaia2.audit_tools
+```
+
+The audit instantiates all 20 registered app classes and validates every tool
+with JSON Schema 2020-12. It also loads one pinned execution, search, and
+ambiguity scenario and checks the actual native, broker, and LangChain-facing
+schemas for byte-order-preserving equality. It rejects exposed `args` or
+`kwargs`, incorrectly required defaults, unapproved broad objects, hidden AUI
+leaks, and lossy native fallback. Finally, it repeats the audit under
+`PYTHONHASHSEED=0,1,42` and requires one schema checksum.
+
+`Contacts__edit_contact` exposes a closed partial-update object containing only
+mutable contact fields. Unknown or incorrectly typed fields fail before
+mutation. An audit of the 480 pinned execution, search, and ambiguity scenarios
+found oracle updates only for `age`, `city_living`, `country`, `job`, `address`,
+and `status`; none updates `contact_id` or `is_user`. The same audit found no
+oracle use of filesystem `cache_options`, `block_size`, or variadic controls.
+Filesystem tool paths accept logical `/foo`, relative `foo`, `~/foo`,
+and paths returned by another filesystem tool, while rejecting traversal,
+sibling-prefix, and symlink escapes. Tool errors shown to either agent surface
+only logical paths and never the temporary physical sandbox root.
 
 ## Prepare the immutable training partition
 
@@ -268,6 +303,23 @@ user-interface tools remain manager-only. Multiple tool calls are valid and
 each is executed once under the scenario lock. Invalid argument types are
 returned to the worker as correctable tool feedback and are never silently
 coerced.
+
+Before scheduling full reruns, run one execution and one search task for each
+of the matched simple and Decomposer profiles below. Give every local process
+an isolated output directory and port offset, and run the commands sequentially
+when sharing GPUs:
+
+```text
+qwen35-4b-non-thinking-simple-general-text-defaults
+gemma4-e4b-thinking-simple-text-defaults
+qwen36-35b-a3b-non-thinking-teacher-qwen35-4b-non-thinking-text-defaults
+gemma4-26b-a4b-thinking-gemma4-e4b-thinking-text-defaults
+```
+
+For each profile use `--num-repeats 1 --limit 1`, then inspect `output.jsonl`,
+`hf/`, `lite/`, and Decomposer sidecars for schema/type errors, duplicated
+sandbox roots, or physical `are_simulation_fs_sandbox_...` paths. A smoke is a
+workflow integrity check; its task reward is not an acceptance criterion.
 
 OpenRouter Responses API reasoning blocks remain available in the sidecar
 manager trace, but only visible text blocks are sent to the Gaia2 user
