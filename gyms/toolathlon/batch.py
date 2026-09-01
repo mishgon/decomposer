@@ -266,6 +266,50 @@ def count_statuses(manifest: dict[str, Any]) -> dict[str, int]:
     return counts
 
 
+def evaluation_metrics(manifest: dict[str, Any]) -> dict[str, Any]:
+    """Compute pass@1, pass@3 and pass^3 without hiding missing scores."""
+    by_task: dict[str, list[dict[str, Any]]] = {}
+    for episode in manifest["episodes"]:
+        by_task.setdefault(episode["task"], []).append(episode)
+    repetitions = manifest["config"]["repetitions"]
+    scored_tasks = [
+        episodes
+        for episodes in by_task.values()
+        if len(episodes) == repetitions
+        and all(isinstance(episode.get("score"), bool) for episode in episodes)
+    ]
+    scored_trials = sum(len(episodes) for episodes in scored_tasks)
+    passed_trials = sum(
+        episode["score"] is True
+        for episodes in scored_tasks
+        for episode in episodes
+    )
+    result: dict[str, Any] = {
+        "task_count": len(by_task),
+        "repetitions": repetitions,
+        "expected_trials": len(by_task) * repetitions,
+        "scored_task_count": len(scored_tasks),
+        "scored_trials": scored_trials,
+        "unscored_trials": sum(
+            not isinstance(episode.get("score"), bool)
+            for episode in manifest["episodes"]
+        ),
+        "pass@1": passed_trials / scored_trials if scored_trials else None,
+        "pass@3": None,
+        "pass^3": None,
+    }
+    if repetitions == 3 and scored_tasks:
+        result["pass@3"] = sum(
+            any(episode["score"] is True for episode in episodes)
+            for episodes in scored_tasks
+        ) / len(scored_tasks)
+        result["pass^3"] = sum(
+            all(episode["score"] is True for episode in episodes)
+            for episodes in scored_tasks
+        ) / len(scored_tasks)
+    return result
+
+
 def save_manifest(run_dir: Path, manifest: dict[str, Any]) -> None:
     manifest["updated_at"] = utc_now()
     manifest["counts"] = count_statuses(manifest)
@@ -831,6 +875,8 @@ def main(
             else "completed"
         )
         manifest["finished_at"] = utc_now()
+        manifest["metrics"] = evaluation_metrics(manifest)
+        write_json(run_dir / "metrics.json", manifest["metrics"])
         save_manifest(run_dir, manifest)
         append_event(
             run_dir,
