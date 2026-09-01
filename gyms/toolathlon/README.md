@@ -153,6 +153,21 @@ inside task containers. Agent loops default to a 30-minute limit and complete
 episodes to a 40-minute total limit; override these with `--agent-timeout` and
 `--episode-timeout` for intentionally longer experiments.
 
+Use the hosted Qwen3.6 teacher through lmrouter with thinking explicitly
+disabled:
+
+```bash
+uv run python gyms/toolathlon/run.py --tasks finalpool/find-alita-paper \
+  --purpose evaluation --agent-mode decomposer \
+  --decomposer-provider lmrouter --decomposer-prompt teacher \
+  --model Qwen/Qwen3.6-35B-A3B-FP8 \
+  --subagent-provider vllm --subagent-gpu 0 \
+  --vllm-data-parallel-size 1
+```
+
+This requires `LLM_PROXY_URL` and `LLM_PROXY_MASTER_KEY`. Toolathlon enforces
+one GPU per locally served model; data-parallel sizes above one are rejected.
+
 Run a subset, with every selected task repeated three times:
 
 ```bash
@@ -267,6 +282,8 @@ traces/<domain>/<task>/<episode-id>/
   preprocess.log
   gateway.log
   subagent_server.log
+  subagent_model_calls.jsonl    # fsync'd request/response records with usage
+  usage.json                    # teacher, per-subagent, and total token usage
   eval.log
   container.log
   task.inspect.json

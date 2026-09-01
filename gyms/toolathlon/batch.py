@@ -63,6 +63,19 @@ def new_run_id() -> str:
     return stamp + uuid.uuid4().hex[:8]
 
 
+def git_provenance(root: Path) -> dict[str, object]:
+    revision = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=root, capture_output=True, text=True
+    )
+    status = subprocess.run(
+        ["git", "status", "--porcelain"], cwd=root, capture_output=True, text=True
+    )
+    return {
+        "commit": revision.stdout.strip() if revision.returncode == 0 else None,
+        "dirty": bool(status.stdout.strip()) if status.returncode == 0 else None,
+    }
+
+
 def write_json(path: Path, value: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
@@ -106,7 +119,9 @@ def parse_args(argv: Sequence[str], defaults: dict[str, Any]) -> argparse.Namesp
     )
     parser.add_argument("--model", default=defaults["model"])
     parser.add_argument(
-        "--decomposer-provider", choices=("openrouter", "vllm"), default="openrouter"
+        "--decomposer-provider",
+        choices=("openrouter", "vllm", "lmrouter"),
+        default="openrouter",
     )
     parser.add_argument(
         "--decomposer-base-url",
@@ -209,6 +224,8 @@ def parse_args(argv: Sequence[str], defaults: dict[str, Any]) -> argparse.Namesp
         parser.error(
             "--subagent-gpu must list exactly --vllm-data-parallel-size GPU IDs"
         )
+    if args.subagent_provider == "vllm" and args.vllm_data_parallel_size != 1:
+        parser.error("Toolathlon evaluation permits exactly one GPU per model")
     if args.subagent_ports:
         if len(set(args.subagent_ports)) != len(args.subagent_ports):
             parser.error("--subagent-ports must not contain duplicates")
@@ -618,6 +635,14 @@ def main(
     )
     if needs_openrouter and not os.environ.get("OPENROUTER_API_KEY"):
         raise RuntimeError("Set OPENROUTER_API_KEY for the selected model")
+    if args.agent_mode == "decomposer" and args.decomposer_provider == "lmrouter":
+        missing = [
+            name
+            for name in ("LLM_PROXY_URL", "LLM_PROXY_MASTER_KEY")
+            if not os.environ.get(name)
+        ]
+        if missing:
+            raise RuntimeError("Set " + " and ".join(missing) + " for lmrouter")
     docker("image", "inspect", args.image)
     manifest.update(status="running", finished_at=None)
     manifest.setdefault("invocations", []).append(
@@ -626,6 +651,7 @@ def main(
             "argv": sys.argv,
             "hostname": platform.node(),
             "python": sys.version,
+            "code": git_provenance(repo_root),
         }
     )
     save_manifest(run_dir, manifest)

@@ -7,15 +7,20 @@ from langchain.agents import create_agent
 from langgraph.graph.state import CompiledStateGraph
 try:
     from .openrouter_compat import create_openrouter_model
+    from .model_logging import durable_model_call_log
     from .webapp import get_tools, truncate_mcp_tool_output
 except ImportError:  # Loaded by `langgraph dev` with this directory on sys.path.
     from openrouter_compat import create_openrouter_model
+    from model_logging import durable_model_call_log
     from webapp import get_tools, truncate_mcp_tool_output
 
 
 REQUEST_TIMEOUT_SECONDS = 600.0
 REQUEST_MAX_RETRIES = 2
 MAX_OUTPUT_TOKENS = 8192
+DEEPSEEK_REASONING_EFFORT = os.environ.get(
+    "TOOLATHLON_DEEPSEEK_REASONING_EFFORT", "high"
+)
 
 
 def _create_subagent(
@@ -65,7 +70,7 @@ def _create_subagent(
         model=model,
         tools=get_tools(),
         system_prompt=SUBAGENT_SYSTEM_PROMPT,
-        middleware=[truncate_mcp_tool_output],
+        middleware=[durable_model_call_log, truncate_mcp_tool_output],
     )
 
 
@@ -84,7 +89,7 @@ def deepseek_openrouter() -> CompiledStateGraph:
             "TOOLATHLON_OPENROUTER_MODEL",
             "deepseek/deepseek-v4-flash-0731",
         ),
-        reasoning={"enabled": False},
+        reasoning={"effort": DEEPSEEK_REASONING_EFFORT},
         max_tokens=MAX_OUTPUT_TOKENS,
         timeout=REQUEST_TIMEOUT_SECONDS,
         max_retries=REQUEST_MAX_RETRIES,
@@ -93,5 +98,5 @@ def deepseek_openrouter() -> CompiledStateGraph:
         model=model,
         tools=get_tools(),
         system_prompt=SUBAGENT_SYSTEM_PROMPT,
-        middleware=[truncate_mcp_tool_output],
+        middleware=[durable_model_call_log, truncate_mcp_tool_output],
     )

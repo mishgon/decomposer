@@ -28,6 +28,8 @@ from decomposer.prompts import (
 
 try:
     from .subagents.openrouter_compat import create_openrouter_model
+    from .teacher_models import create_lmrouter_teacher
+    from .usage import build_usage_summary
     from .settings import (
         DECOMPOSER_RECURSION_LIMIT,
         DEEPSEEK_REASONING_EFFORT,
@@ -36,6 +38,8 @@ try:
     )
 except ImportError:  # Executed directly as ``python gyms/toolathlon/run.py``.
     from subagents.openrouter_compat import create_openrouter_model
+    from teacher_models import create_lmrouter_teacher
+    from usage import build_usage_summary
     from settings import (  # type: ignore[no-redef]
         DECOMPOSER_RECURSION_LIMIT,
         DEEPSEEK_REASONING_EFFORT,
@@ -70,7 +74,7 @@ SUBAGENT_TYPES = (
 )
 AGENT_MODES = ("simple", "decomposer")
 SUBAGENT_PROVIDERS = ("vllm", "openrouter")
-DECOMPOSER_PROVIDERS = ("openrouter", "vllm")
+DECOMPOSER_PROVIDERS = ("openrouter", "vllm", "lmrouter")
 DECOMPOSER_PROMPTS = {
     "student": DECOMPOSER_SYSTEM_PROMPT,
     "teacher": DECOMPOSER_TEACHER_SYSTEM_PROMPT,
@@ -143,6 +147,19 @@ class _TeeTextIO:
 
     def __getattr__(self, name: str):
         return getattr(self.console, name)
+
+
+def git_provenance(root: Path) -> dict[str, object]:
+    revision = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=root, capture_output=True, text=True
+    )
+    status = subprocess.run(
+        ["git", "status", "--porcelain"], cwd=root, capture_output=True, text=True
+    )
+    return {
+        "commit": revision.stdout.strip() if revision.returncode == 0 else None,
+        "dirty": bool(status.stdout.strip()) if status.returncode == 0 else None,
+    }
 
 
 def _docker(
@@ -542,6 +559,7 @@ def start_host_subagent_server(
     model: str,
     n_jobs_per_worker: int,
     log_path: Path,
+    model_call_log_path: Path,
 ) -> subprocess.Popen[bytes]:
     log_path.parent.mkdir(parents=True, exist_ok=True)
     command = [
@@ -562,6 +580,7 @@ def start_host_subagent_server(
         **os.environ,
         "TOOLATHLON_GATEWAY_URL": f"http://127.0.0.1:{gateway_port}/sse",
         "TOOLATHLON_OPENROUTER_MODEL": model,
+        "TOOLATHLON_SUBAGENT_CALL_LOG": str(model_call_log_path),
     }
     with log_path.open("ab") as log:
         return subprocess.Popen(
@@ -1027,6 +1046,8 @@ def main() -> None:
         parser.error(
             "--subagent-gpu must list exactly --vllm-data-parallel-size GPU IDs"
         )
+    if args.subagent_provider == "vllm" and args.vllm_data_parallel_size != 1:
+        parser.error("Toolathlon evaluation permits exactly one GPU per model")
     ensure_benchmark_checkout(TOOLATHLON_ROOT)
     if not TASK_PATH_RE.fullmatch(args.task):
         raise ValueError(
@@ -1041,6 +1062,14 @@ def main() -> None:
     )
     if needs_openrouter and not os.environ.get("OPENROUTER_API_KEY"):
         raise RuntimeError("Set OPENROUTER_API_KEY for the selected model")
+    if args.agent_mode == "decomposer" and args.decomposer_provider == "lmrouter":
+        missing = [
+            name
+            for name in ("LLM_PROXY_URL", "LLM_PROXY_MASTER_KEY")
+            if not os.environ.get(name)
+        ]
+        if missing:
+            raise RuntimeError("Set " + " and ".join(missing) + " for lmrouter")
     docker_socket = resolve_docker_socket(args.docker_socket)
 
     try:
@@ -1289,6 +1318,7 @@ def main() -> None:
                     model=args.subagent_model,
                     n_jobs_per_worker=args.n_jobs_per_worker,
                     log_path=episode_dir / "subagent_server.log",
+                    model_call_log_path=episode_dir / "subagent_model_calls.jsonl",
                 )
             else:
                 _exec_in_container(
@@ -1307,6 +1337,9 @@ def main() -> None:
                         "HOST": "0.0.0.0",
                         "PORT": str(subagent_webapp_port),
                         "N_JOBS_PER_WORKER": str(args.n_jobs_per_worker),
+                        "TOOLATHLON_SUBAGENT_CALL_LOG": (
+                            "/workspace/dumps/subagent_model_calls.jsonl"
+                        ),
                     },
                 )
             wait_for_url(
@@ -1327,6 +1360,9 @@ def main() -> None:
         try:
             if args.agent_mode == "simple":
                 print(f"Running simple {args.subagent_model} agent...", flush=True)
+                os.environ["TOOLATHLON_SUBAGENT_CALL_LOG"] = str(
+                    episode_dir / "subagent_model_calls.jsonl"
+                )
                 agent_state = asyncio.run(
                     asyncio.wait_for(
                         _run_simple_agent(
@@ -1355,6 +1391,13 @@ def main() -> None:
                             max_retries=5,
                         )
                         if args.decomposer_provider == "vllm"
+                        else create_lmrouter_teacher(
+                            model=args.model,
+                            max_tokens=8192,
+                            timeout=180,
+                            max_retries=5,
+                        )
+                        if args.decomposer_provider == "lmrouter"
                         else create_openrouter_model(
                             model=args.model,
                             reasoning={"effort": DEEPSEEK_REASONING_EFFORT},
@@ -1422,6 +1465,8 @@ def main() -> None:
                 break
         agent_success = agent_error is None and bool(answer.strip())
         agent_exit_code = 0 if agent_success else 1
+        serialized_messages = [message_to_dict(message) for message in messages]
+        usage = build_usage_summary(serialized_messages, subagent_runs)
 
         (episode_dir / "trace.json").write_text(
             json.dumps(
@@ -1432,6 +1477,7 @@ def main() -> None:
                     "repetition": args.repetition,
                     "attempt": args.attempt,
                     "purpose": args.purpose,
+                    "code": git_provenance(REPO_ROOT),
                     "agent_mode": args.agent_mode,
                     "decomposer_model": args.model,
                     "decomposer_provider": args.decomposer_provider,
@@ -1439,6 +1485,9 @@ def main() -> None:
                         DEEPSEEK_REASONING_EFFORT
                         if args.decomposer_provider == "openrouter"
                         else None
+                    ),
+                    "decomposer_thinking_enabled": (
+                        False if args.decomposer_provider == "lmrouter" else None
                     ),
                     "decomposer_recursion_limit": DECOMPOSER_RECURSION_LIMIT,
                     "subagent_model": args.subagent_model,
@@ -1457,14 +1506,18 @@ def main() -> None:
                     "started_at": started_at,
                     "finished_at": datetime.now(timezone.utc).isoformat(),
                     "agent_error": agent_error,
-                    "messages": [message_to_dict(message) for message in messages],
+                    "messages": serialized_messages,
                     "subagent_runs": subagent_runs,
+                    "usage": usage,
                 },
                 indent=2,
                 ensure_ascii=False,
                 default=str,
             ),
             encoding="utf-8",
+        )
+        (episode_dir / "usage.json").write_text(
+            json.dumps(usage, indent=2, ensure_ascii=False), encoding="utf-8"
         )
         (episode_dir / "answer.txt").write_text(answer, encoding="utf-8")
         write_trajectory(
