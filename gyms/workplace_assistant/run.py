@@ -94,6 +94,43 @@ def hydra_flow_mapping(values: Mapping[str, Any]) -> str:
     )
 
 
+def runtime_configuration(experiment: Experiment) -> dict[str, Any]:
+    if isinstance(experiment, SimpleExperiment):
+        return {
+            "max_model_len": experiment.max_model_len,
+            "max_output_tokens": experiment.max_output_tokens,
+            "max_model_calls": experiment.max_steps,
+            "thinking": experiment.thinking,
+            "sampling": {
+                "temperature": experiment.temperature,
+                "top_p": experiment.top_p,
+                "top_k": experiment.top_k,
+                "min_p": experiment.min_p,
+                "presence_penalty": experiment.presence_penalty,
+                "repetition_penalty": experiment.repetition_penalty,
+            },
+        }
+    return {
+        "max_model_len": experiment.max_model_len,
+        "max_output_tokens": experiment.max_output_tokens,
+        "evaluation_prompt_profile": experiment.evaluation_prompt_profile,
+        "manager": {
+            "backend": experiment.manager_backend,
+            "reasoning_mode": experiment.manager_reasoning_mode,
+            "max_model_calls": experiment.manager_max_model_calls,
+            "sampling": (
+                experiment.remote_manager_extra_body
+                if experiment.manager_sampling is not None
+                else None
+            ),
+        },
+        "subagent": {
+            "max_model_calls": experiment.subagent_max_model_calls,
+            "recursion_limit": experiment.subagent_recursion_limit,
+        },
+    }
+
+
 class Supervisor:
     def __init__(self, log_dir: Path, env: dict[str, str]) -> None:
         self.log_dir = log_dir
@@ -260,6 +297,8 @@ def remote_manager_proxy_command(experiment: DecomposerExperiment) -> list[str]:
         "3300",
         "--max-retries",
         "2",
+        "--extra-body-json",
+        json.dumps(experiment.remote_manager_extra_body, separators=(",", ":")),
     ]
     if not experiment.manager_verify_tls:
         command.append("--no-verify-tls")
@@ -269,7 +308,7 @@ def remote_manager_proxy_command(experiment: DecomposerExperiment) -> list[str]:
 def langgraph_command(
     local_repo: Path, experiment: DecomposerExperiment
 ) -> tuple[list[str], Path]:
-    if experiment.subagent_graph == "qwen35":
+    if experiment.subagent_graph in {"qwen35", "repository"}:
         directory = local_repo / "gyms" / "workplace_assistant" / "subagents"
     else:
         directory = (
@@ -328,7 +367,11 @@ def gym_start_command(
             / "configs"
             / experiment.gym_config_filename
         )
-        prompt_profile = decomposer_prompt_profile(purpose, prompt_profile)
+        prompt_profile = decomposer_prompt_profile(
+            purpose,
+            prompt_profile,
+            experiment.evaluation_prompt_profile,
+        )
         prompt_override = (
             "++decomposer.responses_api_agents.decomposer_agent."
             f"decomposer_system_prompt_profile={prompt_profile}"
@@ -341,7 +384,7 @@ def gym_start_command(
             "++decomposer.responses_api_agents.decomposer_agent."
             f"subagent_recursion_limit={experiment.subagent_recursion_limit}"
         )
-        return [
+        command = [
             str(gym_bin),
             "env",
             "start",
@@ -352,6 +395,12 @@ def gym_start_command(
             subagent_recursion_limit_override,
             *common,
         ]
+        if experiment.max_output_tokens is not None:
+            command.append(
+                "++responses_create_params.max_output_tokens="
+                f"{experiment.max_output_tokens}"
+            )
+        return command
     if experiment.requires_openrouter:
         if experiment.model_id is None or experiment.base_url is None:
             raise ValueError(f"{experiment.name}: incomplete OpenRouter configuration")
@@ -825,7 +874,11 @@ def validate_existing_attempt_identity(
             "decomposer_system_prompt_profile",
             "teacher" if "purpose" not in metadata else None,
         )
-        expected_profile = decomposer_prompt_profile(purpose, prompt_profile)
+        expected_profile = decomposer_prompt_profile(
+            purpose,
+            prompt_profile,
+            experiment.evaluation_prompt_profile,
+        )
         if existing_profile != expected_profile:
             mismatches.append(
                 "decomposer_system_prompt_profile="
@@ -899,6 +952,10 @@ def _base_environment(
         env["DECOMPOSER_SUBAGENT_MAX_MODEL_CALLS"] = str(
             experiment.subagent_max_model_calls
         )
+        if experiment.max_output_tokens is not None:
+            env["DECOMPOSER_SUBAGENT_MAX_COMPLETION_TOKENS"] = str(
+                experiment.max_output_tokens
+            )
     if isinstance(experiment, SimpleExperiment) and not experiment.requires_openrouter:
         for name in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"):
             env.pop(name, None)
@@ -941,14 +998,22 @@ def _dry_plan(
     rollout_path = directory / "rollouts.jsonl"
     return {
         "decomposer_system_prompt_profile": (
-            decomposer_prompt_profile(purpose, prompt_profile)
+            decomposer_prompt_profile(
+                purpose,
+                prompt_profile,
+                experiment.evaluation_prompt_profile,
+            )
             if isinstance(experiment, DecomposerExperiment)
             else None
         ),
         "decomposer_system_prompt_sha256": (
             hashlib.sha256(
                 resolve_decomposer_system_prompt(
-                    decomposer_prompt_profile(purpose, prompt_profile)
+                    decomposer_prompt_profile(
+                        purpose,
+                        prompt_profile,
+                        experiment.evaluation_prompt_profile,
+                    )
                 ).encode("utf-8")
             ).hexdigest()
             if isinstance(experiment, DecomposerExperiment)
@@ -977,6 +1042,7 @@ def _dry_plan(
         ),
         "purpose": purpose,
         "rollout_failure_policy": WORKPLACE_ROLLOUT_FAILURE_POLICY,
+        "runtime_configuration": runtime_configuration(experiment),
         "split": split,
         "services": [shlex.join(command) for command in services],
         "gym_start": shlex.join(
@@ -1052,7 +1118,11 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
     ):
         raise ValueError("--prompt-profile is only valid for Decomposer experiments")
     resolved_prompt_profile = (
-        decomposer_prompt_profile(purpose, requested_prompt_profile)
+        decomposer_prompt_profile(
+            purpose,
+            requested_prompt_profile,
+            experiment.evaluation_prompt_profile,
+        )
         if isinstance(experiment, DecomposerExperiment)
         else None
     )
@@ -1148,6 +1218,7 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
         ),
         "purpose": purpose,
         "rollout_failure_policy": WORKPLACE_ROLLOUT_FAILURE_POLICY,
+        "runtime_configuration": runtime_configuration(experiment),
         "decomposer_system_prompt_profile": (
             resolved_prompt_profile
             if isinstance(experiment, DecomposerExperiment)

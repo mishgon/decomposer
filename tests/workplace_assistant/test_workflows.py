@@ -48,9 +48,9 @@ from gyms.qwen_sampling import qwen35_general_sampling
 
 
 def test_registry_is_global_and_unique() -> None:
-    assert len(DECOMPOSER_EXPERIMENTS) == 17
-    assert len(SIMPLE_EXPERIMENTS) == 28
-    assert len(experiments.EXPERIMENTS) == 45
+    assert len(DECOMPOSER_EXPERIMENTS) == 19
+    assert len(SIMPLE_EXPERIMENTS) == 30
+    assert len(experiments.EXPERIMENTS) == 49
     assert experiments.BASE_IMAGE.endswith("py3.12-torch2.7.0:0.0.42")
     assert {experiment.kind for experiment in experiments.ALL_EXPERIMENTS} == {
         "decomposer",
@@ -123,6 +123,132 @@ def test_qwen36_teacher_uses_internal_proxy_and_concurrency_override() -> None:
     assert payload["env_variables"]["LLM_PROXY_MASTER_KEY"] == "secret"
     assert "--concurrency 16" in payload["script"]
     assert payload["priority_class"] == "high"
+
+
+def test_qwen36_text_defaults_force_proxy_sampling_and_teacher_prompt(tmp_path) -> None:
+    experiment = get_experiment(
+        "qwen36-35b-a3b-non-thinking-teacher-"
+        "qwen35-4b-non-thinking-text-defaults"
+    )
+    assert isinstance(experiment, DecomposerExperiment)
+    expected_proxy_body = {
+        "temperature": 0.7,
+        "top_p": 0.8,
+        "top_k": 20,
+        "min_p": 0.0,
+        "presence_penalty": 1.5,
+        "repetition_penalty": 1.0,
+        "max_output_tokens": 32768,
+        "include_reasoning": False,
+        "chat_template_kwargs": {"enable_thinking": False},
+    }
+    assert experiment.manager_reasoning_mode == "non_thinking"
+    assert experiment.evaluation_prompt_profile == "teacher"
+    assert experiment.max_model_len == 131072
+    assert experiment.max_output_tokens == 32768
+    assert experiment.manager_max_model_calls == 100
+    assert experiment.subagent_max_model_calls == 100
+    assert experiment.remote_manager_extra_body == expected_proxy_body
+
+    proxy = run_module.remote_manager_proxy_command(experiment)
+    assert (
+        json.loads(proxy[proxy.index("--extra-body-json") + 1])
+        == expected_proxy_body
+    )
+    assert proxy[proxy.index("--upstream-url-env") + 1] == "LLM_PROXY_URL"
+    assert proxy[proxy.index("--api-key-env") + 1] == "LLM_PROXY_MASTER_KEY"
+
+    plan = run_module._dry_plan(
+        Path(__file__).resolve().parents[2],
+        experiment,
+        "evaluation",
+        "validation",
+        3,
+        None,
+        tmp_path,
+        ("0",),
+    )
+    assert plan["decomposer_system_prompt_profile"] == "teacher"
+    assert plan["runtime_configuration"]["max_output_tokens"] == 32768
+    assert "max_output_tokens=32768" in plan["gym_start"]
+    assert [model.model_id for model in models_for_experiment(experiment)] == [
+        "Qwen/Qwen3.5-4B"
+    ]
+    worker = run_module.decomposer_vllm_command(
+        models_for_experiment(experiment)[0], experiment
+    )
+    assert "--language-model-only" in worker
+    assert '{"enable_thinking":false}' in worker
+
+
+def test_gemma_text_defaults_use_pinned_thinking_manager_and_worker(tmp_path) -> None:
+    experiment = get_experiment(
+        "gemma4-26b-a4b-thinking-gemma4-e4b-thinking-text-defaults"
+    )
+    assert isinstance(experiment, DecomposerExperiment)
+    models = models_for_experiment(experiment)
+    assert [model.model_id for model in models] == [
+        "google/gemma-4-26B-A4B-it",
+        "google/gemma-4-E4B-it",
+    ]
+    assert models[0].snapshot.name == "4d7ae4984b7db7de8f8457170b3f1a419ee76d52"
+    assert all(model.thinking for model in models)
+    assert experiment.max_model_len == 131072
+    assert experiment.max_output_tokens == 32768
+    for model in models:
+        command = run_module.decomposer_vllm_command(model, experiment)
+        assert command[command.index("--max-model-len") + 1] == "131072"
+        assert "--language-model-only" in command
+        assert '{"enable_thinking":true}' in command
+
+    config = yaml.safe_load(
+        (
+            Path(__file__).resolve().parents[2]
+            / "gyms"
+            / "workplace_assistant"
+            / "configs"
+            / experiment.gym_config_filename
+        ).read_text()
+    )
+    assert config["responses_create_params"] == {
+        "temperature": 1.0,
+        "top_p": 0.95,
+        "max_output_tokens": 32768,
+    }
+    policy = config["policy_model"]["responses_api_models"]["vllm_model"]
+    assert policy["chat_template_kwargs"]["enable_thinking"] is True
+    assert policy["extra_body"]["top_k"] == 64
+    command, directory = run_module.langgraph_command(
+        Path(__file__).resolve().parents[2], experiment
+    )
+    assert directory == (
+        Path(__file__).resolve().parents[2]
+        / "gyms"
+        / "workplace_assistant"
+        / "subagents"
+    )
+    assert "langgraph.json" in " ".join(command)
+
+
+def test_text_default_simple_profiles_use_matched_workplace_limits() -> None:
+    gemma = get_experiment("gemma4-e4b-thinking-simple-text-defaults")
+    qwen = get_experiment("qwen35-4b-non-thinking-simple-general-text-defaults")
+    assert isinstance(gemma, SimpleExperiment)
+    assert isinstance(qwen, SimpleExperiment)
+    for experiment in (gemma, qwen):
+        assert experiment.max_model_len == 131072
+        assert experiment.max_output_tokens == 32768
+        assert experiment.max_steps == 100
+        assert "--language-model-only" in run_module.simple_vllm_command(experiment)
+    assert (gemma.temperature, gemma.top_p, gemma.top_k) == (1.0, 0.95, 64)
+    assert (
+        qwen.temperature,
+        qwen.top_p,
+        qwen.top_k,
+        qwen.min_p,
+        qwen.presence_penalty,
+        qwen.repetition_penalty,
+    ) == (0.7, 0.8, 20, 0.0, 1.5, 1.0)
 
 
 def test_workplace_prompt_override_is_propagated_and_output_isolated() -> None:
@@ -431,7 +557,9 @@ def test_decomposer_base_profiles_use_student_prompt() -> None:
             ).read_text()
         )
         agent = config["decomposer"]["responses_api_agents"]["decomposer_agent"]
-        assert agent["decomposer_system_prompt_profile"] == "student"
+        assert agent["decomposer_system_prompt_profile"] == (
+            experiment.evaluation_prompt_profile
+        )
 
 
 def test_decomposer_call_limits_reach_runtime_and_identity() -> None:

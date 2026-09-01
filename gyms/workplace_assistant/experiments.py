@@ -9,7 +9,11 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Literal, cast
 
-from gyms.qwen_sampling import qwen35_general_sampling
+from gyms.qwen_sampling import (
+    QwenSamplingParams,
+    qwen35_general_sampling,
+    qwen36_non_thinking_sampling,
+)
 
 ARTIFACTS_ROOT = Path("/mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts")
 PROJECT_VENV = Path("/mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_sft/.venv")
@@ -110,8 +114,10 @@ class DecomposerExperiment:
     manager_upstream_url_env: str | None = None
     manager_api_key_env: str | None = None
     manager_response_tool_parser: str | None = None
-    manager_reasoning_mode: Literal["service_default"] | None = None
+    manager_reasoning_mode: Literal["service_default", "non_thinking"] | None = None
     manager_verify_tls: bool = True
+    manager_sampling: QwenSamplingParams | None = None
+    evaluation_prompt_profile: DecomposerPromptProfile = "student"
     concurrency: int = 8
     max_model_len: int = 32768
     max_num_seqs: int = 32
@@ -119,10 +125,11 @@ class DecomposerExperiment:
     num_gpus: int = 3
     model_ids: tuple[str, ...] | None = None
     model_servers: tuple[ModelServer, ...] | None = None
-    subagent_graph: Literal["gym_gemma4", "qwen35"] = "gym_gemma4"
+    subagent_graph: Literal["gym_gemma4", "qwen35", "repository"] = "gym_gemma4"
     manager_max_model_calls: int = WORKPLACE_MODEL_CALL_LIMIT
     subagent_max_model_calls: int = WORKPLACE_MODEL_CALL_LIMIT
     subagent_recursion_limit: int = WORKPLACE_SUBAGENT_RECURSION_LIMIT
+    max_output_tokens: int | None = None
     kind: Literal["decomposer"] = field(init=False, default="decomposer")
 
     def __post_init__(self) -> None:
@@ -133,6 +140,8 @@ class DecomposerExperiment:
         ):
             if getattr(self, field_name) < 1:
                 raise ValueError(f"{self.name}: {field_name} must be at least 1")
+        if self.max_output_tokens is not None and self.max_output_tokens < 1:
+            raise ValueError(f"{self.name}: max_output_tokens must be at least 1")
         remote_fields = (
             self.manager_model_id,
             self.manager_proxy_port,
@@ -150,6 +159,10 @@ class DecomposerExperiment:
             raise ValueError(
                 f"{self.name}: remote manager fields require manager_backend=llm_proxy"
             )
+        if self.manager_sampling is not None and not self.requires_llm_proxy:
+            raise ValueError(
+                f"{self.name}: manager_sampling requires manager_backend=llm_proxy"
+            )
 
     @property
     def requires_openrouter(self) -> bool:
@@ -166,6 +179,30 @@ class DecomposerExperiment:
     @property
     def requires_local_manager(self) -> bool:
         return self.manager_backend == "local_vllm"
+
+    @property
+    def remote_manager_extra_body(self) -> dict[str, object]:
+        if self.manager_sampling is None:
+            return {}
+        sampling = self.manager_sampling
+        value: dict[str, object] = {
+            "temperature": sampling.temperature,
+            "top_p": sampling.top_p,
+            "top_k": sampling.top_k,
+            "min_p": sampling.min_p,
+            "presence_penalty": sampling.presence_penalty,
+            "repetition_penalty": sampling.repetition_penalty,
+        }
+        if self.max_output_tokens is not None:
+            value["max_output_tokens"] = self.max_output_tokens
+        if self.manager_reasoning_mode == "non_thinking":
+            value.update(
+                {
+                    "include_reasoning": False,
+                    "chat_template_kwargs": {"enable_thinking": False},
+                }
+            )
+        return value
 
 
 @dataclass(frozen=True)
@@ -228,12 +265,16 @@ class SimpleExperiment:
 
     @property
     def extra_body(self) -> dict[str, int | float]:
-        return {
-            "top_k": self.top_k,
-            "min_p": self.min_p,
-            "presence_penalty": self.presence_penalty,
-            "repetition_penalty": self.repetition_penalty,
-        }
+        value: dict[str, int | float] = {"top_k": self.top_k}
+        if self.tool_call_parser != "gemma4":
+            value.update(
+                {
+                    "min_p": self.min_p,
+                    "presence_penalty": self.presence_penalty,
+                    "repetition_penalty": self.repetition_penalty,
+                }
+            )
+        return value
 
     @property
     def chat_template_kwargs(self) -> dict[str, bool]:
@@ -276,11 +317,12 @@ def validate_purpose_for_experiment(experiment: Experiment, purpose: str) -> Run
 def decomposer_prompt_profile(
     purpose: str,
     requested: DecomposerPromptProfile | None = None,
+    evaluation_default: DecomposerPromptProfile = "student",
 ) -> DecomposerPromptProfile:
     validated = validate_run_purpose(purpose)
     if requested is not None:
         return requested
-    return "teacher" if validated == "trace-generation" else "student"
+    return "teacher" if validated == "trace-generation" else evaluation_default
 
 
 MODELS = (
@@ -322,7 +364,7 @@ MODELS = (
         HF_HUB_ROOT
         / "models--google--gemma-4-26B-A4B-it"
         / "snapshots"
-        / "5305c1e72ea29c01f31a81230d52b375ba88b409",
+        / "4d7ae4984b7db7de8f8457170b3f1a419ee76d52",
         8023,
         2,
         0.88,
@@ -454,7 +496,78 @@ WORKPLACE_QWEN35_4B_GAIA2_EXECUTION_ONLY_SFT_FINAL = (
     / "final"
 )
 
+_QWEN36_NON_THINKING_SAMPLING = qwen36_non_thinking_sampling()
+
 DECOMPOSER_EXPERIMENTS = (
+    DecomposerExperiment(
+        name="gemma4-26b-a4b-thinking-gemma4-e4b-thinking-text-defaults",
+        gym_config_filename=(
+            "workplace_assistant_gemma4_26b_a4b_thinking_"
+            "gemma4_e4b_thinking_text_defaults.yaml"
+        ),
+        manager_backend="local_vllm",
+        num_gpus=2,
+        max_model_len=131072,
+        max_num_seqs=16,
+        subagent_graph="repository",
+        max_output_tokens=32768,
+        model_servers=(
+            replace(
+                MODELS[3],
+                gpu=0,
+                gpu_memory_utilization=0.90,
+                startup_wave=0,
+                thinking=True,
+            ),
+            replace(
+                MODELS[1],
+                gpu=1,
+                gpu_memory_utilization=0.90,
+                startup_wave=0,
+                thinking=True,
+            ),
+        ),
+    ),
+    DecomposerExperiment(
+        name=(
+            "qwen36-35b-a3b-non-thinking-teacher-"
+            "qwen35-4b-non-thinking-text-defaults"
+        ),
+        gym_config_filename=(
+            "workplace_assistant_qwen36_35b_a3b_non_thinking_teacher_"
+            "qwen35_4b_non_thinking_text_defaults.yaml"
+        ),
+        manager_backend="llm_proxy",
+        manager_model_id="Qwen/Qwen3.6-35B-A3B-FP8",
+        manager_proxy_port=8142,
+        manager_upstream_url_env="LLM_PROXY_URL",
+        manager_api_key_env="LLM_PROXY_MASTER_KEY",
+        manager_response_tool_parser="qwen3_xml",
+        manager_reasoning_mode="non_thinking",
+        manager_verify_tls=False,
+        manager_sampling=_QWEN36_NON_THINKING_SAMPLING,
+        evaluation_prompt_profile="teacher",
+        concurrency=16,
+        num_gpus=1,
+        max_model_len=131072,
+        max_num_seqs=16,
+        max_output_tokens=32768,
+        subagent_graph="repository",
+        model_servers=(
+            ModelServer(
+                "Qwen/Qwen3.5-4B",
+                QWEN35_4B_BASE,
+                8025,
+                0,
+                0.90,
+                0,
+                thinking=False,
+                tool_call_parser="qwen3_xml",
+                reasoning_parser=None,
+                gdn_prefill_backend="triton",
+            ),
+        ),
+    ),
     DecomposerExperiment(
         name=("qwen35-4b-base-non-thinking-" "qwen35-4b-non-thinking"),
         gym_config_filename=(
@@ -1013,6 +1126,31 @@ def _simple_experiments() -> tuple[SimpleExperiment, ...]:
                 temperature=1.0,
                 top_p=1.0,
                 concurrency=8,
+            ),
+        )
+    )
+    experiments.extend(
+        (
+            SimpleExperiment(
+                name="gemma4-e4b-thinking-simple-text-defaults",
+                checkpoint=GEMMA4_E4B_BASE,
+                thinking=True,
+                temperature=1.0,
+                top_p=0.95,
+                top_k=64,
+                min_p=0.0,
+                presence_penalty=0.0,
+                repetition_penalty=1.0,
+                max_model_len=131072,
+                max_output_tokens=32768,
+                max_steps=100,
+                tool_call_parser="gemma4",
+                reasoning_parser="gemma4",
+                gdn_prefill_backend=None,
+            ),
+            _qwen35_simple_experiment(
+                "qwen35-4b-non-thinking-simple-general-text-defaults",
+                QWEN35_4B_BASE,
             ),
         )
     )

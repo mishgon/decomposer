@@ -26,6 +26,8 @@ from gyms.gaia2.experiments import (
     DEEPSEEK_QWEN_EXPERIMENT,
     DECOMPOSER_EXPERIMENT,
     DOMAIN,
+    GEMMA4_E4B_TEXT_DEFAULTS_SIMPLE_EXPERIMENT,
+    GEMMA4_TEXT_DEFAULTS_DECOMPOSER_EXPERIMENT,
     INSTANCE_TYPES_BY_NUM_GPUS,
     QWEN35_BASE_DECOMPOSER_EXPERIMENT,
     QWEN35_BASE_TEACHER_DECOMPOSER_EXPERIMENT,
@@ -37,6 +39,8 @@ from gyms.gaia2.experiments import (
     QWEN35_SFT_EXPERIMENT,
     QWEN35_TOOLATHLON_ONLY_SFT_EXPERIMENT,
     QWEN36_QWEN_EXPERIMENT,
+    QWEN36_TEXT_DEFAULTS_DECOMPOSER_EXPERIMENT,
+    QWEN35_4B_TEXT_DEFAULTS_SIMPLE_EXPERIMENT,
     SEARCH_DOMAIN,
     SCENARIO_COUNT,
     SIMPLE_DEEPSEEK_EXPERIMENT,
@@ -322,10 +326,14 @@ def test_experiment_registry_contains_local_and_openrouter_profiles() -> None:
         DEEPSEEK_QWEN_EXPERIMENT,
         DEEPSEEK_QWEN_AMBIGUITY_POLICY_EXPERIMENT,
         QWEN36_QWEN_EXPERIMENT,
+        GEMMA4_TEXT_DEFAULTS_DECOMPOSER_EXPERIMENT,
+        QWEN36_TEXT_DEFAULTS_DECOMPOSER_EXPERIMENT,
         SIMPLE_EXPERIMENT,
         SIMPLE_QWEN_EXPERIMENT,
         SIMPLE_QWEN_2B_EXPERIMENT,
         SIMPLE_QWEN_9B_EXPERIMENT,
+        GEMMA4_E4B_TEXT_DEFAULTS_SIMPLE_EXPERIMENT,
+        QWEN35_4B_TEXT_DEFAULTS_SIMPLE_EXPERIMENT,
         SIMPLE_DEEPSEEK_EXPERIMENT,
     ]
     assert BASE_IMAGE.endswith("py3.12-torch2.7.0:0.0.42")
@@ -348,6 +356,8 @@ def test_experiment_registry_contains_local_and_openrouter_profiles() -> None:
             DEEPSEEK_QWEN_EXPERIMENT,
             DEEPSEEK_QWEN_AMBIGUITY_POLICY_EXPERIMENT,
             QWEN36_QWEN_EXPERIMENT,
+            GEMMA4_TEXT_DEFAULTS_DECOMPOSER_EXPERIMENT,
+            QWEN36_TEXT_DEFAULTS_DECOMPOSER_EXPERIMENT,
         )
     )
 
@@ -410,6 +420,104 @@ def test_qwen36_teacher_uses_internal_proxy_and_existing_worker(tmp_path) -> Non
     assert output_dir(SIMPLE_DEEPSEEK_EXPERIMENT, 3).parts[-1] == (
         "deepseek-v4-flash-0731-n3"
     )
+
+
+def test_qwen36_text_defaults_are_explicitly_non_thinking(tmp_path) -> None:
+    experiment = QWEN36_TEXT_DEFAULTS_DECOMPOSER_EXPERIMENT
+    expected_proxy_body = {
+        "temperature": 0.7,
+        "top_p": 0.8,
+        "top_k": 20,
+        "min_p": 0.0,
+        "presence_penalty": 1.5,
+        "repetition_penalty": 1.0,
+        "max_output_tokens": 32768,
+        "include_reasoning": False,
+        "chat_template_kwargs": {"enable_thinking": False},
+    }
+
+    assert experiment.prompt_profile == "teacher"
+    assert experiment.manager_reasoning_mode == "non_thinking"
+    assert experiment.max_model_len == 131072
+    assert experiment.max_completion_tokens == 32768
+    assert experiment.manager_max_model_calls == 200
+    assert experiment.subagent_max_model_calls == 200
+    assert experiment.remote_manager_extra_body == expected_proxy_body
+
+    proxy = remote_manager_proxy_command(experiment)
+    assert (
+        json.loads(proxy[proxy.index("--extra-body-json") + 1])
+        == expected_proxy_body
+    )
+    service_path, _ = _runtime_configs(Path.cwd(), tmp_path, experiment)
+    service = json.loads(service_path.read_text())
+    assert service["manager"]["temperature"] == 0.7
+    assert service["manager"]["top_p"] == 0.8
+    assert service["manager"]["presence_penalty"] == 1.5
+    assert service["manager"]["max_completion_tokens"] == 32768
+    assert service["manager"]["extra_body"] == expected_proxy_body
+    assert service["manager_max_model_calls"] == 200
+    assert service["manager_recursion_limit"] == 1000
+    assert service["subagent_recursion_limit"] == 1000
+
+    manager, worker = decomposer_vllm_commands(experiment)
+    assert manager is None
+    assert "--language-model-only" in worker
+    assert subagent_environment(experiment)["GAIA2_SUBAGENT_MAX_MODEL_CALLS"] == "200"
+
+
+def test_gemma_text_defaults_use_pinned_thinking_models() -> None:
+    experiment = GEMMA4_TEXT_DEFAULTS_DECOMPOSER_EXPERIMENT
+    assert experiment.manager_checkpoint.name == (
+        "4d7ae4984b7db7de8f8457170b3f1a419ee76d52"
+    )
+    assert experiment.manager_checkpoint.is_dir()
+    assert experiment.worker_checkpoint.is_dir()
+    assert experiment.max_model_len == 131072
+    assert experiment.max_completion_tokens == 32768
+    assert experiment.manager_max_model_calls == 200
+    assert experiment.subagent_max_model_calls == 200
+    assert (experiment.temperature, experiment.top_p, experiment.top_k) == (
+        1.0,
+        0.95,
+        64,
+    )
+
+    manager, worker = decomposer_vllm_commands(experiment)
+    assert manager is not None
+    for command in (manager, worker):
+        assert command[command.index("--max-model-len") + 1] == "131072"
+        assert "--language-model-only" in command
+        assert '{"enable_thinking":true}' in command
+    environment = subagent_environment(experiment)
+    assert environment["GAIA2_SUBAGENT_MAX_COMPLETION_TOKENS"] == "32768"
+    assert environment["GAIA2_SUBAGENT_MAX_MODEL_CALLS"] == "200"
+
+
+def test_text_default_simple_profiles_match_context_completion_and_calls() -> None:
+    gemma = GEMMA4_E4B_TEXT_DEFAULTS_SIMPLE_EXPERIMENT
+    qwen = QWEN35_4B_TEXT_DEFAULTS_SIMPLE_EXPERIMENT
+    for experiment in (gemma, qwen):
+        assert experiment.max_model_len == 131072
+        assert experiment.max_completion_tokens == 32768
+        assert experiment.max_model_calls == 200
+        command = simple_vllm_command(experiment)
+        assert "--language-model-only" in command
+    assert simple_sampling_parameters(gemma) == {
+        "temperature": 1.0,
+        "top_p": 0.95,
+        "top_k": 64,
+        "max_tokens": 32768,
+    }
+    assert simple_sampling_parameters(qwen) == {
+        "temperature": 0.7,
+        "top_p": 0.8,
+        "top_k": 20,
+        "max_tokens": 32768,
+        "min_p": 0.0,
+        "presence_penalty": 1.5,
+        "repetition_penalty": 1.0,
+    }
     assert output_dir(
         SIMPLE_EXPERIMENT,
         3,

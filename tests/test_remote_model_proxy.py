@@ -132,6 +132,11 @@ def test_proxy_normalizes_live_response_shape_and_isolates_credential(monkeypatc
     app = remote_model_proxy.create_app(
         upstream_url="https://internal.test/v1",
         api_key="internal-secret",
+        extra_body={
+            "temperature": 0.7,
+            "max_output_tokens": 32768,
+            "chat_template_kwargs": {"enable_thinking": False},
+        },
         response_tool_parser="qwen3_xml",
         verify_tls=False,
     )
@@ -147,3 +152,7 @@ def test_proxy_normalizes_live_response_shape_and_isolates_credential(monkeypatc
     assert result.status_code == 200
     assert result.json()["output"][0]["type"] == "function_call"
     assert calls[0]["headers"]["Authorization"] == "Bearer internal-secret"
+    forwarded = calls[0]["json"]
+    assert forwarded["temperature"] == 0.7
+    assert forwarded["max_output_tokens"] == 32768
+    assert forwarded["chat_template_kwargs"] == {"enable_thinking": False}

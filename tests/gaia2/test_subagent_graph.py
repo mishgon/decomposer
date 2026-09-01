@@ -47,6 +47,13 @@ WAIT_SCHEMA = {
 }
 
 
+def test_worker_model_call_limit_is_read_from_runtime_environment(monkeypatch):
+    monkeypatch.setenv("GAIA2_SUBAGENT_MAX_MODEL_CALLS", "200")
+    assert graphs._max_model_calls() == 200
+    monkeypatch.delenv("GAIA2_SUBAGENT_MAX_MODEL_CALLS")
+    assert graphs._max_model_calls() is None
+
+
 def test_worker_serializes_are_records_as_plain_json_tool_content():
     result = [
         {

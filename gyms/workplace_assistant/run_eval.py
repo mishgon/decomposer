@@ -473,7 +473,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "kind": experiment.kind,
                     "purpose": args.purpose,
                     "decomposer_system_prompt_profile": (
-                        decomposer_prompt_profile(args.purpose, args.prompt_profile)
+                        decomposer_prompt_profile(
+                            args.purpose,
+                            args.prompt_profile,
+                            experiment.evaluation_prompt_profile,
+                        )
                         if experiment.kind == "decomposer"
                         else None
                     ),

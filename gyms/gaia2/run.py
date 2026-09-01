@@ -86,6 +86,53 @@ def prompt_sha256(experiment: Experiment) -> str | None:
     return hashlib.sha256(prompt.encode("utf-8")).hexdigest()
 
 
+def runtime_configuration(experiment: Experiment) -> dict[str, Any]:
+    sampling = {
+        name: getattr(experiment, name)
+        for name in (
+            "temperature",
+            "top_p",
+            "top_k",
+            "min_p",
+            "presence_penalty",
+            "repetition_penalty",
+        )
+        if getattr(experiment, name) is not None
+    }
+    configuration: dict[str, Any] = {
+        "max_model_len": experiment.max_model_len,
+        "max_completion_tokens": experiment.max_completion_tokens,
+        "sampling": sampling,
+    }
+    if isinstance(experiment, SimpleExperiment):
+        configuration.update(
+            {
+                "thinking": experiment.thinking,
+                "language_model_only": experiment.language_model_only,
+                "max_model_calls": experiment.max_model_calls,
+            }
+        )
+    else:
+        configuration.update(
+            {
+                "manager": {
+                    "backend": experiment.manager_backend,
+                    "thinking": experiment.manager_thinking,
+                    "reasoning_mode": experiment.manager_reasoning_mode,
+                    "max_model_calls": experiment.manager_max_model_calls,
+                    "recursion_limit": experiment.manager_recursion_limit,
+                },
+                "subagent": {
+                    "thinking": experiment.worker_thinking,
+                    "language_model_only": experiment.worker_language_model_only,
+                    "max_model_calls": experiment.subagent_max_model_calls,
+                    "recursion_limit": experiment.subagent_recursion_limit,
+                },
+            }
+        )
+    return configuration
+
+
 def run_identity(
     experiment: Experiment,
     *,
@@ -121,6 +168,7 @@ def run_identity(
             else None
         ),
         "decomposer_system_prompt_sha256": prompt_sha256(experiment),
+        "runtime_configuration": runtime_configuration(experiment),
     }
     if partition != "full":
         identity["split_manifest"] = {
@@ -147,7 +195,10 @@ def validate_run_identity(
         raise ValueError(f"Invalid Gaia2 run identity file: {path}") from error
     if not isinstance(value, dict):
         raise ValueError(f"Gaia2 run identity is not an object: {path}")
-    legacy_optional_fields = {"decomposer_system_prompt_sha256"}
+    legacy_optional_fields = {
+        "decomposer_system_prompt_sha256",
+        "runtime_configuration",
+    }
     mismatches = {
         key: {"found": value.get(key), "expected": expected_value}
         for key, expected_value in expected.items()
@@ -476,6 +527,8 @@ def remote_manager_proxy_command(experiment: DecomposerExperiment) -> list[str]:
         "3300",
         "--max-retries",
         "2",
+        "--extra-body-json",
+        json.dumps(experiment.remote_manager_extra_body, separators=(",", ":")),
     ]
     if not experiment.manager_verify_tls:
         command.append("--no-verify-tls")
@@ -569,6 +622,10 @@ def subagent_environment(experiment: DecomposerExperiment) -> dict[str, str]:
     if experiment.repetition_penalty is not None:
         environment["GAIA2_SUBAGENT_REPETITION_PENALTY"] = str(
             experiment.repetition_penalty
+        )
+    if experiment.subagent_max_model_calls is not None:
+        environment["GAIA2_SUBAGENT_MAX_MODEL_CALLS"] = str(
+            experiment.subagent_max_model_calls
         )
     return environment
 
@@ -1147,12 +1204,26 @@ def _runtime_configs(
             "model": experiment.manager_served_name,
             "base_url": f"http://127.0.0.1:{experiment.manager_port}/v1",
             "api_key": "EMPTY",
-            "temperature": 1.0,
-            "top_p": 1.0,
+            "temperature": (
+                experiment.temperature
+                if experiment.remote_manager_extra_body
+                else 1.0
+            ),
+            "top_p": (
+                experiment.top_p if experiment.remote_manager_extra_body else 1.0
+            ),
             "use_responses_api": True,
             "timeout": 3300,
             "max_retries": 2,
         }
+        if experiment.remote_manager_extra_body:
+            manager.update(
+                {
+                    "presence_penalty": experiment.presence_penalty,
+                    "max_completion_tokens": experiment.max_completion_tokens,
+                    "extra_body": experiment.remote_manager_extra_body,
+                }
+            )
     else:
         manager_extra_body: dict[str, Any] = {
             "top_k": experiment.top_k,
@@ -1193,9 +1264,11 @@ def _runtime_configs(
                 "url": f"http://127.0.0.1:{experiment.subagent_port}",
             }
         ],
-        "manager_recursion_limit": 200,
-        "subagent_recursion_limit": 200,
+        "manager_recursion_limit": experiment.manager_recursion_limit,
+        "subagent_recursion_limit": experiment.subagent_recursion_limit,
     }
+    if experiment.manager_max_model_calls is not None:
+        service["manager_max_model_calls"] = experiment.manager_max_model_calls
     plugin = {
         "service_url": f"http://127.0.0.1:{experiment.service_port}",
         "policy": "shared_serialized",
@@ -1213,6 +1286,8 @@ def _runtime_configs(
                 "served_name": experiment.manager_served_name,
                 "thinking": experiment.manager_thinking,
                 "parallel_tool_calls": experiment.manager_parallel_tool_calls,
+                "max_model_calls": experiment.manager_max_model_calls,
+                "recursion_limit": experiment.manager_recursion_limit,
                 **(
                     {"path": str(experiment.manager_checkpoint)}
                     if experiment.manager_checkpoint is not None
@@ -1236,6 +1311,8 @@ def _runtime_configs(
                 "path": str(experiment.worker_checkpoint),
                 "served_name": experiment.worker_served_name,
                 "thinking": experiment.worker_thinking,
+                "max_model_calls": experiment.subagent_max_model_calls,
+                "recursion_limit": experiment.subagent_recursion_limit,
             },
         },
     }
@@ -1415,6 +1492,7 @@ def _dry_plan(
             if isinstance(experiment, DecomposerExperiment)
             else None
         ),
+        "runtime_configuration": runtime_configuration(experiment),
         "gpu_assignments": gpu_assignments,
         "preparation_manifest": str(manifest_path),
         "services": [shlex.join(command) for command in services],
@@ -1934,6 +2012,8 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
     staged_gaia2 = Path(manifest["gaia2"]["staged_repo"])
     benchmark = Path(manifest["gaia2"]["runtime"]["are_benchmark"])
     env = _base_environment(local_repo, staged_gaia2, directory, judge_key)
+    if isinstance(experiment, SimpleExperiment):
+        env["ARE_MAX_ITERATIONS"] = str(experiment.max_model_calls)
     supervisor = Supervisor(logs, env)
     plugin_config: Path | None = None
     try:

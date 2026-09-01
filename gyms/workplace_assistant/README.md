@@ -35,10 +35,28 @@ Gym evaluation, validates the output, and stops every child process.
 
 Every run declares its intent explicitly. `--purpose trace-generation` selects
 the long teacher prompt and is available only for Decomposer experiments;
-`--purpose evaluation` selects the short student prompt. Pass
+`--purpose evaluation` normally selects the short student prompt. The
+explicitly named Qwen3.6 non-thinking teacher profile keeps the teacher prompt
+for evaluation as part of its experiment identity. Pass
 `--prompt-profile teacher` or `--prompt-profile student` to override that
 default for a Decomposer run. Explicit overrides use a distinct output and job
 identity. Simple-agent evaluations are unaffected by prompt selection.
+
+The matched text-default profiles are:
+
+- `gemma4-26b-a4b-thinking-gemma4-e4b-thinking-text-defaults` and its simple
+  control `gemma4-e4b-thinking-simple-text-defaults`, using Gemma's
+  `temperature=1.0`, `top_p=0.95`, `top_k=64` thinking preset.
+- `qwen36-35b-a3b-non-thinking-teacher-qwen35-4b-non-thinking-text-defaults`
+  and its simple control
+  `qwen35-4b-non-thinking-simple-general-text-defaults`, using Qwen's general
+  instruct preset. The remote manager is reached only through
+  `LLM_PROXY_URL`/`LLM_PROXY_MASTER_KEY`; both Qwen chat templates explicitly
+  disable thinking.
+
+All four profiles use 128K context and 32K completion limits. Workplace simple
+agents have 100 model calls; each Decomposer manager and each spawned subagent
+has its own 100-model-call limit.
 
 ```bash
 # Simple agent backed by one local policy vLLM.

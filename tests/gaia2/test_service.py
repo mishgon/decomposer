@@ -5,6 +5,7 @@ import pytest
 pytest.importorskip("langchain_openai")
 
 from fastapi.testclient import TestClient
+from langchain.agents.middleware import ModelCallLimitMiddleware
 from langchain_core.messages import AIMessage
 
 from gyms.gaia2 import service
@@ -20,6 +21,36 @@ class FakeGraph:
         self.calls.append((value, config, context.copy()))
         content = self.content if self.content is not None else f"turn-{len(self.calls)}"
         return {"messages": [AIMessage(content=content)]}
+
+
+def test_manager_model_call_limit_is_installed_independently(monkeypatch):
+    captured = {}
+    graph = FakeGraph()
+    monkeypatch.setattr(service, "_model_from_config", lambda value: object())
+
+    def fake_create_decomposer_agent(**kwargs):
+        captured.update(kwargs)
+        return graph
+
+    monkeypatch.setattr(service, "create_decomposer_agent", fake_create_decomposer_agent)
+    service.create_app(
+        {
+            "manager": {"model": "fake"},
+            "manager_max_model_calls": 200,
+            "manager_recursion_limit": 1000,
+            "subagent_recursion_limit": 1000,
+            "subagent_types": [{"subagent_type_id": "worker"}],
+        }
+    )
+
+    limiter = next(
+        item
+        for item in captured["middleware"]
+        if isinstance(item, ModelCallLimitMiddleware)
+    )
+    assert limiter.run_limit == 200
+    assert limiter.exit_behavior == "end"
+    assert captured["subagent_recursion_limit"] == 1000
 
 
 def test_episode_persists_thread_and_forwards_runtime_context(monkeypatch):

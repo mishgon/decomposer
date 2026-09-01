@@ -15,6 +15,7 @@ from typing import Any, TypedDict
 
 import uvicorn
 from fastapi import FastAPI, HTTPException
+from langchain.agents.middleware import ModelCallLimitMiddleware
 from langchain_core.messages import AIMessage, message_to_dict
 from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.memory import InMemorySaver
@@ -187,6 +188,18 @@ def create_app(config: dict[str, Any]) -> FastAPI:
     subagent_types = config.get("subagent_types") or []
     if not subagent_types:
         raise ValueError("At least one subagent_types entry must be configured")
+    middleware = []
+    manager_max_model_calls = config.get("manager_max_model_calls")
+    if manager_max_model_calls is not None:
+        manager_max_model_calls = int(manager_max_model_calls)
+        if manager_max_model_calls < 1:
+            raise ValueError("manager_max_model_calls must be at least 1")
+        middleware.append(
+            ModelCallLimitMiddleware(
+                run_limit=manager_max_model_calls,
+                exit_behavior="end",
+            )
+        )
     checkpointer = InMemorySaver()
     graph = create_decomposer_agent(
         decomposer_model=manager_model,
@@ -194,6 +207,7 @@ def create_app(config: dict[str, Any]) -> FastAPI:
         decomposer_system_prompt=_decomposer_system_prompt(config),
         checkpointer=checkpointer,
         context_schema=EpisodeContext,
+        middleware=middleware,
         subagent_recursion_limit=int(config.get("subagent_recursion_limit", 200)),
     )
     recursion_limit = int(config.get("manager_recursion_limit", 200))

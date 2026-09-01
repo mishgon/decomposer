@@ -87,6 +87,16 @@ The registered experiments are:
   Qwen XML tool calls into Responses API function calls. The deployment emits
   reasoning at its service-default effort; unlike DeepSeek, no explicit
   `reasoning_effort=high` control is sent.
+- `qwen36-35b-a3b-non-thinking-teacher-qwen35-4b-non-thinking-text-defaults`:
+  an explicitly non-thinking Qwen3.6 manager through `LLM_PROXY_URL`, using
+  Qwen's general instruct sampling preset and the teacher prompt, with a local
+  text-only non-thinking Qwen3.5-4B worker. Manager and worker use 128K context,
+  32K completion limits, and independent 200-model-call caps.
+- `gemma4-26b-a4b-thinking-gemma4-e4b-thinking-text-defaults`: local thinking
+  Gemma-4-26B-A4B manager and thinking Gemma-4-E4B worker using Gemma's
+  `temperature=1.0`, `top_p=0.95`, `top_k=64` preset and the student prompt.
+  Both models use 128K context, 32K completion limits, and independent
+  200-model-call caps.
 - `qwen35-4b-sft-workplace-v1-3765-32k-non-thinking-qwen35-4b-non-thinking`:
   the Workplace-trained non-thinking Qwen3.5-4B manager on the first GPU and
   a base non-thinking Qwen3.5-4B worker on the second GPU, using the student
@@ -119,6 +129,10 @@ The registered experiments are:
 - `qwen35-4b-non-thinking`: vanilla non-thinking Qwen3.5-4B simple agent on
   one GPU, using the recommended general-task sampling parameters and 128K
   context.
+- `qwen35-4b-non-thinking-simple-general-text-defaults` and
+  `gemma4-e4b-thinking-simple-text-defaults`: matched text-only controls for
+  the two new Decomposer profiles. Each uses 128K context, a 32K completion
+  limit, and 200 model calls per rollout.
 - `qwen35-2b-base-non-thinking` and `qwen35-9b-base-non-thinking`: matching
   non-thinking simple-agent baselines using the pinned local checkpoints.
 - `deepseek-v4-flash-0731`: remote OpenRouter DeepSeek simple agent with high

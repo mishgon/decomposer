@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Literal
 
 from gyms.gaia2.prompts import Gaia2ManagerPromptAddendumProfile
-from gyms.qwen_sampling import qwen35_general_sampling
+from gyms.qwen_sampling import qwen35_general_sampling, qwen36_non_thinking_sampling
 
 ARTIFACTS_ROOT = Path("/mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts")
 PROJECT_ROOT = Path("/mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_sft")
@@ -135,6 +135,13 @@ GEMMA4_E4B_BASE = (
     / "models--google--gemma-4-E4B-it"
     / "snapshots"
     / "ee0ef6023621cff504d758262d4e04895a5af4a2"
+)
+GEMMA4_26B_A4B_BASE = (
+    HF_HOME
+    / "hub"
+    / "models--google--gemma-4-26B-A4B-it"
+    / "snapshots"
+    / "4d7ae4984b7db7de8f8457170b3f1a419ee76d52"
 )
 GEMMA4_E4B_SFT = (
     ARTIFACTS_ROOT
@@ -329,7 +336,7 @@ class DecomposerExperiment:
     manager_upstream_url_env: str | None = None
     manager_api_key_env: str | None = None
     manager_response_tool_parser: str | None = None
-    manager_reasoning_mode: Literal["service_default"] | None = None
+    manager_reasoning_mode: Literal["service_default", "non_thinking"] | None = None
     manager_verify_tls: bool = True
     prompt_profile: DecomposerPromptProfile = "student"
     manager_prompt_addendum_profile: Gaia2ManagerPromptAddendumProfile | None = None
@@ -364,9 +371,23 @@ class DecomposerExperiment:
     worker_language_model_only: bool = True
     worker_trust_remote_code: bool = False
     worker_gdn_prefill_backend: str | None = None
+    manager_max_model_calls: int | None = None
+    subagent_max_model_calls: int | None = None
+    manager_recursion_limit: int = 200
+    subagent_recursion_limit: int = 200
     kind: Literal["decomposer"] = field(init=False, default="decomposer")
 
     def __post_init__(self) -> None:
+        for field_name in (
+            "manager_max_model_calls",
+            "subagent_max_model_calls",
+        ):
+            value = getattr(self, field_name)
+            if value is not None and value < 1:
+                raise ValueError(f"{self.name}: {field_name} must be at least 1")
+        for field_name in ("manager_recursion_limit", "subagent_recursion_limit"):
+            if getattr(self, field_name) < 1:
+                raise ValueError(f"{self.name}: {field_name} must be at least 1")
         if self.manager_backend == "local_vllm" and self.manager_checkpoint is None:
             raise ValueError("A local_vllm manager requires manager_checkpoint")
         expected_gpus = 2 if self.manager_backend == "local_vllm" else 1
@@ -406,6 +427,22 @@ class DecomposerExperiment:
     def requires_remote_manager(self) -> bool:
         return self.manager_backend != "local_vllm"
 
+    @property
+    def remote_manager_extra_body(self) -> dict[str, object]:
+        if self.manager_reasoning_mode != "non_thinking":
+            return {}
+        return {
+            "temperature": self.temperature,
+            "top_p": self.top_p,
+            "top_k": self.top_k,
+            "min_p": self.min_p,
+            "presence_penalty": self.presence_penalty,
+            "repetition_penalty": self.repetition_penalty,
+            "max_output_tokens": self.max_completion_tokens,
+            "include_reasoning": False,
+            "chat_template_kwargs": {"enable_thinking": False},
+        }
+
 
 @dataclass(frozen=True)
 class SimpleExperiment:
@@ -435,9 +472,12 @@ class SimpleExperiment:
     language_model_only: bool = True
     trust_remote_code: bool = False
     gdn_prefill_backend: str | None = None
+    max_model_calls: int = 80
     kind: Literal["simple"] = field(init=False, default="simple")
 
     def __post_init__(self) -> None:
+        if self.max_model_calls < 1:
+            raise ValueError(f"{self.name}: max_model_calls must be at least 1")
         if self.backend == "local_vllm":
             if self.checkpoint is None:
                 raise ValueError(f"{self.name}: local_vllm requires checkpoint")
@@ -715,6 +755,58 @@ QWEN36_QWEN_EXPERIMENT = replace(
     manager_verify_tls=False,
     concurrency=16,
 )
+GEMMA4_TEXT_DEFAULTS_DECOMPOSER_EXPERIMENT = DecomposerExperiment(
+    name="gemma4-26b-a4b-thinking-gemma4-e4b-thinking-text-defaults",
+    worker_checkpoint=GEMMA4_E4B_BASE,
+    manager_checkpoint=GEMMA4_26B_A4B_BASE,
+    manager_served_name="google/gemma-4-26B-A4B-it",
+    worker_served_name="google/gemma-4-E4B-it",
+    manager_port=8023,
+    worker_port=8021,
+    service_port=8127,
+    subagent_port=2027,
+    max_model_len=131072,
+    max_completion_tokens=32768,
+    manager_thinking=True,
+    worker_thinking=True,
+    manager_max_model_calls=200,
+    subagent_max_model_calls=200,
+    manager_recursion_limit=1000,
+    subagent_recursion_limit=1000,
+)
+_QWEN36_NON_THINKING_SAMPLING = qwen36_non_thinking_sampling()
+QWEN36_TEXT_DEFAULTS_DECOMPOSER_EXPERIMENT = replace(
+    DEEPSEEK_QWEN_EXPERIMENT,
+    name=(
+        "qwen36-35b-a3b-non-thinking-teacher-"
+        "qwen35-4b-non-thinking-text-defaults"
+    ),
+    manager_backend="llm_proxy",
+    manager_served_name="Qwen/Qwen3.6-35B-A3B-FP8",
+    manager_port=8142,
+    manager_upstream_url_env="LLM_PROXY_URL",
+    manager_api_key_env="LLM_PROXY_MASTER_KEY",
+    manager_response_tool_parser="qwen3_xml",
+    manager_reasoning_mode="non_thinking",
+    manager_verify_tls=False,
+    prompt_profile="teacher",
+    concurrency=16,
+    max_model_len=131072,
+    max_completion_tokens=32768,
+    temperature=_QWEN36_NON_THINKING_SAMPLING.temperature,
+    top_p=_QWEN36_NON_THINKING_SAMPLING.top_p,
+    top_k=_QWEN36_NON_THINKING_SAMPLING.top_k,
+    min_p=_QWEN36_NON_THINKING_SAMPLING.min_p,
+    presence_penalty=_QWEN36_NON_THINKING_SAMPLING.presence_penalty,
+    repetition_penalty=_QWEN36_NON_THINKING_SAMPLING.repetition_penalty,
+    manager_thinking=False,
+    worker_thinking=False,
+    worker_language_model_only=True,
+    manager_max_model_calls=200,
+    subagent_max_model_calls=200,
+    manager_recursion_limit=1000,
+    subagent_recursion_limit=1000,
+)
 SIMPLE_EXPERIMENT = SimpleExperiment(
     name="gemma4-e4b-it-thinking",
     checkpoint=GEMMA4_E4B_BASE,
@@ -753,6 +845,21 @@ SIMPLE_QWEN_2B_EXPERIMENT = _qwen35_simple_experiment(
 SIMPLE_QWEN_9B_EXPERIMENT = _qwen35_simple_experiment(
     "qwen35-9b-base-non-thinking", QWEN35_9B_BASE, "Qwen/Qwen3.5-9B"
 )
+GEMMA4_E4B_TEXT_DEFAULTS_SIMPLE_EXPERIMENT = replace(
+    SIMPLE_EXPERIMENT,
+    name="gemma4-e4b-thinking-simple-text-defaults",
+    max_model_len=131072,
+    max_completion_tokens=32768,
+    max_model_calls=200,
+)
+QWEN35_4B_TEXT_DEFAULTS_SIMPLE_EXPERIMENT = replace(
+    SIMPLE_QWEN_EXPERIMENT,
+    name="qwen35-4b-non-thinking-simple-general-text-defaults",
+    max_model_len=131072,
+    max_completion_tokens=32768,
+    language_model_only=True,
+    max_model_calls=200,
+)
 SIMPLE_DEEPSEEK_EXPERIMENT = SimpleExperiment(
     name="deepseek-v4-flash-0731",
     checkpoint=None,
@@ -789,10 +896,14 @@ ALL_EXPERIMENTS: tuple[Experiment, ...] = (
     DEEPSEEK_QWEN_EXPERIMENT,
     DEEPSEEK_QWEN_AMBIGUITY_POLICY_EXPERIMENT,
     QWEN36_QWEN_EXPERIMENT,
+    GEMMA4_TEXT_DEFAULTS_DECOMPOSER_EXPERIMENT,
+    QWEN36_TEXT_DEFAULTS_DECOMPOSER_EXPERIMENT,
     SIMPLE_EXPERIMENT,
     SIMPLE_QWEN_EXPERIMENT,
     SIMPLE_QWEN_2B_EXPERIMENT,
     SIMPLE_QWEN_9B_EXPERIMENT,
+    GEMMA4_E4B_TEXT_DEFAULTS_SIMPLE_EXPERIMENT,
+    QWEN35_4B_TEXT_DEFAULTS_SIMPLE_EXPERIMENT,
     SIMPLE_DEEPSEEK_EXPERIMENT,
 )
 EXPERIMENTS = {experiment.name: experiment for experiment in ALL_EXPERIMENTS}

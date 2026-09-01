@@ -9,6 +9,7 @@ from typing import Any, TypedDict
 
 import httpx
 from langchain.agents import create_agent
+from langchain.agents.middleware import ModelCallLimitMiddleware
 from langchain_core.tools import StructuredTool
 from langchain_openai import ChatOpenAI
 from langgraph.graph import END, START, MessagesState, StateGraph
@@ -25,6 +26,16 @@ HIDDEN_AUI_TOOLS = frozenset(
     }
 )
 WAIT_FOR_NOTIFICATION_TOOL = "SystemApp__wait_for_notification"
+
+
+def _max_model_calls() -> int | None:
+    raw = os.environ.get("GAIA2_SUBAGENT_MAX_MODEL_CALLS")
+    if raw is None:
+        return None
+    value = int(raw)
+    if value < 1:
+        raise ValueError("GAIA2_SUBAGENT_MAX_MODEL_CALLS must be at least 1")
+    return value
 
 
 class EpisodeContext(TypedDict):
@@ -281,7 +292,23 @@ async def run_subagent(
             "canonical way to advance simulated time."
         ),
     )
-    agent = create_agent(model=_model(), tools=tools, system_prompt=system_prompt)
+    max_model_calls = _max_model_calls()
+    middleware = (
+        [
+            ModelCallLimitMiddleware(
+                run_limit=max_model_calls,
+                exit_behavior="error",
+            )
+        ]
+        if max_model_calls is not None
+        else []
+    )
+    agent = create_agent(
+        model=_model(),
+        tools=tools,
+        system_prompt=system_prompt,
+        middleware=middleware,
+    )
     result = await agent.ainvoke({"messages": state["messages"]})
     return {"messages": result["messages"][len(state["messages"]) :]}
 
