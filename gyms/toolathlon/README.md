@@ -26,13 +26,14 @@ analysis material.
    produce a trusted task bundle.
 3. The benchmark's `task_artifact_guard` stashes the evaluator and
    ground-truth artifacts so the agent cannot see them.
-4. The container starts its MCP gateway (SSE) on a fresh host port. The
-   runner then starts the LangGraph subagent server inside the same
-   container; it holds one persistent SSE session to the gateway.
-5. The host runs Decomposer. Subagents are the configured
-   `qwen_3_5_4b_non_thinking` assistant served by a host vLLM replica.
+4. The container starts its MCP gateway (SSE) on a fresh host port. In
+   `simple` mode the host invokes the Qwen LangGraph directly. In
+   `decomposer` mode the runner also starts the container LangGraph server
+   used by Decomposer subagents.
+5. Qwen requests are served by host vLLM. The selected agent mode changes
+   only the host harness; task preparation and native grading stay identical.
    Every subagent uses a 265,000-token context and recursion limit 410.
-   DeepSeek Decomposer models always run with high reasoning effort.
+   DeepSeek models always run with high reasoning effort.
 6. After the agent loop the runner writes the benchmark-format
    `traj_log.json` into the shared episode directory, restores the evaluator
    artifacts, and runs `scripts.decoupled.container_eval` in the container.
@@ -63,7 +64,10 @@ gyms/toolathlon/build.sh
 
 Override the base or resulting image name with `TOOLATHLON_BASE_IMAGE` or
 `TOOLATHLON_BENCH_IMAGE`. The build warns when `external/toolathlon` is
-checked out at a different commit than the repository pins.
+checked out at a different commit than the repository pins. It also applies
+a fail-fast compatibility patch to the pinned 12306 MCP package for the
+railway site's current bootstrap page and network transport; the MCP version,
+tools, and schemas remain unchanged.
 
 User-provided, gitignored benchmark credentials (GCP OAuth keys,
 `token_key_session.py`, `configs/.mcp-auth`, Notion state, ...) are read from
@@ -94,12 +98,18 @@ ships placeholder API keys, and the per-app keys (GCP OAuth, Notion, email,
 `global_preparation/how2register_accounts.md`. Tasks for unconfigured apps
 will fail until their credentials are in place.
 
+The Verified final pool also needs its local app stack. Run the benchmark's
+`global_preparation/deploy_containers.sh` before a formal evaluation. On a
+rootless Podman host, set `podman_or_docker="podman"` in the gitignored
+`external/toolathlon/configs/global_configs.py`; the runner exposes the
+selected rootless socket at both the Docker and Podman paths expected by
+nested task tooling.
+
 ## Running
 
-Set the Decomposer credential once:
+Choose the local Qwen snapshot:
 
 ```bash
-export OPENROUTER_API_KEY=...
 QWEN=/home/matrosov/.cache/huggingface/hub/models--Qwen--Qwen3.5-4B/snapshots/<snapshot>
 ```
 
@@ -107,12 +117,41 @@ Run the full dataset once (an omitted `-n` means one repetition):
 
 ```bash
 uv run python gyms/toolathlon/run.py --all \
+  --agent-mode simple \
   --purpose evaluation \
   --subagent-model "$QWEN" \
-  --subagent-gpu 0 \
-  --concurrency 4 \
-  --n-jobs-per-worker 1000
+  --subagent-gpu 1,2,3,4 \
+  --vllm-data-parallel-size 4 \
+  --concurrency 16 \
+  --container-slots 2
 ```
+
+`simple` does not require OpenRouter. For the Decomposer harness, use
+`--agent-mode decomposer`, select its model with `--model`, and export
+`OPENROUTER_API_KEY`. This keeps the model choice and harness choice
+orthogonal for the planned Qwen, DeepSeek, and trained-Decomposer matrix.
+
+Select the tool-agent provider independently with `--subagent-provider`:
+
+```bash
+# DeepSeek direct tool agent
+uv run python gyms/toolathlon/run.py --all \
+  --purpose evaluation --agent-mode simple \
+  --subagent-provider openrouter \
+  --subagent-model deepseek/deepseek-v4-flash-0731
+
+# DeepSeek decomposer delegating to DeepSeek tool agents
+uv run python gyms/toolathlon/run.py --all \
+  --purpose evaluation --agent-mode decomposer \
+  --model deepseek/deepseek-v4-flash-0731 \
+  --subagent-provider openrouter \
+  --subagent-model deepseek/deepseek-v4-flash-0731
+```
+
+OpenRouter tool-agent servers run on the host, so the API key is never exposed
+inside task containers. Agent loops default to a 30-minute limit and complete
+episodes to a 40-minute total limit; override these with `--agent-timeout` and
+`--episode-timeout` for intentionally longer experiments.
 
 Run a subset, with every selected task repeated three times:
 
@@ -154,13 +193,10 @@ model and the runner must not own that external process.
 
 When the OpenAI-compatible server runs on the macOS host and task containers
 run through Colima, also pass
-`--subagent-base-url http://host.docker.internal:8030/v1`; the regular
-`--subagent-port` remains the host-side readiness-check port.
-Also pass `--docker-socket /var/run/docker.sock`: bind-mount source paths are
-resolved inside Colima's Linux VM, not against its macOS client socket path.
-Finally, pass `--publish-service-ports` so the container MCP gateway and
-LangGraph server are published from Colima back to macOS loopback instead of
-being stranded on the VM's host network.
+`--subagent-base-url http://host.docker.internal:8030/v1`,
+`--docker-socket /var/run/docker.sock`, and `--publish-service-ports`.
+The socket bind source is resolved inside Colima's Linux VM, while publishing
+the gateway and LangGraph ports makes them reachable from macOS loopback.
 
 For several externally managed replicas (for example the MLSpace pool below),
 pass their host-local ports as a pool. The batch verifies every endpoint and
@@ -171,7 +207,7 @@ uv run python gyms/toolathlon/run.py --all \
   --purpose evaluation \
   --subagent-ports 18200 18201 18202 18203 \
   --concurrency 16 \
-  --n-jobs-per-worker 1000
+  --n-jobs-per-worker 16
 ```
 
 Per-episode gateway and subagent-server ports are allocated automatically;
@@ -242,9 +278,12 @@ stashes/<domain>/<task>/<episode-id>/
   (host-private stash of evaluator artifacts; removed after restore)
 evals/<domain>/<task>/<episode-id>/result.json
 logs/<domain>/<task>/<episode-id>/vllm.log
-logs/<domain>/<task>/<episode-id>/runner.stdout.log
-logs/<domain>/<task>/<episode-id>/runner.stderr.log
 ```
+
+The per-attempt `runner.stdout.log` and `runner.stderr.log` files contain the
+complete runner output. `trace.json` contains every Decomposer message and
+the full message history for each subagent run, plus the effective context,
+recursion, provider, endpoint, and reasoning settings.
 
 The manifest is atomically replaced after every state transition. Each
 task/repetition has its own entry and each retry has a distinct attempt log
@@ -253,19 +292,21 @@ batch runs up to `--concurrency` episodes at once, creates a fresh task
 container for each one (all on `--network host`, with unique per-episode
 gateway and subagent ports), and removes it in the worker's `finally` block.
 Container startup and cleanup are briefly serialized through
-`container.lock`; vLLM startup is shared. Each subagent server starts
-LangGraph with `--n-jobs-per-worker` slots (default 1000). The supervised
+one lock per `--container-slots` slot (default 1); two slots are the validated
+fast rootless-Podman setting on Hertz-2. vLLM startup is shared. The runner
+also supplies canonical Podman short-name aliases so cached Kubernetes images
+load into Kind without registry pulls. Each subagent server starts
+LangGraph with `--n-jobs-per-worker` slots (default 16). The supervised
 vLLM is started once before the worker pool and stopped once after it.
+Kubernetes episodes are serialized because each creates a Kind cluster and
+the default host inotify budget cannot safely support several concurrently;
+their task-provided stop scripts delete the cluster after native evaluation.
 
 ## Runtime boundary
 
-- Host: Decomposer, OpenRouter credentials, vLLM servers, artifact stash,
-  trajectory and evaluation records.
+- Host: selected simple/Decomposer harness, its credentials, vLLM servers,
+  artifact stash, trajectory and evaluation records.
 - Task container: task preprocessing, MCP gateway, LangGraph subagent
   server, MCP server processes, workspace, and native evaluation.
 
 Evaluation records use the same episode identifier as their traces.
-`trace.json` includes every Decomposer message and the complete message
-history for each subagent run, including intermediate model responses and
-tool results. It also records the effective context, recursion, and reasoning
-settings so runs can be compared without reconstructing their launch command.
