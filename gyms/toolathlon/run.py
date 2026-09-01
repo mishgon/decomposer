@@ -487,6 +487,14 @@ def start_vllm(
         "CUDA_VISIBLE_DEVICES": gpu,
         "VLLM_ENGINE_READY_TIMEOUT_S": str(max(1, int(timeout))),
     }
+    # vLLM/FlashInfer invoke helper executables such as ``ninja`` by name.
+    # ``uv run`` can use the virtualenv interpreter without adding its bin
+    # directory to PATH (notably in non-interactive SSH sessions), so preserve
+    # the interpreter's toolchain explicitly for the server process.
+    executable_dir = str(Path(sys.executable).resolve().parent)
+    environment["PATH"] = os.pathsep.join(
+        part for part in (executable_dir, environment.get("PATH", "")) if part
+    )
     with log_path.open("ab") as log:
         reservation.close()
         process = subprocess.Popen(
