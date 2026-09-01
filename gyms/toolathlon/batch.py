@@ -24,6 +24,63 @@ else:
 
 
 SCHEMA_VERSION = 1
+VALID_EVALUATION_TASKS = (
+    "finalpool/academic-pdf-report",
+    "finalpool/add-bibtex",
+    "finalpool/apply-phd-email",
+    "finalpool/arrange-workspace",
+    "finalpool/canvas-arrange-exam",
+    "finalpool/canvas-art-manager",
+    "finalpool/canvas-art-quiz",
+    "finalpool/canvas-do-quiz",
+    "finalpool/canvas-homework-grader-python",
+    "finalpool/canvas-list-test",
+    "finalpool/canvas-new-students-notification",
+    "finalpool/canvas-submit-late-work",
+    "finalpool/cooking-guidance",
+    "finalpool/course-assistant",
+    "finalpool/course-schedule",
+    "finalpool/courses-ta-hws",
+    "finalpool/cvpr-research",
+    "finalpool/detect-revised-terms",
+    "finalpool/dietary-health",
+    "finalpool/excel-data-transformation",
+    "finalpool/excel-market-research",
+    "finalpool/filter-low-selling-products",
+    "finalpool/find-alita-paper",
+    "finalpool/git-bug-hunt",
+    "finalpool/hk-top-conf",
+    "finalpool/identify-all-songs",
+    "finalpool/imagenet",
+    "finalpool/interview-report",
+    "finalpool/inventory-sync",
+    "finalpool/invoice-org",
+    "finalpool/ipad-edu-price",
+    "finalpool/k8s-deployment-cleanup",
+    "finalpool/k8s-mysql",
+    "finalpool/k8s-pr-preview-testing",
+    "finalpool/k8s-redis-helm-upgrade",
+    "finalpool/language-school",
+    "finalpool/latex-prompt-box",
+    "finalpool/logical-datasets-collection",
+    "finalpool/meeting-assign",
+    "finalpool/mrbeast-analysis",
+    "finalpool/nvidia-market",
+    "finalpool/paper-checker",
+    "finalpool/ppt-analysis",
+    "finalpool/privacy-desensitization",
+    "finalpool/profile-update-online",
+    "finalpool/reimbursement-form-filler",
+    "finalpool/sales-accounting",
+    "finalpool/shopping-helper",
+    "finalpool/stock-build-position",
+    "finalpool/train-ticket-plan",
+    "finalpool/travel-exchange",
+    "finalpool/university-course-selection",
+    "finalpool/woocommerce-new-product",
+    "finalpool/woocommerce-update-cover",
+    "finalpool/yahoo-analysis",
+)
 RESUME_CONFIG_FIELDS = (
     "agent_mode",
     "model",
@@ -95,7 +152,9 @@ def append_event(run_dir: Path, event: str, **fields: Any) -> None:
 
 
 def wants_batch(argv: Sequence[str]) -> bool:
-    flags = {"--all", "--tasks", "--resume", "--repetitions", "-n"}
+    flags = {
+        "--all", "--all-valid", "--tasks", "--resume", "--repetitions", "-n"
+    }
     prefixes = ("--tasks=", "--resume=", "--repetitions=", "-n")
     return any(
         argument in flags or argument.startswith(prefixes) for argument in argv
@@ -108,6 +167,14 @@ def parse_args(argv: Sequence[str], defaults: dict[str, Any]) -> argparse.Namesp
     )
     selection = parser.add_mutually_exclusive_group()
     selection.add_argument("--all", action="store_true")
+    selection.add_argument(
+        "--all-valid",
+        action="store_true",
+        help=(
+            "Run the 55 infrastructure-valid tasks, while scoring omitted "
+            "tasks from the full benchmark as failures."
+        ),
+    )
     selection.add_argument("--tasks", nargs="+", metavar="TASK")
     parser.add_argument("--resume", metavar="RUN_ID")
     parser.add_argument("-n", "--repetitions", type=int, default=1)
@@ -194,10 +261,10 @@ def parse_args(argv: Sequence[str], defaults: dict[str, Any]) -> argparse.Namesp
         help="Maximum total wall-clock seconds for one episode (default: 2400).",
     )
     args = parser.parse_args(argv)
-    if args.resume and (args.all or args.tasks):
-        parser.error("--resume cannot be combined with --all or --tasks")
-    if not args.resume and not (args.all or args.tasks):
-        parser.error("choose --all, --tasks, or --resume")
+    if args.resume and (args.all or args.all_valid or args.tasks):
+        parser.error("--resume cannot be combined with task selection")
+    if not args.resume and not (args.all or args.all_valid or args.tasks):
+        parser.error("choose --all, --all-valid, --tasks, or --resume")
     if args.repetitions < 1:
         parser.error("--repetitions must be at least 1")
     if args.resume and args.repetitions != 1:
@@ -238,7 +305,10 @@ def parse_args(argv: Sequence[str], defaults: dict[str, Any]) -> argparse.Namesp
 
 
 def select_tasks(
-    tasks_root: Path, run_all: bool, requested: Sequence[str] | None
+    tasks_root: Path,
+    run_all: bool,
+    run_all_valid: bool,
+    requested: Sequence[str] | None,
 ) -> list[str]:
     available = sorted(
         f"{domain.name}/{task.name}"
@@ -249,6 +319,14 @@ def select_tasks(
     )
     if run_all:
         return available
+    if run_all_valid:
+        missing = [task for task in VALID_EVALUATION_TASKS if task not in available]
+        if missing:
+            raise ValueError(
+                "Infrastructure-valid Toolathlon task(s) are missing: "
+                + ", ".join(missing)
+            )
+        return list(VALID_EVALUATION_TASKS)
     selected = list(requested or ())
     if len(selected) != len(set(selected)):
         raise ValueError("Duplicate Toolathlon tasks are not allowed")
@@ -284,10 +362,16 @@ def evaluation_metrics(manifest: dict[str, Any]) -> dict[str, Any]:
         for episodes in scored_tasks
         for episode in episodes
     )
+    benchmark_task_count = manifest["config"].get("benchmark_task_count", len(by_task))
+    unrun_tasks_are_failures = manifest["config"].get(
+        "unrun_tasks_are_failures", False
+    )
     result: dict[str, Any] = {
         "task_count": len(by_task),
+        "benchmark_task_count": benchmark_task_count,
+        "unrun_task_count": max(benchmark_task_count - len(by_task), 0),
         "repetitions": repetitions,
-        "expected_trials": len(by_task) * repetitions,
+        "expected_trials": benchmark_task_count * repetitions,
         "scored_task_count": len(scored_tasks),
         "scored_trials": scored_trials,
         "unscored_trials": sum(
@@ -298,6 +382,25 @@ def evaluation_metrics(manifest: dict[str, Any]) -> dict[str, Any]:
         "pass@3": None,
         "pass^3": None,
     }
+    if unrun_tasks_are_failures:
+        all_passed_trials = sum(
+            episode.get("score") is True for episode in manifest["episodes"]
+        )
+        result["assumed_failed_task_count"] = max(
+            benchmark_task_count - len(by_task), 0
+        )
+        result["pass@1"] = all_passed_trials / (benchmark_task_count * repetitions)
+        if repetitions == 3:
+            result["pass@3"] = sum(
+                any(episode.get("score") is True for episode in episodes)
+                for episodes in by_task.values()
+            ) / benchmark_task_count
+            result["pass^3"] = sum(
+                len(episodes) == repetitions
+                and all(episode.get("score") is True for episode in episodes)
+                for episodes in by_task.values()
+            ) / benchmark_task_count
+        return result
     if repetitions == 3 and scored_tasks:
         result["pass@3"] = sum(
             any(episode["score"] is True for episode in episodes)
@@ -665,12 +768,19 @@ def main(
             else:
                 setattr(args, name, manifest["config"][name])
     else:
-        tasks = select_tasks(
-            toolathlon_root / "tasks", args.all, args.tasks
-        )
+        tasks_root = toolathlon_root / "tasks"
+        tasks = select_tasks(tasks_root, args.all, args.all_valid, args.tasks)
+        all_tasks = select_tasks(tasks_root, True, False, None)
         run_dir = root / "runs" / new_run_id()
         run_dir.mkdir(parents=True, exist_ok=False)
         manifest = create_manifest(run_dir.name, tasks, args.repetitions, args)
+        manifest["config"].update(
+            benchmark_task_count=len(all_tasks) if args.all_valid else len(tasks),
+            unrun_tasks_are_failures=args.all_valid,
+            assumed_failed_tasks=(
+                sorted(set(all_tasks) - set(tasks)) if args.all_valid else []
+            ),
+        )
         save_manifest(run_dir, manifest)
         append_event(run_dir, "run_created", tasks=tasks, repetitions=args.repetitions)
 
