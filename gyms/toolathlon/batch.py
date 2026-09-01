@@ -17,6 +17,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
+if __package__:
+    from .settings import SUBAGENT_CONTEXT_TOKENS, SUBAGENT_RECURSION_LIMIT
+else:
+    from settings import (  # type: ignore[no-redef]
+        SUBAGENT_CONTEXT_TOKENS,
+        SUBAGENT_RECURSION_LIMIT,
+    )
+
 
 SCHEMA_VERSION = 1
 RESUME_CONFIG_FIELDS = (
@@ -24,11 +32,14 @@ RESUME_CONFIG_FIELDS = (
     "subagent_model",
     "subagent_port",
     "subagent_ports",
+    "subagent_base_url",
     "subagent_gpu",
     "image",
     "docker_socket",
     "reuse_vllm",
+    "publish_service_ports",
     "vllm_max_model_len",
+    "subagent_recursion_limit",
     "vllm_gpu_memory_utilization",
     "vllm_startup_timeout",
     "startup_timeout",
@@ -88,6 +99,13 @@ def parse_args(argv: Sequence[str], defaults: dict[str, Any]) -> argparse.Namesp
     parser.add_argument("--subagent-model", default=defaults["subagent_model"])
     parser.add_argument("--subagent-port", type=int, default=defaults["subagent_port"])
     parser.add_argument(
+        "--subagent-base-url",
+        help=(
+            "OpenAI-compatible subagent URL as seen from task containers. "
+            "Only valid with one subagent port."
+        ),
+    )
+    parser.add_argument(
         "--subagent-ports",
         type=int,
         nargs="+",
@@ -97,10 +115,18 @@ def parse_args(argv: Sequence[str], defaults: dict[str, Any]) -> argparse.Namesp
         ),
     )
     parser.add_argument("--subagent-gpu", default="0")
-    parser.add_argument("--vllm-max-model-len", type=int, default=256000)
+    parser.add_argument(
+        "--vllm-max-model-len", type=int, default=SUBAGENT_CONTEXT_TOKENS
+    )
+    parser.add_argument(
+        "--subagent-recursion-limit",
+        type=int,
+        default=SUBAGENT_RECURSION_LIMIT,
+    )
     parser.add_argument("--vllm-gpu-memory-utilization", type=float, default=0.9)
     parser.add_argument("--vllm-startup-timeout", type=float, default=1800)
     parser.add_argument("--reuse-vllm", action="store_true")
+    parser.add_argument("--publish-service-ports", action="store_true")
     parser.add_argument("--image", default=defaults["image"])
     parser.add_argument(
         "--docker-socket",
@@ -133,12 +159,16 @@ def parse_args(argv: Sequence[str], defaults: dict[str, Any]) -> argparse.Namesp
         parser.error("--concurrency must be at least 1")
     if args.max_steps < 1:
         parser.error("--max-steps must be at least 1")
+    if args.subagent_recursion_limit < 1:
+        parser.error("--subagent-recursion-limit must be at least 1")
     if args.subagent_ports:
         if len(set(args.subagent_ports)) != len(args.subagent_ports):
             parser.error("--subagent-ports must not contain duplicates")
         args.reuse_vllm = True
     else:
         args.subagent_ports = [args.subagent_port]
+    if args.subagent_base_url and len(args.subagent_ports) != 1:
+        parser.error("--subagent-base-url requires exactly one subagent port")
     return args
 
 
@@ -256,6 +286,7 @@ def episode_command(
         "--subagent-port", str(port),
         "--subagent-gpu", args.subagent_gpu,
         "--vllm-max-model-len", str(args.vllm_max_model_len),
+        "--subagent-recursion-limit", str(args.subagent_recursion_limit),
         "--vllm-gpu-memory-utilization", str(args.vllm_gpu_memory_utilization),
         "--vllm-startup-timeout", str(args.vllm_startup_timeout),
         "--reuse-vllm", "--image", args.image,
@@ -268,6 +299,10 @@ def episode_command(
         "--eval-config", args.eval_config,
         "--container-lock-file", str(root / "runs" / run_id / "container.lock"),
     ]
+    if getattr(args, "publish_service_ports", False):
+        command.append("--publish-service-ports")
+    if args.subagent_base_url is not None:
+        command.extend(["--subagent-base-url", args.subagent_base_url])
     if args.docker_socket is not None:
         command.extend(["--docker-socket", args.docker_socket])
     return command
@@ -451,6 +486,12 @@ def main(
         for name in RESUME_CONFIG_FIELDS:
             if name == "subagent_ports" and name not in manifest["config"]:
                 setattr(args, name, [manifest["config"]["subagent_port"]])
+            elif name == "subagent_base_url" and name not in manifest["config"]:
+                setattr(args, name, None)
+            elif name == "publish_service_ports" and name not in manifest["config"]:
+                setattr(args, name, False)
+            elif name == "subagent_recursion_limit" and name not in manifest["config"]:
+                setattr(args, name, SUBAGENT_RECURSION_LIMIT)
             else:
                 setattr(args, name, manifest["config"][name])
     else:

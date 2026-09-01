@@ -126,6 +126,8 @@ def test_wait_stores_tool_calls_in_returned_report_order() -> None:
     assert command.update["subagent_runs"]["run_a"]["tool_calls"] == [
         {"id": "run_a_call", "name": "resource_tool", "args": {"run": "run_a"}},
     ]
+    assert command.update["subagent_runs"]["run_b"]["messages"]
+    assert command.update["subagent_runs"]["run_a"]["messages"]
 
 
 def test_wait_stores_tool_calls_from_error_run() -> None:

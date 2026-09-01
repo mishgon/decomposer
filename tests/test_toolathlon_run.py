@@ -10,7 +10,14 @@ from types import SimpleNamespace
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
-from gyms.toolathlon import batch, mlspace_serve, run
+from gyms.toolathlon import batch, mlspace_serve, run, settings
+
+
+def test_evaluation_runtime_settings_are_uniform() -> None:
+    assert settings.SUBAGENT_CONTEXT_TOKENS == 265_000
+    assert settings.SUBAGENT_RECURSION_LIMIT == 410
+    assert settings.DECOMPOSER_RECURSION_LIMIT == 410
+    assert settings.DEEPSEEK_REASONING_EFFORT == "high"
 
 
 def test_configured_subagents_are_registered() -> None:
@@ -105,6 +112,9 @@ def test_main_fails_fast_when_no_docker_socket(tmp_path, monkeypatch) -> None:
     (tmp_path / "tasks" / "finalpool" / "example").mkdir(parents=True)
     (tmp_path / "configs").mkdir()
     (tmp_path / "configs" / "global_configs.py").write_text("# test\n")
+    (tmp_path / "configs" / "token_key_session_example.py").write_text(
+        "tokens = {}\n"
+    )
     monkeypatch.setattr(run, "TOOLATHLON_ROOT", tmp_path)
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
     monkeypatch.delenv("DOCKER_HOST", raising=False)
@@ -123,6 +133,7 @@ def test_main_bootstraps_global_configs_from_example(tmp_path, monkeypatch) -> N
     configs = tmp_path / "configs"
     configs.mkdir()
     (configs / "global_configs_example.py").write_text("global_configs = {}\n")
+    (configs / "token_key_session_example.py").write_text("tokens = {}\n")
     monkeypatch.setattr(run, "TOOLATHLON_ROOT", tmp_path)
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     monkeypatch.setattr(
@@ -133,6 +144,7 @@ def test_main_bootstraps_global_configs_from_example(tmp_path, monkeypatch) -> N
         run.main()
 
     assert (configs / "global_configs.py").read_text() == "global_configs = {}\n"
+    assert (configs / "token_key_session.py").read_text() == "tokens = {}\n"
     assert (configs / ".mcp-auth").is_dir()
 
 
@@ -190,9 +202,15 @@ def test_resolve_docker_socket_explicit_wins(tmp_path, monkeypatch) -> None:
     assert run.resolve_docker_socket(str(socket_path)) == str(socket_path)
 
 
-def test_resolve_docker_socket_rejects_missing_explicit(tmp_path) -> None:
-    with pytest.raises(RuntimeError, match="Docker socket not found"):
-        run.resolve_docker_socket(str(tmp_path / "missing.sock"))
+def test_resolve_docker_socket_accepts_absolute_daemon_side_path() -> None:
+    assert run.resolve_docker_socket("/var/run/docker.sock") == (
+        "/var/run/docker.sock"
+    )
+
+
+def test_resolve_docker_socket_rejects_relative_explicit() -> None:
+    with pytest.raises(RuntimeError, match="must be absolute"):
+        run.resolve_docker_socket("relative/docker.sock")
 
 
 def test_resolve_docker_socket_uses_docker_host_unix(tmp_path, monkeypatch) -> None:
@@ -256,8 +274,10 @@ def test_episode_command_passes_docker_socket(tmp_path) -> None:
         model="model",
         subagent_model="subagent-model",
         subagent_port=8030,
+        subagent_base_url="http://host.docker.internal:8030/v1",
         subagent_gpu="0",
         vllm_max_model_len=65536,
+        subagent_recursion_limit=410,
         vllm_gpu_memory_utilization=0.9,
         vllm_startup_timeout=1800,
         image="image",
@@ -273,6 +293,9 @@ def test_episode_command_passes_docker_socket(tmp_path) -> None:
     )
 
     assert command[command.index("--docker-socket") + 1] == "/custom/docker.sock"
+    assert command[command.index("--subagent-base-url") + 1] == (
+        "http://host.docker.internal:8030/v1"
+    )
 
     args.docker_socket = None
     command = batch.episode_command(
@@ -696,6 +719,36 @@ def test_cleanup_continues_when_log_capture_fails(tmp_path, monkeypatch) -> None
     assert cleanup["captures"][0]["error"] == "OSError('capture failed')"
 
 
+def test_copy_user_configs_uses_container_copy_syntax(tmp_path, monkeypatch) -> None:
+    configs = tmp_path / "configs"
+    configs.mkdir()
+    source = configs / "global_configs.py"
+    source.write_text("# local config\n", encoding="utf-8")
+    calls = []
+
+    monkeypatch.setattr(run, "TOOLATHLON_ROOT", tmp_path)
+    monkeypatch.setattr(
+        run,
+        "USER_CONFIG_FILES",
+        ("configs/global_configs.py",),
+    )
+    monkeypatch.setattr(
+        run,
+        "_docker",
+        lambda *args, **kwargs: calls.append(args),
+    )
+
+    run._copy_user_configs("task-container")
+
+    assert calls == [
+        (
+            "cp",
+            str(source.resolve()),
+            "task-container:/workspace/configs/global_configs.py",
+        )
+    ]
+
+
 def test_interrupted_attempt_is_recorded_for_next_resume(tmp_path, monkeypatch) -> None:
     toolathlon_root = tmp_path / "toolathlon"
     (toolathlon_root / "tasks" / "finalpool" / "alpha").mkdir(parents=True)
@@ -788,8 +841,10 @@ def test_execute_episode_maps_deterministic_trace_and_eval_paths(
         model="decomposer-model",
         subagent_model="subagent-model",
         subagent_port=8030,
+        subagent_base_url=None,
         subagent_gpu="1",
         vllm_max_model_len=32768,
+        subagent_recursion_limit=410,
         vllm_gpu_memory_utilization=0.8,
         vllm_startup_timeout=30,
         image="image",
@@ -817,6 +872,7 @@ def test_execute_episode_maps_deterministic_trace_and_eval_paths(
     assert command[command.index("--episode-id") + 1] == episode_id
     assert command[command.index("--run-id") + 1] == "run-id"
     assert command[command.index("--n-jobs-per-worker") + 1] == "1000"
+    assert command[command.index("--subagent-recursion-limit") + 1] == "410"
     assert command[command.index("--stashes-dir") + 1] == str(root / "stashes")
     assert command[command.index("--container-lock-file") + 1] == str(
         root / "runs" / "run-id" / "container.lock"

@@ -31,6 +31,8 @@ analysis material.
    container; it holds one persistent SSE session to the gateway.
 5. The host runs Decomposer. Subagents are the configured
    `qwen_3_5_4b_non_thinking` assistant served by a host vLLM replica.
+   Every subagent uses a 265,000-token context and recursion limit 410.
+   DeepSeek Decomposer models always run with high reasoning effort.
 6. After the agent loop the runner writes the benchmark-format
    `traj_log.json` into the shared episode directory, restores the evaluator
    artifacts, and runs `scripts.decoupled.container_eval` in the container.
@@ -150,6 +152,16 @@ uv run python gyms/toolathlon/run.py finalpool/find-alita-paper \
 Use `--reuse-vllm` only when the configured port already serves the expected
 model and the runner must not own that external process.
 
+When the OpenAI-compatible server runs on the macOS host and task containers
+run through Colima, also pass
+`--subagent-base-url http://host.docker.internal:8030/v1`; the regular
+`--subagent-port` remains the host-side readiness-check port.
+Also pass `--docker-socket /var/run/docker.sock`: bind-mount source paths are
+resolved inside Colima's Linux VM, not against its macOS client socket path.
+Finally, pass `--publish-service-ports` so the container MCP gateway and
+LangGraph server are published from Colima back to macOS loopback instead of
+being stranded on the VM's host network.
+
 For several externally managed replicas (for example the MLSpace pool below),
 pass their host-local ports as a pool. The batch verifies every endpoint and
 assigns episodes round-robin:
@@ -230,6 +242,8 @@ stashes/<domain>/<task>/<episode-id>/
   (host-private stash of evaluator artifacts; removed after restore)
 evals/<domain>/<task>/<episode-id>/result.json
 logs/<domain>/<task>/<episode-id>/vllm.log
+logs/<domain>/<task>/<episode-id>/runner.stdout.log
+logs/<domain>/<task>/<episode-id>/runner.stderr.log
 ```
 
 The manifest is atomically replaced after every state transition. Each
@@ -251,3 +265,7 @@ vLLM is started once before the worker pool and stopped once after it.
   server, MCP server processes, workspace, and native evaluation.
 
 Evaluation records use the same episode identifier as their traces.
+`trace.json` includes every Decomposer message and the complete message
+history for each subagent run, including intermediate model responses and
+tool results. It also records the effective context, recursion, and reasoning
+settings so runs can be compared without reconstructing their launch command.
