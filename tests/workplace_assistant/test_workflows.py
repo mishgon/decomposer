@@ -58,6 +58,134 @@ def test_registry_is_global_and_unique() -> None:
     }
 
 
+def test_port_layout_offsets_all_coordinated_endpoints() -> None:
+    ports = run_module.WorkplacePortLayout(12000)
+    assert ports.simple_vllm == 20000
+    assert ports.langgraph == 14024
+    assert ports.gym_head == 23000
+    assert (ports.gym_component_low, ports.gym_component_high) == (23001, 23999)
+    assert run_module.nonnegative_int("0") == 0
+    assert run_module.nonnegative_int("53536") == 53536
+    with pytest.raises(run_module.argparse.ArgumentTypeError, match="TCP port range"):
+        run_module.nonnegative_int("53537")
+    with pytest.raises(run_module.argparse.ArgumentTypeError, match="non-negative"):
+        run_module.nonnegative_int("-1")
+
+
+def test_port_offset_threads_through_simple_commands() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    experiment = get_experiment(
+        "gemma4-e4b-thinking-simple-text-defaults"
+    )
+    assert isinstance(experiment, SimpleExperiment)
+    ports = run_module.WorkplacePortLayout(12000)
+    vllm = run_module.simple_vllm_command(experiment, ports)
+    assert vllm[vllm.index("--port") + 1] == "20000"
+    start = run_module.gym_start_command(
+        repo_root,
+        experiment,
+        purpose="evaluation",
+        gym_bin=Path("/gym"),
+        component_root=Path("/components"),
+        logs=Path("/logs"),
+        ports=ports,
+    )
+    assert start[start.index("--model-url") + 1] == "http://127.0.0.1:20000/v1"
+    assert "+head_server.port=23000" in start
+    assert "+port_range_low=23001" in start
+    assert "+port_range_high=23999" in start
+    evaluation = run_module.gym_eval_command(
+        experiment,
+        gym_bin=Path("/gym"),
+        split="validation",
+        output=Path("/output.jsonl"),
+        num_repeats=1,
+        limit=None,
+        resume=False,
+        ports=ports,
+    )
+    assert "+head_server.port=23000" in evaluation
+
+
+def test_port_offset_materializes_decomposer_runtime_config(tmp_path: Path) -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    experiment = get_experiment(
+        "gemma4-26b-a4b-thinking-gemma4-e4b-thinking-text-defaults"
+    )
+    assert isinstance(experiment, DecomposerExperiment)
+    ports = run_module.WorkplacePortLayout(24000)
+    config_path, metadata = run_module.runtime_decomposer_config(
+        repo_root,
+        experiment,
+        tmp_path,
+        ports,
+        materialize=True,
+    )
+    config = yaml.safe_load(config_path.read_text())
+    policy = config["policy_model"]["responses_api_models"]["vllm_model"]
+    agent = config["decomposer"]["responses_api_agents"]["decomposer_agent"]
+    assert policy["base_url"] == "http://127.0.0.1:32023/v1"
+    assert {item["url"] for item in agent["subagent_types"]} == {
+        "http://127.0.0.1:26024"
+    }
+    assert metadata["sha256"] == run_module.sha256_file(config_path)
+    assert len(metadata["rewrites"]) == 2
+    tracked = repo_root / "gyms" / "workplace_assistant" / "configs"
+    source = tracked / experiment.gym_config_filename
+    assert yaml.safe_load(source.read_text())["policy_model"][
+        "responses_api_models"
+    ]["vllm_model"]["base_url"] == "http://127.0.0.1:8023/v1"
+
+
+def test_port_offset_rewrites_qwen_proxy_and_legacy_configs(tmp_path: Path) -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    ports = run_module.WorkplacePortLayout(12000)
+    qwen = get_experiment(
+        "qwen36-35b-a3b-non-thinking-teacher-"
+        "qwen35-4b-non-thinking-text-defaults"
+    )
+    assert isinstance(qwen, DecomposerExperiment)
+    path, _ = run_module.runtime_decomposer_config(
+        repo_root, qwen, tmp_path / "qwen", ports, materialize=True
+    )
+    config = yaml.safe_load(path.read_text())
+    proxy = config["policy_model"]["responses_api_models"]["openai_model"]
+    assert proxy["openai_base_url"] == "http://127.0.0.1:20142/v1"
+    command = run_module.remote_manager_proxy_command(qwen, ports)
+    assert command[command.index("--port") + 1] == "20142"
+
+    for experiment in DECOMPOSER_EXPERIMENTS:
+        runtime_path, metadata = run_module.runtime_decomposer_config(
+            repo_root,
+            experiment,
+            tmp_path / experiment.name,
+            ports,
+            materialize=False,
+        )
+        assert runtime_path.name == "workplace_assistant.runtime.yaml"
+        assert metadata["rewrites"]
+
+
+def test_nonzero_offset_uses_repository_graph_and_model_url_mapping() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    experiment = get_experiment("deepseek-v4-flash-0731-gemma4-all")
+    assert isinstance(experiment, DecomposerExperiment)
+    ports = run_module.WorkplacePortLayout(12000)
+    command, directory = run_module.langgraph_command(repo_root, experiment, ports)
+    assert directory == repo_root / "gyms" / "workplace_assistant" / "subagents"
+    assert command[command.index("--port") + 1] == "14024"
+    environment = run_module._base_environment(
+        repo_root, experiment, "offset-test", ports
+    )
+    urls = json.loads(environment[run_module.SUBAGENT_MODEL_URLS_ENV])
+    assert urls == {
+        "google/gemma-4-E2B-it": "http://127.0.0.1:20020/v1",
+        "google/gemma-4-E4B-it": "http://127.0.0.1:20021/v1",
+        "google/gemma-4-12B-it": "http://127.0.0.1:20022/v1",
+        "google/gemma-4-26B-A4B-it": "http://127.0.0.1:20023/v1",
+    }
+
+
 def test_qwen36_teacher_uses_internal_proxy_and_concurrency_override() -> None:
     repo_root = Path(__file__).resolve().parents[2]
     experiment = get_experiment("qwen36-35b-a3b-teacher-qwen35-4b-non-thinking")
@@ -441,6 +569,135 @@ def test_simple_output_identity_includes_max_steps(tmp_path: Path) -> None:
         )
 
 
+def test_port_offset_isolates_default_output_and_resume_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    experiment = get_experiment("qwen35-4b-base-non-thinking")
+    assert isinstance(experiment, SimpleExperiment)
+    monkeypatch.setattr(experiments, "RESULTS_ROOT", tmp_path / "results")
+    args = run_module.build_parser().parse_args(
+        [
+            "--experiment",
+            experiment.name,
+            "--purpose",
+            "evaluation",
+            "--split",
+            "validation",
+            "--num-repeats",
+            "3",
+            "--port-offset",
+            "12000",
+        ]
+    )
+    directory = run_module.selected_output_dir(experiment, args)
+    assert directory.name.endswith("-port-offset-12000")
+    identity = run_module.local_run_name(
+        experiment,
+        3,
+        prompt_profile=None,
+        ports=run_module.WorkplacePortLayout(12000),
+    )
+    monkeypatch.setattr(run_module, "ARTIFACTS_ROOT", tmp_path / "artifacts")
+    environment = run_module._base_environment(
+        Path(__file__).resolve().parents[2],
+        experiment,
+        identity,
+        run_module.WorkplacePortLayout(12000),
+    )
+    assert Path(environment["VLLM_CACHE_ROOT"]).parts[-2:] == (identity, "vllm")
+
+    legacy = tmp_path / "legacy"
+    legacy.mkdir()
+    (legacy / "run_status.json").write_text(
+        json.dumps(
+            {
+                "experiment": experiment.name,
+                "kind": "simple",
+                "purpose": "evaluation",
+                "split": "validation",
+                "num_repeats": 3,
+                "limit": None,
+                "simple_agent_max_steps": experiment.max_steps,
+            }
+        )
+    )
+    run_module.validate_existing_attempt_identity(
+        legacy,
+        experiment,
+        purpose="evaluation",
+        split="validation",
+        num_repeats=3,
+        limit=None,
+        force=False,
+    )
+    with pytest.raises(RuntimeError, match="port_offset=0"):
+        run_module.validate_existing_attempt_identity(
+            legacy,
+            experiment,
+            purpose="evaluation",
+            split="validation",
+            num_repeats=3,
+            limit=None,
+            force=False,
+            ports=run_module.WorkplacePortLayout(12000),
+        )
+
+
+def test_port_offset_dry_plans_are_disjoint(tmp_path: Path) -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    cases = (
+        (
+            get_experiment("qwen35-4b-non-thinking-simple-general-text-defaults"),
+            run_module.WorkplacePortLayout(0),
+            ("0",),
+        ),
+        (
+            get_experiment("gemma4-e4b-thinking-simple-text-defaults"),
+            run_module.WorkplacePortLayout(12000),
+            ("1",),
+        ),
+        (
+            get_experiment(
+                "gemma4-26b-a4b-thinking-gemma4-e4b-thinking-text-defaults"
+            ),
+            run_module.WorkplacePortLayout(24000),
+            ("2", "3"),
+        ),
+    )
+    occupied: list[set[int]] = []
+    for index, (experiment, ports, devices) in enumerate(cases):
+        plan = run_module._dry_plan(
+            repo_root,
+            experiment,
+            "evaluation",
+            "validation",
+            1,
+            1,
+            tmp_path / str(index),
+            devices,
+            ports=ports,
+        )
+        layout = plan["port_layout"]
+        current = {
+            layout["simple_agent_vllm"],
+            layout["langgraph"],
+            layout["gym_head"],
+            *layout["model_servers"].values(),
+        }
+        if layout["manager_proxy"] is not None:
+            current.add(layout["manager_proxy"])
+        current.update(
+            range(
+                layout["gym_component_range"][0],
+                layout["gym_component_range"][1] + 1,
+            )
+        )
+        assert all(current.isdisjoint(previous) for previous in occupied)
+        occupied.append(current)
+        if plan["runtime_gym_config"] is not None and ports.offset:
+            assert not Path(plan["runtime_gym_config"]["path"]).exists()
+
+
 def test_simple_execute_does_not_read_decomposer_proxy_fields(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -506,6 +763,7 @@ def test_deepseek_simple_profile_is_remote_and_does_not_start_vllm() -> None:
     assert start[start.index("--model") + 1] == experiment.model_id
     assert start[start.index("--model-url") + 1] == experiment.base_url
     assert "--model-api-key" not in start
+    assert "++policy_api_key=${oc.env:OPENROUTER_API_KEY_DECOMPOSER}" in start
     assert any(argument.endswith('{reasoning:{effort:"high"}}') for argument in start)
 
     plan = run_module._dry_plan(

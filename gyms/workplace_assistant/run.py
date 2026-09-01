@@ -20,9 +20,12 @@ import urllib.request
 from collections import Counter
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+
+import yaml
 
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -62,6 +65,91 @@ from gyms.workplace_assistant.experiments import (  # noqa: E402
 
 
 WORKPLACE_ROLLOUT_FAILURE_POLICY = "score_zero"
+SIMPLE_VLLM_PORT = 8000
+LANGGRAPH_PORT = 2024
+GYM_HEAD_PORT = 11000
+GYM_COMPONENT_PORT_LOW = 11001
+GYM_COMPONENT_PORT_HIGH = 11999
+MAX_TCP_PORT = 65535
+SUBAGENT_MODEL_URLS_ENV = "WORKPLACE_ASSISTANT_MODEL_BASE_URLS_JSON"
+
+
+@dataclass(frozen=True)
+class WorkplacePortLayout:
+    offset: int = 0
+
+    def __post_init__(self) -> None:
+        if isinstance(self.offset, bool) or not isinstance(self.offset, int):
+            raise TypeError("port offset must be an integer")
+        if self.offset < 0:
+            raise ValueError("port offset must be non-negative")
+        if self.gym_component_high > MAX_TCP_PORT:
+            raise ValueError(
+                f"port offset {self.offset} exceeds the maximum TCP port "
+                f"({self.gym_component_high} > {MAX_TCP_PORT})"
+            )
+
+    def shifted(self, base_port: int) -> int:
+        port = base_port + self.offset
+        if not 1 <= port <= MAX_TCP_PORT:
+            raise ValueError(
+                f"port offset {self.offset} maps {base_port} outside the valid "
+                f"TCP port range: {port}"
+            )
+        return port
+
+    @property
+    def simple_vllm(self) -> int:
+        return self.shifted(SIMPLE_VLLM_PORT)
+
+    @property
+    def langgraph(self) -> int:
+        return self.shifted(LANGGRAPH_PORT)
+
+    @property
+    def gym_head(self) -> int:
+        return self.shifted(GYM_HEAD_PORT)
+
+    @property
+    def gym_component_low(self) -> int:
+        return self.shifted(GYM_COMPONENT_PORT_LOW)
+
+    @property
+    def gym_component_high(self) -> int:
+        return self.shifted(GYM_COMPONENT_PORT_HIGH)
+
+    def model_port(self, model: ModelServer) -> int:
+        return self.shifted(model.port)
+
+    def manager_proxy_port(self, experiment: DecomposerExperiment) -> int:
+        if experiment.manager_proxy_port is None:
+            raise ValueError(f"{experiment.name} has no local manager proxy")
+        return self.shifted(experiment.manager_proxy_port)
+
+    def as_dict(self, experiment: Experiment) -> dict[str, Any]:
+        value: dict[str, Any] = {
+            "offset": self.offset,
+            "simple_agent_vllm": self.simple_vllm,
+            "langgraph": self.langgraph,
+            "gym_head": self.gym_head,
+            "gym_component_range": [
+                self.gym_component_low,
+                self.gym_component_high,
+            ],
+            "model_servers": {},
+            "manager_proxy": None,
+        }
+        if isinstance(experiment, DecomposerExperiment):
+            value["model_servers"] = {
+                model.model_id: self.model_port(model)
+                for model in models_for_experiment(experiment)
+            }
+            if experiment.requires_llm_proxy:
+                value["manager_proxy"] = self.manager_proxy_port(experiment)
+        return value
+
+
+DEFAULT_PORT_LAYOUT = WorkplacePortLayout()
 
 
 def utc_now() -> str:
@@ -75,12 +163,44 @@ def atomic_json(path: Path, value: Any) -> None:
     os.replace(temporary, path)
 
 
+def atomic_bytes(path: Path, value: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(path.suffix + f".tmp.{os.getpid()}")
+    temporary.write_bytes(value)
+    os.replace(temporary, path)
+
+
 def sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
         while chunk := stream.read(8 * 1024 * 1024):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def sha256_bytes(value: bytes) -> str:
+    return hashlib.sha256(value).hexdigest()
+
+
+def loopback_url(port: int) -> str:
+    return f"http://127.0.0.1:{port}/v1"
+
+
+def local_run_name(
+    experiment: Experiment,
+    num_repeats: int,
+    *,
+    prompt_profile: str | None,
+    ports: WorkplacePortLayout,
+) -> str:
+    identity = run_name(
+        experiment,
+        num_repeats,
+        prompt_profile=prompt_profile,
+    )
+    if ports.offset:
+        identity += f"-port-offset-{ports.offset}"
+    return identity
 
 
 def hydra_flow_mapping(values: Mapping[str, Any]) -> str:
@@ -128,6 +248,142 @@ def runtime_configuration(experiment: Experiment) -> dict[str, Any]:
             "max_model_calls": experiment.subagent_max_model_calls,
             "recursion_limit": experiment.subagent_recursion_limit,
         },
+    }
+
+
+def _decomposer_config_source(
+    local_repo: Path, experiment: DecomposerExperiment
+) -> Path:
+    return (
+        local_repo
+        / "gyms"
+        / "workplace_assistant"
+        / "configs"
+        / experiment.gym_config_filename
+    )
+
+
+def _configured_policy_model(config: Mapping[str, Any], name: str) -> dict[str, Any]:
+    try:
+        value = config["policy_model"]["responses_api_models"][name]
+    except (KeyError, TypeError) as error:
+        raise ValueError(
+            f"Workplace config is missing policy model {name!r}"
+        ) from error
+    if not isinstance(value, dict):
+        raise ValueError(f"Workplace policy model {name!r} must be a mapping")
+    return value
+
+
+def _rewrite_decomposer_endpoints(
+    config: dict[str, Any],
+    experiment: DecomposerExperiment,
+    ports: WorkplacePortLayout,
+) -> list[dict[str, str]]:
+    rewrites: list[dict[str, str]] = []
+
+    def replace_url(
+        value: dict[str, Any], key: str, expected: str, replacement: str
+    ) -> None:
+        observed = value.get(key)
+        if observed != expected:
+            raise ValueError(
+                f"{experiment.gym_config_filename}: expected {key}={expected!r}, "
+                f"found {observed!r}"
+            )
+        value[key] = replacement
+        if replacement != expected:
+            rewrites.append({"from": expected, "to": replacement})
+
+    if experiment.requires_local_manager:
+        policy = _configured_policy_model(config, "vllm_model")
+        manager_model_id = policy.get("model")
+        matches = [
+            model
+            for model in models_for_experiment(experiment)
+            if model.model_id == manager_model_id
+        ]
+        if len(matches) != 1:
+            raise ValueError(
+                f"{experiment.gym_config_filename}: policy model "
+                f"{manager_model_id!r} does not identify one local model server"
+            )
+        manager = matches[0]
+        replace_url(
+            policy,
+            "base_url",
+            loopback_url(manager.port),
+            loopback_url(ports.model_port(manager)),
+        )
+    elif experiment.requires_llm_proxy:
+        policy = _configured_policy_model(config, "openai_model")
+        if experiment.manager_proxy_port is None:
+            raise ValueError(f"{experiment.name} has no manager proxy port")
+        replace_url(
+            policy,
+            "openai_base_url",
+            loopback_url(experiment.manager_proxy_port),
+            loopback_url(ports.manager_proxy_port(experiment)),
+        )
+
+    try:
+        subagent_types = config["decomposer"]["responses_api_agents"][
+            "decomposer_agent"
+        ]["subagent_types"]
+    except (KeyError, TypeError) as error:
+        raise ValueError(
+            f"{experiment.gym_config_filename}: subagent_types is missing"
+        ) from error
+    if not isinstance(subagent_types, list) or not subagent_types:
+        raise ValueError(
+            f"{experiment.gym_config_filename}: subagent_types must be a non-empty list"
+        )
+    for subagent in subagent_types:
+        if not isinstance(subagent, dict):
+            raise ValueError(
+                f"{experiment.gym_config_filename}: subagent entry must be a mapping"
+            )
+        replace_url(
+            subagent,
+            "url",
+            f"http://127.0.0.1:{LANGGRAPH_PORT}",
+            f"http://127.0.0.1:{ports.langgraph}",
+        )
+    return rewrites
+
+
+def runtime_decomposer_config(
+    local_repo: Path,
+    experiment: DecomposerExperiment,
+    directory: Path,
+    ports: WorkplacePortLayout,
+    *,
+    materialize: bool,
+) -> tuple[Path, dict[str, Any]]:
+    source = _decomposer_config_source(local_repo, experiment)
+    source_locator = source.relative_to(local_repo).as_posix()
+    source_bytes = source.read_bytes()
+    config = yaml.safe_load(source_bytes)
+    if not isinstance(config, dict):
+        raise ValueError(f"Workplace config must contain a mapping: {source}")
+    rewrites = _rewrite_decomposer_endpoints(config, experiment, ports)
+    if ports.offset == 0:
+        return source, {
+            "source": source_locator,
+            "path": source_locator,
+            "sha256": sha256_bytes(source_bytes),
+            "rewrites": rewrites,
+        }
+
+    destination = directory / "configuration" / "workplace_assistant.runtime.yaml"
+    runtime_bytes = yaml.safe_dump(config, sort_keys=False).encode("utf-8")
+    if materialize:
+        atomic_bytes(destination, runtime_bytes)
+    return destination, {
+        "source": source_locator,
+        "path": str(destination),
+        "sha256": sha256_bytes(runtime_bytes),
+        "rewrites": rewrites,
     }
 
 
@@ -200,7 +456,10 @@ def wait_http(
     raise TimeoutError(f"Timed out waiting for {url}")
 
 
-def simple_vllm_command(experiment: SimpleExperiment) -> list[str]:
+def simple_vllm_command(
+    experiment: SimpleExperiment,
+    ports: WorkplacePortLayout = DEFAULT_PORT_LAYOUT,
+) -> list[str]:
     if experiment.requires_openrouter or experiment.checkpoint is None:
         raise ValueError(f"{experiment.name} does not use a local vLLM server")
     command = [
@@ -210,7 +469,7 @@ def simple_vllm_command(experiment: SimpleExperiment) -> list[str]:
         "--host",
         "127.0.0.1",
         "--port",
-        "8000",
+        str(ports.simple_vllm),
         "--tensor-parallel-size",
         str(experiment.num_gpus),
         "--gpu-memory-utilization",
@@ -233,7 +492,9 @@ def simple_vllm_command(experiment: SimpleExperiment) -> list[str]:
 
 
 def decomposer_vllm_command(
-    model: ModelServer, experiment: DecomposerExperiment
+    model: ModelServer,
+    experiment: DecomposerExperiment,
+    ports: WorkplacePortLayout = DEFAULT_PORT_LAYOUT,
 ) -> list[str]:
     command = [
         str(PROJECT_VENV / "bin" / "vllm"),
@@ -244,7 +505,7 @@ def decomposer_vllm_command(
         "--host",
         "127.0.0.1",
         "--port",
-        str(model.port),
+        str(ports.model_port(model)),
         "--max-model-len",
         str(experiment.max_model_len),
         "--max-num-seqs",
@@ -267,7 +528,10 @@ def decomposer_vllm_command(
     return command
 
 
-def remote_manager_proxy_command(experiment: DecomposerExperiment) -> list[str]:
+def remote_manager_proxy_command(
+    experiment: DecomposerExperiment,
+    ports: WorkplacePortLayout = DEFAULT_PORT_LAYOUT,
+) -> list[str]:
     if not experiment.requires_llm_proxy:
         raise ValueError(f"{experiment.name} does not use the LLM proxy manager")
     required = {
@@ -286,7 +550,7 @@ def remote_manager_proxy_command(experiment: DecomposerExperiment) -> list[str]:
         "--host",
         "127.0.0.1",
         "--port",
-        str(experiment.manager_proxy_port),
+        str(ports.manager_proxy_port(experiment)),
         "--upstream-url-env",
         str(experiment.manager_upstream_url_env),
         "--api-key-env",
@@ -306,9 +570,11 @@ def remote_manager_proxy_command(experiment: DecomposerExperiment) -> list[str]:
 
 
 def langgraph_command(
-    local_repo: Path, experiment: DecomposerExperiment
+    local_repo: Path,
+    experiment: DecomposerExperiment,
+    ports: WorkplacePortLayout = DEFAULT_PORT_LAYOUT,
 ) -> tuple[list[str], Path]:
-    if experiment.subagent_graph in {"qwen35", "repository"}:
+    if ports.offset or experiment.subagent_graph in {"qwen35", "repository"}:
         directory = local_repo / "gyms" / "workplace_assistant" / "subagents"
     else:
         directory = (
@@ -328,7 +594,7 @@ def langgraph_command(
             "--host",
             "127.0.0.1",
             "--port",
-            "2024",
+            str(ports.langgraph),
             "--n-jobs-per-worker",
             str(experiment.langgraph_jobs),
             "--no-browser",
@@ -347,26 +613,22 @@ def gym_start_command(
     component_root: Path,
     logs: Path,
     prompt_profile: str | None = None,
+    ports: WorkplacePortLayout = DEFAULT_PORT_LAYOUT,
+    config_path: Path | None = None,
 ) -> list[str]:
     validate_purpose_for_experiment(experiment, purpose)
     common = [
         "+head_server.host=127.0.0.1",
-        "+head_server.port=11000",
-        "+port_range_low=11001",
-        "+port_range_high=11999",
+        f"+head_server.port={ports.gym_head}",
+        f"+port_range_low={ports.gym_component_low}",
+        f"+port_range_high={ports.gym_component_high}",
         "+skip_venv_if_present=true",
         f"+uv_venv_dir={component_root}",
         f"+uv_cache_dir={UV_CACHE}",
         f"+nemo_gym_log_dir={logs / 'gym_components'}",
     ]
     if isinstance(experiment, DecomposerExperiment):
-        config = (
-            local_repo
-            / "gyms"
-            / "workplace_assistant"
-            / "configs"
-            / experiment.gym_config_filename
-        )
+        config = config_path or _decomposer_config_source(local_repo, experiment)
         prompt_profile = decomposer_prompt_profile(
             purpose,
             prompt_profile,
@@ -400,6 +662,10 @@ def gym_start_command(
                 "++responses_create_params.max_output_tokens="
                 f"{experiment.max_output_tokens}"
             )
+        if experiment.requires_openrouter:
+            command.append(
+                "++policy_api_key=${oc.env:OPENROUTER_API_KEY_DECOMPOSER}"
+            )
         return command
     if experiment.requires_openrouter:
         if experiment.model_id is None or experiment.base_url is None:
@@ -424,6 +690,7 @@ def gym_start_command(
             )
         command.extend(
             [
+                "++policy_api_key=${oc.env:OPENROUTER_API_KEY_DECOMPOSER}",
                 (
                     "++workplace_assistant_simple_agent.responses_api_agents."
                     f"simple_agent.max_steps={experiment.max_steps}"
@@ -445,7 +712,7 @@ def gym_start_command(
         "--model",
         str(experiment.checkpoint),
         "--model-url",
-        "http://127.0.0.1:8000/v1",
+        loopback_url(ports.simple_vllm),
         "--model-api-key",
         "EMPTY",
         (
@@ -470,6 +737,7 @@ def gym_eval_command(
     limit: int | None,
     resume: bool,
     concurrency: int | None = None,
+    ports: WorkplacePortLayout = DEFAULT_PORT_LAYOUT,
 ) -> list[str]:
     dataset = (
         decomposer_dataset(split)
@@ -498,7 +766,7 @@ def gym_eval_command(
         str(concurrency or experiment.concurrency),
         f"+rollout_failure_policy={WORKPLACE_ROLLOUT_FAILURE_POLICY}",
         "+head_server.host=127.0.0.1",
-        "+head_server.port=11000",
+        f"+head_server.port={ports.gym_head}",
     ]
     if isinstance(experiment, SimpleExperiment):
         command.extend(
@@ -816,6 +1084,8 @@ def validate_existing_attempt_identity(
     limit: int | None,
     force: bool,
     prompt_profile: str | None = None,
+    ports: WorkplacePortLayout = DEFAULT_PORT_LAYOUT,
+    runtime_gym_config_sha256: str | None = None,
 ) -> None:
     if not directory.is_dir() or force:
         return
@@ -837,7 +1107,11 @@ def validate_existing_attempt_identity(
         "num_repeats": num_repeats,
         "limit": limit,
         "purpose": purpose,
+        "port_offset": ports.offset,
+        "port_layout": ports.as_dict(experiment),
     }
+    if runtime_gym_config_sha256 is not None:
+        expected["runtime_gym_config_sha256"] = runtime_gym_config_sha256
     if isinstance(experiment, SimpleExperiment):
         expected["simple_agent_max_steps"] = experiment.max_steps
     else:
@@ -854,7 +1128,27 @@ def validate_existing_attempt_identity(
                 ),
             }
         )
-    observed = {**metadata, "purpose": existing_purpose}
+    existing_offset = metadata.get("port_offset", 0)
+    observed = {
+        **metadata,
+        "purpose": existing_purpose,
+        "port_offset": existing_offset,
+    }
+    if "port_layout" not in observed:
+        observed["port_layout"] = (
+            ports.as_dict(experiment)
+            if existing_offset == 0 and ports.offset == 0
+            else None
+        )
+    if (
+        runtime_gym_config_sha256 is not None
+        and "runtime_gym_config_sha256" not in observed
+    ):
+        observed["runtime_gym_config_sha256"] = (
+            runtime_gym_config_sha256
+            if existing_offset == 0 and ports.offset == 0
+            else None
+        )
     for field, expected_value in expected.items():
         if field not in observed:
             if field in {
@@ -894,7 +1188,10 @@ def validate_existing_attempt_identity(
 
 
 def _base_environment(
-    local_repo: Path, experiment: Experiment, run_identity: str
+    local_repo: Path,
+    experiment: Experiment,
+    run_identity: str,
+    ports: WorkplacePortLayout = DEFAULT_PORT_LAYOUT,
 ) -> dict[str, str]:
     worker_ip = socket.gethostbyname(socket.gethostname())
     no_proxy = ",".join(
@@ -952,6 +1249,14 @@ def _base_environment(
         env["DECOMPOSER_SUBAGENT_MAX_MODEL_CALLS"] = str(
             experiment.subagent_max_model_calls
         )
+        env[SUBAGENT_MODEL_URLS_ENV] = json.dumps(
+            {
+                model.model_id: loopback_url(ports.model_port(model))
+                for model in models_for_experiment(experiment)
+            },
+            separators=(",", ":"),
+            sort_keys=True,
+        )
         if experiment.max_output_tokens is not None:
             env["DECOMPOSER_SUBAGENT_MAX_COMPLETION_TOKENS"] = str(
                 experiment.max_output_tokens
@@ -973,26 +1278,38 @@ def _dry_plan(
     visible_devices: tuple[str, ...],
     concurrency: int | None = None,
     prompt_profile: str | None = None,
+    ports: WorkplacePortLayout = DEFAULT_PORT_LAYOUT,
 ) -> dict[str, Any]:
     validate_purpose_for_experiment(experiment, purpose)
     logs = directory / "logs"
     gym_bin = gym_venv(local_repo) / "bin" / "gym"
+    runtime_config_path: Path | None = None
+    runtime_config_metadata: dict[str, Any] | None = None
     if isinstance(experiment, SimpleExperiment):
         if experiment.requires_openrouter:
             services = []
             gpu_assignments = {}
         else:
-            services = [simple_vllm_command(experiment)]
+            services = [simple_vllm_command(experiment, ports)]
             gpu_assignments = {"policy_vllm": ",".join(visible_devices)}
     else:
         models = models_for_experiment(experiment)
+        runtime_config_path, runtime_config_metadata = runtime_decomposer_config(
+            local_repo,
+            experiment,
+            directory,
+            ports,
+            materialize=False,
+        )
         services = []
         if experiment.requires_llm_proxy:
-            services.append(remote_manager_proxy_command(experiment))
-        services.extend(decomposer_vllm_command(model, experiment) for model in models)
-        services.append(langgraph_command(local_repo, experiment)[0])
+            services.append(remote_manager_proxy_command(experiment, ports))
+        services.extend(
+            decomposer_vllm_command(model, experiment, ports) for model in models
+        )
+        services.append(langgraph_command(local_repo, experiment, ports)[0])
         gpu_assignments = {
-            f"subagent_vllm_{model.port}": visible_devices[model.gpu]
+            f"subagent_vllm_{ports.model_port(model)}": visible_devices[model.gpu]
             for model in models
         }
     rollout_path = directory / "rollouts.jsonl"
@@ -1041,8 +1358,11 @@ def _dry_plan(
             else None
         ),
         "purpose": purpose,
+        "port_offset": ports.offset,
+        "port_layout": ports.as_dict(experiment),
         "rollout_failure_policy": WORKPLACE_ROLLOUT_FAILURE_POLICY,
         "runtime_configuration": runtime_configuration(experiment),
+        "runtime_gym_config": runtime_config_metadata,
         "split": split,
         "services": [shlex.join(command) for command in services],
         "gym_start": shlex.join(
@@ -1054,6 +1374,8 @@ def _dry_plan(
                 component_root=component_venv_root(local_repo),
                 logs=logs,
                 prompt_profile=prompt_profile,
+                ports=ports,
+                config_path=runtime_config_path,
             )
         ),
         "gym_eval": shlex.join(
@@ -1066,6 +1388,7 @@ def _dry_plan(
                 limit=limit,
                 resume=rollout_path.exists(),
                 concurrency=concurrency,
+                ports=ports,
             )
         ),
         "output_dir": str(directory),
@@ -1098,18 +1421,25 @@ def selected_cuda_devices(
 def selected_output_dir(experiment: Experiment, args: argparse.Namespace) -> Path:
     if args.output_dir is not None:
         return args.output_dir.expanduser().resolve()
-    return output_dir(
+    ports = WorkplacePortLayout(getattr(args, "port_offset", 0))
+    directory = output_dir(
         experiment,
         args.split,
         args.num_repeats,
-        args.limit,
+        None,
         purpose=args.purpose,
         prompt_profile=getattr(args, "prompt_profile", None),
     )
+    if ports.offset:
+        directory = directory.with_name(
+            f"{directory.name}-port-offset-{ports.offset}"
+        )
+    return directory if args.limit is None else directory / f"smoke_{args.limit}"
 
 
 def execute(local_repo: Path, args: argparse.Namespace) -> int:
     experiment = get_experiment(args.experiment)
+    ports = WorkplacePortLayout(getattr(args, "port_offset", 0))
     validate_num_repeats(args.num_repeats)
     purpose = validate_purpose_for_experiment(experiment, args.purpose)
     requested_prompt_profile = getattr(args, "prompt_profile", None)
@@ -1147,6 +1477,7 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
                     visible_devices,
                     args.concurrency,
                     requested_prompt_profile,
+                    ports,
                 ),
                 indent=2,
                 sort_keys=True,
@@ -1154,6 +1485,16 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
         )
         return 0
 
+    runtime_config_path: Path | None = None
+    runtime_config_metadata: dict[str, Any] | None = None
+    if isinstance(experiment, DecomposerExperiment):
+        runtime_config_path, runtime_config_metadata = runtime_decomposer_config(
+            local_repo,
+            experiment,
+            directory,
+            ports,
+            materialize=False,
+        )
     validate_existing_attempt_identity(
         directory,
         experiment,
@@ -1163,6 +1504,12 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
         limit=args.limit,
         force=args.force,
         prompt_profile=requested_prompt_profile,
+        ports=ports,
+        runtime_gym_config_sha256=(
+            runtime_config_metadata["sha256"]
+            if runtime_config_metadata is not None
+            else None
+        ),
     )
     marker = directory / ".eval_done.json"
     if marker.is_file() and not args.force:
@@ -1188,13 +1535,21 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
 
     archived_attempt = archive_attempt(directory) if args.force else None
     directory.mkdir(parents=True, exist_ok=True)
+    if isinstance(experiment, DecomposerExperiment):
+        runtime_config_path, runtime_config_metadata = runtime_decomposer_config(
+            local_repo,
+            experiment,
+            directory,
+            ports,
+            materialize=True,
+        )
     logs = directory / "logs"
     rollout_path = directory / "rollouts.jsonl"
     resume = rollout_path.is_file() and not args.force
     status_path = directory / "run_status.json"
     started = time.monotonic()
     status: dict[str, Any] = {
-        "schema_version": 4,
+        "schema_version": 5,
         "state": "starting",
         "experiment": experiment.name,
         "kind": experiment.kind,
@@ -1217,8 +1572,16 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
             else None
         ),
         "purpose": purpose,
+        "port_offset": ports.offset,
+        "port_layout": ports.as_dict(experiment),
         "rollout_failure_policy": WORKPLACE_ROLLOUT_FAILURE_POLICY,
         "runtime_configuration": runtime_configuration(experiment),
+        "runtime_gym_config": runtime_config_metadata,
+        "runtime_gym_config_sha256": (
+            runtime_config_metadata["sha256"]
+            if runtime_config_metadata is not None
+            else None
+        ),
         "decomposer_system_prompt_profile": (
             resolved_prompt_profile
             if isinstance(experiment, DecomposerExperiment)
@@ -1233,10 +1596,11 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
             if resolved_prompt_profile is not None
             else None
         ),
-        "run_name": run_name(
+        "run_name": local_run_name(
             experiment,
             args.num_repeats,
             prompt_profile=requested_prompt_profile,
+            ports=ports,
         ),
         "split": args.split,
         "num_repeats": args.num_repeats,
@@ -1272,15 +1636,8 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
             status["timings_seconds"][name] = round(time.monotonic() - phase_started, 3)
             atomic_json(status_path, status)
 
-    env = _base_environment(
-        local_repo, experiment, run_name(experiment, args.num_repeats)
-    )
+    env = _base_environment(local_repo, experiment, status["run_name"], ports)
     supervisor = Supervisor(logs, env)
-    gym_env_path = local_repo / "external" / "Gym" / "env.yaml"
-    original_gym_env = gym_env_path.read_bytes() if gym_env_path.is_file() else None
-    original_gym_env_mode = (
-        gym_env_path.stat().st_mode & 0o7777 if gym_env_path.is_file() else None
-    )
     gym_bin = Path(manifest["gym"]["runtime"]["gym_bin"])
     component_root = Path(manifest["component_runtime"]["root"])
     try:
@@ -1289,20 +1646,27 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
                 if not experiment.requires_openrouter:
                     model_process = supervisor.start(
                         "policy_vllm",
-                        simple_vllm_command(experiment),
+                        simple_vllm_command(experiment, ports),
                         cwd=local_repo,
                         env={"CUDA_VISIBLE_DEVICES": ",".join(visible_devices)},
                     )
-                    wait_http("http://127.0.0.1:8000/v1/models", [model_process], 1800)
+                    wait_http(
+                        f"http://127.0.0.1:{ports.simple_vllm}/v1/models",
+                        [model_process],
+                        1800,
+                    )
             else:
                 if experiment.requires_llm_proxy:
                     proxy_process = supervisor.start(
                         "remote_manager_proxy",
-                        remote_manager_proxy_command(experiment),
+                        remote_manager_proxy_command(experiment, ports),
                         cwd=local_repo,
                     )
                     wait_http(
-                        f"http://127.0.0.1:{experiment.manager_proxy_port}/health",
+                        (
+                            "http://127.0.0.1:"
+                            f"{ports.manager_proxy_port(experiment)}/health"
+                        ),
                         [proxy_process],
                         300,
                     )
@@ -1315,8 +1679,8 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
                     for model in wave:
                         model_processes.append(
                             supervisor.start(
-                                f"subagent_vllm_{model.port}",
-                                decomposer_vllm_command(model, experiment),
+                                f"subagent_vllm_{ports.model_port(model)}",
+                                decomposer_vllm_command(model, experiment, ports),
                                 cwd=local_repo,
                                 env={
                                     "CUDA_VISIBLE_DEVICES": visible_devices[model.gpu]
@@ -1325,23 +1689,21 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
                         )
                     for model in wave:
                         wait_http(
-                            f"http://127.0.0.1:{model.port}/health",
+                            f"http://127.0.0.1:{ports.model_port(model)}/health",
                             model_processes,
                             1800,
                         )
                 langgraph_argv, langgraph_cwd = langgraph_command(
-                    local_repo, experiment
+                    local_repo, experiment, ports
                 )
                 langgraph = supervisor.start(
                     "langgraph", langgraph_argv, cwd=langgraph_cwd
                 )
-                wait_http("http://127.0.0.1:2024/docs", [langgraph], 300)
+                wait_http(
+                    f"http://127.0.0.1:{ports.langgraph}/docs", [langgraph], 300
+                )
 
         with phase("gym_startup"):
-            if experiment.requires_openrouter:
-                key = os.environ["OPENROUTER_API_KEY_DECOMPOSER"]
-                gym_env_path.write_text(f"policy_api_key: {json.dumps(key)}\n")
-                gym_env_path.chmod(0o600)
             gym_process = supervisor.start(
                 "gym_servers",
                 gym_start_command(
@@ -1352,10 +1714,16 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
                     component_root=component_root,
                     logs=logs,
                     prompt_profile=requested_prompt_profile,
+                    ports=ports,
+                    config_path=runtime_config_path,
                 ),
                 cwd=local_repo / "external" / "Gym",
             )
-            wait_http("http://127.0.0.1:11000/server_instances", [gym_process], 300)
+            wait_http(
+                f"http://127.0.0.1:{ports.gym_head}/server_instances",
+                [gym_process],
+                300,
+            )
             subprocess.run(
                 [
                     str(
@@ -1366,7 +1734,7 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
                         / "wait_for_servers.sh"
                     ),
                     str(gym_process.pid),
-                    "11000",
+                    str(ports.gym_head),
                     str(
                         experiment.gym_wait_timeout
                         if isinstance(experiment, SimpleExperiment)
@@ -1388,6 +1756,7 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
                 limit=args.limit,
                 resume=resume,
                 concurrency=args.concurrency,
+                ports=ports,
             )
             with (logs / "gym_eval.log").open("a") as stream:
                 subprocess.run(
@@ -1445,12 +1814,6 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
         atomic_json(status_path, status)
         raise
     finally:
-        if original_gym_env is None:
-            gym_env_path.unlink(missing_ok=True)
-        else:
-            gym_env_path.write_bytes(original_gym_env)
-            if original_gym_env_mode is not None:
-                gym_env_path.chmod(original_gym_env_mode)
         supervisor.stop()
 
     status.update(
@@ -1484,6 +1847,20 @@ def positive_int(value: str) -> int:
     return parsed
 
 
+def nonnegative_int(value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(str(error)) from error
+    if parsed < 0:
+        raise argparse.ArgumentTypeError("value must be non-negative")
+    try:
+        WorkplacePortLayout(parsed)
+    except (TypeError, ValueError) as error:
+        raise argparse.ArgumentTypeError(str(error)) from error
+    return parsed
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--experiment", required=True)
@@ -1491,6 +1868,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--split", choices=SPLITS, default="train")
     parser.add_argument("--num-repeats", type=positive_int, default=1)
     parser.add_argument("--concurrency", type=positive_int)
+    parser.add_argument(
+        "--port-offset",
+        type=nonnegative_int,
+        default=0,
+        help="add this value to every local Workplace service port",
+    )
     parser.add_argument("--prompt-profile", choices=DECOMPOSER_PROMPT_PROFILES)
     parser.add_argument("--limit", type=positive_int)
     parser.add_argument("--dry", "--dry-run", action="store_true")

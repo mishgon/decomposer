@@ -107,6 +107,36 @@ processes. `--output-dir` routes every result, log, status file, and completion
 marker beneath an explicit directory. Partial outputs resume by default.
 `--force` archives the previous attempt before starting fresh.
 
+Use `--port-offset` to run several local evaluations on the same host. The
+offset is added to every coordinated loopback endpoint: model servers, manager
+proxy, LangGraph, the Gym head server, and the complete Gym component range.
+Offset zero is the default and preserves the historical ports and artifact
+names. A nonzero default output and cache identity ends in
+`-port-offset-N`; resuming through an explicit `--output-dir` requires the same
+offset.
+
+```bash
+# Qwen simple agent: vLLM 8000 and Gym 11000-11999.
+.venv/bin/python -m gyms.workplace_assistant.run \
+  --experiment qwen35-4b-non-thinking-simple-general-text-defaults \
+  --purpose evaluation --split validation --port-offset 0
+
+# Gemma simple agent: ports shifted by 12000.
+.venv/bin/python -m gyms.workplace_assistant.run \
+  --experiment gemma4-e4b-thinking-simple-text-defaults \
+  --purpose evaluation --split validation --port-offset 12000
+
+# Gemma Decomposer: ports shifted by 24000.
+.venv/bin/python -m gyms.workplace_assistant.run \
+  --experiment gemma4-26b-a4b-thinking-gemma4-e4b-thinking-text-defaults \
+  --purpose evaluation --split validation --port-offset 24000
+```
+
+Offsets may be any non-negative value whose resulting ports do not exceed
+65535. A stride of 12000 is recommended because it keeps the current
+1000-port Gym component ranges disjoint. MLSpace launchers intentionally do
+not expose this local-host option and continue to use offset zero.
+
 Every Workplace simple agent has a 100-step cap. Every Workplace Decomposer
 manager and every spawned subagent independently has an exact 100-model-call
 cap. Workplace collection uses Gym's `score_zero` rollout-failure policy.
