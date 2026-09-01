@@ -32,7 +32,7 @@ analysis material.
    used by Decomposer subagents.
 5. Qwen requests are served by host vLLM. The selected agent mode changes
    only the host harness; task preparation and native grading stay identical.
-   Every subagent uses a 265,000-token context and recursion limit 410.
+   Every subagent uses a 256,000-token context and recursion limit 410.
    DeepSeek models always run with high reasoning effort.
 6. After the agent loop the runner writes the benchmark-format
    `traj_log.json` into the shared episode directory, restores the evaluator
