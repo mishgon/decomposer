@@ -126,6 +126,23 @@ uv run python gyms/toolathlon/run.py --all \
   --container-slots 4
 ```
 
+For the credential-feasible evaluation suite, run the 55 validated tasks three
+times with `--all-valid -n 3`. Metrics still use the complete 108-task
+benchmark as their denominator: every one of the 53 omitted tasks contributes
+three failures to pass@1 and one failed task to pass@3 and pass^3. The manifest
+records the omitted task names explicitly. Plain `--all` continues to run all
+108 tasks.
+
+```bash
+uv run python gyms/toolathlon/run.py --all-valid -n 3 \
+  --purpose evaluation \
+  --subagent-model "$QWEN" \
+  --subagent-gpu 0 \
+  --vllm-data-parallel-size 1 \
+  --concurrency 8 \
+  --container-slots 4
+```
+
 `simple` does not require OpenRouter. For the Decomposer harness, use
 `--agent-mode decomposer`, select its model with `--model`, and export
 `OPENROUTER_API_KEY`. This keeps the model choice and harness choice

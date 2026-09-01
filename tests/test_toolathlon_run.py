@@ -82,6 +82,31 @@ def test_evaluation_metrics_do_not_hide_unscored_tasks() -> None:
     assert metrics["unscored_trials"] == 1
 
 
+def test_all_valid_metrics_use_full_benchmark_denominator() -> None:
+    manifest = {
+        "config": {
+            "repetitions": 3,
+            "benchmark_task_count": 108,
+            "unrun_tasks_are_failures": True,
+        },
+        "episodes": [
+            {"task": "a", "score": score} for score in (True, False, False)
+        ]
+        + [{"task": "b", "score": score} for score in (True, True, True)],
+    }
+
+    metrics = batch.evaluation_metrics(manifest)
+
+    assert metrics["task_count"] == 2
+    assert metrics["benchmark_task_count"] == 108
+    assert metrics["unrun_task_count"] == 106
+    assert metrics["assumed_failed_task_count"] == 106
+    assert metrics["expected_trials"] == 324
+    assert metrics["pass@1"] == pytest.approx(4 / 324)
+    assert metrics["pass@3"] == pytest.approx(2 / 108)
+    assert metrics["pass^3"] == pytest.approx(1 / 108)
+
+
 from gyms.toolathlon.subagents import graph as subagent_graph
 from gyms.toolathlon.subagents.model_logging import durable_model_call_log
 from gyms.toolathlon.subagents.openrouter_compat import create_openrouter_model
@@ -740,18 +765,35 @@ def test_task_selection_lists_domain_task_pairs_and_validates_subset(tmp_path) -
         (tmp_path / "finalpool" / task).mkdir(parents=True)
     (tmp_path / "finalpool" / ".utils").mkdir()
 
-    assert batch.select_tasks(tmp_path, run_all=True, requested=None) == [
+    assert batch.select_tasks(
+        tmp_path, run_all=True, run_all_valid=False, requested=None
+    ) == [
         "finalpool/alpha",
         "finalpool/beta",
     ]
     assert batch.select_tasks(
-        tmp_path, run_all=False, requested=["finalpool/beta", "finalpool/alpha"]
+        tmp_path,
+        run_all=False,
+        run_all_valid=False,
+        requested=["finalpool/beta", "finalpool/alpha"],
     ) == ["finalpool/beta", "finalpool/alpha"]
     with pytest.raises(ValueError, match="Unknown Toolathlon task"):
-        batch.select_tasks(tmp_path, run_all=False, requested=["finalpool/missing"])
+        batch.select_tasks(
+            tmp_path,
+            run_all=False,
+            run_all_valid=False,
+            requested=["finalpool/missing"],
+        )
 
     assert batch.wants_batch(["--repetitions=2"])
     assert batch.wants_batch(["-n2"])
+    assert batch.wants_batch(["--all-valid"])
+
+
+def test_all_valid_suite_has_55_tasks_and_excludes_known_infra_failures() -> None:
+    assert len(batch.VALID_EVALUATION_TASKS) == 55
+    assert "finalpool/fillout-online-forms" not in batch.VALID_EVALUATION_TASKS
+    assert "finalpool/git-milestone" not in batch.VALID_EVALUATION_TASKS
 
 
 def test_batch_manifest_spreads_repetitions_across_rounds() -> None:
