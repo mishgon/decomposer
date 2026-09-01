@@ -11,6 +11,8 @@ import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
+from gyms.toolathlon.settings import SUBAGENT_CONTEXT_TOKENS
+
 
 SERVED_MODEL = "Qwen/Qwen3.5-4B"
 
@@ -29,7 +31,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--known-hosts", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--model", default=SERVED_MODEL)
-    parser.add_argument("--max-model-len", type=int, default=65536)
+    parser.add_argument(
+        "--max-model-len", type=int, default=SUBAGENT_CONTEXT_TOKENS
+    )
     parser.add_argument("--gpu-memory-utilization", type=float, default=0.9)
     parser.add_argument("--startup-timeout", type=float, default=1800)
     args = parser.parse_args()

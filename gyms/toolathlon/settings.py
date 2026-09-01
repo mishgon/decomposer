@@ -1,0 +1,6 @@
+"""Shared runtime settings for Toolathlon benchmark evaluation."""
+
+SUBAGENT_CONTEXT_TOKENS = 265_000
+SUBAGENT_RECURSION_LIMIT = 410
+DECOMPOSER_RECURSION_LIMIT = 410
+DEEPSEEK_REASONING_EFFORT = "high"

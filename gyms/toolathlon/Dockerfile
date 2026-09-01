@@ -27,6 +27,9 @@ RUN uv python install "${PYTHON_VERSION}" \
     && uv pip install \
         --python "${SUBAGENT_VENV}/bin/python" \
         --requirements /tmp/subagent-requirements.txt \
+    && uv pip install \
+        --python "${SUBAGENT_VENV}/bin/python" \
+        --no-deps \
         /tmp/decomposer
 
 COPY gyms/toolathlon /opt/decomposer/gyms/toolathlon

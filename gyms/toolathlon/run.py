@@ -23,6 +23,20 @@ from langchain_openrouter import ChatOpenRouter
 
 from decomposer.core import create_decomposer_agent
 from decomposer.prompts import DECOMPOSER_TEACHER_SYSTEM_PROMPT
+if __package__:
+    from .settings import (
+        DECOMPOSER_RECURSION_LIMIT,
+        DEEPSEEK_REASONING_EFFORT,
+        SUBAGENT_CONTEXT_TOKENS,
+        SUBAGENT_RECURSION_LIMIT,
+    )
+else:
+    from settings import (  # type: ignore[no-redef]
+        DECOMPOSER_RECURSION_LIMIT,
+        DEEPSEEK_REASONING_EFFORT,
+        SUBAGENT_CONTEXT_TOKENS,
+        SUBAGENT_RECURSION_LIMIT,
+    )
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -68,6 +82,24 @@ DOCKER_SOCKET_CANDIDATES = (
 XDG_DOCKER_SOCKET_CANDIDATES = ("docker.sock", "podman/podman.sock")
 
 
+class _TeeTextIO:
+    def __init__(self, console, log) -> None:
+        self.console = console
+        self.log = log
+
+    def write(self, value: str) -> int:
+        self.console.write(value)
+        self.log.write(value)
+        return len(value)
+
+    def flush(self) -> None:
+        self.console.flush()
+        self.log.flush()
+
+    def __getattr__(self, name: str):
+        return getattr(self.console, name)
+
+
 def _docker(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
     process = subprocess.run(
         ["docker", *args],
@@ -86,8 +118,12 @@ def _docker(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
 def resolve_docker_socket(explicit: str | None = None) -> str:
     if explicit:
         path = Path(explicit)
-        if not path.exists():
-            raise RuntimeError(f"Docker socket not found: {path}")
+        if not path.is_absolute():
+            raise RuntimeError(f"Docker socket path must be absolute: {path}")
+        # Bind-mount sources are resolved by the Docker daemon, not always by
+        # this client host. Colima is the common local example: its macOS
+        # client socket is under ~/.colima, while containers must mount the
+        # daemon-side /var/run/docker.sock from inside the Linux VM.
         return str(path)
     docker_host = os.environ.get("DOCKER_HOST", "")
     if docker_host.startswith("unix://"):
@@ -143,6 +179,22 @@ def ensure_benchmark_checkout(toolathlon_root: Path) -> None:
                 f"Missing {global_configs} and no global_configs_example.py to "
                 "seed it from; the checkout is incomplete — run: git submodule "
                 "update --init external/toolathlon"
+            )
+    token_config = configs / "token_key_session.py"
+    token_example = configs / "token_key_session_example.py"
+    if not token_config.is_file():
+        if token_example.is_file():
+            shutil.copyfile(token_example, token_config)
+            print(
+                f"First-run setup: created {token_config} from "
+                "token_key_session_example.py (placeholder remote credentials "
+                "are sufficient only for tasks that do not use them)",
+                flush=True,
+            )
+        else:
+            raise RuntimeError(
+                f"Missing {token_config} and no token_key_session_example.py "
+                "is available to seed it"
             )
     (configs / ".mcp-auth").mkdir(parents=True, exist_ok=True)
     _warn_submodule_drift(toolathlon_root)
@@ -662,7 +714,7 @@ def _copy_user_configs(container: str) -> None:
     for relative in USER_CONFIG_FILES:
         source = (TOOLATHLON_ROOT / relative).resolve()
         if source.is_file():
-            _docker("cp", str(source), f"{container}/{relative}")
+            _docker("cp", str(source), f"{container}:/workspace/{relative}")
     gcp_keys = TOOLATHLON_ROOT / "configs" / "gcp-oauth.keys.json"
     gcp_credentials = TOOLATHLON_ROOT / "configs" / "google_credentials.json"
     if gcp_keys.is_file() and gcp_credentials.is_file():
@@ -692,11 +744,33 @@ def main() -> None:
     parser.add_argument("--model", default=DEFAULT_MODEL)
     parser.add_argument("--subagent-model", default=DEFAULT_SUBAGENT_MODEL)
     parser.add_argument("--subagent-port", type=int, default=DEFAULT_SUBAGENT_PORT)
+    parser.add_argument(
+        "--subagent-base-url",
+        help=(
+            "OpenAI-compatible subagent URL as seen from the task container; "
+            "defaults to the host-network loopback URL."
+        ),
+    )
     parser.add_argument("--subagent-gpu", default="0")
-    parser.add_argument("--vllm-max-model-len", type=int, default=256000)
+    parser.add_argument(
+        "--vllm-max-model-len", type=int, default=SUBAGENT_CONTEXT_TOKENS
+    )
+    parser.add_argument(
+        "--subagent-recursion-limit",
+        type=int,
+        default=SUBAGENT_RECURSION_LIMIT,
+    )
     parser.add_argument("--vllm-gpu-memory-utilization", type=float, default=0.9)
     parser.add_argument("--vllm-startup-timeout", type=float, default=1800)
     parser.add_argument("--reuse-vllm", action="store_true")
+    parser.add_argument(
+        "--publish-service-ports",
+        action="store_true",
+        help=(
+            "Run the task container on a bridge and publish its gateway and "
+            "subagent-server ports to host loopback (required by Colima)."
+        ),
+    )
     parser.add_argument("--image", default=DEFAULT_IMAGE)
     parser.add_argument(
         "--docker-socket",
@@ -716,6 +790,8 @@ def main() -> None:
         parser.error("--n-jobs-per-worker must be at least 1")
     if args.max_steps < 1:
         parser.error("--max-steps must be at least 1")
+    if args.subagent_recursion_limit < 1:
+        parser.error("--subagent-recursion-limit must be at least 1")
     ensure_benchmark_checkout(TOOLATHLON_ROOT)
     if not TASK_PATH_RE.fullmatch(args.task):
         raise ValueError(
@@ -770,6 +846,18 @@ def main() -> None:
         reuse=args.reuse_vllm,
     )
 
+    runner_log_dir = vllm_log.parent
+    runner_log_dir.mkdir(parents=True, exist_ok=True)
+    runner_stdout_log = (runner_log_dir / "runner.stdout.log").open(
+        "a", encoding="utf-8", buffering=1
+    )
+    runner_stderr_log = (runner_log_dir / "runner.stderr.log").open(
+        "a", encoding="utf-8", buffering=1
+    )
+    original_stdout, original_stderr = sys.stdout, sys.stderr
+    sys.stdout = _TeeTextIO(original_stdout, runner_stdout_log)
+    sys.stderr = _TeeTextIO(original_stderr, runner_stderr_log)
+
     container_lock = _open_container_lock(args.container_lock_file)
     container_lock_held = False
     gateway_port, gateway_sock = None, None
@@ -782,6 +870,21 @@ def main() -> None:
     try:
         _acquire_container_lock(container_lock)
         container_lock_held = container_lock is not None
+
+        service_network_args = ["--network", "host"]
+        if args.publish_service_ports:
+            gateway_port, gateway_sock = allocate_port()
+            subagent_webapp_port, subagent_sock = allocate_port()
+            gateway_sock.close()
+            subagent_sock.close()
+            gateway_sock = None
+            subagent_sock = None
+            service_network_args = [
+                "--publish",
+                f"127.0.0.1:{gateway_port}:{gateway_port}",
+                "--publish",
+                f"127.0.0.1:{subagent_webapp_port}:{subagent_webapp_port}",
+            ]
 
         print("Starting task environment...", flush=True)
         mounts: list[str] = [
@@ -811,8 +914,7 @@ def main() -> None:
             "--detach",
             "--name",
             container,
-            "--network",
-            "host",
+            *service_network_args,
             *mounts,
             "-w",
             "/workspace",
@@ -899,7 +1001,8 @@ def main() -> None:
             raise RuntimeError("Artifact guard stash did not report a stash directory")
 
         print("Starting container MCP gateway...", flush=True)
-        gateway_port, gateway_sock = allocate_port()
+        if gateway_port is None:
+            gateway_port, gateway_sock = allocate_port()
         container_bundle_path = _stage_bundle(container, trusted_bundle_file)
         _exec_in_container(
             container,
@@ -921,12 +1024,14 @@ def main() -> None:
         finally:
             _discard_bundle(container, container_bundle_path)
             container_bundle_path = None
-            gateway_sock.close()
-            gateway_sock = None
+            if gateway_sock is not None:
+                gateway_sock.close()
+                gateway_sock = None
         print(f"Gateway is ready: http://127.0.0.1:{gateway_port}/sse", flush=True)
 
         print("Starting subagent server...", flush=True)
-        subagent_webapp_port, subagent_sock = allocate_port()
+        if subagent_webapp_port is None:
+            subagent_webapp_port, subagent_sock = allocate_port()
         try:
             _exec_in_container(
                 container,
@@ -936,7 +1041,10 @@ def main() -> None:
                 ">> /workspace/dumps/subagent_server.log 2>&1",
                 detach=True,
                 env={
-                    "QWEN_3_5_4B_BASE_URL": f"http://127.0.0.1:{args.subagent_port}/v1",
+                    "QWEN_3_5_4B_BASE_URL": (
+                        args.subagent_base_url
+                        or f"http://127.0.0.1:{args.subagent_port}/v1"
+                    ),
                     "TOOLATHLON_GATEWAY_URL": f"http://127.0.0.1:{gateway_port}/sse",
                     "HOST": "0.0.0.0",
                     "PORT": str(subagent_webapp_port),
@@ -949,8 +1057,9 @@ def main() -> None:
                 hint=f"Subagent server for {container}",
             )
         finally:
-            subagent_sock.close()
-            subagent_sock = None
+            if subagent_sock is not None:
+                subagent_sock.close()
+                subagent_sock = None
         print(
             f"Subagent server is ready: http://127.0.0.1:{subagent_webapp_port}",
             flush=True,
@@ -965,7 +1074,7 @@ def main() -> None:
                 model=args.model,
                 temperature=1.0,
                 top_p=1.0,
-                reasoning={"effort": "high"},
+                reasoning={"effort": DEEPSEEK_REASONING_EFFORT},
             ),
             subagent_types=[
                 {
@@ -980,6 +1089,7 @@ def main() -> None:
                 for subagent_type_id, assistant_id, model_description in SUBAGENT_TYPES
             ],
             decomposer_system_prompt=DECOMPOSER_TEACHER_SYSTEM_PROMPT,
+            subagent_recursion_limit=args.subagent_recursion_limit,
         )
         agent_error: str | None = None
         try:
@@ -990,7 +1100,7 @@ def main() -> None:
                             {"role": "user", "content": bundle["task_str"]}
                         ]
                     },
-                    config={"recursion_limit": 200},
+                    config={"recursion_limit": DECOMPOSER_RECURSION_LIMIT},
                 )
             )
         except BaseException as error:
@@ -1025,7 +1135,15 @@ def main() -> None:
                     "attempt": args.attempt,
                     "purpose": args.purpose,
                     "decomposer_model": args.model,
+                    "decomposer_reasoning_effort": DEEPSEEK_REASONING_EFFORT,
+                    "decomposer_recursion_limit": DECOMPOSER_RECURSION_LIMIT,
                     "subagent_model": args.subagent_model,
+                    "subagent_base_url": (
+                        args.subagent_base_url
+                        or f"http://127.0.0.1:{args.subagent_port}/v1"
+                    ),
+                    "subagent_context_tokens": args.vllm_max_model_len,
+                    "subagent_recursion_limit": args.subagent_recursion_limit,
                     "started_at": started_at,
                     "finished_at": datetime.now(timezone.utc).isoformat(),
                     "agent_error": agent_error,
@@ -1141,25 +1259,30 @@ def main() -> None:
                 + (agent_error or "the agent produced no final answer")
             )
     finally:
-        if container_lock_held:
-            _release_container_lock(container_lock)
-            container_lock_held = False
-        _acquire_container_lock(container_lock)
-        if gateway_sock is not None:
-            gateway_sock.close()
-        if subagent_sock is not None:
-            subagent_sock.close()
-        artifacts_stash = trusted_stash_dir / "artifacts"
-        if artifacts_stash.exists():
-            shutil.rmtree(artifacts_stash, ignore_errors=True)
-        print("Cleaning up...", flush=True)
         try:
-            _cleanup_episode(episode_dir=episode_dir, task_container=container)
+            if container_lock_held:
+                _release_container_lock(container_lock)
+                container_lock_held = False
+            _acquire_container_lock(container_lock)
+            if gateway_sock is not None:
+                gateway_sock.close()
+            if subagent_sock is not None:
+                subagent_sock.close()
+            artifacts_stash = trusted_stash_dir / "artifacts"
+            if artifacts_stash.exists():
+                shutil.rmtree(artifacts_stash, ignore_errors=True)
+            print("Cleaning up...", flush=True)
+            try:
+                _cleanup_episode(episode_dir=episode_dir, task_container=container)
+            finally:
+                _release_container_lock(container_lock)
+                if container_lock is not None:
+                    container_lock.close()
+                stop_vllm(vllm_process)
         finally:
-            _release_container_lock(container_lock)
-            if container_lock is not None:
-                container_lock.close()
-            stop_vllm(vllm_process)
+            sys.stdout, sys.stderr = original_stdout, original_stderr
+            runner_stdout_log.close()
+            runner_stderr_log.close()
 
 
 if __name__ == "__main__":
