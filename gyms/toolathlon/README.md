@@ -282,6 +282,7 @@ All output is under `artifacts/gyms/toolathlon/`:
 ```text
 runs/<run-id>/
   manifest.json                 # task/repetition status, score, paths, timings, errors
+  metrics.json                  # pass@1, pass@3, pass^3, and score coverage
   events.jsonl                  # append-only raw lifecycle events
   vllm-<port>.log               # shared vLLM logs, appended on resume
   container.lock

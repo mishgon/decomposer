@@ -45,6 +45,43 @@ def test_batch_rejects_more_than_one_gpu_per_model() -> None:
             ],
             defaults,
         )
+
+
+def test_evaluation_metrics_report_pass_at_and_pass_power_three() -> None:
+    manifest = {
+        "config": {"repetitions": 3},
+        "episodes": [
+            {"task": "a", "score": score} for score in (True, False, False)
+        ]
+        + [{"task": "b", "score": score} for score in (True, True, True)],
+    }
+
+    metrics = batch.evaluation_metrics(manifest)
+
+    assert metrics["pass@1"] == pytest.approx(4 / 6)
+    assert metrics["pass@3"] == 1.0
+    assert metrics["pass^3"] == 0.5
+    assert metrics["scored_task_count"] == 2
+    assert metrics["unscored_trials"] == 0
+
+
+def test_evaluation_metrics_do_not_hide_unscored_tasks() -> None:
+    manifest = {
+        "config": {"repetitions": 3},
+        "episodes": [
+            {"task": "a", "score": score} for score in (True, False, None)
+        ],
+    }
+
+    metrics = batch.evaluation_metrics(manifest)
+
+    assert metrics["pass@1"] is None
+    assert metrics["pass@3"] is None
+    assert metrics["pass^3"] is None
+    assert metrics["scored_task_count"] == 0
+    assert metrics["unscored_trials"] == 1
+
+
 from gyms.toolathlon.subagents import graph as subagent_graph
 from gyms.toolathlon.subagents.model_logging import durable_model_call_log
 from gyms.toolathlon.subagents.openrouter_compat import create_openrouter_model
