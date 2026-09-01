@@ -19,7 +19,14 @@ GATEWAY_TOOL_READ_TIMEOUT_SECONDS = 300
 
 @wrap_tool_call
 async def truncate_mcp_tool_output(request, handler):
-    response = await handler(request)
+    try:
+        response = await handler(request)
+    except Exception as error:
+        return ToolMessage(
+            content=f"Tool call failed: {error}",
+            tool_call_id=request.tool_call["id"],
+            status="error",
+        )
     if isinstance(response, ToolMessage):
         content = (
             response.content
