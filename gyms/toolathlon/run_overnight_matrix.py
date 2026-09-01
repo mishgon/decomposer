@@ -86,9 +86,11 @@ def batch_command(*extra: str, context_tokens: int = 256000) -> list[str]:
         "--subagent-provider",
         "vllm",
         "--subagent-gpu",
-        "4",
+        "6",
         "--vllm-data-parallel-size",
         "1",
+        "--vllm-gpu-memory-utilization",
+        "0.6",
         "--vllm-max-model-len",
         str(context_tokens),
         "--subagent-recursion-limit",
@@ -116,7 +118,8 @@ def main() -> None:
     state = {
         "matrix_id": MATRIX_ID,
         "status": "running",
-        "gpu_policy": {"subagent": 4, "local_decomposer": 5},
+        "gpu_policy": {"subagent": 6, "local_decomposer": 7},
+        "gpu_memory_utilization": 0.6,
         "context_policy": {
             "qwen_subagent": 256000,
             "gemma_e4b_subagent_native_limit": 131072,
@@ -205,13 +208,13 @@ def main() -> None:
 
     server_log_path = MATRIX_DIR / "04-gemma26b-decomposer-vllm.log"
     server_log = server_log_path.open("ab")
-    server_env = {**env, "CUDA_VISIBLE_DEVICES": "5"}
+    server_env = {**env, "CUDA_VISIBLE_DEVICES": "7"}
     server = subprocess.Popen(
         [
             str(Path(PYTHON).with_name("vllm")), "serve", str(GEMMA_26B_DIR),
             "--served-model-name", "google/gemma-4-26B-A4B-it",
             "--host", "0.0.0.0", "--port", "8040",
-            "--max-model-len", "256000", "--gpu-memory-utilization", "0.9",
+            "--max-model-len", "256000", "--gpu-memory-utilization", "0.6",
             "--language-model-only", "--enable-auto-tool-choice",
             "--tool-call-parser", "gemma4", "--reasoning-parser", "gemma4",
         ],
