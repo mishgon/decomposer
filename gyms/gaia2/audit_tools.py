@@ -33,7 +33,12 @@ from are.simulation.agents.default_agent.tools import native_tools  # noqa: E402
 from are.simulation.apps import ALL_APPS  # noqa: E402
 from are.simulation.environment import Environment, EnvironmentConfig  # noqa: E402
 from are.simulation.scenarios.utils.load_utils import load_scenario  # noqa: E402
-from are.simulation.tool_utils import AppTool, AppToolAdapter  # noqa: E402
+from are.simulation.tool_utils import (  # noqa: E402
+    CANONICAL_TOOL_SCHEMA_REMINDER_PREFIX,
+    AppTool,
+    AppToolAdapter,
+    render_app_tool_retry_reminder,
+)
 from jsonschema import Draft202012Validator  # noqa: E402
 from langchain_core.utils.function_calling import convert_to_openai_tool  # noqa: E402
 
@@ -48,6 +53,7 @@ SIMPLE_HIDDEN_AUI_TOOLS = HIDDEN_AUI_TOOLS - {
 }
 EXPECTED_SIMPLE_ONLY_TOOLS = {"AgentUserInterface__send_message_to_user"}
 BROAD_OBJECT_ALLOWLIST: frozenset[str] = frozenset()
+HIDDEN_PUBLIC_PARAMETERS = frozenset({"args", "kwargs", "cache_options"})
 REPRESENTATIVE_SCENARIOS = {
     "execution": "scenario_universe_25_vetd7u.json",
     "search": "scenario_universe_28_4sn4lc.json",
@@ -121,13 +127,39 @@ def _inspect_schema(
         invalid = [value for value in values if value not in VALID_JSON_SCHEMA_TYPES]
         if invalid:
             issues["invalid_type_names"].append(f"{identity}:{path}: {invalid!r}")
-    for forbidden in ("args", "kwargs"):
+    for forbidden in HIDDEN_PUBLIC_PARAMETERS:
         if forbidden in properties:
             issues["exposed_variadics"].append(f"{identity}.{forbidden}")
 
 
+def _schema_from_retry_reminder(
+    identity: str,
+    tool: AppTool,
+    issues: dict[str, list[str]],
+) -> tuple[dict[str, Any] | None, str | None]:
+    try:
+        reminder = render_app_tool_retry_reminder(tool)
+        if not reminder.startswith(CANONICAL_TOOL_SCHEMA_REMINDER_PREFIX):
+            raise ValueError("missing canonical reminder prefix")
+        schema = json.loads(
+            reminder.removeprefix(CANONICAL_TOOL_SCHEMA_REMINDER_PREFIX)
+        )
+        Draft202012Validator.check_schema(schema["function"]["parameters"])
+    except Exception as error:
+        issues["invalid_retry_schemas"].append(f"{identity}: {error}")
+        return None, None
+    properties = schema["function"]["parameters"].get("properties", {})
+    leaked = HIDDEN_PUBLIC_PARAMETERS & set(properties)
+    if leaked:
+        issues["retry_hidden_parameter_leaks"].append(
+            f"{identity}: {sorted(leaked)!r}"
+        )
+    return schema, reminder
+
+
 def _registry_audit(issues: dict[str, list[str]]) -> dict[str, Any]:
     schemas: list[dict[str, Any]] = []
+    retry_reminders: list[str] = []
     tool_count = 0
     python_argument_count = 0
     public_argument_count = 0
@@ -149,6 +181,15 @@ def _registry_audit(issues: dict[str, list[str]]) -> dict[str, Any]:
             )
             _inspect_schema(identity, tool, schema, issues)
             schemas.append(schema)
+            retry_schema, retry_reminder = _schema_from_retry_reminder(
+                identity, tool, issues
+            )
+            if retry_schema is not None and _ordered_json(retry_schema) != _ordered_json(
+                schema
+            ):
+                issues["retry_schema_differences"].append(identity)
+            if retry_reminder is not None:
+                retry_reminders.append(retry_reminder)
         del environment, app
     gc.collect()
     return {
@@ -157,6 +198,7 @@ def _registry_audit(issues: dict[str, list[str]]) -> dict[str, Any]:
         "python_argument_count": python_argument_count,
         "public_argument_count": public_argument_count,
         "schemas": schemas,
+        "retry_reminders": retry_reminders,
     }
 
 
@@ -270,11 +312,14 @@ def run_audit() -> dict[str, Any]:
         "hidden_tool_leaks",
         "invalid_json_schemas",
         "invalid_type_names",
+        "invalid_retry_schemas",
         "langchain_broker_differences",
         "missing_representative_data",
         "native_broker_differences",
         "native_fallback_or_conversion",
         "ordering_differences",
+        "retry_hidden_parameter_leaks",
+        "retry_schema_differences",
         "surface_differences",
         "unsupported_annotations",
     )
@@ -283,6 +328,7 @@ def run_audit() -> dict[str, Any]:
     representative = _representative_audit(issues)
     checksum_payload = {
         "registry": registry["schemas"],
+        "retry_reminders": registry["retry_reminders"],
         "representative": {
             domain: item["schemas"] for domain, item in representative.items()
         },
@@ -294,7 +340,11 @@ def run_audit() -> dict[str, Any]:
             separators=(",", ":"),
         ).encode("utf-8")
     ).hexdigest()
-    registry = {key: value for key, value in registry.items() if key != "schemas"}
+    registry = {
+        key: value
+        for key, value in registry.items()
+        if key not in {"schemas", "retry_reminders"}
+    }
     representative = {
         domain: {key: value for key, value in item.items() if key != "schemas"}
         for domain, item in representative.items()

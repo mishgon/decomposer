@@ -6,7 +6,7 @@ agent adapter, local execution, and MLSpace submission. Evaluation supports the
 restricted to the immutable execution train partition described below.
 
 The Gaia runtime is pinned through `external/gaia2` at commit
-`f17f997a55e1e695fca4ce25cf9209d79eb1b457`. Preparation materializes a
+`613c03c9d14d045aea9a34148b390740e9adfbdc`. Preparation materializes a
 clean, immutable checkout under Decomposer artifacts. Every preparation and
 run manifest records both repository commits.
 
@@ -58,6 +58,14 @@ The converter recursively supports unions, lists, string-keyed dictionaries,
 preserves explicit defaults, and rejects unsupported annotations with the tool
 and argument name.
 
+When an ARE tool raises a model-correctable execution error, the simple-agent
+retry observation embeds that same complete canonical OpenAI schema. It does
+not reconstruct a lossy text signature. Native simple-agent requests use
+`tool_choice="required"` whenever schemas are present, so a turn must call a
+registered tool; `AgentUserInterface__send_message_to_user` remains the normal
+final-response tool. Non-native agents and helper tools without an `AppTool`
+retain their legacy behavior.
+
 Run the complete read-only gate after any tool or schema change:
 
 ```bash
@@ -68,9 +76,11 @@ The audit instantiates all 20 registered app classes and validates every tool
 with JSON Schema 2020-12. It also loads one pinned execution, search, and
 ambiguity scenario and checks the actual native, broker, and LangChain-facing
 schemas for byte-order-preserving equality. It rejects exposed `args` or
-`kwargs`, incorrectly required defaults, unapproved broad objects, hidden AUI
-leaks, and lossy native fallback. Finally, it repeats the audit under
-`PYTHONHASHSEED=0,1,42` and requires one schema checksum.
+`kwargs`, hidden `cache_options`, incorrectly required defaults, unapproved
+broad objects, hidden AUI leaks, and lossy native fallback. It also parses the
+schema embedded in every retry reminder and requires exact equality with the
+initial native schema. Finally, it repeats the audit under
+`PYTHONHASHSEED=0,1,42` and requires one schema-and-reminder checksum.
 
 `Contacts__edit_contact` exposes a closed partial-update object containing only
 mutable contact fields. Unknown or incorrectly typed fields fail before
@@ -318,8 +328,12 @@ gemma4-26b-a4b-thinking-gemma4-e4b-thinking-text-defaults
 
 For each profile use `--num-repeats 1 --limit 1`, then inspect `output.jsonl`,
 `hf/`, `lite/`, and Decomposer sidecars for schema/type errors, duplicated
-sandbox roots, or physical `are_simulation_fs_sandbox_...` paths. A smoke is a
-workflow integrity check; its task reward is not an acceptance criterion.
+sandbox roots, or physical `are_simulation_fs_sandbox_...` paths. For native
+simple agents, also inspect the wire dump and service log to confirm that vLLM
+accepted `tool_choice="required"`, every successful assistant turn produced a
+recognized tool call, invalid extra properties were absent, and the final
+answer used `AgentUserInterface__send_message_to_user`. A smoke is a workflow
+integrity check; its task reward is not an acceptance criterion.
 
 OpenRouter Responses API reasoning blocks remain available in the sidecar
 manager trace, but only visible text blocks are sent to the Gaia2 user
