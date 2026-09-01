@@ -8,7 +8,7 @@ from langchain_core.tools import BaseTool
 from langchain_openai import ChatOpenAI
 
 
-OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+DEFAULT_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
 
 class ToolathlonOpenRouterChat(ChatOpenAI):
@@ -41,7 +41,9 @@ def create_openrouter_model(
     return ToolathlonOpenRouterChat(
         model=model,
         api_key=os.environ["OPENROUTER_API_KEY"],
-        base_url=OPENROUTER_BASE_URL,
+        base_url=os.environ.get(
+            "TOOLATHLON_OPENROUTER_BASE_URL", DEFAULT_OPENROUTER_BASE_URL
+        ),
         temperature=1.0,
         top_p=1.0,
         max_tokens=max_tokens,

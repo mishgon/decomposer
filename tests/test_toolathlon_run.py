@@ -47,6 +47,7 @@ def test_batch_rejects_more_than_one_gpu_per_model() -> None:
         )
 from gyms.toolathlon.subagents import graph as subagent_graph
 from gyms.toolathlon.subagents.model_logging import durable_model_call_log
+from gyms.toolathlon.subagents.openrouter_compat import create_openrouter_model
 from gyms.toolathlon.subagents.webapp import truncate_mcp_tool_output
 
 
@@ -122,6 +123,23 @@ def test_deepseek_subagent_uses_configured_openrouter_model(monkeypatch) -> None
     assert captured["max_tokens"] == subagent_graph.MAX_OUTPUT_TOKENS
     assert captured["reasoning"] == {"effort": "high"}
     assert result is compiled
+
+
+def test_openrouter_model_accepts_local_relay_base_url(monkeypatch) -> None:
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    monkeypatch.setenv(
+        "TOOLATHLON_OPENROUTER_BASE_URL", "http://127.0.0.1:18041/api/v1"
+    )
+
+    model = create_openrouter_model(
+        model="deepseek/test",
+        reasoning={"effort": "high"},
+        max_tokens=8,
+        timeout=1,
+        max_retries=0,
+    )
+
+    assert str(model.openai_api_base) == "http://127.0.0.1:18041/api/v1"
 
 
 def test_lmrouter_teacher_is_non_thinking(monkeypatch) -> None:

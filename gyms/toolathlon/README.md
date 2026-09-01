@@ -120,10 +120,10 @@ uv run python gyms/toolathlon/run.py --all \
   --agent-mode simple \
   --purpose evaluation \
   --subagent-model "$QWEN" \
-  --subagent-gpu 1,2,3,4 \
-  --vllm-data-parallel-size 4 \
+  --subagent-gpu 0 \
+  --vllm-data-parallel-size 1 \
   --concurrency 16 \
-  --container-slots 2
+  --container-slots 4
 ```
 
 `simple` does not require OpenRouter. For the Decomposer harness, use
@@ -152,6 +152,20 @@ OpenRouter tool-agent servers run on the host, so the API key is never exposed
 inside task containers. Agent loops default to a 30-minute limit and complete
 episodes to a 40-minute total limit; override these with `--agent-timeout` and
 `--episode-timeout` for intentionally longer experiments.
+
+If OpenRouter blocks the remote host's public IP, keep the API egress local.
+Start the payload-silent, localhost-only relay on the local machine and expose
+it to the remote host with an SSH reverse tunnel:
+
+```bash
+python gyms/toolathlon/openrouter_relay.py --port 18041
+ssh -N -R 127.0.0.1:18041:127.0.0.1:18041 Hertz-2
+```
+
+Then export
+`TOOLATHLON_OPENROUTER_BASE_URL=http://127.0.0.1:18041/api/v1` for the remote
+evaluation command. The relay has a fixed `openrouter.ai` upstream, binds only
+to loopback, and does not log authenticated request paths, headers, or bodies.
 
 Use the hosted Qwen3.6 teacher through lmrouter with thinking explicitly
 disabled:
