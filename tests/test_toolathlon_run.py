@@ -10,9 +10,10 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from langchain.agents.middleware import ModelResponse
 from langchain_core.messages import AIMessage, HumanMessage
 
-from gyms.toolathlon import batch, mlspace_serve, run, settings
+from gyms.toolathlon import batch, mlspace_serve, run, settings, teacher_models, usage
 
 
 def test_evaluation_runtime_settings_are_uniform() -> None:
@@ -20,7 +21,32 @@ def test_evaluation_runtime_settings_are_uniform() -> None:
     assert settings.SUBAGENT_RECURSION_LIMIT == 410
     assert settings.DECOMPOSER_RECURSION_LIMIT == 410
     assert settings.DEEPSEEK_REASONING_EFFORT == "high"
+
+
+def test_batch_rejects_more_than_one_gpu_per_model() -> None:
+    defaults = {
+        "model": "teacher",
+        "subagent_model": "subagent",
+        "subagent_port": 8030,
+        "image": "image",
+        "artifacts_dir": Path("artifacts/gyms/toolathlon"),
+    }
+    with pytest.raises(SystemExit):
+        batch.parse_args(
+            [
+                "--tasks",
+                "finalpool/example",
+                "--purpose",
+                "evaluation",
+                "--subagent-gpu",
+                "0,1",
+                "--vllm-data-parallel-size",
+                "2",
+            ],
+            defaults,
+        )
 from gyms.toolathlon.subagents import graph as subagent_graph
+from gyms.toolathlon.subagents.model_logging import durable_model_call_log
 from gyms.toolathlon.subagents.webapp import truncate_mcp_tool_output
 
 
@@ -96,6 +122,87 @@ def test_deepseek_subagent_uses_configured_openrouter_model(monkeypatch) -> None
     assert captured["max_tokens"] == subagent_graph.MAX_OUTPUT_TOKENS
     assert captured["reasoning"] == {"effort": "high"}
     assert result is compiled
+
+
+def test_lmrouter_teacher_is_non_thinking(monkeypatch) -> None:
+    monkeypatch.setenv("LLM_PROXY_URL", "https://lmrouter.example/v1")
+    monkeypatch.setenv("LLM_PROXY_MASTER_KEY", "secret")
+
+    model = teacher_models.create_lmrouter_teacher(
+        model="Qwen/Qwen3.6-35B-A3B-FP8",
+        max_tokens=8192,
+        timeout=180,
+        max_retries=5,
+    )
+
+    assert model.model_name == "Qwen/Qwen3.6-35B-A3B-FP8"
+    assert model.extra_body["chat_template_kwargs"] == {"enable_thinking": False}
+
+
+def test_usage_summary_separates_decomposer_and_subagents() -> None:
+    def message(input_tokens, output_tokens, *, cache=0, reasoning=0, cost=None):
+        return {
+            "type": "ai",
+            "data": {
+                "usage_metadata": {
+                    "input_tokens": input_tokens,
+                    "output_tokens": output_tokens,
+                    "total_tokens": input_tokens + output_tokens,
+                    "input_token_details": {"cache_read": cache},
+                    "output_token_details": {"reasoning": reasoning},
+                },
+                "response_metadata": {"token_usage": {"cost": cost}},
+            },
+        }
+
+    summary = usage.build_usage_summary(
+        [message(100, 10, cache=40, reasoning=3, cost=0.01)],
+        {
+            "sub-1": {
+                "subagent_type_id": "qwen",
+                "status": "success",
+                "messages": [message(200, 20), {"type": "tool", "content": "ok"}],
+            }
+        },
+    )
+
+    assert summary["decomposer"]["input_tokens"] == 100
+    assert summary["subagents"]["sub-1"]["output_tokens"] == 20
+    assert summary["totals"]["total_tokens"] == 330
+    assert summary["totals"]["cache_read_tokens"] == 40
+    assert summary["totals"]["reasoning_tokens"] == 3
+    assert summary["totals"]["cost"] == pytest.approx(0.01)
+
+
+def test_subagent_model_calls_are_durably_logged(tmp_path, monkeypatch) -> None:
+    path = tmp_path / "calls.jsonl"
+    monkeypatch.setenv("TOOLATHLON_SUBAGENT_CALL_LOG", str(path))
+    request = SimpleNamespace(
+        model=SimpleNamespace(model_name="test-model"),
+        messages=[HumanMessage(content="do it")],
+        system_message=None,
+    )
+
+    async def handler(_request):
+        return ModelResponse(
+            result=[
+                AIMessage(
+                    content="done",
+                    usage_metadata={
+                        "input_tokens": 3,
+                        "output_tokens": 1,
+                        "total_tokens": 4,
+                    },
+                )
+            ]
+        )
+
+    asyncio.run(durable_model_call_log.awrap_model_call(request, handler))
+    record = json.loads(path.read_text())
+    assert record["status"] == "success"
+    assert record["model"] == "test-model"
+    assert record["request_delta"][0]["data"]["content"] == "do it"
+    assert record["response"][0]["data"]["usage_metadata"]["total_tokens"] == 4
 
 
 def test_subagent_turns_mcp_failures_into_tool_errors() -> None:
