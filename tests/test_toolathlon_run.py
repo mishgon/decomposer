@@ -356,6 +356,37 @@ def test_start_vllm_refuses_an_occupied_port(tmp_path) -> None:
         listener.close()
 
 
+def test_start_vllm_adds_virtualenv_tools_to_path(tmp_path, monkeypatch) -> None:
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    listener.bind(("127.0.0.1", 0))
+    port = listener.getsockname()[1]
+    listener.close()
+    captured = {}
+    process = SimpleNamespace()
+
+    def fake_popen(command, **kwargs):
+        captured.update(command=command, **kwargs)
+        return process
+
+    monkeypatch.setattr(run.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(run, "wait_for_vllm", lambda *args, **kwargs: None)
+    monkeypatch.setenv("PATH", "/usr/bin")
+
+    assert run.start_vllm(
+        model="model",
+        port=port,
+        gpu="0",
+        max_model_len=1024,
+        gpu_memory_utilization=0.5,
+        timeout=1,
+        log_path=tmp_path / "vllm.log",
+        reuse=False,
+    ) is process
+    assert captured["env"]["PATH"].split(run.os.pathsep)[0] == str(
+        Path(sys.executable).resolve().parent
+    )
+
+
 def test_main_requires_explicit_purpose(monkeypatch) -> None:
     monkeypatch.setattr(sys, "argv", ["run.py", "finalpool/example"])
 
