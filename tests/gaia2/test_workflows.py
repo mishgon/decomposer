@@ -65,6 +65,8 @@ from gyms.gaia2.partition import (
     validate_split_against_source,
 )
 from gyms.gaia2.run import (
+    DEFAULT_PORT_LAYOUT,
+    Gaia2PortLayout,
     _base_environment,
     _dry_plan,
     _runtime_configs,
@@ -78,6 +80,7 @@ from gyms.gaia2.run import (
     prompt_sha256,
     remote_manager_proxy_command,
     run_identity,
+    selected_output_dir,
     selected_cuda_devices,
     simple_vllm_command,
     simple_sampling_parameters,
@@ -90,6 +93,193 @@ from gyms.gaia2.run import (
 )
 from gyms.gaia2.run_eval import build_payload, normalize_job_desc, redact_payload
 from gyms.gaia2.snapshot_trace_prefix import create_trace_prefix_snapshot
+
+
+def test_port_layout_offsets_each_gaia2_service_role() -> None:
+    ports = Gaia2PortLayout(12000)
+
+    assert ports.as_dict(SIMPLE_QWEN_EXPERIMENT) == {
+        "offset": 12000,
+        "simple_agent": 20100,
+        "manager": None,
+        "worker": None,
+        "langgraph": None,
+        "decomposer_service": None,
+    }
+    assert ports.as_dict(QWEN35_SFT_EXPERIMENT) == {
+        "offset": 12000,
+        "simple_agent": None,
+        "manager": 20026,
+        "worker": 20025,
+        "langgraph": 14026,
+        "decomposer_service": 20126,
+    }
+    assert ports.as_dict(QWEN36_QWEN_EXPERIMENT)["manager"] == 20142
+    assert ports.as_dict(DEEPSEEK_QWEN_EXPERIMENT)["manager"] is None
+
+    with pytest.raises(ValueError, match="non-negative"):
+        Gaia2PortLayout(-1)
+    with pytest.raises(ValueError, match="TCP port range"):
+        Gaia2PortLayout(60000).as_dict(QWEN36_QWEN_EXPERIMENT)
+
+
+def test_port_offset_threads_through_commands_and_runtime_configs(tmp_path) -> None:
+    ports = Gaia2PortLayout(12000)
+    simple_command = simple_vllm_command(SIMPLE_QWEN_EXPERIMENT, ports)
+    assert simple_command[simple_command.index("--port") + 1] == "20100"
+    openrouter_command = openrouter_proxy_command(SIMPLE_DEEPSEEK_EXPERIMENT, ports)
+    assert openrouter_command[openrouter_command.index("--port") + 1] == "20140"
+
+    manager, worker = decomposer_vllm_commands(QWEN35_SFT_EXPERIMENT, ports)
+    assert manager is not None
+    assert manager[manager.index("--port") + 1] == "20026"
+    assert worker[worker.index("--port") + 1] == "20025"
+
+    proxy = remote_manager_proxy_command(QWEN36_QWEN_EXPERIMENT, ports)
+    assert proxy[proxy.index("--port") + 1] == "20142"
+    langgraph, _ = langgraph_command(QWEN36_QWEN_EXPERIMENT, tmp_path, ports)
+    assert langgraph[langgraph.index("--port") + 1] == "14034"
+    assert subagent_environment(QWEN36_QWEN_EXPERIMENT, ports)[
+        "GAIA2_SUBAGENT_ENDPOINT"
+    ] == "http://127.0.0.1:20031/v1"
+
+    service_path, plugin_path = _runtime_configs(
+        Path(__file__).resolve().parents[2],
+        tmp_path,
+        QWEN36_QWEN_EXPERIMENT,
+        ports,
+    )
+    service = json.loads(service_path.read_text(encoding="utf-8"))
+    plugin = json.loads(plugin_path.read_text(encoding="utf-8"))
+    assert service["manager"]["base_url"] == "http://127.0.0.1:20142/v1"
+    assert service["subagent_types"][0]["url"] == "http://127.0.0.1:14034"
+    assert plugin["service_url"] == "http://127.0.0.1:20134"
+
+    are = are_command(
+        SIMPLE_QWEN_EXPERIMENT,
+        benchmark=tmp_path / "are-benchmark",
+        dataset_root=tmp_path / "dataset",
+        output=tmp_path / "output",
+        judge_endpoint="https://judge.test/v1",
+        num_repeats=3,
+        limit=None,
+        plugin_config=None,
+        ports=ports,
+    )
+    assert are[are.index("--endpoint") + 1] == "http://127.0.0.1:20100/v1"
+
+
+def test_port_offset_isolates_default_output_and_resume_identity(tmp_path) -> None:
+    args = Namespace(
+        purpose="evaluation",
+        partition="test",
+        num_repeats=3,
+        rollout_offset=0,
+        limit=2,
+        output_dir=None,
+    )
+    directory = selected_output_dir(
+        SIMPLE_QWEN_EXPERIMENT,
+        args,
+        domain=DOMAIN,
+        prompt_profile=None,
+        ports=Gaia2PortLayout(12000),
+    )
+    assert directory.parent.name.endswith("-port-offset-12000")
+    assert directory.name == "smoke_2"
+
+    args.purpose = "trace-generation"
+    args.partition = "train"
+    args.rollout_offset = 3
+    trace_directory = selected_output_dir(
+        DEEPSEEK_QWEN_EXPERIMENT,
+        args,
+        domain=DOMAIN,
+        prompt_profile=None,
+        ports=Gaia2PortLayout(24000),
+    )
+    assert trace_directory.parent.name.endswith("-port-offset-24000")
+    assert trace_directory.name == "smoke_2"
+
+    explicit = tmp_path / "explicit"
+    args.output_dir = explicit
+    assert selected_output_dir(
+        DEEPSEEK_QWEN_EXPERIMENT,
+        args,
+        domain=DOMAIN,
+        prompt_profile=None,
+        ports=Gaia2PortLayout(24000),
+    ) == explicit.resolve()
+
+    legacy_identity = run_identity(
+        SIMPLE_QWEN_EXPERIMENT,
+        domain=DOMAIN,
+        purpose="evaluation",
+        partition="test",
+        num_repeats=3,
+        concurrency=4,
+        limit=None,
+    )
+    legacy_identity.pop("port_offset")
+    legacy_identity.pop("port_layout")
+    marker = tmp_path / ".eval_done.json"
+    marker.write_text(
+        json.dumps({"state": "complete", **legacy_identity}) + "\n",
+        encoding="utf-8",
+    )
+    expected_default = run_identity(
+        SIMPLE_QWEN_EXPERIMENT,
+        domain=DOMAIN,
+        purpose="evaluation",
+        partition="test",
+        num_repeats=3,
+        concurrency=4,
+        limit=None,
+        ports=DEFAULT_PORT_LAYOUT,
+    )
+    validate_run_identity(marker, expected_default, require_complete=True)
+    with pytest.raises(ValueError, match="output identity mismatch"):
+        validate_run_identity(
+            marker,
+            run_identity(
+                SIMPLE_QWEN_EXPERIMENT,
+                domain=DOMAIN,
+                purpose="evaluation",
+                partition="test",
+                num_repeats=3,
+                concurrency=4,
+                limit=None,
+                ports=Gaia2PortLayout(12000),
+            ),
+            require_complete=True,
+        )
+
+
+def test_port_offset_dry_plans_are_disjoint(tmp_path) -> None:
+    cases = (
+        (SIMPLE_QWEN_EXPERIMENT, Gaia2PortLayout(0), ("0",)),
+        (QWEN35_SFT_EXPERIMENT, Gaia2PortLayout(12000), ("1", "2")),
+        (QWEN36_QWEN_EXPERIMENT, Gaia2PortLayout(24000), ("3",)),
+    )
+    occupied: set[int] = set()
+    for index, (experiment, ports, devices) in enumerate(cases):
+        plan = _dry_plan(
+            Path(__file__).resolve().parents[2],
+            experiment,
+            tmp_path / f"run-{index}",
+            devices,
+            3,
+            None,
+            ports=ports,
+        )
+        assert plan["port_offset"] == ports.offset
+        active_ports = {
+            value
+            for key, value in plan["port_layout"].items()
+            if key != "offset" and value is not None
+        }
+        assert occupied.isdisjoint(active_ports)
+        occupied.update(active_ports)
 
 
 def _rows():
@@ -1720,6 +1910,7 @@ def test_trace_execution_resumes_completed_round_and_reuses_services(
     tmp_path, monkeypatch, initial_round_state
 ) -> None:
     trace_directory = tmp_path / "trace"
+    ports = Gaia2PortLayout(12000)
     scenario_ids = ("scenario_a", "scenario_b")
     initial_round = _write_trace_round(
         trace_directory,
@@ -1741,6 +1932,7 @@ def test_trace_execution_resumes_completed_round_and_reuses_services(
                     concurrency=10,
                     limit=None,
                     rollout_offset=3,
+                    ports=ports,
                 ),
             }
         )
@@ -1753,6 +1945,7 @@ def test_trace_execution_resumes_completed_round_and_reuses_services(
     started_services: list[str] = []
     started_service_details: dict[str, tuple[list[str], Path]] = {}
     are_commands: list[list[str]] = []
+    readiness_urls: list[str] = []
 
     class Process:
         def poll(self):
@@ -1805,7 +1998,10 @@ def test_trace_execution_resumes_completed_round_and_reuses_services(
         },
     )
     monkeypatch.setattr("gyms.gaia2.run.check_judge", lambda *_args: None)
-    monkeypatch.setattr("gyms.gaia2.run.wait_http", lambda *_args: None)
+    monkeypatch.setattr(
+        "gyms.gaia2.run.wait_http",
+        lambda url, *_args: readiness_urls.append(url),
+    )
     monkeypatch.setattr("gyms.gaia2.run.Supervisor", FakeSupervisor)
     monkeypatch.setattr("gyms.gaia2.run.subprocess.run", fake_subprocess_run)
     monkeypatch.setattr("gyms.gaia2.run.git", lambda *_args: "commit")
@@ -1826,6 +2022,7 @@ def test_trace_execution_resumes_completed_round_and_reuses_services(
         output_dir=trace_directory,
         cuda_visible_devices=("0",),
         domain=DOMAIN,
+        port_offset=12000,
     )
 
     assert execute_trace_generation(tmp_path, args) == 0
@@ -1843,6 +2040,18 @@ def test_trace_execution_resumes_completed_round_and_reuses_services(
     assert langgraph_command_argv[langgraph_command_argv.index("--config") + 1] == str(
         langgraph_config
     )
+    assert langgraph_command_argv[langgraph_command_argv.index("--port") + 1] == (
+        "14034"
+    )
+    worker_command = started_service_details["worker_vllm"][0]
+    assert worker_command[worker_command.index("--port") + 1] == "20031"
+    service_command_argv = started_service_details["decomposer_service"][0]
+    assert service_command_argv[service_command_argv.index("--port") + 1] == "20134"
+    assert readiness_urls == [
+        "http://127.0.0.1:20031/v1/models",
+        "http://127.0.0.1:14034/ok",
+        "http://127.0.0.1:20134/health",
+    ]
     assert langgraph_server.load_runtime_config(langgraph_config)[
         "disable_persistence"
     ] is True
@@ -1857,6 +2066,10 @@ def test_trace_execution_resumes_completed_round_and_reuses_services(
     assert (trace_directory / "round_04" / ".round_done.json").is_file()
     assert (trace_directory / "round_05" / ".round_done.json").is_file()
     assert (trace_directory / ".trace_done.json").is_file()
+    completion = json.loads((trace_directory / ".trace_done.json").read_text())
+    assert completion["schema_version"] == 2
+    assert completion["port_offset"] == 12000
+    assert completion["port_layout"] == ports.as_dict(DEEPSEEK_QWEN_EXPERIMENT)
     assert len((trace_directory / "trace_manifest.jsonl").read_text().splitlines()) == 4
     round_marker = json.loads(
         (trace_directory / "round_04" / ".round_done.json").read_text()

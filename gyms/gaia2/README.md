@@ -209,6 +209,54 @@ judge. Use `--dry` to print every service and ARE command without starting
 processes. `--output-dir` isolates an ad-hoc run. A rerun skips a completed
 marker; `--force` archives the previous attempt before starting again.
 
+For parallel local runs, pass a distinct non-negative `--port-offset` to each
+runner. The offset is added consistently to the simple-agent server or proxy,
+manager server or proxy, worker vLLM, LangGraph server, and Decomposer service.
+Remote manager and judge URLs are not changed. Offset zero preserves the
+existing ports and artifact names; a nonzero default output gains a
+`-port-offset-N` suffix so its logs, caches, runtime configuration, and resume
+markers stay isolated. Explicit `--output-dir` paths are not renamed, but their
+stored run identity still prevents reuse with another offset. Every effective
+port must remain at or below 65535.
+
+The following three runs use four GPUs and disjoint port layouts. A stride of
+12000 matches the Workplace convention and leaves ample separation:
+
+```bash
+# GPU 0, base ports.
+.venv/bin/python -m gyms.gaia2.run \
+  --domain search \
+  --partition test \
+  --experiment qwen35-4b-non-thinking \
+  --num-repeats 3 \
+  --cuda-visible-devices 0 \
+  --port-offset 0 &
+
+# GPUs 1 and 2, every local endpoint shifted by 12000.
+.venv/bin/python -m gyms.gaia2.run \
+  --domain search \
+  --partition test \
+  --experiment qwen35-4b-sft-workplace-v1-3765-32k-non-thinking-qwen35-4b-non-thinking \
+  --num-repeats 3 \
+  --cuda-visible-devices 1,2 \
+  --port-offset 12000 &
+
+# GPU 3 plus the remote Qwen3.6 manager, shifted by 24000.
+.venv/bin/python -m gyms.gaia2.run \
+  --domain search \
+  --partition test \
+  --experiment qwen36-35b-a3b-teacher-qwen35-4b-non-thinking \
+  --num-repeats 3 \
+  --cuda-visible-devices 3 \
+  --port-offset 24000 &
+
+wait
+```
+
+The option applies to execution, search, and ambiguity evaluations and to
+execution trace generation. MLSpace jobs continue to use offset zero because
+each job has an isolated network namespace.
+
 Each Decomposer experiment declares its student or teacher prompt profile.
 `--prompt-profile teacher|student` can override it for local and MLSpace runs;
 explicit overrides use a distinct output/job identity and record the resolved

@@ -18,7 +18,7 @@ import urllib.error
 import urllib.request
 from collections import Counter
 from collections.abc import Mapping, Sequence
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -64,6 +64,70 @@ from gyms.gaia2.staging import git  # noqa: E402
 from decomposer.prompts import (  # noqa: E402
     DECOMPOSER_PROMPT_PROFILES,
 )
+
+
+MAX_TCP_PORT = 65535
+
+
+@dataclass(frozen=True)
+class Gaia2PortLayout:
+    """Resolve one experiment's coordinated loopback service ports."""
+
+    offset: int = 0
+
+    def __post_init__(self) -> None:
+        if isinstance(self.offset, bool) or not isinstance(self.offset, int):
+            raise TypeError("port offset must be an integer")
+        if self.offset < 0:
+            raise ValueError("port offset must be non-negative")
+
+    def shifted(self, base_port: int) -> int:
+        port = base_port + self.offset
+        if not 1 <= port <= MAX_TCP_PORT:
+            raise ValueError(
+                f"port offset {self.offset} maps {base_port} outside the valid "
+                f"TCP port range: {port}"
+            )
+        return port
+
+    def simple_agent_port(self, experiment: SimpleExperiment) -> int:
+        return self.shifted(experiment.port)
+
+    def manager_port(self, experiment: DecomposerExperiment) -> int | None:
+        if experiment.requires_openrouter:
+            return None
+        return self.shifted(experiment.manager_port)
+
+    def worker_port(self, experiment: DecomposerExperiment) -> int:
+        return self.shifted(experiment.worker_port)
+
+    def langgraph_port(self, experiment: DecomposerExperiment) -> int:
+        return self.shifted(experiment.subagent_port)
+
+    def decomposer_service_port(self, experiment: DecomposerExperiment) -> int:
+        return self.shifted(experiment.service_port)
+
+    def as_dict(self, experiment: Experiment) -> dict[str, Any]:
+        if isinstance(experiment, SimpleExperiment):
+            return {
+                "offset": self.offset,
+                "simple_agent": self.simple_agent_port(experiment),
+                "manager": None,
+                "worker": None,
+                "langgraph": None,
+                "decomposer_service": None,
+            }
+        return {
+            "offset": self.offset,
+            "simple_agent": None,
+            "manager": self.manager_port(experiment),
+            "worker": self.worker_port(experiment),
+            "langgraph": self.langgraph_port(experiment),
+            "decomposer_service": self.decomposer_service_port(experiment),
+        }
+
+
+DEFAULT_PORT_LAYOUT = Gaia2PortLayout()
 
 
 def select_prompt_profile(
@@ -143,6 +207,7 @@ def run_identity(
     concurrency: int,
     limit: int | None,
     rollout_offset: int = 0,
+    ports: Gaia2PortLayout = DEFAULT_PORT_LAYOUT,
 ) -> dict[str, Any]:
     """Return the fields that make an output directory safe to reuse."""
 
@@ -157,6 +222,8 @@ def run_identity(
         "num_repeats": num_repeats,
         "concurrency": concurrency,
         "limit": limit,
+        "port_offset": ports.offset,
+        "port_layout": ports.as_dict(experiment),
         "decomposer_system_prompt_profile": (
             experiment.prompt_profile
             if isinstance(experiment, DecomposerExperiment)
@@ -199,11 +266,20 @@ def validate_run_identity(
         "decomposer_system_prompt_sha256",
         "runtime_configuration",
     }
+    observed = dict(value)
+    existing_offset = observed.get("port_offset", 0)
+    observed["port_offset"] = existing_offset
+    if "port_layout" not in observed:
+        observed["port_layout"] = (
+            expected.get("port_layout")
+            if existing_offset == 0 and expected.get("port_offset") == 0
+            else None
+        )
     mismatches = {
-        key: {"found": value.get(key), "expected": expected_value}
+        key: {"found": observed.get(key), "expected": expected_value}
         for key, expected_value in expected.items()
-        if value.get(key) != expected_value
-        and not (key in legacy_optional_fields and key not in value)
+        if observed.get(key) != expected_value
+        and not (key in legacy_optional_fields and key not in observed)
     }
     if require_complete and value.get("state") != "complete":
         mismatches["state"] = {
@@ -216,6 +292,44 @@ def validate_run_identity(
             f"{json.dumps(mismatches, sort_keys=True)}"
         )
     return value
+
+
+def selected_output_dir(
+    experiment: Experiment,
+    args: argparse.Namespace,
+    *,
+    domain: Gaia2Domain,
+    prompt_profile: str | None,
+    ports: Gaia2PortLayout,
+) -> Path:
+    """Choose an isolated default artifact path without altering explicit paths."""
+
+    if args.output_dir is not None:
+        return args.output_dir.expanduser().resolve()
+    if args.purpose == "trace-generation":
+        directory = trace_output_dir(
+            experiment,
+            args.num_repeats,
+            args.rollout_offset,
+            args.partition,
+            None,
+            prompt_profile=prompt_profile,
+            domain=domain,
+        )
+    else:
+        directory = output_dir(
+            experiment,
+            args.num_repeats,
+            None,
+            partition=args.partition,
+            prompt_profile=prompt_profile,
+            domain=domain,
+        )
+    if ports.offset:
+        directory = directory.with_name(
+            f"{directory.name}-port-offset-{ports.offset}"
+        )
+    return directory if args.limit is None else directory / f"smoke_{args.limit}"
 
 
 def utc_now() -> str:
@@ -436,13 +550,16 @@ def _common_vllm_command(
     return command
 
 
-def simple_vllm_command(experiment: SimpleExperiment) -> list[str]:
+def simple_vllm_command(
+    experiment: SimpleExperiment,
+    ports: Gaia2PortLayout = DEFAULT_PORT_LAYOUT,
+) -> list[str]:
     if experiment.requires_openrouter or experiment.checkpoint is None:
         raise ValueError("Remote simple agents do not start a local vLLM server")
     return _common_vllm_command(
         experiment.checkpoint,
         experiment.served_name,
-        experiment.port,
+        ports.simple_agent_port(experiment),
         thinking=experiment.thinking,
         max_model_len=experiment.max_model_len,
         max_num_seqs=experiment.max_num_seqs,
@@ -470,7 +587,10 @@ def simple_sampling_parameters(
     return parameters
 
 
-def openrouter_proxy_command(experiment: SimpleExperiment) -> list[str]:
+def openrouter_proxy_command(
+    experiment: SimpleExperiment,
+    ports: Gaia2PortLayout = DEFAULT_PORT_LAYOUT,
+) -> list[str]:
     if (
         not experiment.requires_openrouter
         or experiment.base_url is None
@@ -484,7 +604,7 @@ def openrouter_proxy_command(experiment: SimpleExperiment) -> list[str]:
         "--host",
         "127.0.0.1",
         "--port",
-        str(experiment.port),
+        str(ports.simple_agent_port(experiment)),
         "--upstream-url",
         experiment.base_url,
         "--api-key-env",
@@ -498,7 +618,10 @@ def openrouter_proxy_command(experiment: SimpleExperiment) -> list[str]:
     ]
 
 
-def remote_manager_proxy_command(experiment: DecomposerExperiment) -> list[str]:
+def remote_manager_proxy_command(
+    experiment: DecomposerExperiment,
+    ports: Gaia2PortLayout = DEFAULT_PORT_LAYOUT,
+) -> list[str]:
     if not experiment.requires_llm_proxy:
         raise ValueError(f"{experiment.name} does not use the LLM proxy manager")
     required = {
@@ -516,7 +639,7 @@ def remote_manager_proxy_command(experiment: DecomposerExperiment) -> list[str]:
         "--host",
         "127.0.0.1",
         "--port",
-        str(experiment.manager_port),
+        str(ports.manager_port(experiment)),
         "--upstream-url-env",
         str(experiment.manager_upstream_url_env),
         "--api-key-env",
@@ -537,6 +660,7 @@ def remote_manager_proxy_command(experiment: DecomposerExperiment) -> list[str]:
 
 def decomposer_vllm_commands(
     experiment: DecomposerExperiment,
+    ports: Gaia2PortLayout = DEFAULT_PORT_LAYOUT,
 ) -> tuple[list[str] | None, list[str]]:
     manager = None
     if experiment.requires_local_manager:
@@ -545,7 +669,7 @@ def decomposer_vllm_commands(
         manager = _common_vllm_command(
             experiment.manager_checkpoint,
             experiment.manager_served_name,
-            experiment.manager_port,
+            ports.manager_port(experiment),
             thinking=experiment.manager_thinking,
             max_model_len=experiment.max_model_len,
             max_num_seqs=experiment.max_num_seqs,
@@ -559,7 +683,7 @@ def decomposer_vllm_commands(
     worker = _common_vllm_command(
         experiment.worker_checkpoint,
         experiment.worker_served_name,
-        experiment.worker_port,
+        ports.worker_port(experiment),
         thinking=experiment.worker_thinking,
         max_model_len=experiment.max_model_len,
         max_num_seqs=experiment.max_num_seqs,
@@ -581,7 +705,9 @@ def langgraph_runtime_paths(directory: Path) -> tuple[Path, Path]:
 
 
 def langgraph_command(
-    experiment: DecomposerExperiment, directory: Path
+    experiment: DecomposerExperiment,
+    directory: Path,
+    ports: Gaia2PortLayout = DEFAULT_PORT_LAYOUT,
 ) -> tuple[list[str], Path]:
     config_path, runtime_directory = langgraph_runtime_paths(directory)
     return (
@@ -594,7 +720,7 @@ def langgraph_command(
             "--host",
             "127.0.0.1",
             "--port",
-            str(experiment.subagent_port),
+            str(ports.langgraph_port(experiment)),
             "--n-jobs-per-worker",
             "16",
         ],
@@ -602,10 +728,15 @@ def langgraph_command(
     )
 
 
-def subagent_environment(experiment: DecomposerExperiment) -> dict[str, str]:
+def subagent_environment(
+    experiment: DecomposerExperiment,
+    ports: Gaia2PortLayout = DEFAULT_PORT_LAYOUT,
+) -> dict[str, str]:
     environment = {
         "GAIA2_SUBAGENT_MODEL": experiment.worker_served_name,
-        "GAIA2_SUBAGENT_ENDPOINT": (f"http://127.0.0.1:{experiment.worker_port}/v1"),
+        "GAIA2_SUBAGENT_ENDPOINT": (
+            f"http://127.0.0.1:{ports.worker_port(experiment)}/v1"
+        ),
         "GAIA2_SUBAGENT_API_KEY": "EMPTY",
         "GAIA2_SUBAGENT_TEMPERATURE": str(experiment.temperature),
         "GAIA2_SUBAGENT_TOP_P": str(experiment.top_p),
@@ -633,6 +764,7 @@ def subagent_environment(experiment: DecomposerExperiment) -> dict[str, str]:
 def service_command(
     experiment: DecomposerExperiment,
     config_path: Path,
+    ports: Gaia2PortLayout = DEFAULT_PORT_LAYOUT,
 ) -> list[str]:
     return [
         str(PROJECT_VENV / "bin" / "python"),
@@ -643,7 +775,7 @@ def service_command(
         "--host",
         "127.0.0.1",
         "--port",
-        str(experiment.service_port),
+        str(ports.decomposer_service_port(experiment)),
     ]
 
 
@@ -659,6 +791,7 @@ def are_command(
     plugin_config: Path | None,
     concurrency: int | None = None,
     domain: Gaia2Domain = DOMAIN,
+    ports: Gaia2PortLayout = DEFAULT_PORT_LAYOUT,
 ) -> list[str]:
     command = [
         str(benchmark),
@@ -689,7 +822,7 @@ def are_command(
     if limit is not None:
         command.extend(["--limit", str(limit)])
     if isinstance(experiment, SimpleExperiment):
-        endpoint = f"http://127.0.0.1:{experiment.port}/v1"
+        endpoint = f"http://127.0.0.1:{ports.simple_agent_port(experiment)}/v1"
         command.extend(
             [
                 "--model",
@@ -1182,6 +1315,7 @@ def _runtime_configs(
     local_repo: Path,
     directory: Path,
     experiment: DecomposerExperiment,
+    ports: Gaia2PortLayout = DEFAULT_PORT_LAYOUT,
 ) -> tuple[Path, Path]:
     config_dir = directory / "configuration"
     service_path = config_dir / "service.json"
@@ -1202,7 +1336,7 @@ def _runtime_configs(
     elif experiment.requires_llm_proxy:
         manager = {
             "model": experiment.manager_served_name,
-            "base_url": f"http://127.0.0.1:{experiment.manager_port}/v1",
+            "base_url": f"http://127.0.0.1:{ports.manager_port(experiment)}/v1",
             "api_key": "EMPTY",
             "temperature": (
                 experiment.temperature
@@ -1236,7 +1370,7 @@ def _runtime_configs(
             manager_extra_body["repetition_penalty"] = experiment.repetition_penalty
         manager = {
             "model": experiment.manager_served_name,
-            "base_url": f"http://127.0.0.1:{experiment.manager_port}/v1",
+            "base_url": f"http://127.0.0.1:{ports.manager_port(experiment)}/v1",
             "api_key": "EMPTY",
             "temperature": experiment.temperature,
             "top_p": experiment.top_p,
@@ -1261,7 +1395,7 @@ def _runtime_configs(
                     "the current Gaia2 scenario tools."
                 ),
                 "assistant_id": "gaia2_worker",
-                "url": f"http://127.0.0.1:{experiment.subagent_port}",
+                "url": f"http://127.0.0.1:{ports.langgraph_port(experiment)}",
             }
         ],
         "manager_recursion_limit": experiment.manager_recursion_limit,
@@ -1270,7 +1404,9 @@ def _runtime_configs(
     if experiment.manager_max_model_calls is not None:
         service["manager_max_model_calls"] = experiment.manager_max_model_calls
     plugin = {
-        "service_url": f"http://127.0.0.1:{experiment.service_port}",
+        "service_url": (
+            f"http://127.0.0.1:{ports.decomposer_service_port(experiment)}"
+        ),
         "policy": "shared_serialized",
         "request_timeout_seconds": 3500,
         "notification_poll_seconds": 0.1,
@@ -1397,6 +1533,7 @@ def _dry_plan(
     concurrency: int | None = None,
     rollout_offset: int = 0,
     domain: Gaia2Domain = DOMAIN,
+    ports: Gaia2PortLayout = DEFAULT_PORT_LAYOUT,
 ) -> dict[str, Any]:
     spec = get_domain_spec(domain)
     manifest_path = preparation_manifest(experiment, spec.name)
@@ -1414,15 +1551,15 @@ def _dry_plan(
     plugin_config: Path | None = None
     if isinstance(experiment, SimpleExperiment):
         if experiment.requires_openrouter:
-            services.append(openrouter_proxy_command(experiment))
+            services.append(openrouter_proxy_command(experiment, ports))
             gpu_assignments = {}
         else:
-            services.append(simple_vllm_command(experiment))
+            services.append(simple_vllm_command(experiment, ports))
             gpu_assignments = {"policy_vllm": visible_devices[0]}
     else:
-        manager_command, worker_command = decomposer_vllm_commands(experiment)
+        manager_command, worker_command = decomposer_vllm_commands(experiment, ports)
         if experiment.requires_llm_proxy:
-            services.append(remote_manager_proxy_command(experiment))
+            services.append(remote_manager_proxy_command(experiment, ports))
         if manager_command is not None:
             services.append(manager_command)
         services.append(worker_command)
@@ -1433,9 +1570,11 @@ def _dry_plan(
             else directory
         )
         plugin_config = plugin_directory / "configuration" / "are_plugin.json"
-        langgraph_argv, langgraph_cwd = langgraph_command(experiment, directory)
+        langgraph_argv, langgraph_cwd = langgraph_command(
+            experiment, directory, ports
+        )
         services.append(langgraph_argv)
-        services.append(service_command(experiment, service_config))
+        services.append(service_command(experiment, service_config, ports))
         if experiment.requires_local_manager:
             gpu_assignments = {
                 "manager_vllm": visible_devices[0],
@@ -1461,6 +1600,7 @@ def _dry_plan(
         plugin_config=plugin_config,
         concurrency=effective_concurrency,
         domain=spec.name,
+        ports=ports,
     )
     plan = {
         "experiment": experiment.name,
@@ -1476,6 +1616,8 @@ def _dry_plan(
         ),
         "concurrency": effective_concurrency,
         "limit": limit,
+        "port_offset": ports.offset,
+        "port_layout": ports.as_dict(experiment),
         "decomposer_system_prompt_profile": (
             experiment.prompt_profile
             if isinstance(experiment, DecomposerExperiment)
@@ -1532,6 +1674,7 @@ def _dry_plan(
                         ),
                         concurrency=effective_concurrency,
                         domain=spec.name,
+                        ports=ports,
                     )
                 ),
             }
@@ -1556,19 +1699,15 @@ def execute_trace_generation(local_repo: Path, args: argparse.Namespace) -> int:
         raise ValueError(
             "Gaia2 trace generation is restricted to the pinned train partition"
         )
+    ports = Gaia2PortLayout(getattr(args, "port_offset", 0))
+    ports.as_dict(experiment)
     visible_devices = selected_cuda_devices(experiment, args.cuda_visible_devices)
-    directory = (
-        args.output_dir.expanduser().resolve()
-        if args.output_dir is not None
-        else trace_output_dir(
-            experiment,
-            args.num_repeats,
-            args.rollout_offset,
-            args.partition,
-            args.limit,
-            prompt_profile=requested_prompt_profile,
-            domain=spec.name,
-        )
+    directory = selected_output_dir(
+        experiment,
+        args,
+        domain=spec.name,
+        prompt_profile=requested_prompt_profile,
+        ports=ports,
     )
     logical_rollout_numbers = tuple(
         range(
@@ -1595,6 +1734,7 @@ def execute_trace_generation(local_repo: Path, args: argparse.Namespace) -> int:
                     concurrency=args.concurrency,
                     rollout_offset=args.rollout_offset,
                     domain=spec.name,
+                    ports=ports,
                 ),
                 indent=2,
                 sort_keys=True,
@@ -1611,6 +1751,7 @@ def execute_trace_generation(local_repo: Path, args: argparse.Namespace) -> int:
         concurrency=args.concurrency or experiment.concurrency,
         limit=args.limit,
         rollout_offset=args.rollout_offset,
+        ports=ports,
     )
     marker = directory / ".trace_done.json"
     if marker.is_file() and not args.force:
@@ -1646,7 +1787,7 @@ def execute_trace_generation(local_repo: Path, args: argparse.Namespace) -> int:
     status_path = directory / "run_status.json"
     started = time.monotonic()
     status: dict[str, Any] = {
-        "schema_version": 1,
+        "schema_version": 2,
         "state": "starting",
         **identity,
         "scenario_count": len(scenario_ids),
@@ -1678,16 +1819,16 @@ def execute_trace_generation(local_repo: Path, args: argparse.Namespace) -> int:
     try:
         status["state"] = "agent_services_startup"
         atomic_json(status_path, status)
-        manager_command, worker_command = decomposer_vllm_commands(experiment)
+        manager_command, worker_command = decomposer_vllm_commands(experiment, ports)
         manager_process = None
         if experiment.requires_llm_proxy:
             proxy_process = supervisor.start(
                 "remote_manager_proxy",
-                remote_manager_proxy_command(experiment),
+                remote_manager_proxy_command(experiment, ports),
                 cwd=local_repo,
             )
             wait_http(
-                f"http://127.0.0.1:{experiment.manager_port}/health",
+                f"http://127.0.0.1:{ports.manager_port(experiment)}/health",
                 [proxy_process],
                 300,
             )
@@ -1707,20 +1848,22 @@ def execute_trace_generation(local_repo: Path, args: argparse.Namespace) -> int:
         )
         if manager_process is not None:
             wait_http(
-                f"http://127.0.0.1:{experiment.manager_port}/v1/models",
+                f"http://127.0.0.1:{ports.manager_port(experiment)}/v1/models",
                 [manager_process],
                 1800,
             )
         wait_http(
-            f"http://127.0.0.1:{experiment.worker_port}/v1/models",
+            f"http://127.0.0.1:{ports.worker_port(experiment)}/v1/models",
             [worker_process],
             1800,
         )
         service_config, base_plugin = _runtime_configs(
-            local_repo, directory, experiment
+            local_repo, directory, experiment, ports
         )
-        subagent_env = subagent_environment(experiment)
-        langgraph_argv, langgraph_cwd = langgraph_command(experiment, directory)
+        subagent_env = subagent_environment(experiment, ports)
+        langgraph_argv, langgraph_cwd = langgraph_command(
+            experiment, directory, ports
+        )
         langgraph_process = supervisor.start(
             "langgraph_subagent",
             langgraph_argv,
@@ -1729,16 +1872,16 @@ def execute_trace_generation(local_repo: Path, args: argparse.Namespace) -> int:
         )
         service_process = supervisor.start(
             "decomposer_service",
-            service_command(experiment, service_config),
+            service_command(experiment, service_config, ports),
             cwd=local_repo,
         )
         wait_http(
-            f"http://127.0.0.1:{experiment.subagent_port}/ok",
+            f"http://127.0.0.1:{ports.langgraph_port(experiment)}/ok",
             [langgraph_process],
             300,
         )
         wait_http(
-            f"http://127.0.0.1:{experiment.service_port}/health",
+            f"http://127.0.0.1:{ports.decomposer_service_port(experiment)}/health",
             [service_process],
             300,
         )
@@ -1808,6 +1951,7 @@ def execute_trace_generation(local_repo: Path, args: argparse.Namespace) -> int:
                 plugin_config=plugin_config,
                 concurrency=args.concurrency,
                 domain=spec.name,
+                ports=ports,
             )
             with (round_logs / "are_benchmark.log").open(
                 "a", encoding="utf-8"
@@ -1904,18 +2048,15 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
     experiment = select_prompt_profile(
         get_experiment(args.experiment), requested_prompt_profile
     )
+    ports = Gaia2PortLayout(getattr(args, "port_offset", 0))
+    ports.as_dict(experiment)
     visible_devices = selected_cuda_devices(experiment, args.cuda_visible_devices)
-    directory = (
-        args.output_dir.expanduser().resolve()
-        if args.output_dir is not None
-        else output_dir(
-            experiment,
-            args.num_repeats,
-            args.limit,
-            partition=args.partition,
-            prompt_profile=requested_prompt_profile,
-            domain=spec.name,
-        )
+    directory = selected_output_dir(
+        experiment,
+        args,
+        domain=spec.name,
+        prompt_profile=requested_prompt_profile,
+        ports=ports,
     )
     if args.dry:
         print(
@@ -1932,6 +2073,7 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
                     concurrency=args.concurrency,
                     rollout_offset=args.rollout_offset,
                     domain=spec.name,
+                    ports=ports,
                 ),
                 indent=2,
                 sort_keys=True,
@@ -1947,6 +2089,7 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
         num_repeats=args.num_repeats,
         concurrency=args.concurrency or experiment.concurrency,
         limit=args.limit,
+        ports=ports,
     )
     marker = directory / ".eval_done.json"
     if marker.is_file() and not args.force:
@@ -1984,7 +2127,7 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
     status_path = directory / "run_status.json"
     started = time.monotonic()
     status: dict[str, Any] = {
-        "schema_version": 1,
+        "schema_version": 2,
         "state": "starting",
         **identity,
         "manager_parallel_tool_calls": (
@@ -2023,23 +2166,23 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
             if experiment.requires_openrouter:
                 process = supervisor.start(
                     "openrouter_policy_proxy",
-                    openrouter_proxy_command(experiment),
+                    openrouter_proxy_command(experiment, ports),
                     cwd=local_repo,
                 )
                 wait_http(
-                    f"http://127.0.0.1:{experiment.port}/health",
+                    f"http://127.0.0.1:{ports.simple_agent_port(experiment)}/health",
                     [process],
                     300,
                 )
             else:
                 process = supervisor.start(
                     "policy_vllm",
-                    simple_vllm_command(experiment),
+                    simple_vllm_command(experiment, ports),
                     cwd=local_repo,
                     env={"CUDA_VISIBLE_DEVICES": visible_devices[0]},
                 )
                 wait_http(
-                    f"http://127.0.0.1:{experiment.port}/v1/models",
+                    f"http://127.0.0.1:{ports.simple_agent_port(experiment)}/v1/models",
                     [process],
                     1800,
                 )
@@ -2048,16 +2191,18 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
                 simple_sampling_parameters(experiment), separators=(",", ":")
             )
         else:
-            manager_command, worker_command = decomposer_vllm_commands(experiment)
+            manager_command, worker_command = decomposer_vllm_commands(
+                experiment, ports
+            )
             manager_process = None
             if experiment.requires_llm_proxy:
                 proxy_process = supervisor.start(
                     "remote_manager_proxy",
-                    remote_manager_proxy_command(experiment),
+                    remote_manager_proxy_command(experiment, ports),
                     cwd=local_repo,
                 )
                 wait_http(
-                    f"http://127.0.0.1:{experiment.manager_port}/health",
+                    f"http://127.0.0.1:{ports.manager_port(experiment)}/health",
                     [proxy_process],
                     300,
                 )
@@ -2077,20 +2222,22 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
             )
             if manager_process is not None:
                 wait_http(
-                    f"http://127.0.0.1:{experiment.manager_port}/v1/models",
+                    f"http://127.0.0.1:{ports.manager_port(experiment)}/v1/models",
                     [manager_process],
                     1800,
                 )
             wait_http(
-                f"http://127.0.0.1:{experiment.worker_port}/v1/models",
+                f"http://127.0.0.1:{ports.worker_port(experiment)}/v1/models",
                 [worker_process],
                 1800,
             )
             service_config, plugin_config = _runtime_configs(
-                local_repo, directory, experiment
+                local_repo, directory, experiment, ports
             )
-            subagent_env = subagent_environment(experiment)
-            langgraph_argv, langgraph_cwd = langgraph_command(experiment, directory)
+            subagent_env = subagent_environment(experiment, ports)
+            langgraph_argv, langgraph_cwd = langgraph_command(
+                experiment, directory, ports
+            )
             langgraph_process = supervisor.start(
                 "langgraph_subagent",
                 langgraph_argv,
@@ -2099,16 +2246,16 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
             )
             service_process = supervisor.start(
                 "decomposer_service",
-                service_command(experiment, service_config),
+                service_command(experiment, service_config, ports),
                 cwd=local_repo,
             )
             wait_http(
-                f"http://127.0.0.1:{experiment.subagent_port}/ok",
+                f"http://127.0.0.1:{ports.langgraph_port(experiment)}/ok",
                 [langgraph_process],
                 300,
             )
             wait_http(
-                f"http://127.0.0.1:{experiment.service_port}/health",
+                f"http://127.0.0.1:{ports.decomposer_service_port(experiment)}/health",
                 [service_process],
                 300,
             )
@@ -2126,6 +2273,7 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
             plugin_config=plugin_config,
             concurrency=args.concurrency,
             domain=spec.name,
+            ports=ports,
         )
         are_env = dict(env)
         for name in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"):
@@ -2221,6 +2369,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--partition", choices=PARTITIONS, default="full")
     parser.add_argument("--num-repeats", type=positive_int, default=3)
     parser.add_argument("--concurrency", type=positive_int)
+    parser.add_argument(
+        "--port-offset",
+        type=nonnegative_int,
+        default=0,
+        help="add this value to every local GAIA2 service port",
+    )
     parser.add_argument("--prompt-profile", choices=DECOMPOSER_PROMPT_PROFILES)
     parser.add_argument("--rollout-offset", type=nonnegative_int, default=0)
     parser.add_argument("--limit", type=positive_int)
