@@ -200,6 +200,7 @@ def test_all_qwen_simple_profiles_use_official_mode_specific_sampling() -> None:
         )
         assert command[command.index("--temperature") + 1] == str(expected.temperature)
         assert command[command.index("--top-p") + 1] == str(expected.top_p)
+        assert "+rollout_failure_policy=score_zero" in command
 
 
 def test_gemma_simple_profiles_keep_existing_sampling() -> None:
@@ -1320,11 +1321,64 @@ def test_result_validation_uses_split_limit_and_repeats(
 ) -> None:
     monkeypatch.setitem(experiments.SPLIT_ROWS, "validation", 5)
     rollouts = tmp_path / "rollouts.jsonl"
-    rollouts.write_text("".join(json.dumps({"id": index}) + "\n" for index in range(6)))
+    rows = [
+        {
+            "_ng_task_index": task_index,
+            "_ng_rollout_index": rollout_index,
+            "reward": 0.0 if (task_index, rollout_index) == (1, 2) else 1.0,
+            **(
+                {
+                    "_ng_rollout_error": {
+                        "type": "http_500",
+                        "status_code": 500,
+                        "detail": "synthetic failure",
+                    }
+                }
+                if (task_index, rollout_index) == (1, 2)
+                else {}
+            ),
+        }
+        for task_index in range(2)
+        for rollout_index in range(3)
+    ]
+    rollouts.write_text("".join(json.dumps(row) + "\n" for row in rows))
     (tmp_path / "rollouts_aggregate_metrics.json").write_text("{}")
     result = run_module.validate_result("validation", 3, rollout_path=rollouts, limit=2)
     assert result["task_rows"] == 2
     assert result["rollout_rows"] == 6
+    assert result["rollout_error_rows"] == 1
+    assert result["rollout_error_types"] == {"http_500": 1}
+
+
+@pytest.mark.parametrize("mutation", ["missing", "duplicate"])
+def test_result_validation_requires_exact_task_repeat_grid(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mutation: str,
+) -> None:
+    monkeypatch.setitem(experiments.SPLIT_ROWS, "validation", 2)
+    rows = [
+        {
+            "_ng_task_index": task_index,
+            "_ng_rollout_index": rollout_index,
+            "reward": 1.0,
+        }
+        for task_index in range(2)
+        for rollout_index in range(2)
+    ]
+    if mutation == "missing":
+        rows.pop()
+    else:
+        rows[-1] = dict(rows[0])
+    rollouts = tmp_path / "rollouts.jsonl"
+    rollouts.write_text("".join(json.dumps(row) + "\n" for row in rows))
+    (tmp_path / "rollouts_aggregate_metrics.json").write_text("{}")
+
+    expected_error = "missing" if mutation == "missing" else "Duplicate"
+    with pytest.raises(ValueError, match=expected_error):
+        run_module.validate_result(
+            "validation", 2, rollout_path=rollouts, limit=None
+        )
 
 
 def test_force_archives_previous_attempt(tmp_path: Path) -> None:

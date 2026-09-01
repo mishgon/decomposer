@@ -17,6 +17,7 @@ import tempfile
 import time
 import urllib.error
 import urllib.request
+from collections import Counter
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from datetime import UTC, datetime
@@ -60,6 +61,9 @@ from gyms.workplace_assistant.experiments import (  # noqa: E402
 )
 
 
+WORKPLACE_ROLLOUT_FAILURE_POLICY = "score_zero"
+
+
 def utc_now() -> str:
     return datetime.now(UTC).isoformat()
 
@@ -77,20 +81,6 @@ def sha256_file(path: Path) -> str:
         while chunk := stream.read(8 * 1024 * 1024):
             digest.update(chunk)
     return digest.hexdigest()
-
-
-def count_jsonl(path: Path) -> int:
-    rows = 0
-    with path.open() as stream:
-        for line_number, line in enumerate(stream, start=1):
-            if not line.strip():
-                continue
-            try:
-                json.loads(line)
-            except json.JSONDecodeError as error:
-                raise ValueError(f"Invalid JSON at {path}:{line_number}") from error
-            rows += 1
-    return rows
 
 
 def hydra_flow_mapping(values: Mapping[str, Any]) -> str:
@@ -457,6 +447,7 @@ def gym_eval_command(
         str(num_repeats),
         "--concurrency",
         str(concurrency or experiment.concurrency),
+        f"+rollout_failure_policy={WORKPLACE_ROLLOUT_FAILURE_POLICY}",
         "+head_server.host=127.0.0.1",
         "+head_server.port=11000",
     ]
@@ -603,14 +594,107 @@ def validate_result(
     json.loads(aggregate.read_text())
     tasks = min(SPLIT_ROWS[split], limit) if limit is not None else SPLIT_ROWS[split]
     expected_rows = tasks * num_repeats
-    actual_rows = count_jsonl(rollout_path)
-    if actual_rows != expected_rows:
-        raise ValueError(f"Expected {expected_rows} rollouts, found {actual_rows}")
+    expected_keys = {
+        (task_index, rollout_index)
+        for task_index in range(tasks)
+        for rollout_index in range(num_repeats)
+    }
+    observed_keys: set[tuple[int, int]] = set()
+    rollout_error_types: Counter[str] = Counter()
+    with rollout_path.open(encoding="utf-8") as stream:
+        for line_number, line in enumerate(stream, start=1):
+            if not line.strip():
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError as error:
+                raise ValueError(
+                    f"Invalid JSON at {rollout_path}:{line_number}"
+                ) from error
+            if not isinstance(row, Mapping):
+                raise ValueError(
+                    f"Expected an object at {rollout_path}:{line_number}"
+                )
+            task_index = row.get("_ng_task_index")
+            rollout_index = row.get("_ng_rollout_index")
+            if (
+                isinstance(task_index, bool)
+                or not isinstance(task_index, int)
+                or isinstance(rollout_index, bool)
+                or not isinstance(rollout_index, int)
+            ):
+                raise ValueError(
+                    f"Invalid rollout identity at {rollout_path}:{line_number}: "
+                    f"({task_index!r}, {rollout_index!r})"
+                )
+            key = (task_index, rollout_index)
+            if key not in expected_keys:
+                raise ValueError(
+                    f"Unexpected rollout identity at {rollout_path}:{line_number}: "
+                    f"{key}"
+                )
+            if key in observed_keys:
+                raise ValueError(
+                    f"Duplicate rollout identity at {rollout_path}:{line_number}: "
+                    f"{key}"
+                )
+            observed_keys.add(key)
+
+            reward = row.get("reward")
+            if (
+                isinstance(reward, bool)
+                or not isinstance(reward, (int, float))
+                or float(reward) not in {0.0, 1.0}
+            ):
+                raise ValueError(
+                    f"Invalid binary reward at {rollout_path}:{line_number}: "
+                    f"{reward!r}"
+                )
+
+            rollout_error = row.get("_ng_rollout_error")
+            if rollout_error is None:
+                continue
+            if not isinstance(rollout_error, Mapping):
+                raise ValueError(
+                    f"Invalid rollout error at {rollout_path}:{line_number}"
+                )
+            error_type = rollout_error.get("type")
+            status_code = rollout_error.get("status_code")
+            detail = rollout_error.get("detail")
+            if (
+                not isinstance(error_type, str)
+                or not error_type
+                or (
+                    status_code is not None
+                    and (
+                        isinstance(status_code, bool)
+                        or not isinstance(status_code, int)
+                    )
+                )
+                or not isinstance(detail, str)
+                or float(reward) != 0.0
+            ):
+                raise ValueError(
+                    f"Invalid reward-0 rollout error at "
+                    f"{rollout_path}:{line_number}"
+                )
+            rollout_error_types[error_type] += 1
+
+    missing_keys = expected_keys - observed_keys
+    if missing_keys:
+        preview = sorted(missing_keys)[:10]
+        raise ValueError(
+            f"Expected {expected_rows} unique rollouts, found {len(observed_keys)}; "
+            f"missing {len(missing_keys)} identities (first: {preview})"
+        )
+    actual_rows = len(observed_keys)
     return {
         "rollouts": str(rollout_path),
         "aggregate_metrics": str(aggregate),
         "task_rows": tasks,
         "rollout_rows": actual_rows,
+        "rollout_error_rows": sum(rollout_error_types.values()),
+        "rollout_error_types": dict(sorted(rollout_error_types.items())),
     }
 
 
@@ -892,6 +976,7 @@ def _dry_plan(
             else None
         ),
         "purpose": purpose,
+        "rollout_failure_policy": WORKPLACE_ROLLOUT_FAILURE_POLICY,
         "split": split,
         "services": [shlex.join(command) for command in services],
         "gym_start": shlex.join(
@@ -1062,6 +1147,7 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
             else None
         ),
         "purpose": purpose,
+        "rollout_failure_policy": WORKPLACE_ROLLOUT_FAILURE_POLICY,
         "decomposer_system_prompt_profile": (
             resolved_prompt_profile
             if isinstance(experiment, DecomposerExperiment)

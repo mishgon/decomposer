@@ -91,12 +91,24 @@ marker beneath an explicit directory. Partial outputs resume by default.
 
 Every Workplace simple agent has a 100-step cap. Every Workplace Decomposer
 manager and every spawned subagent independently has an exact 100-model-call
-cap. Manager exhaustion is stored as a reward-0 rollout with failure class
-`decomposer_manager_model_call_limit`, so a single overflow does not abort the
-evaluation or trace collection. Subagent exhaustion terminates that LangGraph
+cap. Workplace collection uses Gym's `score_zero` rollout-failure policy.
+Manager exhaustion and other agent-returned failure classes are therefore
+stored in the main `rollouts.jsonl` as reward-0 attempts with structured
+`_ng_rollout_error` diagnostics. Subagent exhaustion terminates that LangGraph
 run with an error; the normal `wait` result delivers the error report to the
 manager, which may recover by delegating again. The subagent recursion guard is
 1,000 so it cannot preempt the exact model-call limiter.
+
+An individual `/run` HTTP 500 is handled the same way: the collector writes a
+valid placeholder response, copies the original request parameters, records
+the bounded error detail, scores the rollout as zero, and continues with the
+remaining tasks. These rows are completed attempts and are not retried on
+resume. Transport failures, an unreachable service, or a dead process still
+fail the job because they indicate a systemic problem rather than one bad
+trace. Completion requires the exact task-by-repeat grid with no missing or
+duplicate identities. Reward-0 rows are filtered before trace-shape validation
+when preparing reward-1 SFT data, so placeholder responses cannot enter the
+training set.
 
 Call budgets are part of the artifact identity: simple runs use `calls100` and
 Decomposer runs use `managercalls100-subagentcalls100`. This prevents an old
