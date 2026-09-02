@@ -507,7 +507,10 @@ def start_vllm(
     # ``uv run`` can use the virtualenv interpreter without adding its bin
     # directory to PATH (notably in non-interactive SSH sessions), so preserve
     # the interpreter's toolchain explicitly for the server process.
-    executable_dir = str(Path(sys.executable).resolve().parent)
+    # Do not resolve the virtualenv's python symlink: helper executables such
+    # as ninja live beside that symlink in .venv/bin, not beside the underlying
+    # uv-managed interpreter target.
+    executable_dir = str(Path(sys.executable).parent)
     environment["PATH"] = os.pathsep.join(
         part for part in (executable_dir, environment.get("PATH", "")) if part
     )

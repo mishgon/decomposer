@@ -481,7 +481,7 @@ def test_start_vllm_adds_virtualenv_tools_to_path(tmp_path, monkeypatch) -> None
         reuse=False,
     ) is process
     assert captured["env"]["PATH"].split(run.os.pathsep)[0] == str(
-        Path(sys.executable).resolve().parent
+        Path(sys.executable).parent
     )
 
 
