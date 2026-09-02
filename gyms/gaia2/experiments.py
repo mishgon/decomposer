@@ -8,7 +8,11 @@ from pathlib import Path
 from typing import Literal
 
 from gyms.gaia2.prompts import Gaia2ManagerPromptAddendumProfile
-from gyms.qwen_sampling import qwen35_general_sampling, qwen36_non_thinking_sampling
+from gyms.qwen_sampling import (
+    qwen35_general_sampling,
+    qwen36_non_thinking_sampling,
+    qwen36_thinking_sampling,
+)
 
 ARTIFACTS_ROOT = Path("/mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts")
 PROJECT_ROOT = Path("/mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_sft")
@@ -336,7 +340,9 @@ class DecomposerExperiment:
     manager_upstream_url_env: str | None = None
     manager_api_key_env: str | None = None
     manager_response_tool_parser: str | None = None
-    manager_reasoning_mode: Literal["service_default", "non_thinking"] | None = None
+    manager_reasoning_mode: Literal[
+        "service_default", "non_thinking", "thinking"
+    ] | None = None
     manager_verify_tls: bool = True
     prompt_profile: DecomposerPromptProfile = "student"
     manager_prompt_addendum_profile: Gaia2ManagerPromptAddendumProfile | None = None
@@ -433,7 +439,9 @@ class DecomposerExperiment:
 
     @property
     def remote_manager_extra_body(self) -> dict[str, object]:
-        if self.manager_reasoning_mode != "non_thinking":
+        if self.manager_reasoning_mode == "service_default":
+            return {}
+        if self.manager_reasoning_mode not in ("non_thinking", "thinking"):
             return {}
         body: dict[str, object] = {
             "temperature": self.temperature,
@@ -442,8 +450,15 @@ class DecomposerExperiment:
             "min_p": self.min_p,
             "presence_penalty": self.presence_penalty,
             "repetition_penalty": self.repetition_penalty,
-            "include_reasoning": False,
-            "chat_template_kwargs": {"enable_thinking": False},
+            "include_reasoning": self.manager_reasoning_mode == "thinking",
+            "chat_template_kwargs": {
+                "enable_thinking": self.manager_reasoning_mode == "thinking",
+                **(
+                    {"preserve_thinking": True}
+                    if self.manager_reasoning_mode == "thinking"
+                    else {}
+                ),
+            },
         }
         if self.max_completion_tokens is not None:
             body["max_output_tokens"] = self.max_completion_tokens
@@ -784,6 +799,7 @@ GEMMA4_TEXT_DEFAULTS_DECOMPOSER_EXPERIMENT = DecomposerExperiment(
     subagent_recursion_limit=1000,
 )
 _QWEN36_NON_THINKING_SAMPLING = qwen36_non_thinking_sampling()
+_QWEN36_THINKING_SAMPLING = qwen36_thinking_sampling()
 QWEN36_TEXT_DEFAULTS_DECOMPOSER_EXPERIMENT = replace(
     DEEPSEEK_QWEN_EXPERIMENT,
     name=(
@@ -808,6 +824,37 @@ QWEN36_TEXT_DEFAULTS_DECOMPOSER_EXPERIMENT = replace(
     presence_penalty=_QWEN36_NON_THINKING_SAMPLING.presence_penalty,
     repetition_penalty=_QWEN36_NON_THINKING_SAMPLING.repetition_penalty,
     manager_thinking=False,
+    worker_thinking=False,
+    worker_language_model_only=True,
+    manager_max_model_calls=80,
+    subagent_max_model_calls=80,
+    manager_recursion_limit=1000,
+    subagent_recursion_limit=1000,
+)
+QWEN36_THINKING_TEXT_DEFAULTS_DECOMPOSER_EXPERIMENT = replace(
+    DEEPSEEK_QWEN_EXPERIMENT,
+    name=(
+        "qwen36-35b-a3b-thinking-teacher-"
+        "qwen35-4b-non-thinking-text-defaults"
+    ),
+    manager_backend="llm_proxy",
+    manager_served_name="Qwen/Qwen3.6-35B-A3B-FP8",
+    manager_port=8142,
+    manager_upstream_url_env="LLM_PROXY_URL",
+    manager_api_key_env="LLM_PROXY_MASTER_KEY",
+    manager_response_tool_parser="qwen3_xml",
+    manager_reasoning_mode="thinking",
+    manager_verify_tls=False,
+    prompt_profile="teacher",
+    concurrency=16,
+    max_model_len=131072,
+    temperature=_QWEN36_THINKING_SAMPLING.temperature,
+    top_p=_QWEN36_THINKING_SAMPLING.top_p,
+    top_k=_QWEN36_THINKING_SAMPLING.top_k,
+    min_p=_QWEN36_THINKING_SAMPLING.min_p,
+    presence_penalty=_QWEN36_THINKING_SAMPLING.presence_penalty,
+    repetition_penalty=_QWEN36_THINKING_SAMPLING.repetition_penalty,
+    manager_thinking=True,
     worker_thinking=False,
     worker_language_model_only=True,
     manager_max_model_calls=80,
@@ -904,6 +951,7 @@ ALL_EXPERIMENTS: tuple[Experiment, ...] = (
     QWEN36_QWEN_EXPERIMENT,
     GEMMA4_TEXT_DEFAULTS_DECOMPOSER_EXPERIMENT,
     QWEN36_TEXT_DEFAULTS_DECOMPOSER_EXPERIMENT,
+    QWEN36_THINKING_TEXT_DEFAULTS_DECOMPOSER_EXPERIMENT,
     SIMPLE_EXPERIMENT,
     SIMPLE_QWEN_EXPERIMENT,
     SIMPLE_QWEN_2B_EXPERIMENT,

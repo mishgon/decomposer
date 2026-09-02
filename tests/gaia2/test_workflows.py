@@ -42,6 +42,7 @@ from gyms.gaia2.experiments import (
     QWEN35_SFT_EXPERIMENT,
     QWEN35_TOOLATHLON_ONLY_SFT_EXPERIMENT,
     QWEN36_QWEN_EXPERIMENT,
+    QWEN36_THINKING_TEXT_DEFAULTS_DECOMPOSER_EXPERIMENT,
     QWEN36_TEXT_DEFAULTS_DECOMPOSER_EXPERIMENT,
     QWEN35_4B_TEXT_DEFAULTS_SIMPLE_EXPERIMENT,
     SEARCH_DOMAIN,
@@ -523,6 +524,7 @@ def test_experiment_registry_contains_local_and_openrouter_profiles() -> None:
         QWEN36_QWEN_EXPERIMENT,
         GEMMA4_TEXT_DEFAULTS_DECOMPOSER_EXPERIMENT,
         QWEN36_TEXT_DEFAULTS_DECOMPOSER_EXPERIMENT,
+        QWEN36_THINKING_TEXT_DEFAULTS_DECOMPOSER_EXPERIMENT,
         SIMPLE_EXPERIMENT,
         SIMPLE_QWEN_EXPERIMENT,
         SIMPLE_QWEN_2B_EXPERIMENT,
@@ -553,6 +555,7 @@ def test_experiment_registry_contains_local_and_openrouter_profiles() -> None:
             QWEN36_QWEN_EXPERIMENT,
             GEMMA4_TEXT_DEFAULTS_DECOMPOSER_EXPERIMENT,
             QWEN36_TEXT_DEFAULTS_DECOMPOSER_EXPERIMENT,
+            QWEN36_THINKING_TEXT_DEFAULTS_DECOMPOSER_EXPERIMENT,
         )
     )
 
@@ -562,6 +565,7 @@ def test_qwen36_teacher_uses_internal_proxy_and_existing_worker(tmp_path) -> Non
     repo_root = Path(__file__).resolve().parents[2]
     assert experiment.manager_backend == "llm_proxy"
     assert experiment.manager_reasoning_mode == "service_default"
+    assert experiment.remote_manager_extra_body == {}
     assert experiment.manager_served_name == "Qwen/Qwen3.6-35B-A3B-FP8"
     assert experiment.prompt_profile == "teacher"
     assert experiment.worker_checkpoint == DEEPSEEK_QWEN_EXPERIMENT.worker_checkpoint
@@ -658,6 +662,87 @@ def test_qwen36_text_defaults_are_explicitly_non_thinking(tmp_path) -> None:
     assert manager is None
     assert "--language-model-only" in worker
     assert subagent_environment(experiment)["GAIA2_SUBAGENT_MAX_MODEL_CALLS"] == "80"
+
+
+def test_qwen36_thinking_text_defaults_preserve_reasoning(tmp_path) -> None:
+    experiment = QWEN36_THINKING_TEXT_DEFAULTS_DECOMPOSER_EXPERIMENT
+    expected_proxy_body = {
+        "temperature": 1.0,
+        "top_p": 0.95,
+        "top_k": 20,
+        "min_p": 0.0,
+        "presence_penalty": 1.5,
+        "repetition_penalty": 1.0,
+        "include_reasoning": True,
+        "chat_template_kwargs": {
+            "enable_thinking": True,
+            "preserve_thinking": True,
+        },
+    }
+
+    assert experiment.manager_backend == "llm_proxy"
+    assert experiment.manager_served_name == "Qwen/Qwen3.6-35B-A3B-FP8"
+    assert experiment.manager_reasoning_mode == "thinking"
+    assert experiment.manager_thinking is True
+    assert experiment.prompt_profile == "teacher"
+    assert experiment.max_model_len == 131072
+    assert experiment.max_completion_tokens is None
+    assert experiment.manager_max_model_calls == 80
+    assert experiment.subagent_max_model_calls == 80
+    assert experiment.worker_checkpoint == DEEPSEEK_QWEN_EXPERIMENT.worker_checkpoint
+    assert experiment.worker_served_name == "Qwen/Qwen3.5-4B"
+    assert experiment.worker_thinking is False
+    assert experiment.worker_language_model_only is True
+    assert experiment.num_gpus == 1
+    assert experiment.concurrency == 16
+    assert experiment.remote_manager_extra_body == expected_proxy_body
+
+    ports = Gaia2PortLayout(12000)
+    proxy = remote_manager_proxy_command(experiment, ports)
+    assert proxy[proxy.index("--port") + 1] == "20142"
+    assert proxy[proxy.index("--upstream-url-env") + 1] == "LLM_PROXY_URL"
+    assert proxy[proxy.index("--api-key-env") + 1] == "LLM_PROXY_MASTER_KEY"
+    assert proxy[proxy.index("--response-tool-parser") + 1] == "qwen3_xml"
+    assert "--no-verify-tls" in proxy
+    assert (
+        json.loads(proxy[proxy.index("--extra-body-json") + 1])
+        == expected_proxy_body
+    )
+
+    service_path, _ = _runtime_configs(Path.cwd(), tmp_path, experiment, ports)
+    service = json.loads(service_path.read_text())
+    manager = service["manager"]
+    assert manager["base_url"] == "http://127.0.0.1:20142/v1"
+    assert manager["extra_body"] == expected_proxy_body
+    assert "presence_penalty" not in {
+        key: value for key, value in manager.items() if key != "extra_body"
+    }
+    assert service["manager_max_model_calls"] == 80
+    assert service["manager_recursion_limit"] == 1000
+    assert service["subagent_recursion_limit"] == 1000
+
+    local_manager, worker = decomposer_vllm_commands(experiment, ports)
+    assert local_manager is None
+    assert "--language-model-only" in worker
+    assert '{"enable_thinking":false}' in worker
+    plan = _dry_plan(
+        Path.cwd(),
+        experiment,
+        tmp_path / "dry",
+        ("0",),
+        3,
+        None,
+        purpose="evaluation",
+        partition="test",
+        concurrency=16,
+        ports=ports,
+    )
+    assert plan["concurrency"] == 16
+    assert plan["gpu_assignments"] == {"worker_vllm": "0"}
+    assert "gyms.remote_model_proxy" in plan["services"][0]
+    assert subagent_environment(experiment, ports)[
+        "GAIA2_SUBAGENT_MAX_MODEL_CALLS"
+    ] == "80"
 
 
 def test_gemma_text_defaults_use_pinned_thinking_models() -> None:

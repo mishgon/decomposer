@@ -51,6 +51,14 @@ QWEN36_NON_THINKING = QwenSamplingParams(
     presence_penalty=1.5,
     repetition_penalty=1.0,
 )
+QWEN36_THINKING = QwenSamplingParams(
+    temperature=1.0,
+    top_p=0.95,
+    top_k=20,
+    min_p=0.0,
+    presence_penalty=1.5,
+    repetition_penalty=1.0,
+)
 
 
 def qwen35_general_sampling(*, thinking: bool) -> QwenSamplingParams:
@@ -65,3 +73,9 @@ def qwen36_non_thinking_sampling() -> QwenSamplingParams:
     """Return Qwen3.6's recommended instruct/non-thinking preset."""
 
     return QWEN36_NON_THINKING
+
+
+def qwen36_thinking_sampling() -> QwenSamplingParams:
+    """Return Qwen3.6's recommended general-task thinking preset."""
+
+    return QWEN36_THINKING

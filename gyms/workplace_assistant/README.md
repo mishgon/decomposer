@@ -36,8 +36,8 @@ Gym evaluation, validates the output, and stops every child process.
 Every run declares its intent explicitly. `--purpose trace-generation` selects
 the long teacher prompt and is available only for Decomposer experiments;
 `--purpose evaluation` normally selects the short student prompt. The
-explicitly named Qwen3.6 non-thinking teacher profile keeps the teacher prompt
-for evaluation as part of its experiment identity. Pass
+explicitly named Qwen3.6 text-default teacher profiles keep the teacher prompt
+for evaluation as part of their experiment identity. Pass
 `--prompt-profile teacher` or `--prompt-profile student` to override that
 default for a Decomposer run. Explicit overrides use a distinct output and job
 identity. Simple-agent evaluations are unaffected by prompt selection.
@@ -53,10 +53,17 @@ The matched text-default profiles are:
   instruct preset. The remote manager is reached only through
   `LLM_PROXY_URL`/`LLM_PROXY_MASTER_KEY`; both Qwen chat templates explicitly
   disable thinking.
+- `qwen36-35b-a3b-thinking-teacher-qwen35-4b-non-thinking-text-defaults`
+  keeps the same teacher prompt, local Qwen3.5-4B non-thinking worker, 128K
+  context, and runtime limits, but explicitly enables Qwen3.6 thinking through
+  the LLM proxy and preserves its reasoning across manager turns. Raw traces
+  retain that reasoning; current non-thinking SFT preprocessing removes it.
 
-All four profiles use 128K context and 32K completion limits. Workplace simple
-agents have 100 model calls; each Decomposer manager and each spawned subagent
-has its own 100-model-call limit.
+All five profiles use 128K context and provider-controlled output length.
+Workplace simple agents have 100 model calls; each Decomposer manager and each
+spawned subagent has its own 100-model-call limit. The runner omits
+`max_output_tokens` unless an experiment explicitly requests a bounded-output
+ablation.
 
 ```bash
 # Simple agent backed by one local policy vLLM.
@@ -85,6 +92,15 @@ HTTPS_PROXY=... \
   --concurrency 16 \
   --cuda-visible-devices 0
 
+# Matched explicit-thinking Qwen3.6 manager comparison.
+.venv/bin/python -m gyms.workplace_assistant.run \
+  --purpose evaluation \
+  --experiment qwen36-35b-a3b-thinking-teacher-qwen35-4b-non-thinking-text-defaults \
+  --split validation \
+  --num-repeats 3 \
+  --concurrency 16 \
+  --cuda-visible-devices 0
+
 # One-task local smoke run. There is no automatic smoke pass.
 .venv/bin/python -m gyms.workplace_assistant.run \
   --purpose evaluation \
@@ -105,7 +121,9 @@ HTTPS_PROXY=... \
 Use `--dry` to print the complete service and Gym commands without starting
 processes. `--output-dir` routes every result, log, status file, and completion
 marker beneath an explicit directory. Partial outputs resume by default.
-`--force` archives the previous attempt before starting fresh.
+Completion and resume validate the full runtime configuration, including the
+output-length policy. An existing 32K-capped result cannot be reused as an
+uncapped run; `--force` archives the previous attempt before starting fresh.
 
 Use `--port-offset` to run several local evaluations on the same host. The
 offset is added to every coordinated loopback endpoint: model servers, manager
@@ -159,8 +177,9 @@ when preparing reward-1 SFT data, so placeholder responses cannot enter the
 training set.
 
 Call budgets are part of the artifact identity: simple runs use `calls100` and
-Decomposer runs use `managercalls100-subagentcalls100`. This prevents an old
-six-step or uncapped result from being silently reused.
+Decomposer runs use `managercalls100-subagentcalls100`. The stored runtime
+configuration provides the remaining identity checks, including context,
+sampling, thinking mode, and output-length policy.
 
 ## Submit MLSpace jobs
 

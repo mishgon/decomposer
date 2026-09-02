@@ -40,6 +40,8 @@ from gyms.workplace_assistant.experiments import (  # noqa: E402
 )
 from gyms.workplace_assistant.run import (
     positive_int,
+    runtime_decomposer_config,
+    validate_existing_attempt_identity,
     validate_preparation,
 )  # noqa: E402
 
@@ -340,6 +342,26 @@ def main(argv: Sequence[str] | None = None) -> int:
             prompt_profile=args.prompt_profile,
         )
         if marker.is_file() and not args.force:
+            runtime_gym_config_sha256 = None
+            if isinstance(experiment, DecomposerExperiment):
+                _, runtime_config_metadata = runtime_decomposer_config(
+                    repo_root,
+                    experiment,
+                    marker.parent,
+                    materialize=False,
+                )
+                runtime_gym_config_sha256 = runtime_config_metadata["sha256"]
+            validate_existing_attempt_identity(
+                marker.parent,
+                experiment,
+                purpose=args.purpose,
+                split=args.split,
+                num_repeats=args.num_repeats,
+                limit=args.limit,
+                force=False,
+                prompt_profile=args.prompt_profile,
+                runtime_gym_config_sha256=runtime_gym_config_sha256,
+            )
             skipped_completed += 1
             print(f"Skip (completed): {marker}")
         else:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -48,9 +49,9 @@ from gyms.qwen_sampling import qwen35_general_sampling
 
 
 def test_registry_is_global_and_unique() -> None:
-    assert len(DECOMPOSER_EXPERIMENTS) == 19
+    assert len(DECOMPOSER_EXPERIMENTS) == 20
     assert len(SIMPLE_EXPERIMENTS) == 30
-    assert len(experiments.EXPERIMENTS) == 49
+    assert len(experiments.EXPERIMENTS) == 50
     assert experiments.BASE_IMAGE.endswith("py3.12-torch2.7.0:0.0.42")
     assert {experiment.kind for experiment in experiments.ALL_EXPERIMENTS} == {
         "decomposer",
@@ -193,6 +194,7 @@ def test_qwen36_teacher_uses_internal_proxy_and_concurrency_override() -> None:
     assert experiment.manager_backend == "llm_proxy"
     assert experiment.manager_model_id == "Qwen/Qwen3.6-35B-A3B-FP8"
     assert experiment.manager_reasoning_mode == "service_default"
+    assert experiment.remote_manager_extra_body == {}
     assert experiment.requires_llm_proxy
     assert experiment.requires_remote_manager
     assert not experiment.requires_openrouter
@@ -266,14 +268,13 @@ def test_qwen36_text_defaults_force_proxy_sampling_and_teacher_prompt(tmp_path) 
         "min_p": 0.0,
         "presence_penalty": 1.5,
         "repetition_penalty": 1.0,
-        "max_output_tokens": 32768,
         "include_reasoning": False,
         "chat_template_kwargs": {"enable_thinking": False},
     }
     assert experiment.manager_reasoning_mode == "non_thinking"
     assert experiment.evaluation_prompt_profile == "teacher"
     assert experiment.max_model_len == 131072
-    assert experiment.max_output_tokens == 32768
+    assert experiment.max_output_tokens is None
     assert experiment.manager_max_model_calls == 100
     assert experiment.subagent_max_model_calls == 100
     assert experiment.remote_manager_extra_body == expected_proxy_body
@@ -297,8 +298,8 @@ def test_qwen36_text_defaults_force_proxy_sampling_and_teacher_prompt(tmp_path) 
         ("0",),
     )
     assert plan["decomposer_system_prompt_profile"] == "teacher"
-    assert plan["runtime_configuration"]["max_output_tokens"] == 32768
-    assert "max_output_tokens=32768" in plan["gym_start"]
+    assert plan["runtime_configuration"]["max_output_tokens"] is None
+    assert "max_output_tokens" not in plan["gym_start"]
     assert [model.model_id for model in models_for_experiment(experiment)] == [
         "Qwen/Qwen3.5-4B"
     ]
@@ -307,6 +308,100 @@ def test_qwen36_text_defaults_force_proxy_sampling_and_teacher_prompt(tmp_path) 
     )
     assert "--language-model-only" in worker
     assert '{"enable_thinking":false}' in worker
+
+
+def test_qwen36_thinking_text_defaults_preserve_reasoning(tmp_path) -> None:
+    experiment = get_experiment(
+        "qwen36-35b-a3b-thinking-teacher-"
+        "qwen35-4b-non-thinking-text-defaults"
+    )
+    assert isinstance(experiment, DecomposerExperiment)
+    expected_proxy_body = {
+        "temperature": 1.0,
+        "top_p": 0.95,
+        "top_k": 20,
+        "min_p": 0.0,
+        "presence_penalty": 1.5,
+        "repetition_penalty": 1.0,
+        "include_reasoning": True,
+        "chat_template_kwargs": {
+            "enable_thinking": True,
+            "preserve_thinking": True,
+        },
+    }
+    assert experiment.manager_backend == "llm_proxy"
+    assert experiment.manager_model_id == "Qwen/Qwen3.6-35B-A3B-FP8"
+    assert experiment.manager_reasoning_mode == "thinking"
+    assert experiment.evaluation_prompt_profile == "teacher"
+    assert experiment.max_model_len == 131072
+    assert experiment.max_output_tokens is None
+    assert experiment.manager_max_model_calls == 100
+    assert experiment.subagent_max_model_calls == 100
+    assert experiment.subagent_recursion_limit == 1000
+    assert experiment.num_gpus == 1
+    assert experiment.concurrency == 16
+    assert experiment.remote_manager_extra_body == expected_proxy_body
+
+    ports = run_module.WorkplacePortLayout(12000)
+    proxy = run_module.remote_manager_proxy_command(experiment, ports)
+    assert proxy[proxy.index("--port") + 1] == "20142"
+    assert proxy[proxy.index("--upstream-url-env") + 1] == "LLM_PROXY_URL"
+    assert proxy[proxy.index("--api-key-env") + 1] == "LLM_PROXY_MASTER_KEY"
+    assert proxy[proxy.index("--response-tool-parser") + 1] == "qwen3_xml"
+    assert "--no-verify-tls" in proxy
+    assert (
+        json.loads(proxy[proxy.index("--extra-body-json") + 1])
+        == expected_proxy_body
+    )
+
+    repo_root = Path(__file__).resolve().parents[2]
+    runtime_config, _ = run_module.runtime_decomposer_config(
+        repo_root, experiment, tmp_path / "runtime", ports, materialize=True
+    )
+    config = yaml.safe_load(runtime_config.read_text())
+    assert config["responses_create_params"] == {
+        "temperature": 1.0,
+        "top_p": 0.95,
+    }
+    assert "presence_penalty" not in config["responses_create_params"]
+    policy = config["policy_model"]["responses_api_models"]["openai_model"]
+    assert policy["openai_base_url"] == "http://127.0.0.1:20142/v1"
+    assert policy["extra_body"] == {
+        "top_k": 20,
+        "min_p": 0.0,
+        "presence_penalty": 1.5,
+        "repetition_penalty": 1.0,
+        "include_reasoning": True,
+        "chat_template_kwargs": {
+            "enable_thinking": True,
+            "preserve_thinking": True,
+        },
+    }
+    assert [model.model_id for model in models_for_experiment(experiment)] == [
+        "Qwen/Qwen3.5-4B"
+    ]
+    worker = run_module.decomposer_vllm_command(
+        models_for_experiment(experiment)[0], experiment, ports
+    )
+    assert "--language-model-only" in worker
+    assert '{"enable_thinking":false}' in worker
+
+    plan = run_module._dry_plan(
+        repo_root,
+        experiment,
+        "evaluation",
+        "validation",
+        3,
+        None,
+        tmp_path / "dry",
+        ("0",),
+        16,
+        ports=ports,
+    )
+    assert plan["decomposer_system_prompt_profile"] == "teacher"
+    assert plan["gpu_assignments"] == {"subagent_vllm_20025": "0"}
+    assert "gyms.remote_model_proxy" in plan["services"][0]
+    assert "--concurrency 16" in plan["gym_eval"]
 
 
 def test_gemma_text_defaults_use_pinned_thinking_manager_and_worker(tmp_path) -> None:
@@ -322,7 +417,7 @@ def test_gemma_text_defaults_use_pinned_thinking_manager_and_worker(tmp_path) ->
     assert models[0].snapshot.name == "4d7ae4984b7db7de8f8457170b3f1a419ee76d52"
     assert all(model.thinking for model in models)
     assert experiment.max_model_len == 131072
-    assert experiment.max_output_tokens == 32768
+    assert experiment.max_output_tokens is None
     for model in models:
         command = run_module.decomposer_vllm_command(model, experiment)
         assert command[command.index("--max-model-len") + 1] == "131072"
@@ -341,7 +436,6 @@ def test_gemma_text_defaults_use_pinned_thinking_manager_and_worker(tmp_path) ->
     assert config["responses_create_params"] == {
         "temperature": 1.0,
         "top_p": 0.95,
-        "max_output_tokens": 32768,
     }
     policy = config["policy_model"]["responses_api_models"]["vllm_model"]
     assert policy["chat_template_kwargs"]["enable_thinking"] is True
@@ -365,7 +459,7 @@ def test_text_default_simple_profiles_use_matched_workplace_limits() -> None:
     assert isinstance(qwen, SimpleExperiment)
     for experiment in (gemma, qwen):
         assert experiment.max_model_len == 131072
-        assert experiment.max_output_tokens == 32768
+        assert experiment.max_output_tokens is None
         assert experiment.max_steps == 100
         assert "--language-model-only" in run_module.simple_vllm_command(experiment)
     assert (gemma.temperature, gemma.top_p, gemma.top_k) == (1.0, 0.95, 64)
@@ -377,6 +471,35 @@ def test_text_default_simple_profiles_use_matched_workplace_limits() -> None:
         qwen.presence_penalty,
         qwen.repetition_penalty,
     ) == (0.7, 0.8, 20, 0.0, 1.5, 1.0)
+
+
+def test_all_simple_profiles_use_provider_output_length_by_default() -> None:
+    for experiment in SIMPLE_EXPERIMENTS:
+        assert experiment.max_output_tokens is None
+        command = run_module.gym_eval_command(
+            experiment,
+            gym_bin=Path("/gym"),
+            split="validation",
+            output=Path("/rollouts.jsonl"),
+            num_repeats=1,
+            limit=None,
+            resume=False,
+        )
+        assert "--max-output-tokens" not in command
+
+    limited = replace(SIMPLE_EXPERIMENTS[0], max_output_tokens=4096)
+    command = run_module.gym_eval_command(
+        limited,
+        gym_bin=Path("/gym"),
+        split="validation",
+        output=Path("/rollouts.jsonl"),
+        num_repeats=1,
+        limit=None,
+        resume=False,
+    )
+    assert command[command.index("--max-output-tokens") + 1] == "4096"
+    with pytest.raises(ValueError, match="max_output_tokens"):
+        replace(SIMPLE_EXPERIMENTS[0], max_output_tokens=0)
 
 
 def test_workplace_prompt_override_is_propagated_and_output_isolated() -> None:
@@ -618,6 +741,9 @@ def test_port_offset_isolates_default_output_and_resume_identity(
                 "num_repeats": 3,
                 "limit": None,
                 "simple_agent_max_steps": experiment.max_steps,
+                "runtime_configuration": run_module.runtime_configuration(
+                    experiment
+                ),
             }
         )
     )
@@ -1919,6 +2045,9 @@ def test_existing_completion_marker_skips_without_new_manifest(
                 "num_repeats": 1,
                 "limit": None,
                 "simple_agent_max_steps": 100,
+                "runtime_configuration": run_module.runtime_configuration(
+                    experiment
+                ),
             }
         )
     )
@@ -1951,6 +2080,9 @@ def test_custom_output_completion_marker_is_isolated(
                 "num_repeats": 1,
                 "limit": None,
                 "simple_agent_max_steps": 100,
+                "runtime_configuration": run_module.runtime_configuration(
+                    experiment
+                ),
             }
         )
     )
@@ -1970,6 +2102,69 @@ def test_custom_output_completion_marker_is_isolated(
     assert f"Skip (completed): {custom_output / '.eval_done.json'}" in (
         capsys.readouterr().out
     )
+
+
+def test_submission_rejects_capped_marker_for_uncapped_simple_agent(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(experiments, "RESULTS_ROOT", tmp_path)
+    experiment = get_experiment("gemma4-e2b-it-non-thinking")
+    assert isinstance(experiment, SimpleExperiment)
+    marker = completion_marker(experiment, "train", purpose="evaluation")
+    marker.parent.mkdir(parents=True)
+    capped_runtime = run_module.runtime_configuration(experiment)
+    capped_runtime["max_output_tokens"] = 32768
+    marker.write_text(
+        json.dumps(
+            {
+                "experiment": experiment.name,
+                "purpose": "evaluation",
+                "split": "train",
+                "num_repeats": 1,
+                "limit": None,
+                "simple_agent_max_steps": 100,
+                "runtime_configuration": capped_runtime,
+            }
+        )
+    )
+    monkeypatch.setattr(
+        run_eval.sys,
+        "argv",
+        [
+            "run_eval",
+            "--experiment",
+            experiment.name,
+            "--purpose",
+            "evaluation",
+            "--split",
+            "train",
+            "--author-name",
+            "alice",
+            "--dry",
+        ],
+    )
+
+    with pytest.raises(RuntimeError, match="runtime_configuration"):
+        run_eval.main()
+
+    uncapped_runtime = run_module.runtime_configuration(experiment)
+    marker.write_text(
+        json.dumps(
+            {
+                "experiment": experiment.name,
+                "purpose": "evaluation",
+                "split": "train",
+                "num_repeats": 1,
+                "limit": None,
+                "simple_agent_max_steps": 100,
+                "runtime_configuration": uncapped_runtime,
+            }
+        )
+    )
+    assert run_eval.main() == 0
+    assert f"Skip (completed): {marker}" in capsys.readouterr().out
 
 
 def test_job_payload_uses_shared_runner_and_redacts_decomposer_secrets() -> None:

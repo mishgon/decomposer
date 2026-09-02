@@ -775,10 +775,12 @@ def gym_eval_command(
                 str(experiment.temperature),
                 "--top-p",
                 str(experiment.top_p),
-                "--max-output-tokens",
-                str(experiment.max_output_tokens),
             ]
         )
+        if experiment.max_output_tokens is not None:
+            command.extend(
+                ["--max-output-tokens", str(experiment.max_output_tokens)]
+            )
     if limit is not None:
         command.extend(["--limit", str(limit)])
     if resume:
@@ -1109,6 +1111,7 @@ def validate_existing_attempt_identity(
         "purpose": purpose,
         "port_offset": ports.offset,
         "port_layout": ports.as_dict(experiment),
+        "runtime_configuration": runtime_configuration(experiment),
     }
     if runtime_gym_config_sha256 is not None:
         expected["runtime_gym_config_sha256"] = runtime_gym_config_sha256

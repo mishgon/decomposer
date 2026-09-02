@@ -142,12 +142,18 @@ The registered experiments are:
   an explicitly non-thinking Qwen3.6 manager through `LLM_PROXY_URL`, using
   Qwen's general instruct sampling preset and the teacher prompt, with a local
   text-only non-thinking Qwen3.5-4B worker. Manager and worker use 128K context,
-  32K completion limits, and independent 200-model-call caps.
+  provider-controlled completion length, and independent 80-model-call caps.
+- `qwen36-35b-a3b-thinking-teacher-qwen35-4b-non-thinking-text-defaults`:
+  the matched explicit-thinking Qwen3.6 manager, also reached through the
+  credential-isolating LLM proxy. It uses Qwen's thinking preset and preserves
+  manager reasoning across the ReAct loop; the prompt and local worker are
+  identical to the non-thinking comparison. Raw traces retain manager
+  reasoning, while current non-thinking SFT preprocessing removes it.
 - `gemma4-26b-a4b-thinking-gemma4-e4b-thinking-text-defaults`: local thinking
   Gemma-4-26B-A4B manager and thinking Gemma-4-E4B worker using Gemma's
   `temperature=1.0`, `top_p=0.95`, `top_k=64` preset and the student prompt.
-  Both models use 128K context, 32K completion limits, and independent
-  200-model-call caps.
+  Both models use 128K context, provider-controlled completion length, and
+  independent 80-model-call caps.
 - `qwen35-4b-sft-workplace-v1-3765-32k-non-thinking-qwen35-4b-non-thinking`:
   the Workplace-trained non-thinking Qwen3.5-4B manager on the first GPU and
   a base non-thinking Qwen3.5-4B worker on the second GPU, using the student
@@ -243,6 +249,16 @@ report. Subsequent benchmark rollouts still run normally.
   --experiment qwen35-4b-base-non-thinking-teacher-qwen35-4b-non-thinking \
   --num-repeats 3 \
   --cuda-visible-devices 6,7
+
+# Explicit-thinking Qwen3.6 proxy manager with the teacher prompt and one
+# local non-thinking Qwen3.5-4B worker.
+.venv/bin/python -m gyms.gaia2.run \
+  --experiment qwen36-35b-a3b-thinking-teacher-qwen35-4b-non-thinking-text-defaults \
+  --domain execution \
+  --partition test \
+  --num-repeats 3 \
+  --concurrency 16 \
+  --cuda-visible-devices 0
 
 # Simple-agent one-scenario smoke.
 .venv/bin/python -m gyms.gaia2.run \
@@ -346,6 +362,7 @@ when sharing GPUs:
 qwen35-4b-non-thinking-simple-general-text-defaults
 gemma4-e4b-thinking-simple-text-defaults
 qwen36-35b-a3b-non-thinking-teacher-qwen35-4b-non-thinking-text-defaults
+qwen36-35b-a3b-thinking-teacher-qwen35-4b-non-thinking-text-defaults
 gemma4-26b-a4b-thinking-gemma4-e4b-thinking-text-defaults
 ```
 

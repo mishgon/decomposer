@@ -1,4 +1,8 @@
-from gyms.qwen_sampling import qwen35_general_sampling, qwen36_non_thinking_sampling
+from gyms.qwen_sampling import (
+    qwen35_general_sampling,
+    qwen36_non_thinking_sampling,
+    qwen36_thinking_sampling,
+)
 
 
 def test_qwen35_general_sampling_is_mode_specific() -> None:
@@ -39,3 +43,16 @@ def test_qwen36_non_thinking_sampling_matches_instruct_recommendation() -> None:
         sampling.presence_penalty,
         sampling.repetition_penalty,
     ) == (0.7, 0.8, 20, 0.0, 1.5, 1.0)
+
+
+def test_qwen36_thinking_sampling_matches_general_recommendation() -> None:
+    sampling = qwen36_thinking_sampling()
+
+    assert (
+        sampling.temperature,
+        sampling.top_p,
+        sampling.top_k,
+        sampling.min_p,
+        sampling.presence_penalty,
+        sampling.repetition_penalty,
+    ) == (1.0, 0.95, 20, 0.0, 1.5, 1.0)

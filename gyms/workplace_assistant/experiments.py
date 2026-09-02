@@ -13,6 +13,7 @@ from gyms.qwen_sampling import (
     QwenSamplingParams,
     qwen35_general_sampling,
     qwen36_non_thinking_sampling,
+    qwen36_thinking_sampling,
 )
 
 ARTIFACTS_ROOT = Path("/mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts")
@@ -114,7 +115,9 @@ class DecomposerExperiment:
     manager_upstream_url_env: str | None = None
     manager_api_key_env: str | None = None
     manager_response_tool_parser: str | None = None
-    manager_reasoning_mode: Literal["service_default", "non_thinking"] | None = None
+    manager_reasoning_mode: Literal[
+        "service_default", "non_thinking", "thinking"
+    ] | None = None
     manager_verify_tls: bool = True
     manager_sampling: QwenSamplingParams | None = None
     evaluation_prompt_profile: DecomposerPromptProfile = "student"
@@ -202,6 +205,16 @@ class DecomposerExperiment:
                     "chat_template_kwargs": {"enable_thinking": False},
                 }
             )
+        elif self.manager_reasoning_mode == "thinking":
+            value.update(
+                {
+                    "include_reasoning": True,
+                    "chat_template_kwargs": {
+                        "enable_thinking": True,
+                        "preserve_thinking": True,
+                    },
+                }
+            )
         return value
 
 
@@ -224,7 +237,7 @@ class SimpleExperiment:
     repetition_penalty: float = 1.0
     concurrency: int = 32
     max_model_len: int = 131072
-    max_output_tokens: int = 32768
+    max_output_tokens: int | None = None
     gpu_memory_utilization: float = 0.90
     max_steps: int = WORKPLACE_MODEL_CALL_LIMIT
     gym_wait_timeout: int = 360
@@ -234,6 +247,8 @@ class SimpleExperiment:
     kind: Literal["simple"] = field(init=False, default="simple")
 
     def __post_init__(self) -> None:
+        if self.max_output_tokens is not None and self.max_output_tokens < 1:
+            raise ValueError(f"{self.name}: max_output_tokens must be at least 1")
         if self.backend == "local_vllm":
             if self.checkpoint is None:
                 raise ValueError(f"{self.name}: local_vllm requires checkpoint")
@@ -497,6 +512,7 @@ WORKPLACE_QWEN35_4B_GAIA2_EXECUTION_ONLY_SFT_FINAL = (
 )
 
 _QWEN36_NON_THINKING_SAMPLING = qwen36_non_thinking_sampling()
+_QWEN36_THINKING_SAMPLING = qwen36_thinking_sampling()
 
 DECOMPOSER_EXPERIMENTS = (
     DecomposerExperiment(
@@ -510,7 +526,6 @@ DECOMPOSER_EXPERIMENTS = (
         max_model_len=131072,
         max_num_seqs=16,
         subagent_graph="repository",
-        max_output_tokens=32768,
         model_servers=(
             replace(
                 MODELS[3],
@@ -551,7 +566,45 @@ DECOMPOSER_EXPERIMENTS = (
         num_gpus=1,
         max_model_len=131072,
         max_num_seqs=16,
-        max_output_tokens=32768,
+        subagent_graph="repository",
+        model_servers=(
+            ModelServer(
+                "Qwen/Qwen3.5-4B",
+                QWEN35_4B_BASE,
+                8025,
+                0,
+                0.90,
+                0,
+                thinking=False,
+                tool_call_parser="qwen3_xml",
+                reasoning_parser=None,
+                gdn_prefill_backend="triton",
+            ),
+        ),
+    ),
+    DecomposerExperiment(
+        name=(
+            "qwen36-35b-a3b-thinking-teacher-"
+            "qwen35-4b-non-thinking-text-defaults"
+        ),
+        gym_config_filename=(
+            "workplace_assistant_qwen36_35b_a3b_thinking_teacher_"
+            "qwen35_4b_non_thinking_text_defaults.yaml"
+        ),
+        manager_backend="llm_proxy",
+        manager_model_id="Qwen/Qwen3.6-35B-A3B-FP8",
+        manager_proxy_port=8142,
+        manager_upstream_url_env="LLM_PROXY_URL",
+        manager_api_key_env="LLM_PROXY_MASTER_KEY",
+        manager_response_tool_parser="qwen3_xml",
+        manager_reasoning_mode="thinking",
+        manager_verify_tls=False,
+        manager_sampling=_QWEN36_THINKING_SAMPLING,
+        evaluation_prompt_profile="teacher",
+        concurrency=16,
+        num_gpus=1,
+        max_model_len=131072,
+        max_num_seqs=16,
         subagent_graph="repository",
         model_servers=(
             ModelServer(
@@ -1142,7 +1195,6 @@ def _simple_experiments() -> tuple[SimpleExperiment, ...]:
                 presence_penalty=0.0,
                 repetition_penalty=1.0,
                 max_model_len=131072,
-                max_output_tokens=32768,
                 max_steps=100,
                 tool_call_parser="gemma4",
                 reasoning_parser="gemma4",
