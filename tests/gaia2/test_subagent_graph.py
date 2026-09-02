@@ -19,6 +19,10 @@ from are.simulation.schema_reminders import (  # noqa: E402
 
 pytest.importorskip("langchain_openai")
 
+from gyms.gaia2.model_overflow import (  # noqa: E402
+    ExactModelCallLimitMiddleware,
+    Gaia2ModelOverflowMiddleware,
+)
 from gyms.gaia2.subagents import graphs  # noqa: E402
 
 TYPED_PARAMETERS = {
@@ -242,6 +246,38 @@ def test_worker_model_requests_without_tools_are_unchanged():
     )
 
     assert result is request
+
+
+def test_worker_installs_fail_fast_overflow_middleware(monkeypatch):
+    captured = {}
+
+    class FakeAgent:
+        async def ainvoke(self, value):
+            return {"messages": value["messages"]}
+
+    def fake_create_agent(**kwargs):
+        captured.update(kwargs)
+        return FakeAgent()
+
+    monkeypatch.setattr(graphs, "create_agent", fake_create_agent)
+    monkeypatch.setattr(graphs, "_model", lambda: object())
+    monkeypatch.setattr(graphs, "_worker_tools", lambda context, consumer: [])
+    monkeypatch.setenv("GAIA2_SUBAGENT_MAX_MODEL_CALLS", "80")
+    runtime = type("Runtime", (), {"context": {}})()
+
+    asyncio.run(graphs.run_subagent({"messages": []}, runtime))
+
+    assert any(
+        isinstance(item, Gaia2ModelOverflowMiddleware)
+        and item.actor == "subagent"
+        and item.max_completion_tokens == 8192
+        and item.max_model_len == 65536
+        for item in captured["middleware"]
+    )
+    assert any(
+        isinstance(item, ExactModelCallLimitMiddleware) and item.run_limit == 80
+        for item in captured["middleware"]
+    )
 
 
 def test_worker_wait_adapter_starts_from_context_and_advances_shared_cursor(

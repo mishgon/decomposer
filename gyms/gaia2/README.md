@@ -177,7 +177,7 @@ The registered experiments are:
   context.
 - `qwen35-4b-non-thinking-simple-general-text-defaults` and
   `gemma4-e4b-thinking-simple-text-defaults`: matched text-only controls for
-  the two new Decomposer profiles. Each uses 128K context, a 32K completion
+  the two new Decomposer profiles. Each uses 128K context, an 8K completion
   limit, and the shared 80-call per-actor budget.
 - `qwen35-2b-base-non-thinking` and `qwen35-9b-base-non-thinking`: matching
   non-thinking simple-agent baselines using the pinned local checkpoints.
@@ -192,6 +192,14 @@ multi-tool response do not consume additional model calls. This is not an
 aggregate-compute limit: spawning multiple subagents can make Decomposer's
 episode total larger. Budget exhaustion is recorded as a failed rollout and
 does not stop the remaining evaluation.
+
+Every simple agent, manager, and subagent also uses an 8,192-token per-response
+limit. Input-context overflow and output truncation are terminal for only the
+affected actor (`fail_actor_v1`): the harness does not retry an impossible
+request, compact history, or execute a truncated tool call. A simple-agent or
+manager overflow makes that rollout a recorded failure; a subagent overflow is
+returned to the manager as an error report. Subsequent benchmark rollouts still
+run normally.
 
 ```bash
 # Decomposer, three attempts per scenario.

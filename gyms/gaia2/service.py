@@ -8,14 +8,13 @@ import json
 import os
 import time
 import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from collections.abc import Mapping
 from typing import Any, TypedDict
 
 import uvicorn
 from fastapi import FastAPI, HTTPException
-from langchain.agents.middleware import ModelCallLimitMiddleware
 from langchain_core.messages import AIMessage, message_to_dict
 from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.memory import InMemorySaver
@@ -25,6 +24,11 @@ from decomposer.core import TERMINAL_STATUSES, create_decomposer_agent
 from decomposer.prompts import (
     DECOMPOSER_SYSTEM_PROMPT,
     DECOMPOSER_TEACHER_SYSTEM_PROMPT,
+)
+from gyms.gaia2.model_overflow import (
+    ExactModelCallLimitMiddleware,
+    Gaia2ModelOverflowError,
+    Gaia2ModelOverflowMiddleware,
 )
 from gyms.gaia2.prompts import compose_decomposer_system_prompt
 
@@ -188,14 +192,20 @@ def create_app(config: dict[str, Any]) -> FastAPI:
     subagent_types = config.get("subagent_types") or []
     if not subagent_types:
         raise ValueError("At least one subagent_types entry must be configured")
-    middleware = []
+    middleware = [
+        Gaia2ModelOverflowMiddleware(
+            "manager",
+            max_completion_tokens=config["manager"].get("max_completion_tokens"),
+            max_model_len=config.get("max_model_len"),
+        )
+    ]
     manager_max_model_calls = config.get("manager_max_model_calls")
     if manager_max_model_calls is not None:
         manager_max_model_calls = int(manager_max_model_calls)
         if manager_max_model_calls < 1:
             raise ValueError("manager_max_model_calls must be at least 1")
         middleware.append(
-            ModelCallLimitMiddleware(
+            ExactModelCallLimitMiddleware(
                 run_limit=manager_max_model_calls,
                 exit_behavior="end",
             )
@@ -294,6 +304,19 @@ def create_app(config: dict[str, Any]) -> FastAPI:
         except asyncio.CancelledError:
             await cancel_subagents(episode)
             raise HTTPException(409, "episode cancelled")
+        except Gaia2ModelOverflowError as error:
+            await cancel_subagents(episode)
+            result = {
+                "failure": error.as_dict(),
+                "timing": {"elapsed_seconds": time.monotonic() - before},
+                "trace": {
+                    "runtime_context": _public_context(episode.context),
+                    "notification_cursor": request.notification_cursor,
+                    "turn_number": request.turn_number,
+                },
+            }
+            episode.turns.append(result)
+            return result
         finally:
             episode.task = None
         messages = state.get("messages") or []

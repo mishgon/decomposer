@@ -167,6 +167,7 @@ def runtime_configuration(experiment: Experiment) -> dict[str, Any]:
         "max_model_len": experiment.max_model_len,
         "max_completion_tokens": experiment.max_completion_tokens,
         "model_call_budget_semantics": "per_actor_policy_invocations_v1",
+        "model_overflow_policy": "fail_actor_v1",
         "sampling": sampling,
     }
     if isinstance(experiment, SimpleExperiment):
@@ -742,6 +743,7 @@ def subagent_environment(
         "GAIA2_SUBAGENT_TOP_P": str(experiment.top_p),
         "GAIA2_SUBAGENT_TOP_K": str(experiment.top_k),
         "GAIA2_SUBAGENT_MAX_COMPLETION_TOKENS": str(experiment.max_completion_tokens),
+        "GAIA2_SUBAGENT_MAX_MODEL_LEN": str(experiment.max_model_len),
         "GAIA2_SUBAGENT_THINKING": "1" if experiment.worker_thinking else "0",
     }
     if experiment.min_p is not None:
@@ -1332,6 +1334,7 @@ def _runtime_configs(
             "api_key_env": "OPENROUTER_API_KEY_DECOMPOSER",
             "temperature": 1.0,
             "top_p": 1.0,
+            "max_completion_tokens": experiment.max_completion_tokens,
             "use_responses_api": True,
             "reasoning": {"effort": "high"},
             "timeout": 3300,
@@ -1350,6 +1353,7 @@ def _runtime_configs(
             "top_p": (
                 experiment.top_p if experiment.remote_manager_extra_body else 1.0
             ),
+            "max_completion_tokens": experiment.max_completion_tokens,
             "use_responses_api": True,
             "timeout": 3300,
             "max_retries": 2,
@@ -1357,7 +1361,6 @@ def _runtime_configs(
         if experiment.remote_manager_extra_body:
             manager.update(
                 {
-                    "max_completion_tokens": experiment.max_completion_tokens,
                     "extra_body": experiment.remote_manager_extra_body,
                 }
             )
@@ -1386,6 +1389,7 @@ def _runtime_configs(
     manager["parallel_tool_calls"] = experiment.manager_parallel_tool_calls
     service = {
         "manager": manager,
+        "max_model_len": experiment.max_model_len,
         "decomposer_system_prompt_profile": experiment.prompt_profile,
         "decomposer_system_prompt_addendum_profile": (
             experiment.manager_prompt_addendum_profile

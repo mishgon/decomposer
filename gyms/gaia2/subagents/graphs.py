@@ -8,13 +8,18 @@ from typing import Any, TypedDict
 
 import httpx
 from langchain.agents import create_agent
-from langchain.agents.middleware import AgentMiddleware, ModelCallLimitMiddleware
+from langchain.agents.middleware import AgentMiddleware
 from langchain_core.tools import StructuredTool
 from langchain_openai import ChatOpenAI
 from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.runtime import Runtime
 
 from are.simulation.schema_reminders import render_openai_tool_retry_reminder
+
+from gyms.gaia2.model_overflow import (
+    ExactModelCallLimitMiddleware,
+    Gaia2ModelOverflowMiddleware,
+)
 
 HIDDEN_AUI_TOOLS = frozenset(
     {
@@ -166,7 +171,7 @@ def _model() -> ChatOpenAI:
         "temperature": float(os.environ.get("GAIA2_SUBAGENT_TEMPERATURE", "1.0")),
         "top_p": float(os.environ.get("GAIA2_SUBAGENT_TOP_P", "0.95")),
         "max_completion_tokens": int(
-            os.environ.get("GAIA2_SUBAGENT_MAX_COMPLETION_TOKENS", "4096")
+            os.environ.get("GAIA2_SUBAGENT_MAX_COMPLETION_TOKENS", "8192")
         ),
         "use_responses_api": False,
         "timeout": float(os.environ.get("GAIA2_SUBAGENT_TIMEOUT", "300")),
@@ -280,10 +285,21 @@ async def run_subagent(
         ),
     )
     max_model_calls = _max_model_calls()
-    middleware: list[AgentMiddleware] = [Gaia2ToolChoiceAutoMiddleware()]
+    middleware: list[AgentMiddleware] = [
+        Gaia2ModelOverflowMiddleware(
+            "subagent",
+            max_completion_tokens=int(
+                os.environ.get("GAIA2_SUBAGENT_MAX_COMPLETION_TOKENS", "8192")
+            ),
+            max_model_len=int(
+                os.environ.get("GAIA2_SUBAGENT_MAX_MODEL_LEN", "65536")
+            ),
+        ),
+        Gaia2ToolChoiceAutoMiddleware(),
+    ]
     if max_model_calls is not None:
         middleware.append(
-            ModelCallLimitMiddleware(
+            ExactModelCallLimitMiddleware(
                 run_limit=max_model_calls,
                 exit_behavior="error",
             )

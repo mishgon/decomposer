@@ -9,6 +9,11 @@ from langchain.agents.middleware import ModelCallLimitMiddleware
 from langchain_core.messages import AIMessage
 
 from gyms.gaia2 import service
+from gyms.gaia2.model_overflow import (
+    ExactModelCallLimitMiddleware,
+    Gaia2ModelOverflowError,
+    Gaia2ModelOverflowMiddleware,
+)
 from gyms.gaia2.prompts import GAIA2_AMBIGUITY_MANAGER_ADDENDUM
 
 
@@ -48,9 +53,58 @@ def test_manager_model_call_limit_is_installed_independently(monkeypatch):
         for item in captured["middleware"]
         if isinstance(item, ModelCallLimitMiddleware)
     )
+    assert isinstance(limiter, ExactModelCallLimitMiddleware)
     assert limiter.run_limit == 200
     assert limiter.exit_behavior == "end"
+    assert any(
+        isinstance(item, Gaia2ModelOverflowMiddleware)
+        and item.actor == "manager"
+        for item in captured["middleware"]
+    )
     assert captured["subagent_recursion_limit"] == 1000
+
+
+def test_manager_overflow_is_returned_as_structured_terminal_failure(monkeypatch):
+    class OverflowGraph(FakeGraph):
+        async def ainvoke(self, value, config, context):
+            self.calls.append((value, config, context.copy()))
+            raise Gaia2ModelOverflowError(
+                actor="manager",
+                kind="input_context_overflow",
+                detail="maximum context length is 131072 tokens",
+                max_completion_tokens=8192,
+                max_model_len=131072,
+            )
+
+    graph = OverflowGraph()
+    monkeypatch.setattr(service, "_model_from_config", lambda value: object())
+    monkeypatch.setattr(service, "create_decomposer_agent", lambda **kwargs: graph)
+    app = service.create_app(
+        {
+            "manager": {"model": "fake"},
+            "max_model_len": 131072,
+            "subagent_types": [{"subagent_type_id": "worker"}],
+        }
+    )
+
+    with TestClient(app) as client:
+        episode_id = client.post(
+            "/v1/episodes", json={"context": _context()}
+        ).json()["episode_id"]
+        response = client.post(
+            f"/v1/episodes/{episode_id}/turn", json=_turn()
+        )
+
+    assert response.status_code == 200
+    assert response.json()["failure"] == {
+        "actor": "manager",
+        "kind": "input_context_overflow",
+        "detail": "maximum context length is 131072 tokens",
+        "policy": "fail_actor_v1",
+        "max_completion_tokens": 8192,
+        "max_model_len": 131072,
+    }
+    assert "final_text" not in response.json()
 
 
 def test_episode_persists_thread_and_forwards_runtime_context(monkeypatch):

@@ -625,7 +625,7 @@ def test_qwen36_text_defaults_are_explicitly_non_thinking(tmp_path) -> None:
         "min_p": 0.0,
         "presence_penalty": 1.5,
         "repetition_penalty": 1.0,
-        "max_output_tokens": 32768,
+        "max_output_tokens": 8192,
         "include_reasoning": False,
         "chat_template_kwargs": {"enable_thinking": False},
     }
@@ -633,7 +633,7 @@ def test_qwen36_text_defaults_are_explicitly_non_thinking(tmp_path) -> None:
     assert experiment.prompt_profile == "teacher"
     assert experiment.manager_reasoning_mode == "non_thinking"
     assert experiment.max_model_len == 131072
-    assert experiment.max_completion_tokens == 32768
+    assert experiment.max_completion_tokens == 8192
     assert experiment.manager_max_model_calls == 80
     assert experiment.subagent_max_model_calls == 80
     assert experiment.remote_manager_extra_body == expected_proxy_body
@@ -648,7 +648,7 @@ def test_qwen36_text_defaults_are_explicitly_non_thinking(tmp_path) -> None:
     assert service["manager"]["temperature"] == 0.7
     assert service["manager"]["top_p"] == 0.8
     assert "presence_penalty" not in service["manager"]
-    assert service["manager"]["max_completion_tokens"] == 32768
+    assert service["manager"]["max_completion_tokens"] == 8192
     assert service["manager"]["extra_body"] == expected_proxy_body
     assert service["manager_max_model_calls"] == 80
     assert service["manager_recursion_limit"] == 1000
@@ -668,7 +668,7 @@ def test_gemma_text_defaults_use_pinned_thinking_models() -> None:
     assert experiment.manager_checkpoint.is_dir()
     assert experiment.worker_checkpoint.is_dir()
     assert experiment.max_model_len == 131072
-    assert experiment.max_completion_tokens == 32768
+    assert experiment.max_completion_tokens == 8192
     assert experiment.manager_max_model_calls == 80
     assert experiment.subagent_max_model_calls == 80
     assert (experiment.temperature, experiment.top_p, experiment.top_k) == (
@@ -684,7 +684,7 @@ def test_gemma_text_defaults_use_pinned_thinking_models() -> None:
         assert "--language-model-only" in command
         assert '{"enable_thinking":true}' in command
     environment = subagent_environment(experiment)
-    assert environment["GAIA2_SUBAGENT_MAX_COMPLETION_TOKENS"] == "32768"
+    assert environment["GAIA2_SUBAGENT_MAX_COMPLETION_TOKENS"] == "8192"
     assert environment["GAIA2_SUBAGENT_MAX_MODEL_CALLS"] == "80"
 
 
@@ -693,7 +693,7 @@ def test_text_default_simple_profiles_match_context_completion_and_calls() -> No
     qwen = QWEN35_4B_TEXT_DEFAULTS_SIMPLE_EXPERIMENT
     for experiment in (gemma, qwen):
         assert experiment.max_model_len == 131072
-        assert experiment.max_completion_tokens == 32768
+        assert experiment.max_completion_tokens == 8192
         assert experiment.max_model_calls == 80
         command = simple_vllm_command(experiment)
         assert "--language-model-only" in command
@@ -701,13 +701,13 @@ def test_text_default_simple_profiles_match_context_completion_and_calls() -> No
         "temperature": 1.0,
         "top_p": 0.95,
         "top_k": 64,
-        "max_tokens": 32768,
+        "max_tokens": 8192,
     }
     assert simple_sampling_parameters(qwen) == {
         "temperature": 0.7,
         "top_p": 0.8,
         "top_k": 20,
-        "max_tokens": 32768,
+        "max_tokens": 8192,
         "min_p": 0.0,
         "presence_penalty": 1.5,
         "repetition_penalty": 1.0,
@@ -724,8 +724,9 @@ def test_text_default_simple_profiles_match_context_completion_and_calls() -> No
     )
 
 
-def test_all_gaia2_profiles_use_eighty_policy_calls_per_actor() -> None:
+def test_all_gaia2_profiles_use_standardized_actor_budgets() -> None:
     for experiment in ALL_EXPERIMENTS:
+        assert experiment.max_completion_tokens == 8192
         if isinstance(experiment, SimpleExperiment):
             assert experiment.max_model_calls == 80
             assert simple_agent_environment(experiment) == {
@@ -754,6 +755,14 @@ def test_model_call_budget_semantics_are_part_of_resume_identity(tmp_path) -> No
         json.dumps({"state": "complete", **legacy}) + "\n", encoding="utf-8"
     )
 
+    with pytest.raises(ValueError, match="output identity mismatch"):
+        validate_run_identity(marker, expected, require_complete=True)
+
+    legacy = json.loads(json.dumps(expected))
+    legacy["runtime_configuration"].pop("model_overflow_policy")
+    marker.write_text(
+        json.dumps({"state": "complete", **legacy}) + "\n", encoding="utf-8"
+    )
     with pytest.raises(ValueError, match="output identity mismatch"):
         validate_run_identity(marker, expected, require_complete=True)
 
@@ -899,7 +908,7 @@ def test_simple_qwen_uses_qwen_runtime_and_sampling_profile() -> None:
             "temperature": 0.7,
             "top_p": 0.8,
             "top_k": 20,
-            "max_tokens": 4096,
+            "max_tokens": 8192,
             "min_p": 0.0,
             "presence_penalty": 1.5,
             "repetition_penalty": 1.0,
@@ -916,7 +925,7 @@ def test_simple_deepseek_uses_local_credential_proxy_without_gpu() -> None:
     assert simple_sampling_parameters(experiment) == {
         "temperature": 1.0,
         "top_p": 1.0,
-        "max_tokens": 4096,
+        "max_tokens": 8192,
     }
     with pytest.raises(ValueError, match="do not start a local vLLM"):
         simple_vllm_command(experiment)
@@ -1076,7 +1085,8 @@ def test_qwen_worker_uses_official_non_thinking_sampling() -> None:
         "GAIA2_SUBAGENT_TEMPERATURE": "0.7",
         "GAIA2_SUBAGENT_TOP_P": "0.8",
         "GAIA2_SUBAGENT_TOP_K": "20",
-        "GAIA2_SUBAGENT_MAX_COMPLETION_TOKENS": "4096",
+        "GAIA2_SUBAGENT_MAX_COMPLETION_TOKENS": "8192",
+        "GAIA2_SUBAGENT_MAX_MODEL_LEN": "131072",
         "GAIA2_SUBAGENT_MAX_MODEL_CALLS": "80",
         "GAIA2_SUBAGENT_THINKING": "0",
         "GAIA2_SUBAGENT_MIN_P": "0.0",
@@ -1146,7 +1156,7 @@ def test_qwen_sft_manager_uses_official_non_thinking_sampling(
         "temperature": 0.7,
         "top_p": 0.8,
         "presence_penalty": 1.5,
-        "max_completion_tokens": 4096,
+        "max_completion_tokens": 8192,
         "use_responses_api": False,
         "parallel_tool_calls": False,
         "extra_body": {
@@ -1187,6 +1197,7 @@ def test_openrouter_runtime_uses_teacher_responses_api(tmp_path) -> None:
         "api_key_env": "OPENROUTER_API_KEY_DECOMPOSER",
         "temperature": 1.0,
         "top_p": 1.0,
+        "max_completion_tokens": 8192,
         "use_responses_api": True,
         "reasoning": {"effort": "high"},
         "timeout": 3300,

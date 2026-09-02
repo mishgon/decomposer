@@ -19,7 +19,7 @@ DATASET_ID = "meta-agents-research-environments/gaia2"
 DATASET_REVISION = "78ea3bdbdeec2bdcd6afa5420915d8a22f23ed99"
 FILESYSTEM_DATASET_ID = "meta-agents-research-environments/gaia2_filesystem"
 FILESYSTEM_DATASET_REVISION = "132e26376f5e963bb59f64bcccdd02188cb08dee"
-GAIA2_REVISION = "6c3505af02dc1de4370bdb675c42dc0a25b72cc7"
+GAIA2_REVISION = "da132d150573b7f5c3a7decee3421419b0d722cf"
 SPLIT = "validation"
 SPLIT_MANIFEST_SEED = 42
 PARTITIONS = ("train", "test", "full")
@@ -349,7 +349,7 @@ class DecomposerExperiment:
     subagent_port: int = 2024
     max_model_len: int = 65536
     max_num_seqs: int = 16
-    max_completion_tokens: int = 4096
+    max_completion_tokens: int = 8192
     temperature: float = 1.0
     top_p: float = 0.95
     top_k: int = 64
@@ -457,7 +457,7 @@ class SimpleExperiment:
     reasoning_effort: str | None = None
     max_model_len: int = 65536
     max_num_seqs: int = 16
-    max_completion_tokens: int = 4096
+    max_completion_tokens: int = 8192
     temperature: float = 1.0
     top_p: float = 0.95
     top_k: int | None = 64
@@ -766,7 +766,7 @@ GEMMA4_TEXT_DEFAULTS_DECOMPOSER_EXPERIMENT = DecomposerExperiment(
     service_port=8127,
     subagent_port=2027,
     max_model_len=131072,
-    max_completion_tokens=32768,
+    max_completion_tokens=8192,
     manager_thinking=True,
     worker_thinking=True,
     manager_max_model_calls=80,
@@ -792,7 +792,7 @@ QWEN36_TEXT_DEFAULTS_DECOMPOSER_EXPERIMENT = replace(
     prompt_profile="teacher",
     concurrency=16,
     max_model_len=131072,
-    max_completion_tokens=32768,
+    max_completion_tokens=8192,
     temperature=_QWEN36_NON_THINKING_SAMPLING.temperature,
     top_p=_QWEN36_NON_THINKING_SAMPLING.top_p,
     top_k=_QWEN36_NON_THINKING_SAMPLING.top_k,
@@ -849,14 +849,14 @@ GEMMA4_E4B_TEXT_DEFAULTS_SIMPLE_EXPERIMENT = replace(
     SIMPLE_EXPERIMENT,
     name="gemma4-e4b-thinking-simple-text-defaults",
     max_model_len=131072,
-    max_completion_tokens=32768,
+    max_completion_tokens=8192,
     max_model_calls=80,
 )
 QWEN35_4B_TEXT_DEFAULTS_SIMPLE_EXPERIMENT = replace(
     SIMPLE_QWEN_EXPERIMENT,
     name="qwen35-4b-non-thinking-simple-general-text-defaults",
     max_model_len=131072,
-    max_completion_tokens=32768,
+    max_completion_tokens=8192,
     language_model_only=True,
     max_model_calls=80,
 )

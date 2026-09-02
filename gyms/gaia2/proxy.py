@@ -21,6 +21,10 @@ class RemoteError(RuntimeError):
     pass
 
 
+class RemoteModelOverflowError(RemoteError):
+    pass
+
+
 def _request(
     method: str,
     url: str,
@@ -232,6 +236,20 @@ class DecomposerProxyAgent(RunnableARESimulationAgent):
                         },
                         timeout=self.request_timeout,
                     )
+                    if failure := response.get("failure"):
+                        sidecar["turns"].append(
+                            {
+                                "turn_number": turn_number,
+                                "notifications": notifications,
+                                "manager": response,
+                                "proxy_latency_seconds": time.monotonic() - started,
+                            }
+                        )
+                        self._write_sidecar(scenario, sidecar)
+                        raise RemoteModelOverflowError(
+                            "Decomposer manager model overflow: "
+                            + json.dumps(failure, ensure_ascii=False)
+                        )
                 except Exception:
                     self._cancel_remote()
                     raise
