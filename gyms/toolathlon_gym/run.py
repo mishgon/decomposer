@@ -434,6 +434,7 @@ def main() -> None:
         dump = (TOOLATHLON_ROOT / "db" / "init.sql.gz").resolve()
         _docker(
             "run",
+            "--http-proxy=false",
             "--detach",
             "--name",
             pg_container,
@@ -534,6 +535,7 @@ def main() -> None:
         ]
         _docker(
             "run",
+            "--http-proxy=false",
             "--detach",
             "--name",
             task_container,
