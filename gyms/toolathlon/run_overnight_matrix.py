@@ -113,7 +113,7 @@ def batch_command(*extra: str, context_tokens: int = 256000) -> list[str]:
 def main() -> None:
     MATRIX_DIR.mkdir(parents=True, exist_ok=False)
     env = dict(os.environ)
-    env["PATH"] = f"{Path(PYTHON).resolve().parent}:/home/matrosov/.local/bin:" + env.get(
+    env["PATH"] = f"{Path(PYTHON).parent}:/home/matrosov/.local/bin:" + env.get(
         "PATH", ""
     )
     env["XDG_RUNTIME_DIR"] = "/run/user/1006"
