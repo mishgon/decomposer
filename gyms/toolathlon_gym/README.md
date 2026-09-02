@@ -38,10 +38,11 @@ The container resolves the host vLLM server through this variable:
 
 It defaults to port 8023 on `host.docker.internal`.
 
-Set the Decomposer credential and model path once:
+Set the hosted thinking-teacher endpoint and local subagent model once:
 
 ```bash
-export OPENROUTER_API_KEY=...
+export LLM_PROXY_URL=...
+export LLM_PROXY_MASTER_KEY=...
 QWEN=Qwen/Qwen3.5-4B
 ```
 
@@ -50,6 +51,7 @@ Run the full dataset once (an omitted `-n` means one repetition):
 ```bash
 uv run python gyms/toolathlon_gym/run.py --all \
   --purpose trace-generation \
+  --model Qwen/Qwen3.6-35B-A3B-FP8 \
   --subagent-model "$QWEN" \
   --subagent-gpu 7 \
   --concurrency 16 \

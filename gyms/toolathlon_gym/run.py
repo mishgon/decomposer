@@ -31,7 +31,7 @@ DEFAULT_GYM_ARTIFACTS_DIR = REPO_ROOT / "artifacts" / "gyms" / "toolathlon_gym"
 DEFAULT_ARTIFACTS_DIR = DEFAULT_GYM_ARTIFACTS_DIR / "traces"
 DEFAULT_EVALS_DIR = DEFAULT_GYM_ARTIFACTS_DIR / "evals"
 DEFAULT_IMAGE = "decomposer-toolathlon:latest"
-DEFAULT_MODEL = "deepseek/deepseek-v4-flash-0731"
+DEFAULT_MODEL = "Qwen/Qwen3.6-35B-A3B-FP8"
 DEFAULT_SUBAGENT_MODEL = "Qwen/Qwen3.5-4B"
 DEFAULT_SUBAGENT_PORT = 8023
 POSTGRES_IMAGE = "docker.io/library/postgres:15"
@@ -633,12 +633,19 @@ def main() -> None:
                 base_url=llm_proxy_url,
                 api_key=llm_proxy_key,
                 temperature=1.0,
-                top_p=1.0,
+                top_p=0.95,
                 max_tokens=decomposer_max_tokens,
                 timeout=openrouter_timeout,
                 max_retries=openrouter_max_retries,
                 disable_streaming=True,
                 use_responses_api=False,
+                extra_body={
+                    "top_k": 20,
+                    "min_p": 0.0,
+                    "repetition_penalty": 1.0,
+                    "include_reasoning": True,
+                    "chat_template_kwargs": {"enable_thinking": True},
+                },
             )
             teacher_backend = "llm_proxy"
         else:
