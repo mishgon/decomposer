@@ -8,11 +8,13 @@ from typing import Any, TypedDict
 
 import httpx
 from langchain.agents import create_agent
-from langchain.agents.middleware import ModelCallLimitMiddleware
+from langchain.agents.middleware import AgentMiddleware, ModelCallLimitMiddleware
 from langchain_core.tools import StructuredTool
 from langchain_openai import ChatOpenAI
 from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.runtime import Runtime
+
+from are.simulation.schema_reminders import render_openai_tool_retry_reminder
 
 HIDDEN_AUI_TOOLS = frozenset(
     {
@@ -60,15 +62,42 @@ def _serialize_tool_result(result: Any) -> str:
     return json.dumps(result, ensure_ascii=False, default=str)
 
 
-def _broker_tool_result(response: httpx.Response) -> str:
+def _correctable_tool_error(
+    error: Any,
+    schema: dict[str, Any],
+    *,
+    http_status: int | None = None,
+) -> str:
+    """Return concise error metadata followed by the exact failing-tool schema."""
+
+    metadata: dict[str, Any] = {"error": str(error)}
+    if http_status is not None:
+        metadata["http_status"] = http_status
+    return (
+        _serialize_tool_result(metadata)
+        + "\n"
+        + render_openai_tool_retry_reminder(schema)
+    )
+
+
+def _broker_tool_result(
+    response: httpx.Response,
+    schema: dict[str, Any] | None = None,
+) -> str:
     """Translate model-correctable ARE errors into ordinary tool feedback."""
     if response.status_code in {400, 422}:
         try:
             error = response.json().get("error", response.text)
         except (json.JSONDecodeError, AttributeError):
             error = response.text
-        return _serialize_tool_result(
-            {"error": error, "http_status": response.status_code}
+        if schema is None:
+            return _serialize_tool_result(
+                {"error": error, "http_status": response.status_code}
+            )
+        return _correctable_tool_error(
+            error,
+            schema,
+            http_status=response.status_code,
         )
     # Authentication, session-isolation, and unknown-tool failures remain hard
     # errors; a model must never reason its way around broker security checks.
@@ -94,7 +123,10 @@ def _tool_from_schema(
                 headers={"Authorization": f"Bearer {context['session_token']}"},
                 json={"arguments": arguments},
             )
-            return _broker_tool_result(response)
+            return _broker_tool_result(response, schema)
+
+    def validation_error(error: Exception) -> str:
+        return _correctable_tool_error(error, schema)
 
     return StructuredTool.from_function(
         coroutine=coroutine or broker_invoke,
@@ -103,6 +135,7 @@ def _tool_from_schema(
         args_schema=function.get("parameters")
         or {"type": "object", "properties": {}, "additionalProperties": False},
         infer_schema=False,
+        handle_validation_error=validation_error,
     )
 
 
@@ -151,6 +184,14 @@ def _worker_tools(context: EpisodeContext, consumer: str) -> list[StructuredTool
 
     cursor = int(context["notification_cursor"])
     authorization = {"Authorization": f"Bearer {context['session_token']}"}
+    wait_schema = next(
+        (
+            schema
+            for schema in context["tool_schemas"]
+            if schema["function"]["name"] == WAIT_FOR_NOTIFICATION_TOOL
+        ),
+        None,
+    )
 
     def advance_cursor(result: dict[str, Any]) -> None:
         nonlocal cursor
@@ -180,7 +221,7 @@ def _worker_tools(context: EpisodeContext, consumer: str) -> list[StructuredTool
                 },
             )
             if response.status_code in {400, 422}:
-                return _broker_tool_result(response)
+                return _broker_tool_result(response, wait_schema)
             response.raise_for_status()
             result = response.json()
             advance_cursor(result)
@@ -214,6 +255,15 @@ def _worker_tools(context: EpisodeContext, consumer: str) -> list[StructuredTool
     return tools
 
 
+class Gaia2ToolChoiceAutoMiddleware(AgentMiddleware):
+    """Make the worker's vLLM tool-selection policy explicit and reproducible."""
+
+    async def awrap_model_call(self, request: Any, handler: Any) -> Any:
+        if request.tools:
+            request = request.override(tool_choice="auto")
+        return await handler(request)
+
+
 async def run_subagent(
     state: MessagesState, runtime: Runtime[EpisodeContext]
 ) -> dict[str, Any]:
@@ -230,16 +280,14 @@ async def run_subagent(
         ),
     )
     max_model_calls = _max_model_calls()
-    middleware = (
-        [
+    middleware: list[AgentMiddleware] = [Gaia2ToolChoiceAutoMiddleware()]
+    if max_model_calls is not None:
+        middleware.append(
             ModelCallLimitMiddleware(
                 run_limit=max_model_calls,
                 exit_behavior="error",
             )
-        ]
-        if max_model_calls is not None
-        else []
-    )
+        )
     agent = create_agent(
         model=_model(),
         tools=tools,

@@ -2,14 +2,24 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sys
+from pathlib import Path
 
 import httpx
 import pytest
 from langchain_core.utils.function_calling import convert_to_openai_tool
 
+GAIA2_REPO = Path(__file__).parents[2] / "external" / "gaia2"
+sys.path.insert(0, str(GAIA2_REPO))
+
+from are.simulation.schema_reminders import (  # noqa: E402
+    CANONICAL_TOOL_SCHEMA_REMINDER_PREFIX,
+    render_openai_tool_retry_reminder,
+)
+
 pytest.importorskip("langchain_openai")
 
-from gyms.gaia2.subagents import graphs
+from gyms.gaia2.subagents import graphs  # noqa: E402
 
 TYPED_PARAMETERS = {
     "type": "object",
@@ -42,6 +52,15 @@ WAIT_SCHEMA = {
             },
             "additionalProperties": False,
         },
+    },
+}
+
+LOOKUP_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "Contacts__lookup",
+        "description": "Look up contacts.",
+        "parameters": TYPED_PARAMETERS,
     },
 }
 
@@ -78,8 +97,18 @@ def test_worker_returns_model_correctable_broker_errors_as_tool_content():
         request=httpx.Request("POST", "http://broker.test/invoke"),
     )
 
-    assert graphs._broker_tool_result(response) == (
-        '{"error": "unknown city", "http_status": 400}'
+    result = graphs._broker_tool_result(response, LOOKUP_SCHEMA)
+    metadata, reminder = result.split(
+        "\n" + CANONICAL_TOOL_SCHEMA_REMINDER_PREFIX,
+        1,
+    )
+
+    assert json.loads(metadata) == {"error": "unknown city", "http_status": 400}
+    assert json.loads(reminder) == LOOKUP_SCHEMA
+    assert result.endswith(
+        render_openai_tool_retry_reminder(LOOKUP_SCHEMA).removeprefix(
+            CANONICAL_TOOL_SCHEMA_REMINDER_PREFIX
+        )
     )
 
 
@@ -95,14 +124,7 @@ def test_worker_does_not_hide_broker_authentication_errors():
 
 
 def test_worker_preserves_canonical_json_schema_without_rebuilding_it():
-    schema = {
-        "type": "function",
-        "function": {
-            "name": "Contacts__lookup",
-            "description": "Look up contacts.",
-            "parameters": TYPED_PARAMETERS,
-        },
-    }
+    schema = LOOKUP_SCHEMA
     context = {
         "tool_schemas": [schema],
         "broker_url": "http://broker.test",
@@ -121,14 +143,7 @@ def test_worker_preserves_canonical_json_schema_without_rebuilding_it():
 def test_worker_returns_broker_argument_validation_as_correctable_tool_feedback(
     monkeypatch,
 ):
-    schema = {
-        "type": "function",
-        "function": {
-            "name": "Contacts__lookup",
-            "description": "Look up contacts.",
-            "parameters": TYPED_PARAMETERS,
-        },
-    }
+    schema = LOOKUP_SCHEMA
     context = {
         "tool_schemas": [schema],
         "broker_url": "http://broker.test",
@@ -158,9 +173,75 @@ def test_worker_returns_broker_argument_validation_as_correctable_tool_feedback(
     result = asyncio.run(tool.ainvoke({"age": "24", "recipients": "[]"}))
 
     assert '"error": "Argument \'age\' must be of type int"' in result
+    assert render_openai_tool_retry_reminder(schema) in result
     assert json.loads(requests[0].content) == {
         "arguments": {"age": "24", "recipients": "[]"}
     }
+
+
+def test_worker_langchain_validation_errors_use_canonical_retry_reminder():
+    context = {
+        "tool_schemas": [LOOKUP_SCHEMA],
+        "broker_url": "http://broker.test",
+        "session_token": "token",
+        "policy": "shared_serialized",
+        "scenario_id": "scenario",
+        "run_number": 1,
+        "notification_cursor": 0,
+    }
+    tool = graphs._tool_from_schema(LOOKUP_SCHEMA, context)
+
+    assert callable(tool.handle_validation_error)
+    result = tool.handle_validation_error(ValueError("age must be an integer"))
+
+    assert json.loads(result.split("\n", 1)[0]) == {
+        "error": "age must be an integer"
+    }
+    assert render_openai_tool_retry_reminder(LOOKUP_SCHEMA) in result
+
+
+def test_worker_model_requests_use_explicit_auto_tool_choice():
+    class Request:
+        def __init__(self, tools, tool_choice=None):
+            self.tools = tools
+            self.tool_choice = tool_choice
+
+        def override(self, **values):
+            return Request(
+                self.tools,
+                values.get("tool_choice", self.tool_choice),
+            )
+
+    captured = []
+
+    async def handler(request):
+        captured.append(request)
+        return request
+
+    middleware = graphs.Gaia2ToolChoiceAutoMiddleware()
+    result = asyncio.run(middleware.awrap_model_call(Request([object()]), handler))
+
+    assert result.tool_choice == "auto"
+    assert captured[0].tool_choice == "auto"
+
+
+def test_worker_model_requests_without_tools_are_unchanged():
+    class Request:
+        tools = []
+        tool_choice = None
+
+        def override(self, **_values):
+            raise AssertionError("tool-free request must not be overridden")
+
+    async def handler(request):
+        return request
+
+    request = Request()
+    result = asyncio.run(
+        graphs.Gaia2ToolChoiceAutoMiddleware().awrap_model_call(request, handler)
+    )
+
+    assert result is request
 
 
 def test_worker_wait_adapter_starts_from_context_and_advances_shared_cursor(

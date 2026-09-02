@@ -38,6 +38,7 @@ from are.simulation.tool_utils import (  # noqa: E402
     AppTool,
     AppToolAdapter,
     render_app_tool_retry_reminder,
+    render_openai_tool_retry_reminder,
 )
 from jsonschema import Draft202012Validator  # noqa: E402
 from langchain_core.utils.function_calling import convert_to_openai_tool  # noqa: E402
@@ -144,6 +145,8 @@ def _schema_from_retry_reminder(
         schema = json.loads(
             reminder.removeprefix(CANONICAL_TOOL_SCHEMA_REMINDER_PREFIX)
         )
+        if reminder != render_openai_tool_retry_reminder(schema):
+            raise ValueError("retry reminder is not in canonical compact form")
         Draft202012Validator.check_schema(schema["function"]["parameters"])
     except Exception as error:
         issues["invalid_retry_schemas"].append(f"{identity}: {error}")
@@ -245,6 +248,9 @@ def _representative_audit(issues: dict[str, list[str]]) -> dict[str, Any]:
             native_by_name = {
                 schema["function"]["name"]: schema for schema in native_schemas
             }
+            simple_tools_by_name = {
+                _public_name(tool): tool for tool in simple_tools
+            }
             broker_by_name = {
                 schema["function"]["name"]: schema for schema in broker_schemas
             }
@@ -275,16 +281,43 @@ def _representative_audit(issues: dict[str, list[str]]) -> dict[str, Any]:
                 "run_number": None,
                 "notification_cursor": 0,
             }
+            simple_retry_reminders: list[str] = []
+            decomposer_retry_reminders: list[str] = []
             for name in common_names:
                 native_schema = native_by_name[name]
                 broker_schema = broker_by_name[name]
                 if _ordered_json(native_schema) != _ordered_json(broker_schema):
                     issues["native_broker_differences"].append(f"{domain}:{name}")
-                langchain_schema = convert_to_openai_tool(
-                    _tool_from_schema(broker_schema, context)
-                )
+                langchain_tool = _tool_from_schema(broker_schema, context)
+                langchain_schema = convert_to_openai_tool(langchain_tool)
                 if _ordered_json(langchain_schema) != _ordered_json(broker_schema):
                     issues["langchain_broker_differences"].append(f"{domain}:{name}")
+
+                simple_reminder = render_app_tool_retry_reminder(
+                    simple_tools_by_name[name]
+                )
+                validation_handler = langchain_tool.handle_validation_error
+                if not callable(validation_handler):
+                    issues["missing_decomposer_retry_handlers"].append(
+                        f"{domain}:{name}"
+                    )
+                    continue
+                feedback = validation_handler(ValueError("audit validation error"))
+                if CANONICAL_TOOL_SCHEMA_REMINDER_PREFIX not in feedback:
+                    issues["missing_decomposer_retry_handlers"].append(
+                        f"{domain}:{name}"
+                    )
+                    continue
+                decomposer_reminder = (
+                    CANONICAL_TOOL_SCHEMA_REMINDER_PREFIX
+                    + feedback.split(CANONICAL_TOOL_SCHEMA_REMINDER_PREFIX, 1)[1]
+                )
+                if simple_reminder != decomposer_reminder:
+                    issues["simple_decomposer_retry_differences"].append(
+                        f"{domain}:{name}"
+                    )
+                simple_retry_reminders.append(simple_reminder)
+                decomposer_retry_reminders.append(decomposer_reminder)
 
             result[domain] = {
                 "scenario": path.name,
@@ -296,6 +329,10 @@ def _representative_audit(issues: dict[str, list[str]]) -> dict[str, Any]:
                 "schemas": {
                     "native": native_schemas,
                     "broker": broker_schemas,
+                },
+                "retry_reminders": {
+                    "simple": simple_retry_reminders,
+                    "decomposer": decomposer_retry_reminders,
                 },
             }
             del scenario
@@ -314,12 +351,14 @@ def run_audit() -> dict[str, Any]:
         "invalid_type_names",
         "invalid_retry_schemas",
         "langchain_broker_differences",
+        "missing_decomposer_retry_handlers",
         "missing_representative_data",
         "native_broker_differences",
         "native_fallback_or_conversion",
         "ordering_differences",
         "retry_hidden_parameter_leaks",
         "retry_schema_differences",
+        "simple_decomposer_retry_differences",
         "surface_differences",
         "unsupported_annotations",
     )
@@ -330,7 +369,11 @@ def run_audit() -> dict[str, Any]:
         "registry": registry["schemas"],
         "retry_reminders": registry["retry_reminders"],
         "representative": {
-            domain: item["schemas"] for domain, item in representative.items()
+            domain: {
+                "schemas": item["schemas"],
+                "retry_reminders": item["retry_reminders"],
+            }
+            for domain, item in representative.items()
         },
     }
     checksum = hashlib.sha256(
@@ -346,7 +389,11 @@ def run_audit() -> dict[str, Any]:
         if key not in {"schemas", "retry_reminders"}
     }
     representative = {
-        domain: {key: value for key, value in item.items() if key != "schemas"}
+        domain: {
+            key: value
+            for key, value in item.items()
+            if key not in {"schemas", "retry_reminders"}
+        }
         for domain, item in representative.items()
     }
     return {

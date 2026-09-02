@@ -58,13 +58,14 @@ The converter recursively supports unions, lists, string-keyed dictionaries,
 preserves explicit defaults, and rejects unsupported annotations with the tool
 and argument name.
 
-When an ARE tool raises a model-correctable execution error, the simple-agent
-retry observation embeds that same complete canonical OpenAI schema. It does
-not reconstruct a lossy text signature. Native simple-agent requests use
-`tool_choice="required"` whenever schemas are present, so a turn must call a
-registered tool; `AgentUserInterface__send_message_to_user` remains the normal
-final-response tool. Non-native agents and helper tools without an `AppTool`
-retain their legacy behavior.
+When an ARE tool raises a model-correctable execution error, both the simple
+agent and the Decomposer worker append the same complete canonical OpenAI
+schema for that one failing tool. The shared renderer uses compact JSON rather
+than reconstructing a lossy text signature or repeating the complete registry.
+Native simple-agent and Decomposer worker requests explicitly use
+`tool_choice="auto"` whenever schemas are present. The Decomposer manager does
+not call GAIA2 tools and is unchanged; `AgentUserInterface__send_message_to_user`
+remains the simple agent's normal final-response tool.
 
 Run the complete read-only gate after any tool or schema change:
 
@@ -330,10 +331,10 @@ For each profile use `--num-repeats 1 --limit 1`, then inspect `output.jsonl`,
 `hf/`, `lite/`, and Decomposer sidecars for schema/type errors, duplicated
 sandbox roots, or physical `are_simulation_fs_sandbox_...` paths. For native
 simple agents, also inspect the wire dump and service log to confirm that vLLM
-accepted `tool_choice="required"`, every successful assistant turn produced a
-recognized tool call, invalid extra properties were absent, and the final
-answer used `AgentUserInterface__send_message_to_user`. A smoke is a workflow
-integrity check; its task reward is not an acceptance criterion.
+accepted `tool_choice="auto"`, recognized emitted tool calls, rejected invalid
+extra properties, and delivered the final answer through
+`AgentUserInterface__send_message_to_user`. A smoke is a workflow integrity
+check; its task reward is not an acceptance criterion.
 
 OpenRouter Responses API reasoning blocks remain available in the sidecar
 manager trace, but only visible text blocks are sent to the Gaia2 user
