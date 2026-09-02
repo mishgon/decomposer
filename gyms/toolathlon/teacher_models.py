@@ -10,7 +10,7 @@ from langchain_openai import ChatOpenAI
 def create_lmrouter_teacher(
     *, model: str, max_tokens: int, timeout: float, max_retries: int
 ) -> ChatOpenAI:
-    """Create the hosted Qwen teacher with thinking explicitly disabled."""
+    """Create the hosted Qwen teacher with thinking explicitly enabled."""
     return ChatOpenAI(
         model=model,
         base_url=os.environ["LLM_PROXY_URL"],
@@ -25,6 +25,7 @@ def create_lmrouter_teacher(
             "top_k": 20,
             "min_p": 0.0,
             "repetition_penalty": 1.0,
-            "chat_template_kwargs": {"enable_thinking": False},
+            "include_reasoning": True,
+            "chat_template_kwargs": {"enable_thinking": True},
         },
     )

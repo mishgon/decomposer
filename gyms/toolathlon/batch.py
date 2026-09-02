@@ -618,7 +618,12 @@ def execute_episode(
             score = json.loads(evaluation_path.read_text(encoding="utf-8")).get("pass")
         except (json.JSONDecodeError, OSError):
             pass
-    completed = returncode == 0 and evaluation_path.is_file()
+    # A model can terminate without a textual final answer, hit its recursion
+    # limit, or exhaust its completion budget after still leaving a valid
+    # native evaluation result.  Those are benchmark failures, not missing
+    # infrastructure episodes: retain the model's false score and complete the
+    # episode.  Infrastructure failures do not produce a boolean native score.
+    completed = evaluation_path.is_file() and isinstance(score, bool)
     error = None
     if not completed:
         stderr_tail = (attempt_dir / "runner.stderr.log").read_text(
