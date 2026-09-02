@@ -145,6 +145,23 @@ def test_task_selection_ignores_helpers_and_validates_subset(tmp_path) -> None:
     assert batch.wants_batch(["-n2"])
 
 
+def test_teacher_credentials_accept_lmrouter(monkeypatch) -> None:
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.setenv("LLM_PROXY_URL", "https://lmrouter.example/v1")
+    monkeypatch.setenv("LLM_PROXY_MASTER_KEY", "test-key")
+
+    batch.validate_teacher_credentials()
+
+
+def test_teacher_credentials_require_complete_lmrouter_config(monkeypatch) -> None:
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.setenv("LLM_PROXY_URL", "https://lmrouter.example/v1")
+    monkeypatch.delenv("LLM_PROXY_MASTER_KEY", raising=False)
+
+    with pytest.raises(RuntimeError, match="both LLM_PROXY_URL"):
+        batch.validate_teacher_credentials()
+
+
 def test_batch_repetitions_and_resume_skip_completed(tmp_path, monkeypatch) -> None:
     toolathlon_root = tmp_path / "toolathlon"
     for task in ("alpha", "beta"):

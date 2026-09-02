@@ -65,6 +65,20 @@ def append_event(run_dir: Path, event: str, **fields: Any) -> None:
         os.fsync(output.fileno())
 
 
+def validate_teacher_credentials() -> None:
+    proxy_url = os.environ.get("LLM_PROXY_URL")
+    proxy_key = os.environ.get("LLM_PROXY_MASTER_KEY")
+    if proxy_url or proxy_key:
+        if not (proxy_url and proxy_key):
+            raise RuntimeError("Set both LLM_PROXY_URL and LLM_PROXY_MASTER_KEY")
+        return
+    if not os.environ.get("OPENROUTER_API_KEY"):
+        raise RuntimeError(
+            "Set OPENROUTER_API_KEY, or configure LLM_PROXY_URL and "
+            "LLM_PROXY_MASTER_KEY for the Decomposer model"
+        )
+
+
 def wants_batch(argv: Sequence[str]) -> bool:
     flags = {"--all", "--tasks", "--resume", "--repetitions", "-n"}
     prefixes = ("--tasks=", "--resume=", "--repetitions=", "-n")
@@ -500,8 +514,7 @@ def main(
         save_manifest(run_dir, manifest)
         append_event(run_dir, "run_created", tasks=tasks, repetitions=args.repetitions)
 
-    if not os.environ.get("OPENROUTER_API_KEY"):
-        raise RuntimeError("Set OPENROUTER_API_KEY for the Decomposer model")
+    validate_teacher_credentials()
     docker("image", "inspect", args.image)
     manifest.update(status="running", finished_at=None)
     manifest.setdefault("invocations", []).append(
