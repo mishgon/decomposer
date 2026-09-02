@@ -219,6 +219,8 @@ def test_lmrouter_teacher_is_thinking(monkeypatch) -> None:
     assert model.model_name == "Qwen/Qwen3.6-35B-A3B-FP8"
     assert model.extra_body["chat_template_kwargs"] == {"enable_thinking": True}
     assert model.extra_body["include_reasoning"] is True
+    assert model.preserve_reasoning is True
+    assert model.parse_qwen_xml_tool_calls is True
 
 
 def test_usage_summary_separates_decomposer_and_subagents() -> None:

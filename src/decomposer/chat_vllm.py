@@ -1,4 +1,8 @@
-from typing import Any
+import html
+import json
+import re
+import uuid
+from typing import Any, ClassVar
 
 from langchain_core.messages import AIMessage
 from langchain_core.outputs import ChatResult
@@ -10,6 +14,43 @@ class ChatVLLM(ChatOpenAI):
     """ChatOpenAI adapter for vLLM's Chat Completions reasoning field."""
 
     preserve_reasoning: bool = Field(default=False, exclude=True)
+    parse_qwen_xml_tool_calls: bool = Field(default=False, exclude=True)
+
+    _TOOL_CALL_PATTERN: ClassVar[re.Pattern[str]] = re.compile(
+        r"<tool_call>\s*<function=([^>\s]+)>\s*(.*?)\s*</function>\s*</tool_call>",
+        re.DOTALL,
+    )
+    _PARAMETER_PATTERN: ClassVar[re.Pattern[str]] = re.compile(
+        r"<parameter=([^>\s]+)>\s*(.*?)\s*</parameter>",
+        re.DOTALL,
+    )
+
+    @classmethod
+    def _parse_qwen_xml(cls, content: str) -> tuple[str, list[dict[str, Any]]]:
+        tool_calls: list[dict[str, Any]] = []
+        for match in cls._TOOL_CALL_PATTERN.finditer(content):
+            arguments: dict[str, Any] = {}
+            for parameter in cls._PARAMETER_PATTERN.finditer(match.group(2)):
+                value = html.unescape(parameter.group(2).strip())
+                if value.startswith(("{", "[")):
+                    try:
+                        value = json.loads(value)
+                    except json.JSONDecodeError:
+                        pass
+                arguments[html.unescape(parameter.group(1))] = value
+            tool_calls.append(
+                {
+                    "id": f"call_{uuid.uuid4().hex}",
+                    "name": html.unescape(match.group(1)),
+                    "args": arguments,
+                    "type": "tool_call",
+                }
+            )
+
+        if "<tool_call>" in content and not tool_calls:
+            raise ValueError("Could not parse Qwen XML tool call")
+
+        return cls._TOOL_CALL_PATTERN.sub("", content).strip(), tool_calls
 
     def _create_chat_result(
         self,
@@ -29,6 +70,16 @@ class ChatVLLM(ChatOpenAI):
                     "vLLM exhausted max_completion_tokens before completing "
                     "its response."
                 )
+
+        if self.parse_qwen_xml_tool_calls:
+            for generation in result.generations:
+                message = generation.message
+                if not isinstance(message, AIMessage):
+                    continue
+                clean_content, tool_calls = self._parse_qwen_xml(message.text)
+                if tool_calls:
+                    message.content = clean_content
+                    message.tool_calls = tool_calls
 
         if not self.preserve_reasoning:
             return result
@@ -64,6 +115,9 @@ class ChatVLLM(ChatOpenAI):
         request_messages = payload.get("messages")
         if not isinstance(request_messages, list):
             raise RuntimeError("ChatVLLM requires the Chat Completions API.")
+
+        if self.parse_qwen_xml_tool_calls and payload.get("tools"):
+            payload["tool_choice"] = "none"
 
         if not self.preserve_reasoning:
             return payload
