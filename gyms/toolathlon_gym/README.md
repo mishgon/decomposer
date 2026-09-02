@@ -4,7 +4,7 @@ This gym integration keeps Decomposer and its model credentials on the host whil
 task container owns the Toolathlon workspace, MCP servers, and evaluator.
 The host runner owns one supervised vLLM process for a batch. Task containers
 reuse it and do not pay a per-example model cold start.
-The configured Gemma-4-26B-A4B subagent runs in non-thinking mode.
+The configured Qwen3.5-4B subagent runs in non-thinking mode.
 
 ## Image layout
 
@@ -34,7 +34,7 @@ environment.
 
 The container resolves the host vLLM server through this variable:
 
-- `GEMMA_4_26B_A4B_BASE_URL`
+- `QWEN_3_5_4B_BASE_URL`
 
 It defaults to port 8023 on `host.docker.internal`.
 
@@ -42,7 +42,7 @@ Set the Decomposer credential and model path once:
 
 ```bash
 export OPENROUTER_API_KEY=...
-GEMMA=/home/matrosov/.cache/huggingface/hub/models--google--gemma-4-26B-A4B-it/snapshots/4d7ae4984b7db7de8f8457170b3f1a419ee76d52
+QWEN=Qwen/Qwen3.5-4B
 ```
 
 Run the full dataset once (an omitted `-n` means one repetition):
@@ -50,9 +50,10 @@ Run the full dataset once (an omitted `-n` means one repetition):
 ```bash
 uv run python gyms/toolathlon_gym/run.py --all \
   --purpose trace-generation \
-  --subagent-model "$GEMMA" \
-  --subagent-gpu 1 \
-  --concurrency 4 \
+  --subagent-model "$QWEN" \
+  --subagent-gpu 7 \
+  --concurrency 16 \
+  --container-slots 2 \
   --n-jobs-per-worker 1000
 ```
 
@@ -63,7 +64,7 @@ uv run python gyms/toolathlon_gym/run.py \
   --tasks howtocook-event-menu-ppt canvas-announcement-summary \
   -n 3 \
   --purpose trace-generation \
-  --subagent-model "$GEMMA" \
+  --subagent-model "$QWEN" \
   --subagent-gpu 1
 ```
 
@@ -86,8 +87,8 @@ The original one-task smoke interface remains available:
 ```bash
 uv run python gyms/toolathlon_gym/run.py howtocook-event-menu-ppt \
   --purpose trace-generation \
-  --subagent-model "$GEMMA" \
-  --subagent-gpu 1
+  --subagent-model "$QWEN" \
+  --subagent-gpu 0
 ```
 
 Use `--reuse-vllm` only when the configured port already serves the expected
@@ -106,7 +107,7 @@ uv run python gyms/toolathlon_gym/run.py --all \
 
 ## MLSpace inference pool
 
-Toolathlon's Docker containers remain on Hertz-2. MLSpace jobs only run Gemma
+Toolathlon's Docker containers remain on Hertz-2. MLSpace jobs only run Qwen
 vLLM replicas and expose them through dedicated SSH reverse tunnels bound to
 Hertz-2 loopback. This avoids requiring Docker inside MLSpace.
 
@@ -167,11 +168,13 @@ directory. Existing trace/evaluation directories are never overwritten. A
 batch runs up to `--concurrency` episodes at once, creates a fresh Docker
 network, PostgreSQL container, and task container for each one, and removes all
 three in the worker's `finally` block. Container startup and cleanup are briefly
-serialized, and each task receives its PostgreSQL container's network address
+bounded by `--container-slots` independent locks (default 1; two slots are the
+validated high-throughput setting), and each task receives its PostgreSQL container's network address
 directly to avoid rootless Podman DNS races; Decomposer execution remains
 concurrent. Each task container starts LangGraph with `--n-jobs-per-worker`
 slots (default 1000). The supervised vLLM is started once before the worker pool
-and stopped once after it.
+and stopped once after it. `--agent-timeout` and `--episode-timeout` bound stuck
+work. Keep one supervised vLLM process on one GPU for each model.
 
 ## Runtime boundary
 

@@ -29,8 +29,12 @@ RESUME_CONFIG_FIELDS = (
     "reuse_vllm",
     "vllm_max_model_len",
     "vllm_gpu_memory_utilization",
+    "vllm_data_parallel_size",
     "vllm_startup_timeout",
     "startup_timeout",
+    "container_slots",
+    "agent_timeout",
+    "episode_timeout",
 )
 
 
@@ -94,6 +98,7 @@ def parse_args(argv: Sequence[str], defaults: dict[str, Any]) -> argparse.Namesp
     parser.add_argument("--subagent-gpu", default="0")
     parser.add_argument("--vllm-max-model-len", type=int, default=256000)
     parser.add_argument("--vllm-gpu-memory-utilization", type=float, default=0.9)
+    parser.add_argument("--vllm-data-parallel-size", type=int, default=1)
     parser.add_argument("--vllm-startup-timeout", type=float, default=1800)
     parser.add_argument("--reuse-vllm", action="store_true")
     parser.add_argument("--image", default=defaults["image"])
@@ -103,6 +108,19 @@ def parse_args(argv: Sequence[str], defaults: dict[str, Any]) -> argparse.Namesp
     parser.add_argument("--startup-timeout", type=float, default=180)
     parser.add_argument("--n-jobs-per-worker", type=int, default=1000)
     parser.add_argument("--concurrency", type=int, default=1)
+    parser.add_argument("--container-slots", type=int, default=1)
+    parser.add_argument(
+        "--agent-timeout",
+        type=float,
+        default=1800,
+        help="Maximum seconds spent in the Decomposer loop (default: 1800).",
+    )
+    parser.add_argument(
+        "--episode-timeout",
+        type=float,
+        default=2400,
+        help="Maximum total wall-clock seconds for one episode (default: 2400).",
+    )
     args = parser.parse_args(argv)
     if args.resume and (args.all or args.tasks):
         parser.error("--resume cannot be combined with --all or --tasks")
@@ -116,6 +134,17 @@ def parse_args(argv: Sequence[str], defaults: dict[str, Any]) -> argparse.Namesp
         parser.error("--n-jobs-per-worker must be at least 1")
     if args.concurrency < 1:
         parser.error("--concurrency must be at least 1")
+    if args.container_slots < 1:
+        parser.error("--container-slots must be at least 1")
+    if args.agent_timeout <= 0 or args.episode_timeout <= 0:
+        parser.error("--agent-timeout and --episode-timeout must be positive")
+    if args.vllm_data_parallel_size < 1:
+        parser.error("--vllm-data-parallel-size must be at least 1")
+    visible_gpus = [item for item in args.subagent_gpu.split(",") if item]
+    if len(visible_gpus) != args.vllm_data_parallel_size:
+        parser.error(
+            "--subagent-gpu must list exactly --vllm-data-parallel-size GPU IDs"
+        )
     if args.subagent_ports:
         if len(set(args.subagent_ports)) != len(args.subagent_ports):
             parser.error("--subagent-ports must not contain duplicates")
@@ -224,8 +253,10 @@ def episode_command(
     episode_id: str,
     root: Path,
     subagent_port: int | None = None,
+    container_slot: int = 0,
 ) -> list[str]:
     port = args.subagent_port if subagent_port is None else subagent_port
+    container_slots = getattr(args, "container_slots", 1)
     return [
         sys.executable, str(runner_path), task,
         "--episode-id", episode_id, "--run-id", run_id,
@@ -236,13 +267,25 @@ def episode_command(
         "--subagent-gpu", args.subagent_gpu,
         "--vllm-max-model-len", str(args.vllm_max_model_len),
         "--vllm-gpu-memory-utilization", str(args.vllm_gpu_memory_utilization),
+        "--vllm-data-parallel-size", str(getattr(args, "vllm_data_parallel_size", 1)),
         "--vllm-startup-timeout", str(args.vllm_startup_timeout),
         "--reuse-vllm", "--image", args.image,
         "--artifacts-dir", str(root / "traces"),
         "--evals-dir", str(root / "evals"),
         "--startup-timeout", str(args.startup_timeout),
         "--n-jobs-per-worker", str(args.n_jobs_per_worker),
-        "--container-lock-file", str(root / "runs" / run_id / "container.lock"),
+        "--agent-timeout", str(getattr(args, "agent_timeout", 1800)),
+        "--container-lock-file",
+        str(
+            root
+            / "runs"
+            / run_id
+            / (
+                "container.lock"
+                if container_slots == 1
+                else f"container-{container_slot:02d}.lock"
+            )
+        ),
     ]
 
 
@@ -255,6 +298,7 @@ def execute_episode(
     attempt: int,
     stop_event: threading.Event | None = None,
     subagent_port: int | None = None,
+    container_slot: int = 0,
 ) -> dict[str, Any]:
     task, repetition = episode["task"], episode["repetition"]
     attempt_dir = run_dir / "attempts" / task / f"rep-{repetition:03d}" / f"attempt-{attempt:03d}"
@@ -270,6 +314,7 @@ def execute_episode(
         episode_id,
         root,
         subagent_port,
+        container_slot,
     )
     started_at, started = utc_now(), time.monotonic()
     write_json(attempt_dir / "attempt.json", {
@@ -280,12 +325,24 @@ def execute_episode(
         attempt_dir / "runner.stderr.log"
     ).open("wb") as stderr:
         process = subprocess.Popen(command, stdout=stdout, stderr=stderr)
+        timed_out = False
         try:
             while True:
                 try:
                     returncode = process.wait(timeout=0.5)
                     break
                 except subprocess.TimeoutExpired:
+                    if time.monotonic() - started >= getattr(
+                        args, "episode_timeout", 2400
+                    ):
+                        timed_out = True
+                        process.send_signal(signal.SIGINT)
+                        try:
+                            returncode = process.wait(timeout=120)
+                        except subprocess.TimeoutExpired:
+                            process.kill()
+                            returncode = process.wait()
+                        break
                     if stop_event is not None and stop_event.is_set():
                         raise KeyboardInterrupt("batch interrupted")
         except BaseException:
@@ -306,15 +363,19 @@ def execute_episode(
             score = json.loads(evaluation_path.read_text(encoding="utf-8")).get("pass")
         except (json.JSONDecodeError, OSError):
             pass
-    completed = returncode == 0 and evaluation_path.is_file()
+    completed = not timed_out and returncode == 0 and evaluation_path.is_file()
     error = None
     if not completed:
         stderr_tail = (attempt_dir / "runner.stderr.log").read_text(
             encoding="utf-8", errors="replace"
         )[-8000:]
         error = {
-            "type": "EpisodeProcessError",
-            "message": f"Episode runner exited with code {returncode}",
+            "type": "EpisodeTimeout" if timed_out else "EpisodeProcessError",
+            "message": (
+                f"Episode exceeded {getattr(args, 'episode_timeout', 2400):g}s"
+                if timed_out
+                else f"Episode runner exited with code {returncode}"
+            ),
             "returncode": returncode,
             "stderr_tail": stderr_tail,
         }
@@ -419,6 +480,14 @@ def main(
         for name in RESUME_CONFIG_FIELDS:
             if name == "subagent_ports" and name not in manifest["config"]:
                 setattr(args, name, [manifest["config"]["subagent_port"]])
+            elif name == "vllm_data_parallel_size" and name not in manifest["config"]:
+                setattr(args, name, 1)
+            elif name == "container_slots" and name not in manifest["config"]:
+                setattr(args, name, 1)
+            elif name == "agent_timeout" and name not in manifest["config"]:
+                setattr(args, name, 1800)
+            elif name == "episode_timeout" and name not in manifest["config"]:
+                setattr(args, name, 2400)
             else:
                 setattr(args, name, manifest["config"][name])
     else:
@@ -461,6 +530,7 @@ def main(
                     timeout=args.vllm_startup_timeout,
                     log_path=run_dir / f"vllm-{port}.log",
                     reuse=args.reuse_vllm,
+                    data_parallel_size=args.vllm_data_parallel_size,
                 )
             )
         append_event(
@@ -535,6 +605,7 @@ def main(
                 attempt=attempt,
                 stop_event=stop_event,
                 subagent_port=args.subagent_ports[next_endpoint],
+                container_slot=(index - 1) % args.container_slots,
             )
             next_endpoint = (next_endpoint + 1) % len(args.subagent_ports)
             active[future] = (index, episode, attempt)

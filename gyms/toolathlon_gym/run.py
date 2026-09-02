@@ -7,6 +7,7 @@ import json
 import os
 import signal
 import shlex
+import socket
 import subprocess
 import sys
 import time
@@ -16,7 +17,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from langchain_core.messages import message_to_dict
+from langchain_openai import ChatOpenAI
 from langchain_openrouter import ChatOpenRouter
+from langgraph.checkpoint.memory import InMemorySaver
 
 from decomposer.core import create_decomposer_agent
 from decomposer.prompts import DECOMPOSER_TEACHER_SYSTEM_PROMPT
@@ -54,12 +57,18 @@ SUBAGENT_TYPES = (
 
 
 def _docker(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
+    process = subprocess.run(
         ["docker", *args],
-        check=check,
         capture_output=True,
         text=True,
     )
+    if check and process.returncode != 0:
+        detail = (process.stderr or process.stdout or "").strip()
+        raise RuntimeError(
+            f"docker {' '.join(args)} failed with exit code {process.returncode}"
+            + (f": {detail}" if detail else "")
+        )
+    return process
 
 
 def _handle_termination(signum: int, _frame: object) -> None:
@@ -155,8 +164,9 @@ def vllm_command(
     *,
     max_model_len: int,
     gpu_memory_utilization: float,
+    data_parallel_size: int = 1,
 ) -> list[str]:
-    return [
+    command = [
         str(Path(sys.executable).with_name("vllm")),
         "serve",
         model,
@@ -177,6 +187,18 @@ def vllm_command(
         "--default-chat-template-kwargs",
         '{"enable_thinking":false}',
     ]
+    if data_parallel_size > 1:
+        command.extend(
+            [
+                "--data-parallel-size",
+                str(data_parallel_size),
+                # Keep one frontend so turns from persistent episode clients
+                # can be dispatched across all data-parallel engines.
+                "--api-server-count",
+                "1",
+            ]
+        )
+    return command
 
 
 def wait_for_vllm(
@@ -220,6 +242,7 @@ def start_vllm(
     timeout: float,
     log_path: Path,
     reuse: bool,
+    data_parallel_size: int = 1,
 ) -> subprocess.Popen[bytes] | None:
     no_proxy = {
         item
@@ -243,12 +266,23 @@ def start_vllm(
         )
         return None
 
+    reservation = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        reservation.bind(("127.0.0.1", port))
+    except OSError as error:
+        reservation.close()
+        raise RuntimeError(
+            f"Refusing to start vLLM: port {port} is already in use; choose a "
+            "dedicated --subagent-port or pass --reuse-vllm intentionally"
+        ) from error
+
     log_path.parent.mkdir(parents=True, exist_ok=True)
     command = vllm_command(
         model,
         port,
         max_model_len=max_model_len,
         gpu_memory_utilization=gpu_memory_utilization,
+        data_parallel_size=data_parallel_size,
     )
     environment = {
         **os.environ,
@@ -256,6 +290,7 @@ def start_vllm(
         "VLLM_ENGINE_READY_TIMEOUT_S": str(max(1, int(timeout))),
     }
     with log_path.open("ab") as log:
+        reservation.close()
         process = subprocess.Popen(
             command,
             env=environment,
@@ -316,6 +351,7 @@ def main() -> None:
     parser.add_argument("--subagent-gpu", default="0")
     parser.add_argument("--vllm-max-model-len", type=int, default=256000)
     parser.add_argument("--vllm-gpu-memory-utilization", type=float, default=0.9)
+    parser.add_argument("--vllm-data-parallel-size", type=int, default=1)
     parser.add_argument("--vllm-startup-timeout", type=float, default=1800)
     parser.add_argument("--reuse-vllm", action="store_true")
     parser.add_argument("--image", default=DEFAULT_IMAGE)
@@ -323,17 +359,37 @@ def main() -> None:
     parser.add_argument("--evals-dir", type=Path, default=DEFAULT_EVALS_DIR)
     parser.add_argument("--startup-timeout", type=float, default=180)
     parser.add_argument("--n-jobs-per-worker", type=int, default=1000)
+    parser.add_argument("--agent-timeout", type=float, default=1800)
     parser.add_argument("--container-lock-file", type=Path, help=argparse.SUPPRESS)
     args = parser.parse_args()
     if args.n_jobs_per_worker < 1:
         parser.error("--n-jobs-per-worker must be at least 1")
+    if args.agent_timeout <= 0:
+        parser.error("--agent-timeout must be positive")
+    if args.vllm_data_parallel_size < 1:
+        parser.error("--vllm-data-parallel-size must be at least 1")
+    visible_gpus = [item for item in args.subagent_gpu.split(",") if item]
+    if len(visible_gpus) != args.vllm_data_parallel_size:
+        parser.error(
+            "--subagent-gpu must list exactly --vllm-data-parallel-size GPU IDs"
+        )
 
     tasks_dir = (TOOLATHLON_ROOT / "tasks" / "finalpool").resolve()
     task_dir = (tasks_dir / args.task).resolve()
     if task_dir.parent != tasks_dir or not task_dir.is_dir():
         raise ValueError(f"Unknown Toolathlon task: {args.task!r}")
-    if not os.environ.get("OPENROUTER_API_KEY"):
-        raise RuntimeError("Set OPENROUTER_API_KEY for the Decomposer model")
+    llm_proxy_url = os.environ.get("LLM_PROXY_URL")
+    llm_proxy_key = os.environ.get("LLM_PROXY_MASTER_KEY")
+    if llm_proxy_url:
+        if not llm_proxy_key:
+            raise RuntimeError(
+                "Set LLM_PROXY_MASTER_KEY when LLM_PROXY_URL is configured"
+            )
+    elif not os.environ.get("OPENROUTER_API_KEY"):
+        raise RuntimeError(
+            "Set OPENROUTER_API_KEY, or configure LLM_PROXY_URL and "
+            "LLM_PROXY_MASTER_KEY for the Decomposer model"
+        )
 
     _docker("image", "inspect", args.image)
 
@@ -365,6 +421,7 @@ def main() -> None:
         timeout=args.vllm_startup_timeout,
         log_path=vllm_log,
         reuse=args.reuse_vllm,
+        data_parallel_size=args.vllm_data_parallel_size,
     )
 
     container_lock = _open_container_lock(args.container_lock_file)
@@ -411,18 +468,40 @@ def main() -> None:
                 pg_container,
                 check=False,
             ).stdout.strip()
-            logs = _docker(
-                "logs",
-                "--tail",
-                "50",
-                pg_container,
-                check=False,
-            )
-            initialized = (
-                "PostgreSQL init process complete; ready for start up."
-                in logs.stdout + logs.stderr
-            )
-            if status == "healthy" and initialized:
+            final_server = False
+            schema_ready = False
+            if status == "healthy":
+                process_check = _docker(
+                    "exec",
+                    pg_container,
+                    "cat",
+                    "/proc/1/comm",
+                    check=False,
+                )
+                final_server = (
+                    process_check.returncode == 0
+                    and process_check.stdout.strip() == "postgres"
+                )
+            if status == "healthy" and final_server:
+                schema_check = _docker(
+                    "exec",
+                    pg_container,
+                    "psql",
+                    "--username",
+                    "eigent",
+                    "--dbname",
+                    "toolathlon_gym",
+                    "--tuples-only",
+                    "--no-align",
+                    "--command",
+                    "SELECT to_regclass('email.messages') IS NOT NULL;",
+                    check=False,
+                )
+                schema_ready = (
+                    schema_check.returncode == 0
+                    and schema_check.stdout.strip() == "t"
+                )
+            if status == "healthy" and final_server and schema_ready:
                 break
             time.sleep(1)
         else:
@@ -529,13 +608,64 @@ def main() -> None:
 
         runtime = json.loads((episode_dir / "runtime.json").read_text(encoding="utf-8"))
         print("Running Decomposer...", flush=True)
-        agent = create_decomposer_agent(
-            decomposer_model=ChatOpenRouter(
+        checkpointer = InMemorySaver()
+        openrouter_provider = os.environ.get("DECOMPOSER_OPENROUTER_PROVIDER")
+        reasoning_effort = os.environ.get(
+            "DECOMPOSER_REASONING_EFFORT", "high"
+        ).lower()
+        decomposer_max_tokens = int(
+            os.environ.get("DECOMPOSER_MAX_TOKENS", "8192")
+        )
+        openrouter_timeout = float(
+            os.environ.get("DECOMPOSER_OPENROUTER_TIMEOUT", "600")
+        )
+        openrouter_max_retries = int(
+            os.environ.get("DECOMPOSER_OPENROUTER_MAX_RETRIES", "5")
+        )
+        reasoning = (
+            {"enabled": False}
+            if reasoning_effort in {"none", "off", "disabled"}
+            else {"effort": reasoning_effort}
+        )
+        if llm_proxy_url:
+            decomposer_model = ChatOpenAI(
+                model=args.model,
+                base_url=llm_proxy_url,
+                api_key=llm_proxy_key,
+                temperature=1.0,
+                top_p=1.0,
+                max_tokens=decomposer_max_tokens,
+                timeout=openrouter_timeout,
+                max_retries=openrouter_max_retries,
+                disable_streaming=True,
+                use_responses_api=False,
+            )
+            teacher_backend = "llm_proxy"
+        else:
+            decomposer_model = ChatOpenRouter(
                 model=args.model,
                 temperature=1.0,
                 top_p=1.0,
-                reasoning={"effort": "high"},
-            ),
+                reasoning=reasoning,
+                max_tokens=decomposer_max_tokens,
+                # DeepSeek V4 high-reasoning decompositions can legitimately
+                # take several minutes. Preserve that response window while
+                # allowing transient backend failures to retry; the outer
+                # agent timeout still caps total episode wall-clock time.
+                timeout=openrouter_timeout,
+                max_retries=openrouter_max_retries,
+                openrouter_provider=(
+                    {
+                        "order": [openrouter_provider],
+                        "allow_fallbacks": False,
+                    }
+                    if openrouter_provider
+                    else None
+                ),
+            )
+            teacher_backend = "openrouter"
+        agent = create_decomposer_agent(
+            decomposer_model=decomposer_model,
             subagent_types=[
                 {
                     "subagent_type_id": subagent_type_id,
@@ -549,21 +679,41 @@ def main() -> None:
                 for subagent_type_id, assistant_id, model_description in SUBAGENT_TYPES
             ],
             decomposer_system_prompt=DECOMPOSER_TEACHER_SYSTEM_PROMPT,
+            checkpointer=checkpointer,
+            subagent_recursion_limit=410,
         )
-        state = asyncio.run(
-            agent.ainvoke(
-                {
-                    "messages": [
+        agent_config = {
+            "recursion_limit": 410,
+            "configurable": {"thread_id": episode_id},
+        }
+        agent_error: str | None = None
+        agent_exception: BaseException | None = None
+        try:
+            state = asyncio.run(
+                asyncio.wait_for(
+                    agent.ainvoke(
                         {
-                            "role": "user",
-                            "content": runtime["task_config"]["task_str"],
-                        }
-                    ]
-                },
-                config={"recursion_limit": 200},
+                            "messages": [
+                                {
+                                    "role": "user",
+                                    "content": runtime["task_config"]["task_str"],
+                                }
+                            ]
+                        },
+                        config=agent_config,
+                    ),
+                    timeout=args.agent_timeout,
+                )
             )
-        )
-        messages = state["messages"]
+        except BaseException as error:
+            agent_exception = error
+            agent_error = repr(error)
+            try:
+                snapshot = asyncio.run(agent.aget_state(agent_config))
+                state = dict(snapshot.values)
+            except BaseException:
+                state = {}
+        messages = state.get("messages", [])
         (episode_dir / "trace.json").write_text(
             json.dumps(
                 {
@@ -574,9 +724,16 @@ def main() -> None:
                     "attempt": args.attempt,
                     "purpose": args.purpose,
                     "decomposer_model": args.model,
+                    "teacher_backend": teacher_backend,
+                    "openrouter_provider": openrouter_provider,
+                    "reasoning_effort": reasoning_effort,
+                    "decomposer_max_tokens": decomposer_max_tokens,
+                    "openrouter_timeout": openrouter_timeout,
+                    "openrouter_max_retries": openrouter_max_retries,
                     "subagent_model": args.subagent_model,
                     "started_at": started_at,
                     "finished_at": datetime.now(timezone.utc).isoformat(),
+                    "agent_error": agent_error,
                     "messages": [message_to_dict(message) for message in messages],
                     "subagent_runs": state.get("subagent_runs", {}),
                 },
@@ -586,8 +743,11 @@ def main() -> None:
             ),
             encoding="utf-8",
         )
-        answer = str(messages[-1].content)
+        answer = str(messages[-1].content) if messages else ""
         (episode_dir / "answer.txt").write_text(answer, encoding="utf-8")
+
+        if agent_exception is not None:
+            raise RuntimeError(f"Decomposer agent loop failed: {agent_error}") from agent_exception
 
         print("Running native evaluation...", flush=True)
         config = runtime["task_config"]

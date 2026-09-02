@@ -38,8 +38,21 @@ def test_docker(monkeypatch) -> None:
 
     assert result.stdout == "output"
     assert calls == [
-        ((["docker", "ps"],), {"check": False, "capture_output": True, "text": True})
+        ((["docker", "ps"],), {"capture_output": True, "text": True})
     ]
+
+
+def test_docker_error_includes_container_runtime_output(monkeypatch) -> None:
+    monkeypatch.setattr(
+        run.subprocess,
+        "run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(
+            args, 125, "", "podman socket is unavailable"
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="podman socket is unavailable"):
+        run._docker("ps")
 
 
 def test_vllm_command_uses_current_environment_and_gemma_parsers() -> None:
@@ -59,6 +72,20 @@ def test_vllm_command_uses_current_environment_and_gemma_parsers() -> None:
     assert command[command.index("--default-chat-template-kwargs") + 1] == (
         '{"enable_thinking":false}'
     )
+
+    data_parallel_command = run.vllm_command(
+        "/models/qwen",
+        8023,
+        max_model_len=32768,
+        gpu_memory_utilization=0.8,
+        data_parallel_size=4,
+    )
+    assert data_parallel_command[
+        data_parallel_command.index("--data-parallel-size") + 1
+    ] == "4"
+    assert data_parallel_command[
+        data_parallel_command.index("--api-server-count") + 1
+    ] == "1"
 
 
 def test_postgres_image_is_fully_qualified_for_podman() -> None:
@@ -520,3 +547,40 @@ def test_execute_episode_maps_deterministic_trace_and_eval_paths(
     assert command[command.index("--container-lock-file") + 1] == str(
         root / "runs" / "run-id" / "container.lock"
     )
+
+
+def test_episode_command_distributes_container_operations_across_slots(tmp_path) -> None:
+    args = SimpleNamespace(
+        purpose="trace-generation",
+        model="decomposer-model",
+        subagent_model="subagent-model",
+        subagent_port=8023,
+        subagent_gpu="0,1",
+        vllm_max_model_len=32768,
+        vllm_gpu_memory_utilization=0.8,
+        vllm_data_parallel_size=2,
+        vllm_startup_timeout=30,
+        image="image",
+        startup_timeout=10,
+        n_jobs_per_worker=1000,
+        agent_timeout=1200,
+        container_slots=2,
+    )
+
+    command = batch.episode_command(
+        args,
+        tmp_path / "run.py",
+        "alpha",
+        "run-id",
+        1,
+        1,
+        "episode-id",
+        tmp_path,
+        container_slot=1,
+    )
+
+    assert command[command.index("--container-lock-file") + 1] == str(
+        tmp_path / "runs" / "run-id" / "container-01.lock"
+    )
+    assert command[command.index("--vllm-data-parallel-size") + 1] == "2"
+    assert command[command.index("--agent-timeout") + 1] == "1200"
