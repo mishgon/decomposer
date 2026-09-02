@@ -263,6 +263,7 @@ def test_worker_installs_fail_fast_overflow_middleware(monkeypatch):
     monkeypatch.setattr(graphs, "_model", lambda: object())
     monkeypatch.setattr(graphs, "_worker_tools", lambda context, consumer: [])
     monkeypatch.setenv("GAIA2_SUBAGENT_MAX_MODEL_CALLS", "80")
+    monkeypatch.delenv("GAIA2_SUBAGENT_MAX_COMPLETION_TOKENS", raising=False)
     runtime = type("Runtime", (), {"context": {}})()
 
     asyncio.run(graphs.run_subagent({"messages": []}, runtime))
@@ -270,7 +271,7 @@ def test_worker_installs_fail_fast_overflow_middleware(monkeypatch):
     assert any(
         isinstance(item, Gaia2ModelOverflowMiddleware)
         and item.actor == "subagent"
-        and item.max_completion_tokens == 8192
+        and item.max_completion_tokens is None
         and item.max_model_len == 65536
         for item in captured["middleware"]
     )
@@ -378,3 +379,27 @@ def test_worker_model_forwards_non_thinking_sampling(monkeypatch):
         "include_reasoning": False,
         "chat_template_kwargs": {"enable_thinking": False},
     }
+
+
+def test_worker_model_omits_completion_limit_by_default(monkeypatch):
+    captured = {}
+
+    def fake_model(**kwargs):
+        captured.update(kwargs)
+        return object()
+
+    monkeypatch.setattr(graphs, "ChatOpenAI", fake_model)
+    monkeypatch.setenv("GAIA2_SUBAGENT_MODEL", "worker")
+    monkeypatch.delenv("GAIA2_SUBAGENT_MAX_COMPLETION_TOKENS", raising=False)
+
+    graphs._model()
+
+    assert "max_completion_tokens" not in captured
+
+
+def test_worker_model_rejects_nonpositive_completion_limit(monkeypatch):
+    monkeypatch.setenv("GAIA2_SUBAGENT_MODEL", "worker")
+    monkeypatch.setenv("GAIA2_SUBAGENT_MAX_COMPLETION_TOKENS", "0")
+
+    with pytest.raises(ValueError, match="must be at least 1"):
+        graphs._model()

@@ -177,8 +177,8 @@ The registered experiments are:
   context.
 - `qwen35-4b-non-thinking-simple-general-text-defaults` and
   `gemma4-e4b-thinking-simple-text-defaults`: matched text-only controls for
-  the two new Decomposer profiles. Each uses 128K context, an 8K completion
-  limit, and the shared 80-call per-actor budget.
+  the two new Decomposer profiles. Each uses 128K context, provider-controlled
+  output length, and the shared 80-call per-actor budget.
 - `qwen35-2b-base-non-thinking` and `qwen35-9b-base-non-thinking`: matching
   non-thinking simple-agent baselines using the pinned local checkpoints.
 - `deepseek-v4-flash-0731`: remote OpenRouter DeepSeek simple agent with high
@@ -193,13 +193,14 @@ aggregate-compute limit: spawning multiple subagents can make Decomposer's
 episode total larger. Budget exhaustion is recorded as a failed rollout and
 does not stop the remaining evaluation.
 
-Every simple agent, manager, and subagent also uses an 8,192-token per-response
-limit. Input-context overflow and output truncation are terminal for only the
-affected actor (`fail_actor_v1`): the harness does not retry an impossible
-request, compact history, or execute a truncated tool call. A simple-agent or
-manager overflow makes that rollout a recorded failure; a subagent overflow is
-returned to the manager as an error report. Subsequent benchmark rollouts still
-run normally.
+Simple agents, managers, and subagents do not set an explicit per-response
+token limit; output length is controlled by the model server or provider and
+remains bounded by its finite context. Input-context overflow and provider
+output truncation are terminal for only the affected actor (`fail_actor_v1`):
+the harness does not retry an impossible request, compact history, or execute a
+truncated tool call. A simple-agent or manager overflow makes that rollout a
+recorded failure; a subagent overflow is returned to the manager as an error
+report. Subsequent benchmark rollouts still run normally.
 
 ```bash
 # Decomposer, three attempts per scenario.

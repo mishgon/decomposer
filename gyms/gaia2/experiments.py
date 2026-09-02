@@ -349,7 +349,7 @@ class DecomposerExperiment:
     subagent_port: int = 2024
     max_model_len: int = 65536
     max_num_seqs: int = 16
-    max_completion_tokens: int = 8192
+    max_completion_tokens: int | None = None
     temperature: float = 1.0
     top_p: float = 0.95
     top_k: int = 64
@@ -378,6 +378,10 @@ class DecomposerExperiment:
     kind: Literal["decomposer"] = field(init=False, default="decomposer")
 
     def __post_init__(self) -> None:
+        if self.max_completion_tokens is not None and self.max_completion_tokens < 1:
+            raise ValueError(
+                f"{self.name}: max_completion_tokens must be at least 1"
+            )
         for field_name in (
             "manager_max_model_calls",
             "subagent_max_model_calls",
@@ -431,17 +435,19 @@ class DecomposerExperiment:
     def remote_manager_extra_body(self) -> dict[str, object]:
         if self.manager_reasoning_mode != "non_thinking":
             return {}
-        return {
+        body: dict[str, object] = {
             "temperature": self.temperature,
             "top_p": self.top_p,
             "top_k": self.top_k,
             "min_p": self.min_p,
             "presence_penalty": self.presence_penalty,
             "repetition_penalty": self.repetition_penalty,
-            "max_output_tokens": self.max_completion_tokens,
             "include_reasoning": False,
             "chat_template_kwargs": {"enable_thinking": False},
         }
+        if self.max_completion_tokens is not None:
+            body["max_output_tokens"] = self.max_completion_tokens
+        return body
 
 
 @dataclass(frozen=True)
@@ -457,7 +463,7 @@ class SimpleExperiment:
     reasoning_effort: str | None = None
     max_model_len: int = 65536
     max_num_seqs: int = 16
-    max_completion_tokens: int = 8192
+    max_completion_tokens: int | None = None
     temperature: float = 1.0
     top_p: float = 0.95
     top_k: int | None = 64
@@ -476,6 +482,10 @@ class SimpleExperiment:
     kind: Literal["simple"] = field(init=False, default="simple")
 
     def __post_init__(self) -> None:
+        if self.max_completion_tokens is not None and self.max_completion_tokens < 1:
+            raise ValueError(
+                f"{self.name}: max_completion_tokens must be at least 1"
+            )
         if self.max_model_calls < 1:
             raise ValueError(f"{self.name}: max_model_calls must be at least 1")
         if self.backend == "local_vllm":
@@ -766,7 +776,6 @@ GEMMA4_TEXT_DEFAULTS_DECOMPOSER_EXPERIMENT = DecomposerExperiment(
     service_port=8127,
     subagent_port=2027,
     max_model_len=131072,
-    max_completion_tokens=8192,
     manager_thinking=True,
     worker_thinking=True,
     manager_max_model_calls=80,
@@ -792,7 +801,6 @@ QWEN36_TEXT_DEFAULTS_DECOMPOSER_EXPERIMENT = replace(
     prompt_profile="teacher",
     concurrency=16,
     max_model_len=131072,
-    max_completion_tokens=8192,
     temperature=_QWEN36_NON_THINKING_SAMPLING.temperature,
     top_p=_QWEN36_NON_THINKING_SAMPLING.top_p,
     top_k=_QWEN36_NON_THINKING_SAMPLING.top_k,
@@ -849,14 +857,12 @@ GEMMA4_E4B_TEXT_DEFAULTS_SIMPLE_EXPERIMENT = replace(
     SIMPLE_EXPERIMENT,
     name="gemma4-e4b-thinking-simple-text-defaults",
     max_model_len=131072,
-    max_completion_tokens=8192,
     max_model_calls=80,
 )
 QWEN35_4B_TEXT_DEFAULTS_SIMPLE_EXPERIMENT = replace(
     SIMPLE_QWEN_EXPERIMENT,
     name="qwen35-4b-non-thinking-simple-general-text-defaults",
     max_model_len=131072,
-    max_completion_tokens=8192,
     language_model_only=True,
     max_model_calls=80,
 )

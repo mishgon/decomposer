@@ -579,8 +579,9 @@ def simple_sampling_parameters(
     parameters: dict[str, int | float] = {
         "temperature": experiment.temperature,
         "top_p": experiment.top_p,
-        "max_tokens": experiment.max_completion_tokens,
     }
+    if experiment.max_completion_tokens is not None:
+        parameters["max_tokens"] = experiment.max_completion_tokens
     for name in ("top_k", "min_p", "presence_penalty", "repetition_penalty"):
         value = getattr(experiment, name)
         if value is not None:
@@ -742,10 +743,13 @@ def subagent_environment(
         "GAIA2_SUBAGENT_TEMPERATURE": str(experiment.temperature),
         "GAIA2_SUBAGENT_TOP_P": str(experiment.top_p),
         "GAIA2_SUBAGENT_TOP_K": str(experiment.top_k),
-        "GAIA2_SUBAGENT_MAX_COMPLETION_TOKENS": str(experiment.max_completion_tokens),
         "GAIA2_SUBAGENT_MAX_MODEL_LEN": str(experiment.max_model_len),
         "GAIA2_SUBAGENT_THINKING": "1" if experiment.worker_thinking else "0",
     }
+    if experiment.max_completion_tokens is not None:
+        environment["GAIA2_SUBAGENT_MAX_COMPLETION_TOKENS"] = str(
+            experiment.max_completion_tokens
+        )
     if experiment.min_p is not None:
         environment["GAIA2_SUBAGENT_MIN_P"] = str(experiment.min_p)
     if experiment.presence_penalty is not None:
@@ -1334,7 +1338,6 @@ def _runtime_configs(
             "api_key_env": "OPENROUTER_API_KEY_DECOMPOSER",
             "temperature": 1.0,
             "top_p": 1.0,
-            "max_completion_tokens": experiment.max_completion_tokens,
             "use_responses_api": True,
             "reasoning": {"effort": "high"},
             "timeout": 3300,
@@ -1353,7 +1356,6 @@ def _runtime_configs(
             "top_p": (
                 experiment.top_p if experiment.remote_manager_extra_body else 1.0
             ),
-            "max_completion_tokens": experiment.max_completion_tokens,
             "use_responses_api": True,
             "timeout": 3300,
             "max_retries": 2,
@@ -1380,12 +1382,13 @@ def _runtime_configs(
             "api_key": "EMPTY",
             "temperature": experiment.temperature,
             "top_p": experiment.top_p,
-            "max_completion_tokens": experiment.max_completion_tokens,
             "use_responses_api": False,
             "extra_body": manager_extra_body,
         }
         if experiment.presence_penalty is not None:
             manager["presence_penalty"] = experiment.presence_penalty
+    if experiment.max_completion_tokens is not None:
+        manager["max_completion_tokens"] = experiment.max_completion_tokens
     manager["parallel_tool_calls"] = experiment.manager_parallel_tool_calls
     service = {
         "manager": manager,

@@ -43,6 +43,18 @@ def _max_model_calls() -> int | None:
     return value
 
 
+def _max_completion_tokens() -> int | None:
+    raw = os.environ.get("GAIA2_SUBAGENT_MAX_COMPLETION_TOKENS")
+    if raw is None:
+        return None
+    value = int(raw)
+    if value < 1:
+        raise ValueError(
+            "GAIA2_SUBAGENT_MAX_COMPLETION_TOKENS must be at least 1"
+        )
+    return value
+
+
 class EpisodeContext(TypedDict):
     tool_schemas: list[dict[str, Any]]
     broker_url: str
@@ -170,13 +182,12 @@ def _model() -> ChatOpenAI:
         ),
         "temperature": float(os.environ.get("GAIA2_SUBAGENT_TEMPERATURE", "1.0")),
         "top_p": float(os.environ.get("GAIA2_SUBAGENT_TOP_P", "0.95")),
-        "max_completion_tokens": int(
-            os.environ.get("GAIA2_SUBAGENT_MAX_COMPLETION_TOKENS", "8192")
-        ),
         "use_responses_api": False,
         "timeout": float(os.environ.get("GAIA2_SUBAGENT_TIMEOUT", "300")),
         "max_retries": int(os.environ.get("GAIA2_SUBAGENT_MAX_RETRIES", "2")),
     }
+    if (max_completion_tokens := _max_completion_tokens()) is not None:
+        kwargs["max_completion_tokens"] = max_completion_tokens
     if presence_penalty := os.environ.get("GAIA2_SUBAGENT_PRESENCE_PENALTY"):
         kwargs["presence_penalty"] = float(presence_penalty)
     if extra_body:
@@ -288,9 +299,7 @@ async def run_subagent(
     middleware: list[AgentMiddleware] = [
         Gaia2ModelOverflowMiddleware(
             "subagent",
-            max_completion_tokens=int(
-                os.environ.get("GAIA2_SUBAGENT_MAX_COMPLETION_TOKENS", "8192")
-            ),
+            max_completion_tokens=_max_completion_tokens(),
             max_model_len=int(
                 os.environ.get("GAIA2_SUBAGENT_MAX_MODEL_LEN", "65536")
             ),
