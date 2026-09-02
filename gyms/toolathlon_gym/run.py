@@ -17,10 +17,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from langchain_core.messages import message_to_dict
-from langchain_openai import ChatOpenAI
 from langchain_openrouter import ChatOpenRouter
 from langgraph.checkpoint.memory import InMemorySaver
 
+from decomposer.chat_vllm import ChatVLLM
 from decomposer.core import create_decomposer_agent
 from decomposer.prompts import DECOMPOSER_TEACHER_SYSTEM_PROMPT
 
@@ -630,7 +630,7 @@ def main() -> None:
             else {"effort": reasoning_effort}
         )
         if llm_proxy_url:
-            decomposer_model = ChatOpenAI(
+            decomposer_model = ChatVLLM(
                 model=args.model,
                 base_url=llm_proxy_url,
                 api_key=llm_proxy_key,
@@ -641,6 +641,8 @@ def main() -> None:
                 max_retries=openrouter_max_retries,
                 disable_streaming=True,
                 use_responses_api=False,
+                preserve_reasoning=True,
+                parse_qwen_xml_tool_calls=True,
                 extra_body={
                     "top_k": 20,
                     "min_p": 0.0,
