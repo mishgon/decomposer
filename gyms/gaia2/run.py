@@ -166,6 +166,7 @@ def runtime_configuration(experiment: Experiment) -> dict[str, Any]:
     configuration: dict[str, Any] = {
         "max_model_len": experiment.max_model_len,
         "max_completion_tokens": experiment.max_completion_tokens,
+        "model_call_budget_semantics": "per_actor_policy_invocations_v1",
         "sampling": sampling,
     }
     if isinstance(experiment, SimpleExperiment):
@@ -264,7 +265,6 @@ def validate_run_identity(
         raise ValueError(f"Gaia2 run identity is not an object: {path}")
     legacy_optional_fields = {
         "decomposer_system_prompt_sha256",
-        "runtime_configuration",
     }
     observed = dict(value)
     existing_offset = observed.get("port_offset", 0)
@@ -759,6 +759,10 @@ def subagent_environment(
             experiment.subagent_max_model_calls
         )
     return environment
+
+
+def simple_agent_environment(experiment: SimpleExperiment) -> dict[str, str]:
+    return {"ARE_MAX_MODEL_CALLS": str(experiment.max_model_calls)}
 
 
 def service_command(
@@ -2155,7 +2159,7 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
     benchmark = Path(manifest["gaia2"]["runtime"]["are_benchmark"])
     env = _base_environment(local_repo, staged_gaia2, directory, judge_key)
     if isinstance(experiment, SimpleExperiment):
-        env["ARE_MAX_ITERATIONS"] = str(experiment.max_model_calls)
+        env.update(simple_agent_environment(experiment))
     supervisor = Supervisor(logs, env)
     plugin_config: Path | None = None
     try:

@@ -178,12 +178,20 @@ The registered experiments are:
 - `qwen35-4b-non-thinking-simple-general-text-defaults` and
   `gemma4-e4b-thinking-simple-text-defaults`: matched text-only controls for
   the two new Decomposer profiles. Each uses 128K context, a 32K completion
-  limit, and 200 model calls per rollout.
+  limit, and the shared 80-call per-actor budget.
 - `qwen35-2b-base-non-thinking` and `qwen35-9b-base-non-thinking`: matching
   non-thinking simple-agent baselines using the pinned local checkpoints.
 - `deepseek-v4-flash-0731`: remote OpenRouter DeepSeek simple agent with high
   reasoning. The runner starts only a credential-isolating loopback proxy and
   does not allocate a GPU.
+
+All GAIA2 experiments use the same per-actor budget: a simple agent may make
+80 actual policy-model invocations, while a Decomposer manager and each of its
+subagents may independently make 80. Locally queued calls from one native
+multi-tool response do not consume additional model calls. This is not an
+aggregate-compute limit: spawning multiple subagents can make Decomposer's
+episode total larger. Budget exhaustion is recorded as a failed rollout and
+does not stop the remaining evaluation.
 
 ```bash
 # Decomposer, three attempts per scenario.

@@ -19,7 +19,7 @@ DATASET_ID = "meta-agents-research-environments/gaia2"
 DATASET_REVISION = "78ea3bdbdeec2bdcd6afa5420915d8a22f23ed99"
 FILESYSTEM_DATASET_ID = "meta-agents-research-environments/gaia2_filesystem"
 FILESYSTEM_DATASET_REVISION = "132e26376f5e963bb59f64bcccdd02188cb08dee"
-GAIA2_REVISION = "f50b9a91381f1b46aa8b3d480c0a49e228477b8c"
+GAIA2_REVISION = "6c3505af02dc1de4370bdb675c42dc0a25b72cc7"
 SPLIT = "validation"
 SPLIT_MANIFEST_SEED = 42
 PARTITIONS = ("train", "test", "full")
@@ -371,8 +371,8 @@ class DecomposerExperiment:
     worker_language_model_only: bool = True
     worker_trust_remote_code: bool = False
     worker_gdn_prefill_backend: str | None = None
-    manager_max_model_calls: int | None = None
-    subagent_max_model_calls: int | None = None
+    manager_max_model_calls: int | None = 80
+    subagent_max_model_calls: int | None = 80
     manager_recursion_limit: int = 200
     subagent_recursion_limit: int = 200
     kind: Literal["decomposer"] = field(init=False, default="decomposer")
@@ -769,8 +769,8 @@ GEMMA4_TEXT_DEFAULTS_DECOMPOSER_EXPERIMENT = DecomposerExperiment(
     max_completion_tokens=32768,
     manager_thinking=True,
     worker_thinking=True,
-    manager_max_model_calls=200,
-    subagent_max_model_calls=200,
+    manager_max_model_calls=80,
+    subagent_max_model_calls=80,
     manager_recursion_limit=1000,
     subagent_recursion_limit=1000,
 )
@@ -802,8 +802,8 @@ QWEN36_TEXT_DEFAULTS_DECOMPOSER_EXPERIMENT = replace(
     manager_thinking=False,
     worker_thinking=False,
     worker_language_model_only=True,
-    manager_max_model_calls=200,
-    subagent_max_model_calls=200,
+    manager_max_model_calls=80,
+    subagent_max_model_calls=80,
     manager_recursion_limit=1000,
     subagent_recursion_limit=1000,
 )
@@ -850,7 +850,7 @@ GEMMA4_E4B_TEXT_DEFAULTS_SIMPLE_EXPERIMENT = replace(
     name="gemma4-e4b-thinking-simple-text-defaults",
     max_model_len=131072,
     max_completion_tokens=32768,
-    max_model_calls=200,
+    max_model_calls=80,
 )
 QWEN35_4B_TEXT_DEFAULTS_SIMPLE_EXPERIMENT = replace(
     SIMPLE_QWEN_EXPERIMENT,
@@ -858,7 +858,7 @@ QWEN35_4B_TEXT_DEFAULTS_SIMPLE_EXPERIMENT = replace(
     max_model_len=131072,
     max_completion_tokens=32768,
     language_model_only=True,
-    max_model_calls=200,
+    max_model_calls=80,
 )
 SIMPLE_DEEPSEEK_EXPERIMENT = SimpleExperiment(
     name="deepseek-v4-flash-0731",

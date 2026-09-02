@@ -18,6 +18,7 @@ from gyms.gaia2.dataset import (
     write_materialized_dataset,
 )
 from gyms.gaia2.experiments import (
+    ALL_EXPERIMENTS,
     AMBIGUITY_DOMAIN,
     BASE_IMAGE,
     DATASET_REVISION,
@@ -25,6 +26,7 @@ from gyms.gaia2.experiments import (
     DEEPSEEK_QWEN_AMBIGUITY_POLICY_EXPERIMENT,
     DEEPSEEK_QWEN_EXPERIMENT,
     DECOMPOSER_EXPERIMENT,
+    DecomposerExperiment,
     DOMAIN,
     GEMMA4_E4B_TEXT_DEFAULTS_SIMPLE_EXPERIMENT,
     GEMMA4_TEXT_DEFAULTS_DECOMPOSER_EXPERIMENT,
@@ -48,6 +50,7 @@ from gyms.gaia2.experiments import (
     SIMPLE_QWEN_2B_EXPERIMENT,
     SIMPLE_QWEN_9B_EXPERIMENT,
     SIMPLE_QWEN_EXPERIMENT,
+    SimpleExperiment,
     SPLIT,
     SPLIT_MANIFEST_NAME,
     collect_experiments,
@@ -84,6 +87,7 @@ from gyms.gaia2.run import (
     selected_cuda_devices,
     simple_vllm_command,
     simple_sampling_parameters,
+    simple_agent_environment,
     select_prompt_profile,
     subagent_environment,
     execute_trace_generation,
@@ -630,8 +634,8 @@ def test_qwen36_text_defaults_are_explicitly_non_thinking(tmp_path) -> None:
     assert experiment.manager_reasoning_mode == "non_thinking"
     assert experiment.max_model_len == 131072
     assert experiment.max_completion_tokens == 32768
-    assert experiment.manager_max_model_calls == 200
-    assert experiment.subagent_max_model_calls == 200
+    assert experiment.manager_max_model_calls == 80
+    assert experiment.subagent_max_model_calls == 80
     assert experiment.remote_manager_extra_body == expected_proxy_body
 
     proxy = remote_manager_proxy_command(experiment)
@@ -646,14 +650,14 @@ def test_qwen36_text_defaults_are_explicitly_non_thinking(tmp_path) -> None:
     assert "presence_penalty" not in service["manager"]
     assert service["manager"]["max_completion_tokens"] == 32768
     assert service["manager"]["extra_body"] == expected_proxy_body
-    assert service["manager_max_model_calls"] == 200
+    assert service["manager_max_model_calls"] == 80
     assert service["manager_recursion_limit"] == 1000
     assert service["subagent_recursion_limit"] == 1000
 
     manager, worker = decomposer_vllm_commands(experiment)
     assert manager is None
     assert "--language-model-only" in worker
-    assert subagent_environment(experiment)["GAIA2_SUBAGENT_MAX_MODEL_CALLS"] == "200"
+    assert subagent_environment(experiment)["GAIA2_SUBAGENT_MAX_MODEL_CALLS"] == "80"
 
 
 def test_gemma_text_defaults_use_pinned_thinking_models() -> None:
@@ -665,8 +669,8 @@ def test_gemma_text_defaults_use_pinned_thinking_models() -> None:
     assert experiment.worker_checkpoint.is_dir()
     assert experiment.max_model_len == 131072
     assert experiment.max_completion_tokens == 32768
-    assert experiment.manager_max_model_calls == 200
-    assert experiment.subagent_max_model_calls == 200
+    assert experiment.manager_max_model_calls == 80
+    assert experiment.subagent_max_model_calls == 80
     assert (experiment.temperature, experiment.top_p, experiment.top_k) == (
         1.0,
         0.95,
@@ -681,7 +685,7 @@ def test_gemma_text_defaults_use_pinned_thinking_models() -> None:
         assert '{"enable_thinking":true}' in command
     environment = subagent_environment(experiment)
     assert environment["GAIA2_SUBAGENT_MAX_COMPLETION_TOKENS"] == "32768"
-    assert environment["GAIA2_SUBAGENT_MAX_MODEL_CALLS"] == "200"
+    assert environment["GAIA2_SUBAGENT_MAX_MODEL_CALLS"] == "80"
 
 
 def test_text_default_simple_profiles_match_context_completion_and_calls() -> None:
@@ -690,7 +694,7 @@ def test_text_default_simple_profiles_match_context_completion_and_calls() -> No
     for experiment in (gemma, qwen):
         assert experiment.max_model_len == 131072
         assert experiment.max_completion_tokens == 32768
-        assert experiment.max_model_calls == 200
+        assert experiment.max_model_calls == 80
         command = simple_vllm_command(experiment)
         assert "--language-model-only" in command
     assert simple_sampling_parameters(gemma) == {
@@ -718,6 +722,47 @@ def test_text_default_simple_profiles_match_context_completion_and_calls() -> No
         "test",
         "gemma4-e4b-it-thinking-n3",
     )
+
+
+def test_all_gaia2_profiles_use_eighty_policy_calls_per_actor() -> None:
+    for experiment in ALL_EXPERIMENTS:
+        if isinstance(experiment, SimpleExperiment):
+            assert experiment.max_model_calls == 80
+            assert simple_agent_environment(experiment) == {
+                "ARE_MAX_MODEL_CALLS": "80"
+            }
+        else:
+            assert isinstance(experiment, DecomposerExperiment)
+            assert experiment.manager_max_model_calls == 80
+            assert experiment.subagent_max_model_calls == 80
+
+
+def test_model_call_budget_semantics_are_part_of_resume_identity(tmp_path) -> None:
+    expected = run_identity(
+        SIMPLE_QWEN_EXPERIMENT,
+        domain="execution",
+        purpose="evaluation",
+        partition="test",
+        num_repeats=3,
+        concurrency=4,
+        limit=None,
+    )
+    legacy = json.loads(json.dumps(expected))
+    legacy["runtime_configuration"].pop("model_call_budget_semantics")
+    marker = tmp_path / ".eval_done.json"
+    marker.write_text(
+        json.dumps({"state": "complete", **legacy}) + "\n", encoding="utf-8"
+    )
+
+    with pytest.raises(ValueError, match="output identity mismatch"):
+        validate_run_identity(marker, expected, require_complete=True)
+
+    legacy.pop("runtime_configuration")
+    marker.write_text(
+        json.dumps({"state": "complete", **legacy}) + "\n", encoding="utf-8"
+    )
+    with pytest.raises(ValueError, match="output identity mismatch"):
+        validate_run_identity(marker, expected, require_complete=True)
 
 
 def test_langgraph_runtime_is_private_and_disables_file_persistence(tmp_path) -> None:
@@ -1032,6 +1077,7 @@ def test_qwen_worker_uses_official_non_thinking_sampling() -> None:
         "GAIA2_SUBAGENT_TOP_P": "0.8",
         "GAIA2_SUBAGENT_TOP_K": "20",
         "GAIA2_SUBAGENT_MAX_COMPLETION_TOKENS": "4096",
+        "GAIA2_SUBAGENT_MAX_MODEL_CALLS": "80",
         "GAIA2_SUBAGENT_THINKING": "0",
         "GAIA2_SUBAGENT_MIN_P": "0.0",
         "GAIA2_SUBAGENT_PRESENCE_PENALTY": "1.5",
