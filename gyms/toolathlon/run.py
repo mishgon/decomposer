@@ -642,6 +642,45 @@ def wait_for_url(
     raise TimeoutError(f"{hint} did not become ready at {url} within {timeout:g}s")
 
 
+def wait_for_container_url(
+    url: str,
+    *,
+    timeout: float,
+    hint: str,
+    container: str,
+    pid: str,
+) -> None:
+    """Wait for a container service while failing fast if its process exits."""
+    deadline = time.monotonic() + timeout
+    last_error: OSError | None = None
+    while time.monotonic() < deadline:
+        try:
+            with urllib.request.urlopen(url, timeout=2):
+                return
+        except OSError as error:
+            last_error = error
+        alive = _exec_in_container(
+            container, "kill", "-0", pid, check=False
+        )
+        if alive.returncode != 0:
+            raise RuntimeError(f"{hint} process {pid} exited before becoming ready")
+        time.sleep(1)
+    raise TimeoutError(
+        f"{hint} did not become ready at {url} within {timeout:g}s"
+    ) from last_error
+
+
+def missing_preprocess_runtime_files(container: str, bundle: dict) -> list[str]:
+    """Return required runtime files that a successful preprocess omitted."""
+    resolved = bundle.get("resolved_task_config") or {}
+    token_config = resolved.get("local_token_key_session") or {}
+    kubeconfig = token_config.get("kubeconfig_path")
+    if not isinstance(kubeconfig, str) or not kubeconfig:
+        return []
+    probe = _exec_in_container(container, "test", "-s", kubeconfig, check=False)
+    return [] if probe.returncode == 0 else [kubeconfig]
+
+
 def wait_for_container_ready(container: str, timeout: float) -> None:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -1180,8 +1219,9 @@ def main() -> None:
         service_network_args = ["--network", "host"]
         if args.publish_service_ports:
             gateway_port, gateway_sock, gateway_port_lock = allocate_port()
-            gateway_sock.close()
-            gateway_sock = None
+            if gateway_sock is not None:
+                gateway_sock.close()
+                gateway_sock = None
             service_network_args = [
                 "--publish", f"127.0.0.1:{gateway_port}:{gateway_port}"
             ]
@@ -1243,58 +1283,108 @@ def main() -> None:
         _copy_user_configs(container)
 
         print("Running container preprocess...", flush=True)
-        preprocess_bundle_path = _exec_in_container(
-            container, "mktemp", "/run/toolathlon-preprocess-bundle.XXXXXX.json"
-        ).stdout.strip()
-        if not preprocess_bundle_path:
-            raise RuntimeError("Failed to allocate the preprocess bundle path")
-        preprocess = _exec_in_container(
-            container,
-            "uv",
-            "run",
-            "python",
-            "-m",
-            "scripts.decoupled.container_preprocess",
-            "--eval_config",
-            args.eval_config,
-            "--task_dir",
-            args.task,
-            "--max_steps_under_single_turn_mode",
-            str(args.max_steps),
-            "--model_short_name",
-            "decomposer",
-            "--provider",
-            "unified",
-            "--bundle_file",
-            preprocess_bundle_path,
-            "--host_output_folder",
-            str(episode_dir.resolve()),
-            "--debug",
-            env={
-                "CONTAINERS_REGISTRIES_CONF": CONTAINER_PODMAN_SHORTNAMES_FILE,
-            },
-            check=False,
-            timeout=600,
-        )
-        with (episode_dir / "preprocess.log").open("w", encoding="utf-8") as log:
-            log.write(preprocess.stdout)
-            log.write(preprocess.stderr)
-        if preprocess.returncode != 0:
+        preprocess_attempts = 3 if args.task in K8S_TASK_CLEANUP_COMMANDS else 1
+        preprocess_failure = "preprocess did not run"
+        bundle = None
+        for preprocess_attempt in range(1, preprocess_attempts + 1):
+            preprocess_bundle_path = _exec_in_container(
+                container, "mktemp", "/run/toolathlon-preprocess-bundle.XXXXXX.json"
+            ).stdout.strip()
+            if not preprocess_bundle_path:
+                raise RuntimeError("Failed to allocate the preprocess bundle path")
+            preprocess = _exec_in_container(
+                container,
+                "uv",
+                "run",
+                "python",
+                "-m",
+                "scripts.decoupled.container_preprocess",
+                "--eval_config",
+                args.eval_config,
+                "--task_dir",
+                args.task,
+                "--max_steps_under_single_turn_mode",
+                str(args.max_steps),
+                "--model_short_name",
+                "decomposer",
+                "--provider",
+                "unified",
+                "--bundle_file",
+                preprocess_bundle_path,
+                "--host_output_folder",
+                str(episode_dir.resolve()),
+                "--debug",
+                env={
+                    "CONTAINERS_REGISTRIES_CONF": CONTAINER_PODMAN_SHORTNAMES_FILE,
+                },
+                check=False,
+                timeout=600,
+            )
+            with (episode_dir / "preprocess.log").open(
+                "a" if preprocess_attempt > 1 else "w", encoding="utf-8"
+            ) as log:
+                log.write(f"\n=== preprocess attempt {preprocess_attempt} ===\n")
+                log.write(preprocess.stdout)
+                log.write(preprocess.stderr)
+
+            if preprocess.returncode == 0:
+                _docker(
+                    "cp",
+                    f"{container}:{preprocess_bundle_path}",
+                    str(trusted_bundle_file),
+                )
+                os.chmod(trusted_bundle_file, 0o600)
+                candidate = json.loads(
+                    trusted_bundle_file.read_text(encoding="utf-8")
+                )
+                validate_bundle(candidate, args.task, str(episode_dir.resolve()))
+                missing = missing_preprocess_runtime_files(container, candidate)
+                if not missing:
+                    bundle = candidate
+                    _exec_in_container(
+                        container, "rm", "-f", "--", preprocess_bundle_path
+                    )
+                    break
+                preprocess_failure = (
+                    "preprocess reported success but omitted required runtime "
+                    f"files: {', '.join(missing)}"
+                )
+            else:
+                preprocess_failure = (
+                    f"preprocess exited with code {preprocess.returncode}"
+                )
+
             _exec_in_container(
                 container, "rm", "-f", "--", preprocess_bundle_path, check=False
             )
-            raise RuntimeError(
-                f"Container preprocess failed with code {preprocess.returncode}; "
-                f"inspect {episode_dir / 'preprocess.log'}"
-            )
+            if preprocess_attempt < preprocess_attempts:
+                task_cleanup = K8S_TASK_CLEANUP_COMMANDS.get(args.task)
+                if task_cleanup:
+                    _exec_in_container(
+                        container,
+                        *task_cleanup,
+                        env={
+                            "CONTAINERS_REGISTRIES_CONF": (
+                                CONTAINER_PODMAN_SHORTNAMES_FILE
+                            ),
+                        },
+                        check=False,
+                    )
+                _exec_in_container(
+                    container,
+                    "rm",
+                    "-rf",
+                    "--",
+                    "/workspace/dumps/workspace",
+                    check=False,
+                )
+                time.sleep(5)
 
-        _docker("cp", f"{container}:{preprocess_bundle_path}", str(trusted_bundle_file))
-        os.chmod(trusted_bundle_file, 0o600)
-        _exec_in_container(
-            container, "rm", "-f", "--", preprocess_bundle_path
-        )
-        bundle = json.loads(trusted_bundle_file.read_text(encoding="utf-8"))
-        validate_bundle(bundle, args.task, str(episode_dir.resolve()))
+        if bundle is None:
+            raise RuntimeError(
+                f"Container preprocess failed after {preprocess_attempts} attempt(s): "
+                f"{preprocess_failure}; inspect {episode_dir / 'preprocess.log'}"
+            )
         container_paths = bundle["container_paths"]
         eval_result_path = posixpath.join(
             posixpath.dirname(container_paths["log_file"]), "eval_res.json"
@@ -1313,31 +1403,57 @@ def main() -> None:
             raise RuntimeError("Artifact guard stash did not report a stash directory")
 
         print("Starting container MCP gateway...", flush=True)
-        if gateway_port is None:
-            gateway_port, gateway_sock, gateway_port_lock = allocate_port()
-        container_bundle_path = _stage_bundle(container, trusted_bundle_file)
-        gateway_sock.close()
-        gateway_sock = None
-        _exec_in_container(
-            container,
-            "bash",
-            "-c",
-            (
-                "nohup uv run python -m scripts.decoupled.container_tool_gateway "
-                f"--bundle_file {container_bundle_path} "
-                f"--host 0.0.0.0 --port {gateway_port} --debug "
-                f"> /workspace/dumps/gateway.log 2>&1 & echo $!"
-            ),
-        )
-        try:
-            wait_for_url(
-                f"http://127.0.0.1:{gateway_port}/health",
-                timeout=120,
-                hint=f"Container MCP gateway for {container}",
+        gateway_failure: BaseException | None = None
+        for gateway_attempt in range(1, 6):
+            if gateway_port is None:
+                gateway_port, gateway_sock, gateway_port_lock = allocate_port()
+            container_bundle_path = _stage_bundle(container, trusted_bundle_file)
+            gateway_sock.close()
+            gateway_sock = None
+            launch = _exec_in_container(
+                container,
+                "bash",
+                "-c",
+                (
+                    "nohup uv run python -m scripts.decoupled.container_tool_gateway "
+                    f"--bundle_file {container_bundle_path} "
+                    f"--host 0.0.0.0 --port {gateway_port} --debug "
+                    f"> /workspace/dumps/gateway.log 2>&1 & echo $!"
+                ),
             )
-        finally:
-            _discard_bundle(container, container_bundle_path)
-            container_bundle_path = None
+            gateway_pid = launch.stdout.strip()
+            try:
+                if not gateway_pid.isdigit():
+                    raise RuntimeError(
+                        f"gateway did not report a process id: {gateway_pid!r}"
+                    )
+                wait_for_container_url(
+                    f"http://127.0.0.1:{gateway_port}/health",
+                    timeout=120,
+                    hint=f"Container MCP gateway for {container}",
+                    container=container,
+                    pid=gateway_pid,
+                )
+                gateway_failure = None
+                break
+            except BaseException as error:
+                gateway_failure = error
+                _exec_in_container(
+                    container, "kill", gateway_pid, check=False
+                )
+                if gateway_port_lock is not None:
+                    gateway_port_lock.close()
+                gateway_port = None
+                gateway_port_lock = None
+                if gateway_attempt == 5:
+                    raise RuntimeError(
+                        "Container MCP gateway failed to start after 5 attempts"
+                    ) from error
+            finally:
+                _discard_bundle(container, container_bundle_path)
+                container_bundle_path = None
+        if gateway_failure is not None:
+            raise gateway_failure
         print(f"Gateway is ready: http://127.0.0.1:{gateway_port}/sse", flush=True)
 
         if args.agent_mode == "decomposer":
@@ -1534,7 +1650,7 @@ def main() -> None:
                         else None
                     ),
                     "decomposer_thinking_enabled": (
-                        False
+                        True
                         if args.decomposer_provider == "lmrouter"
                         else "gemma-4" in args.model.lower()
                         if args.decomposer_provider == "vllm"

@@ -205,7 +205,7 @@ def test_openrouter_model_accepts_local_relay_base_url(monkeypatch) -> None:
     assert str(model.openai_api_base) == "http://127.0.0.1:18041/api/v1"
 
 
-def test_lmrouter_teacher_is_non_thinking(monkeypatch) -> None:
+def test_lmrouter_teacher_is_thinking(monkeypatch) -> None:
     monkeypatch.setenv("LLM_PROXY_URL", "https://lmrouter.example/v1")
     monkeypatch.setenv("LLM_PROXY_MASTER_KEY", "secret")
 
@@ -217,7 +217,8 @@ def test_lmrouter_teacher_is_non_thinking(monkeypatch) -> None:
     )
 
     assert model.model_name == "Qwen/Qwen3.6-35B-A3B-FP8"
-    assert model.extra_body["chat_template_kwargs"] == {"enable_thinking": False}
+    assert model.extra_body["chat_template_kwargs"] == {"enable_thinking": True}
+    assert model.extra_body["include_reasoning"] is True
 
 
 def test_usage_summary_separates_decomposer_and_subagents() -> None:

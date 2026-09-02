@@ -593,6 +593,7 @@ dependencies = [
     { name = "langgraph" },
     { name = "langgraph-sdk" },
     { name = "pydantic" },
+    { name = "sentencepiece" },
     { name = "typing-extensions" },
     { name = "vllm" },
 ]
@@ -620,6 +621,7 @@ requires-dist = [
     { name = "langgraph", specifier = ">=1.2.4,<2" },
     { name = "langgraph-sdk", specifier = ">=0.4.0,<0.5" },
     { name = "pydantic", specifier = ">=2.11,<3" },
+    { name = "sentencepiece", specifier = ">=0.2,<1" },
     { name = "typing-extensions", specifier = ">=4.12,<5" },
     { name = "vllm", url = "https://github.com/vllm-project/vllm/releases/download/v0.24.0/vllm-0.24.0%2Bcu129-cp38-abi3-manylinux_2_28_x86_64.whl" },
 ]
