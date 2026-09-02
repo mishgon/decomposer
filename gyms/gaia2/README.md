@@ -56,7 +56,10 @@ registered `AppTool`s never fall back to ARE's legacy scalar-only converter.
 The converter recursively supports unions, lists, string-keyed dictionaries,
 `Literal`, and closed `TypedDict` objects. It omits variadic Python arguments,
 preserves explicit defaults, and rejects unsupported annotations with the tool
-and argument name.
+and argument name. Arguments with ordinary defaults remain optional. Empty-string
+defaults are the deliberate exception: Gaia2 uses them for payload fields such as
+`content`, `subject`, and `discount_code`, so those fields remain required. Set
+`ARE_TOOLS_REQUIRE_ALL=1` only for the opt-in all-required schema ablation.
 
 When an ARE tool raises a model-correctable execution error, both the simple
 agent and the Decomposer worker append the same complete canonical OpenAI
@@ -77,10 +80,12 @@ The audit instantiates all 20 registered app classes and validates every tool
 with JSON Schema 2020-12. It also loads one pinned execution, search, and
 ambiguity scenario and checks the actual native, broker, and LangChain-facing
 schemas for byte-order-preserving equality. It rejects exposed `args` or
-`kwargs`, hidden `cache_options`, incorrectly required defaults, unapproved
-broad objects, hidden AUI leaks, and lossy native fallback. It also parses the
-schema embedded in every retry reminder and requires exact equality with the
-initial native schema. Finally, it repeats the audit under
+`kwargs`, hidden `cache_options`, incorrectly required ordinary defaults,
+incorrectly optional empty-string payloads, unapproved broad objects, hidden AUI
+leaks, and lossy native fallback. The report also pins the complete population of
+empty-string payload surfaces for conscious review when the registry changes. It
+parses the schema embedded in every retry reminder and requires exact equality
+with the initial native schema. Finally, it repeats the audit under
 `PYTHONHASHSEED=0,1,42` and requires one schema-and-reminder checksum.
 
 `Contacts__edit_contact` exposes a closed partial-update object containing only

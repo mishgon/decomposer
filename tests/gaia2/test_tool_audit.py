@@ -8,6 +8,7 @@ def test_complete_registry_and_representative_surfaces_are_lossless():
         "broad_object_parameters": [],
         "defaulted_required": [],
         "duplicate_tool_names": [],
+        "empty_string_payload_optional": [],
         "exposed_variadics": [],
         "hidden_tool_leaks": [],
         "invalid_json_schemas": [],
@@ -31,6 +32,21 @@ def test_complete_registry_and_representative_surfaces_are_lossless():
         "tool_count": 161,
         "python_argument_count": 347,
         "public_argument_count": 332,
+        # Aliased apps remain separate because every public name is a distinct
+        # schema surface shown to the model; do not deduplicate these by method.
+        "empty_string_payload_arguments": [
+            ["AgentUserInterface__send_message_to_user", "content"],
+            ["EmailClientV2__reply_to_email", "content"],
+            ["EmailClientV2__send_email", "content"],
+            ["EmailClientV2__send_email", "subject"],
+            ["Mail__reply_to_email", "content"],
+            ["Mail__send_email", "content"],
+            ["Mail__send_email", "subject"],
+            ["MessagingAppV2__send_message", "content"],
+            ["MessagingAppV2__send_message_to_group_conversation", "content"],
+            ["ShoppingApp__get_discount_code_info", "discount_code"],
+            ["Shopping__get_discount_code_info", "discount_code"],
+        ],
     }
     for domain in ("execution", "search", "ambiguity"):
         surface = report["representative_scenarios"][domain]

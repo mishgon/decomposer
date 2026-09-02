@@ -107,8 +107,18 @@ def _inspect_schema(
             if argument.name in properties:
                 issues["exposed_variadics"].append(argument_identity)
             continue
-        if argument.has_default and argument.name in required:
+        if (
+            argument.has_default
+            and argument.default != ""
+            and argument.name in required
+        ):
             issues["defaulted_required"].append(argument_identity)
+        if (
+            argument.has_default
+            and argument.default == ""
+            and argument.name not in required
+        ):
+            issues["empty_string_payload_optional"].append(argument_identity)
         argument_schema = properties.get(argument.name)
         if argument_schema == {} and argument_identity not in BROAD_OBJECT_ALLOWLIST:
             issues["broad_object_parameters"].append(argument_identity)
@@ -163,6 +173,7 @@ def _schema_from_retry_reminder(
 def _registry_audit(issues: dict[str, list[str]]) -> dict[str, Any]:
     schemas: list[dict[str, Any]] = []
     retry_reminders: list[str] = []
+    empty_string_payload_arguments: set[tuple[str, str]] = set()
     tool_count = 0
     python_argument_count = 0
     public_argument_count = 0
@@ -182,6 +193,16 @@ def _registry_audit(issues: dict[str, list[str]]) -> dict[str, Any]:
             public_argument_count += len(
                 schema["function"]["parameters"].get("properties", {})
             )
+            public_properties = schema["function"]["parameters"].get(
+                "properties", {}
+            )
+            empty_string_payload_arguments.update(
+                (_public_name(tool), argument.name)
+                for argument in tool.args
+                if argument.has_default
+                and argument.default == ""
+                and argument.name in public_properties
+            )
             _inspect_schema(identity, tool, schema, issues)
             schemas.append(schema)
             retry_schema, retry_reminder = _schema_from_retry_reminder(
@@ -200,6 +221,9 @@ def _registry_audit(issues: dict[str, list[str]]) -> dict[str, Any]:
         "tool_count": tool_count,
         "python_argument_count": python_argument_count,
         "public_argument_count": public_argument_count,
+        "empty_string_payload_arguments": [
+            list(item) for item in sorted(empty_string_payload_arguments)
+        ],
         "schemas": schemas,
         "retry_reminders": retry_reminders,
     }
@@ -345,6 +369,7 @@ def run_audit() -> dict[str, Any]:
         "broad_object_parameters",
         "defaulted_required",
         "duplicate_tool_names",
+        "empty_string_payload_optional",
         "exposed_variadics",
         "hidden_tool_leaks",
         "invalid_json_schemas",
