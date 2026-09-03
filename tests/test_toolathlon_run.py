@@ -996,6 +996,29 @@ def test_container_socket_is_available_to_docker_and_podman() -> None:
     ]
 
 
+def test_evaluator_isolation_restarts_task_container(monkeypatch) -> None:
+    docker_calls = []
+    readiness_calls = []
+    monkeypatch.setattr(
+        run,
+        "_docker",
+        lambda *args, **kwargs: docker_calls.append((args, kwargs)),
+    )
+    monkeypatch.setattr(
+        run,
+        "wait_for_container_ready",
+        lambda container, timeout: readiness_calls.append((container, timeout)),
+    )
+
+    run.restart_container_for_evaluation("task-container", 37)
+
+    assert docker_calls == [
+        (("kill", "task-container"), {}),
+        (("start", "task-container"), {}),
+    ]
+    assert readiness_calls == [("task-container", 37)]
+
+
 def test_k8s_tasks_have_post_evaluation_cluster_cleanup() -> None:
     assert set(run.K8S_TASK_CLEANUP_COMMANDS) == {
         "finalpool/k8s-deployment-cleanup",
