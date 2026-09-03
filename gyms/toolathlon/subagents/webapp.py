@@ -1,7 +1,10 @@
+import json
 import os
+import uuid
 from collections.abc import AsyncIterator
 from contextlib import AsyncExitStack, asynccontextmanager
 from datetime import timedelta
+from pathlib import Path
 
 from fastapi import FastAPI
 from langchain.agents.middleware import wrap_tool_call
@@ -12,7 +15,11 @@ from mcp import ClientSession
 from mcp.client.sse import sse_client
 
 
-MAX_TOOL_OUTPUT_CHARS = 8000
+# Match Toolathlon-Verified's own scaffold.  The previous 8K limit discarded
+# most of many search/list results long before the benchmark's 100K cutoff.
+MAX_TOOL_OUTPUT_CHARS = int(
+    os.environ.get("TOOLATHLON_MAX_TOOL_OUTPUT_CHARS", "100000")
+)
 GATEWAY_SSE_READ_TIMEOUT_SECONDS = 30 * 60
 GATEWAY_TOOL_READ_TIMEOUT_SECONDS = 300
 
@@ -31,13 +38,25 @@ async def truncate_mcp_tool_output(request, handler):
         content = (
             response.content
             if isinstance(response.content, str)
-            else str(response.content)
+            else json.dumps(response.content, ensure_ascii=False, default=str)
         )
         if len(content) > MAX_TOOL_OUTPUT_CHARS:
+            output_id = uuid.uuid4().hex
+            relative_path = f".overlong_tool_outputs/{output_id}.json"
+            workspace = os.environ.get("TOOLATHLON_AGENT_WORKSPACE")
+            saved_note = ""
+            if workspace:
+                output_path = Path(workspace) / relative_path
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+                output_path.write_text(content, encoding="utf-8")
+                saved_note = (
+                    f" The complete output is available at {relative_path}."
+                )
             response = response.model_copy(
                 update={
                     "content": content[:MAX_TOOL_OUTPUT_CHARS]
-                    + f"\n...[truncated, total {len(content)} chars]"
+                    + f"\n...[truncated, total {len(content)} chars]."
+                    + saved_note
                 }
             )
     return response

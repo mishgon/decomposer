@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import copy
 import fcntl
 import json
 import os
@@ -79,6 +80,8 @@ SUBAGENT_TYPES = (
     ),
 )
 AGENT_MODES = ("simple", "decomposer")
+AGENT_SYSTEM_PROMPT_MODES = ("toolathlon", "generic")
+SIMPLE_AGENT_IMPLEMENTATIONS = ("toolathlon", "langgraph")
 SUBAGENT_PROVIDERS = ("vllm", "openrouter")
 DECOMPOSER_PROVIDERS = ("openrouter", "vllm", "lmrouter")
 DECOMPOSER_PROMPTS = {
@@ -372,6 +375,80 @@ def served_subagent_model_name(model: str) -> str:
     return DEFAULT_SUBAGENT_MODEL
 
 
+def official_simple_agent_bundle(bundle: dict, args: argparse.Namespace) -> dict:
+    """Build a container-local bundle for Toolathlon's native TaskAgent."""
+    runtime_bundle = copy.deepcopy(bundle)
+    runtime_bundle["host_paths"] = copy.deepcopy(bundle["container_paths"])
+    eval_config = runtime_bundle["eval_config"]
+    model_name = served_subagent_model_name(args.subagent_model)
+    model_lower = model_name.lower()
+    is_qwen_non_thinking = "qwen3.5" in model_lower
+    is_gemma = "gemma-4" in model_lower
+    gemma_thinking = is_gemma and "gemma-4-26b-a4b" not in model_lower
+
+    if is_qwen_non_thinking:
+        generation = {
+            "temperature": 0.7,
+            "top_p": 0.8,
+            "presence_penalty": 1.5,
+            "max_tokens": None,
+            "extra_body": {
+                "top_k": 20,
+                "min_p": 0.0,
+                "repetition_penalty": 1.0,
+                "include_reasoning": False,
+                "chat_template_kwargs": {"enable_thinking": False},
+            },
+        }
+    else:
+        extra_body: dict[str, object] = {"top_k": 64}
+        if is_gemma:
+            extra_body["chat_template_kwargs"] = {
+                "enable_thinking": gemma_thinking
+            }
+            if not gemma_thinking:
+                extra_body["include_reasoning"] = False
+        generation = {
+            "temperature": 1.0,
+            "top_p": 0.95,
+            "max_tokens": None,
+            "extra_body": extra_body,
+        }
+
+    eval_config["agent"] = {
+        "model": {
+            "short_name": model_name,
+            "provider": "local_vllm",
+            "context_window": args.vllm_max_model_len,
+        },
+        "generation": generation,
+        "tool": {
+            "tool_choice": "auto",
+            "parallel_tool_calls": True,
+            "max_inner_turns": args.max_steps,
+        },
+    }
+    eval_config["global_task_config"][
+        "max_steps_under_single_turn_mode"
+    ] = args.max_steps
+    return runtime_bundle
+
+
+def answer_from_native_trajectory(trajectory: dict) -> str:
+    for message in reversed(trajectory.get("messages") or []):
+        if not isinstance(message, dict) or message.get("role") != "assistant":
+            continue
+        content = message.get("content", "")
+        if isinstance(content, list):
+            content = "".join(
+                part.get("text", "") if isinstance(part, dict) else str(part)
+                for part in content
+            )
+        if str(content).strip():
+            return str(content)
+    return ""
+
+
 def vllm_command(
     model: str,
     port: int,
@@ -603,6 +680,9 @@ def start_host_subagent_server(
     n_jobs_per_worker: int,
     log_path: Path,
     model_call_log_path: Path,
+    system_prompt: str | None,
+    max_tool_output_chars: int,
+    agent_workspace: str,
 ) -> subprocess.Popen[bytes]:
     log_path.parent.mkdir(parents=True, exist_ok=True)
     command = [
@@ -624,7 +704,11 @@ def start_host_subagent_server(
         "TOOLATHLON_GATEWAY_URL": f"http://127.0.0.1:{gateway_port}/sse",
         "TOOLATHLON_OPENROUTER_MODEL": model,
         "TOOLATHLON_SUBAGENT_CALL_LOG": str(model_call_log_path),
+        "TOOLATHLON_MAX_TOOL_OUTPUT_CHARS": str(max_tool_output_chars),
+        "TOOLATHLON_AGENT_WORKSPACE": agent_workspace,
     }
+    if system_prompt:
+        environment["TOOLATHLON_AGENT_SYSTEM_PROMPT"] = system_prompt
     with log_path.open("ab") as log:
         return subprocess.Popen(
             command,
@@ -1031,6 +1115,9 @@ async def _run_simple_agent(
     gateway_port: int,
     subagent_port: int,
     recursion_limit: int,
+    system_prompt: str | None,
+    max_tool_output_chars: int,
+    agent_workspace: str,
 ) -> dict:
     os.environ["TOOLATHLON_GATEWAY_URL"] = (
         f"http://127.0.0.1:{gateway_port}/sse"
@@ -1047,25 +1134,34 @@ async def _run_simple_agent(
     os.environ["GEMMA_4_26B_A4B_BASE_URL"] = (
         f"http://127.0.0.1:{subagent_port}/v1"
     )
+    os.environ["TOOLATHLON_AGENT_WORKSPACE"] = agent_workspace
     if __package__:
         from .subagents import graph, webapp
     else:
         from subagents import graph, webapp
 
+    # webapp may already have been imported by a test or an earlier in-process
+    # invocation, so update the runtime value as well as the child-server env.
+    webapp.MAX_TOOL_OUTPUT_CHARS = max_tool_output_chars
+
     async with webapp.lifespan(webapp.app):
         if provider == "vllm":
             model_lower = model.lower()
             if "gemma-4-31b" in model_lower:
-                agent = graph.gemma_4_31b_thinking()
+                agent = graph.gemma_4_31b_thinking(system_prompt=system_prompt)
             elif "gemma-4-26b-a4b" in model_lower:
-                agent = graph.gemma_4_26b_a4b_non_thinking()
+                agent = graph.gemma_4_26b_a4b_non_thinking(
+                    system_prompt=system_prompt
+                )
             elif "gemma-4-e4b" in model_lower:
-                agent = graph.gemma_4_e4b_thinking()
+                agent = graph.gemma_4_e4b_thinking(system_prompt=system_prompt)
             else:
-                agent = graph.qwen_3_5_4b_non_thinking()
+                agent = graph.qwen_3_5_4b_non_thinking(
+                    system_prompt=system_prompt
+                )
         else:
             os.environ["TOOLATHLON_OPENROUTER_MODEL"] = model
-            agent = graph.deepseek_openrouter()
+            agent = graph.deepseek_openrouter(system_prompt=system_prompt)
         return await agent.ainvoke(
             {"messages": [{"role": "user", "content": task}]},
             config={"recursion_limit": recursion_limit},
@@ -1083,6 +1179,24 @@ def main() -> None:
         "--purpose", choices=("trace-generation", "evaluation"), required=True
     )
     parser.add_argument("--agent-mode", choices=AGENT_MODES, default="decomposer")
+    parser.add_argument(
+        "--simple-agent-implementation",
+        choices=SIMPLE_AGENT_IMPLEMENTATIONS,
+        default="toolathlon",
+        help=(
+            "Use Toolathlon's native TaskAgent (default) or the legacy "
+            "LangGraph wrapper."
+        ),
+    )
+    parser.add_argument(
+        "--agent-system-prompt",
+        choices=AGENT_SYSTEM_PROMPT_MODES,
+        default="toolathlon",
+        help=(
+            "Use the benchmark task's agent prompt (default), or the legacy "
+            "generic Decomposer subagent prompt."
+        ),
+    )
     parser.add_argument("--model", default=DEFAULT_MODEL)
     parser.add_argument(
         "--decomposer-provider", choices=DECOMPOSER_PROVIDERS, default="openrouter"
@@ -1131,6 +1245,12 @@ def main() -> None:
     parser.add_argument("--stashes-dir", type=Path, default=DEFAULT_STASHES_DIR)
     parser.add_argument("--startup-timeout", type=float, default=180)
     parser.add_argument("--n-jobs-per-worker", type=int, default=16)
+    parser.add_argument(
+        "--max-tool-output-chars",
+        type=int,
+        default=100_000,
+        help="Per-tool output cutoff; Toolathlon-Verified defaults to 100000.",
+    )
     parser.add_argument("--agent-timeout", type=float, default=2700)
     parser.add_argument("--max-steps", type=int, default=DEFAULT_MAX_STEPS)
     parser.add_argument("--eval-config", default=DEFAULT_EVAL_CONFIG)
@@ -1139,6 +1259,26 @@ def main() -> None:
     args = parser.parse_args()
     if args.n_jobs_per_worker < 1:
         parser.error("--n-jobs-per-worker must be at least 1")
+    if args.max_tool_output_chars < 1:
+        parser.error("--max-tool-output-chars must be at least 1")
+    if (
+        args.agent_mode == "simple"
+        and args.simple_agent_implementation == "toolathlon"
+        and args.subagent_provider != "vllm"
+    ):
+        parser.error(
+            "--simple-agent-implementation toolathlon currently requires "
+            "--subagent-provider vllm"
+        )
+    if (
+        args.agent_mode == "simple"
+        and args.simple_agent_implementation == "toolathlon"
+        and args.agent_system_prompt != "toolathlon"
+    ):
+        parser.error(
+            "Toolathlon's native TaskAgent always uses the task-specific "
+            "system prompt"
+        )
     if args.max_steps < 1:
         parser.error("--max-steps must be at least 1")
     if args.subagent_recursion_limit < 1:
@@ -1421,6 +1561,11 @@ def main() -> None:
                 f"{preprocess_failure}; inspect {episode_dir / 'preprocess.log'}"
             )
         container_paths = bundle["container_paths"]
+        agent_system_prompt = (
+            bundle["system_prompts"]["agent"]
+            if args.agent_system_prompt == "toolathlon"
+            else None
+        )
         eval_result_path = posixpath.join(
             posixpath.dirname(container_paths["log_file"]), "eval_res.json"
         )
@@ -1437,59 +1582,73 @@ def main() -> None:
         if not stash_dir:
             raise RuntimeError("Artifact guard stash did not report a stash directory")
 
-        print("Starting container MCP gateway...", flush=True)
-        gateway_failure: BaseException | None = None
-        for gateway_attempt in range(1, 6):
-            if gateway_port is None:
-                gateway_port, gateway_sock, gateway_port_lock = allocate_port()
-            container_bundle_path = _stage_bundle(container, trusted_bundle_file)
-            gateway_sock.close()
-            gateway_sock = None
-            launch = _exec_in_container(
-                container,
-                "bash",
-                "-c",
-                (
-                    "nohup uv run python -m scripts.decoupled.container_tool_gateway "
-                    f"--bundle_file {container_bundle_path} "
-                    f"--host 0.0.0.0 --port {gateway_port} --debug "
-                    f"> /workspace/dumps/gateway.log 2>&1 & echo $!"
-                ),
-            )
-            gateway_pid = launch.stdout.strip()
-            try:
-                if not gateway_pid.isdigit():
-                    raise RuntimeError(
-                        f"gateway did not report a process id: {gateway_pid!r}"
+        use_container_gateway = not (
+            args.agent_mode == "simple"
+            and args.simple_agent_implementation == "toolathlon"
+        )
+        if use_container_gateway:
+            print("Starting container MCP gateway...", flush=True)
+            gateway_failure: BaseException | None = None
+            for gateway_attempt in range(1, 6):
+                if gateway_port is None:
+                    gateway_port, gateway_sock, gateway_port_lock = allocate_port()
+                container_bundle_path = _stage_bundle(
+                    container, trusted_bundle_file
+                )
+                gateway_sock.close()
+                gateway_sock = None
+                launch = _exec_in_container(
+                    container,
+                    "bash",
+                    "-c",
+                    (
+                        "nohup uv run python "
+                        "/opt/decomposer/gyms/toolathlon/"
+                        "container_tool_gateway.py "
+                        f"--bundle_file {container_bundle_path} "
+                        f"--host 0.0.0.0 --port {gateway_port} --debug "
+                        "--include_local_tools "
+                        "> /workspace/dumps/gateway.log 2>&1 & echo $!"
+                    ),
+                )
+                gateway_pid = launch.stdout.strip()
+                try:
+                    if not gateway_pid.isdigit():
+                        raise RuntimeError(
+                            "gateway did not report a process id: "
+                            f"{gateway_pid!r}"
+                        )
+                    wait_for_container_url(
+                        f"http://127.0.0.1:{gateway_port}/health",
+                        timeout=120,
+                        hint=f"Container MCP gateway for {container}",
+                        container=container,
+                        pid=gateway_pid,
                     )
-                wait_for_container_url(
-                    f"http://127.0.0.1:{gateway_port}/health",
-                    timeout=120,
-                    hint=f"Container MCP gateway for {container}",
-                    container=container,
-                    pid=gateway_pid,
-                )
-                gateway_failure = None
-                break
-            except BaseException as error:
-                gateway_failure = error
-                _exec_in_container(
-                    container, "kill", gateway_pid, check=False
-                )
-                if gateway_port_lock is not None:
-                    gateway_port_lock.close()
-                gateway_port = None
-                gateway_port_lock = None
-                if gateway_attempt == 5:
-                    raise RuntimeError(
-                        "Container MCP gateway failed to start after 5 attempts"
-                    ) from error
-            finally:
-                _discard_bundle(container, container_bundle_path)
-                container_bundle_path = None
-        if gateway_failure is not None:
-            raise gateway_failure
-        print(f"Gateway is ready: http://127.0.0.1:{gateway_port}/sse", flush=True)
+                    gateway_failure = None
+                    break
+                except BaseException as error:
+                    gateway_failure = error
+                    _exec_in_container(
+                        container, "kill", gateway_pid, check=False
+                    )
+                    if gateway_port_lock is not None:
+                        gateway_port_lock.close()
+                    gateway_port = None
+                    gateway_port_lock = None
+                    if gateway_attempt == 5:
+                        raise RuntimeError(
+                            "Container MCP gateway failed to start after 5 attempts"
+                        ) from error
+                finally:
+                    _discard_bundle(container, container_bundle_path)
+                    container_bundle_path = None
+            if gateway_failure is not None:
+                raise gateway_failure
+            print(
+                f"Gateway is ready: http://127.0.0.1:{gateway_port}/sse",
+                flush=True,
+            )
 
         if args.agent_mode == "decomposer":
             print("Starting subagent server...", flush=True)
@@ -1505,6 +1664,9 @@ def main() -> None:
                     n_jobs_per_worker=args.n_jobs_per_worker,
                     log_path=episode_dir / "subagent_server.log",
                     model_call_log_path=episode_dir / "subagent_model_calls.jsonl",
+                    system_prompt=agent_system_prompt,
+                    max_tool_output_chars=args.max_tool_output_chars,
+                    agent_workspace=bundle["host_paths"]["agent_workspace"],
                 )
             else:
                 _exec_in_container(
@@ -1530,6 +1692,17 @@ def main() -> None:
                         "TOOLATHLON_SUBAGENT_CALL_LOG": (
                             "/workspace/dumps/subagent_model_calls.jsonl"
                         ),
+                        "TOOLATHLON_MAX_TOOL_OUTPUT_CHARS": str(
+                            args.max_tool_output_chars
+                        ),
+                        "TOOLATHLON_AGENT_WORKSPACE": container_paths[
+                            "agent_workspace"
+                        ],
+                        **(
+                            {"TOOLATHLON_AGENT_SYSTEM_PROMPT": agent_system_prompt}
+                            if agent_system_prompt
+                            else {}
+                        ),
                     },
                 )
             wait_for_url(
@@ -1547,25 +1720,92 @@ def main() -> None:
         container_lock_held = False
 
         agent_error: str | None = None
+        native_trajectory: dict | None = None
         try:
             if args.agent_mode == "simple":
                 print(f"Running simple {args.subagent_model} agent...", flush=True)
-                os.environ["TOOLATHLON_SUBAGENT_CALL_LOG"] = str(
-                    episode_dir / "subagent_model_calls.jsonl"
-                )
-                agent_state = asyncio.run(
-                    asyncio.wait_for(
-                        _run_simple_agent(
-                            bundle["task_str"],
-                            provider=args.subagent_provider,
-                            model=args.subagent_model,
-                            gateway_port=gateway_port,
-                            subagent_port=args.subagent_port,
-                            recursion_limit=args.subagent_recursion_limit,
+                if args.simple_agent_implementation == "toolathlon":
+                    runtime_bundle_file = trusted_stash_dir / "native_bundle.json"
+                    runtime_bundle_file.write_text(
+                        json.dumps(
+                            official_simple_agent_bundle(bundle, args),
+                            ensure_ascii=False,
                         ),
-                        timeout=args.agent_timeout,
+                        encoding="utf-8",
                     )
-                )
+                    os.chmod(runtime_bundle_file, 0o600)
+                    container_bundle_path = _stage_bundle(
+                        container, runtime_bundle_file
+                    )
+                    try:
+                        native_run = _exec_in_container(
+                            container,
+                            "bash",
+                            "-c",
+                            (
+                                "exec uv run python -m "
+                                "scripts.containerized.container_agent "
+                                f"--bundle_file {container_bundle_path} "
+                                "> /workspace/dumps/native_agent.log 2>&1"
+                            ),
+                            env={
+                                "VLLM_BASE_URL": (
+                                    args.subagent_base_url
+                                    or f"http://127.0.0.1:{args.subagent_port}/v1"
+                                ),
+                                "BENCH_MAX_SINGLE_TURN_RETURN_CHARS": str(
+                                    args.max_tool_output_chars
+                                ),
+                                "PYTHONUNBUFFERED": "1",
+                            },
+                            check=False,
+                            timeout=args.agent_timeout,
+                        )
+                    finally:
+                        _discard_bundle(container, container_bundle_path)
+                        container_bundle_path = None
+                        runtime_bundle_file.unlink(missing_ok=True)
+                    trajectory_path = episode_dir / "traj_log.json"
+                    if not trajectory_path.is_file():
+                        raise RuntimeError(
+                            "Toolathlon TaskAgent produced no traj_log.json; "
+                            f"exit code {native_run.returncode}"
+                        )
+                    native_trajectory = json.loads(
+                        trajectory_path.read_text(encoding="utf-8")
+                    )
+                    if (
+                        native_run.returncode != 0
+                        or native_trajectory.get("status") != "success"
+                    ):
+                        raise RuntimeError(
+                            "Toolathlon TaskAgent failed with exit code "
+                            f"{native_run.returncode} and status "
+                            f"{native_trajectory.get('status')!r}"
+                        )
+                    agent_state = {}
+                else:
+                    os.environ["TOOLATHLON_SUBAGENT_CALL_LOG"] = str(
+                        episode_dir / "subagent_model_calls.jsonl"
+                    )
+                    agent_state = asyncio.run(
+                        asyncio.wait_for(
+                            _run_simple_agent(
+                                bundle["task_str"],
+                                provider=args.subagent_provider,
+                                model=args.subagent_model,
+                                gateway_port=gateway_port,
+                                subagent_port=args.subagent_port,
+                                recursion_limit=args.subagent_recursion_limit,
+                                system_prompt=agent_system_prompt,
+                                max_tool_output_chars=args.max_tool_output_chars,
+                                agent_workspace=bundle["host_paths"][
+                                    "agent_workspace"
+                                ],
+                            ),
+                            timeout=args.agent_timeout,
+                        )
+                    )
             else:
                 print("Running Decomposer...", flush=True)
                 agent = create_decomposer_agent(
@@ -1645,23 +1885,41 @@ def main() -> None:
                 agent_state = {}
         messages = agent_state.get("messages", [])
         subagent_runs = agent_state.get("subagent_runs", {}) or {}
-        answer = ""
-        for message in reversed(messages):
-            if message.type == "ai":
-                content = message.content
-                if isinstance(content, list):
-                    content = "".join(
-                        part.get("text", "")
-                        if isinstance(part, dict)
-                        else str(part)
-                        for part in content
-                    )
-                answer = str(content)
-                break
-        agent_success = agent_error is None and bool(answer.strip())
+        answer = (
+            answer_from_native_trajectory(native_trajectory)
+            if native_trajectory is not None
+            else ""
+        )
+        if native_trajectory is None:
+            for message in reversed(messages):
+                if message.type == "ai":
+                    content = message.content
+                    if isinstance(content, list):
+                        content = "".join(
+                            part.get("text", "")
+                            if isinstance(part, dict)
+                            else str(part)
+                            for part in content
+                        )
+                    answer = str(content)
+                    break
+        agent_success = agent_error is None and (
+            native_trajectory is not None or bool(answer.strip())
+        )
         agent_exit_code = 0 if agent_success else 1
-        serialized_messages = [message_to_dict(message) for message in messages]
-        usage = build_usage_summary(serialized_messages, subagent_runs)
+        serialized_messages = (
+            native_trajectory.get("messages", [])
+            if native_trajectory is not None
+            else [message_to_dict(message) for message in messages]
+        )
+        usage = (
+            {
+                "native_agent_cost": native_trajectory.get("agent_cost", {}),
+                "native_key_stats": native_trajectory.get("key_stats", {}),
+            }
+            if native_trajectory is not None
+            else build_usage_summary(serialized_messages, subagent_runs)
+        )
 
         (episode_dir / "trace.json").write_text(
             json.dumps(
@@ -1674,6 +1932,13 @@ def main() -> None:
                     "purpose": args.purpose,
                     "code": git_provenance(REPO_ROOT),
                     "agent_mode": args.agent_mode,
+                    "simple_agent_implementation": (
+                        args.simple_agent_implementation
+                        if args.agent_mode == "simple"
+                        else None
+                    ),
+                    "agent_system_prompt": args.agent_system_prompt,
+                    "max_tool_output_chars": args.max_tool_output_chars,
                     "decomposer_model": args.model,
                     "decomposer_provider": args.decomposer_provider,
                     "decomposer_reasoning_effort": (
@@ -1719,17 +1984,18 @@ def main() -> None:
             json.dumps(usage, indent=2, ensure_ascii=False), encoding="utf-8"
         )
         (episode_dir / "answer.txt").write_text(answer, encoding="utf-8")
-        write_trajectory(
-            episode_dir,
-            task=args.task,
-            episode_id=episode_id,
-            status="success" if agent_success else "failed",
-            state=agent_state,
-            subagent_runs=subagent_runs,
-            started_at=started_at,
-            resolved_task_config=bundle.get("resolved_task_config"),
-            error=agent_error,
-        )
+        if native_trajectory is None:
+            write_trajectory(
+                episode_dir,
+                task=args.task,
+                episode_id=episode_id,
+                status="success" if agent_success else "failed",
+                state=agent_state,
+                subagent_runs=subagent_runs,
+                started_at=started_at,
+                resolved_task_config=bundle.get("resolved_task_config"),
+                error=agent_error,
+            )
 
         print("Restoring trusted evaluator artifacts...", flush=True)
         if stash_dir:

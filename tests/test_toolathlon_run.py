@@ -11,7 +11,7 @@ from types import SimpleNamespace
 
 import pytest
 from langchain.agents.middleware import ModelResponse
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from gyms.toolathlon import batch, mlspace_serve, run, settings, teacher_models, usage
 
@@ -80,6 +80,28 @@ def test_evaluation_metrics_do_not_hide_unscored_tasks() -> None:
     assert metrics["pass^3"] is None
     assert metrics["scored_task_count"] == 0
     assert metrics["unscored_trials"] == 1
+
+
+def test_evaluation_metrics_do_not_drop_one_incomplete_task() -> None:
+    manifest = {
+        "config": {"repetitions": 3},
+        "episodes": [
+            {"task": "complete", "score": score}
+            for score in (True, True, True)
+        ]
+        + [
+            {"task": "incomplete", "score": score}
+            for score in (False, False, None)
+        ],
+    }
+
+    metrics = batch.evaluation_metrics(manifest)
+
+    assert metrics["scored_task_count"] == 1
+    assert metrics["unscored_trials"] == 1
+    assert metrics["pass@1"] is None
+    assert metrics["pass@3"] is None
+    assert metrics["pass^3"] is None
 
 
 def test_all_valid_metrics_use_full_benchmark_denominator() -> None:
@@ -180,6 +202,40 @@ def test_subagent_reconnects_model_requests_for_data_parallel_balance(
     assert "max_tokens" not in captured
     asyncio.run(client.aclose())
     assert result is compiled
+
+
+def test_subagent_uses_task_specific_system_prompt(monkeypatch) -> None:
+    model_kwargs = {}
+    agent_kwargs = {}
+
+    class FakeChatVLLM:
+        def __init__(self, **kwargs):
+            model_kwargs.update(kwargs)
+
+    monkeypatch.setattr(subagent_graph, "ChatVLLM", FakeChatVLLM)
+    monkeypatch.setattr(subagent_graph, "get_tools", lambda: [])
+    monkeypatch.setattr(
+        subagent_graph,
+        "create_agent",
+        lambda **kwargs: agent_kwargs.update(kwargs) or object(),
+    )
+
+    subagent_graph._create_subagent(
+        "model",
+        "UNSET_TEST_BASE_URL",
+        9999,
+        thinking=False,
+        system_prompt="benchmark-specific instructions",
+    )
+
+    assert agent_kwargs["system_prompt"] == "benchmark-specific instructions"
+    asyncio.run(model_kwargs["http_async_client"].aclose())
+
+
+def test_tool_output_limit_matches_toolathlon_default() -> None:
+    from gyms.toolathlon.subagents import webapp
+
+    assert webapp.MAX_TOOL_OUTPUT_CHARS == 100_000
 
 
 def test_qwen_non_thinking_uses_official_sampling_parameters(monkeypatch) -> None:
@@ -411,6 +467,33 @@ def test_subagent_turns_mcp_failures_into_tool_errors() -> None:
     assert response.content == "Tool call failed: ping"
 
 
+def test_overlong_tool_output_is_preserved_in_workspace(
+    tmp_path, monkeypatch
+) -> None:
+    from gyms.toolathlon.subagents import webapp
+
+    monkeypatch.setattr(webapp, "MAX_TOOL_OUTPUT_CHARS", 10)
+    monkeypatch.setenv("TOOLATHLON_AGENT_WORKSPACE", str(tmp_path))
+    request = SimpleNamespace(tool_call={"id": "call-1"})
+
+    async def handler(_request):
+        return ToolMessage(
+            content=[{"type": "text", "text": "x" * 20}],
+            tool_call_id="call-1",
+        )
+
+    response = asyncio.run(
+        webapp.truncate_mcp_tool_output.awrap_tool_call(request, handler)
+    )
+
+    output_files = list((tmp_path / ".overlong_tool_outputs").glob("*.json"))
+    assert len(output_files) == 1
+    assert json.loads(output_files[0].read_text()) == [
+        {"type": "text", "text": "x" * 20}
+    ]
+    assert str(output_files[0].relative_to(tmp_path)) in response.content
+
+
 def test_docker(monkeypatch) -> None:
     calls = []
 
@@ -541,6 +624,64 @@ def test_served_subagent_model_names_cover_supported_local_models() -> None:
     assert run.served_subagent_model_name("/models/gemma-4-31B-it") == (
         "google/gemma-4-31B-it"
     )
+
+
+def test_official_simple_agent_bundle_uses_local_vllm_and_native_paths() -> None:
+    source = {
+        "container_paths": {
+            "task_root": "/workspace/dumps",
+            "agent_workspace": "/workspace/dumps/workspace",
+            "log_file": "/workspace/dumps/traj_log.json",
+        },
+        "host_paths": {
+            "task_root": "/host/episode",
+            "agent_workspace": "/host/episode/workspace",
+            "log_file": "/host/episode/traj_log.json",
+        },
+        "eval_config": {
+            "global_task_config": {"max_steps_under_single_turn_mode": 1},
+            "agent": {},
+        },
+    }
+    args = SimpleNamespace(
+        subagent_model="/models/gemma-4-31B-it",
+        vllm_max_model_len=131072,
+        max_steps=200,
+    )
+
+    result = run.official_simple_agent_bundle(source, args)
+
+    assert result["host_paths"] == source["container_paths"]
+    assert source["host_paths"]["task_root"] == "/host/episode"
+    agent = result["eval_config"]["agent"]
+    assert agent["model"] == {
+        "short_name": "google/gemma-4-31B-it",
+        "provider": "local_vllm",
+        "context_window": 131072,
+    }
+    assert agent["generation"] == {
+        "temperature": 1.0,
+        "top_p": 0.95,
+        "max_tokens": None,
+        "extra_body": {
+            "top_k": 64,
+            "chat_template_kwargs": {"enable_thinking": True},
+        },
+    }
+    assert agent["tool"]["parallel_tool_calls"] is True
+    assert agent["tool"]["max_inner_turns"] == 200
+
+
+def test_answer_from_native_trajectory_uses_last_assistant_message() -> None:
+    assert run.answer_from_native_trajectory(
+        {
+            "messages": [
+                {"role": "assistant", "content": "earlier"},
+                {"role": "tool", "content": "result"},
+                {"role": "assistant", "content": "done"},
+            ]
+        }
+    ) == "done"
 
 
 def test_vllm_command_uses_gemma_thinking_parsers() -> None:
@@ -868,6 +1009,14 @@ def test_k8s_tasks_have_post_evaluation_cluster_cleanup() -> None:
     )
 
 
+def test_shared_mutable_services_are_serialized_across_tasks() -> None:
+    assert batch.shared_task_resources("finalpool/canvas-art-manager") == (
+        "canvas",
+    )
+    assert batch.shared_task_resources("finalpool/k8s-mysql") == ("k8s",)
+    assert batch.shared_task_resources("finalpool/meeting-assign") == ()
+
+
 def test_episode_command_passes_docker_socket(tmp_path) -> None:
     args = SimpleNamespace(
         purpose="evaluation",
@@ -894,6 +1043,8 @@ def test_episode_command_passes_docker_socket(tmp_path) -> None:
 
     assert command[command.index("--docker-socket") + 1] == "/custom/docker.sock"
     assert command[command.index("--agent-mode") + 1] == "simple"
+    assert command[command.index("--agent-system-prompt") + 1] == "toolathlon"
+    assert command[command.index("--max-tool-output-chars") + 1] == "100000"
     assert command[command.index("--decomposer-prompt") + 1] == "student"
 
     args.container_slots = 2

@@ -148,6 +148,13 @@ uv run python gyms/toolathlon/run.py --all-valid -n 3 \
 `OPENROUTER_API_KEY`. This keeps the model choice and harness choice
 orthogonal for the planned Qwen, DeepSeek, and trained-Decomposer matrix.
 
+Simple-agent evaluation defaults to Toolathlon's native `TaskAgent`, including
+the task-specific system prompt, requested local tools, context recovery, and
+the benchmark's 100,000-character tool-output policy. Use
+`--simple-agent-implementation langgraph` only for legacy comparisons. Its
+prompt and cutoff can be reproduced exactly with
+`--agent-system-prompt generic --max-tool-output-chars 8000`.
+
 Select the tool-agent provider independently with `--subagent-provider`:
 
 ```bash

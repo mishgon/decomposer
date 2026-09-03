@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import concurrent.futures
+import contextlib
 import hashlib
 import json
 import os
@@ -83,6 +84,8 @@ VALID_EVALUATION_TASKS = (
 )
 RESUME_CONFIG_FIELDS = (
     "agent_mode",
+    "simple_agent_implementation",
+    "agent_system_prompt",
     "model",
     "decomposer_provider",
     "decomposer_base_url",
@@ -107,8 +110,14 @@ RESUME_CONFIG_FIELDS = (
     "agent_timeout",
     "episode_timeout",
     "max_steps",
+    "max_tool_output_chars",
     "eval_config",
 )
+
+# These services are shared mutable environments, not per-episode MCP
+# processes.  Different tasks can otherwise reset the same Canvas courses or
+# Kubernetes cluster while another agent is still working in it.
+SHARED_MUTABLE_MCP_SERVERS = frozenset({"canvas", "k8s"})
 
 
 def utc_now() -> str:
@@ -184,6 +193,16 @@ def parse_args(argv: Sequence[str], defaults: dict[str, Any]) -> argparse.Namesp
     parser.add_argument(
         "--agent-mode", choices=("simple", "decomposer"), default="decomposer"
     )
+    parser.add_argument(
+        "--simple-agent-implementation",
+        choices=("toolathlon", "langgraph"),
+        default="toolathlon",
+    )
+    parser.add_argument(
+        "--agent-system-prompt",
+        choices=("toolathlon", "generic"),
+        default="toolathlon",
+    )
     parser.add_argument("--model", default=defaults["model"])
     parser.add_argument(
         "--decomposer-provider",
@@ -241,6 +260,7 @@ def parse_args(argv: Sequence[str], defaults: dict[str, Any]) -> argparse.Namesp
     parser.add_argument("--startup-timeout", type=float, default=180)
     parser.add_argument("--n-jobs-per-worker", type=int, default=16)
     parser.add_argument("--max-steps", type=int, default=200)
+    parser.add_argument("--max-tool-output-chars", type=int, default=100_000)
     parser.add_argument(
         "--eval-config",
         default="scripts/formal_run_v0.json",
@@ -279,6 +299,26 @@ def parse_args(argv: Sequence[str], defaults: dict[str, Any]) -> argparse.Namesp
         parser.error("--agent-timeout and --episode-timeout must be positive")
     if args.max_steps < 1:
         parser.error("--max-steps must be at least 1")
+    if args.max_tool_output_chars < 1:
+        parser.error("--max-tool-output-chars must be at least 1")
+    if (
+        args.agent_mode == "simple"
+        and args.simple_agent_implementation == "toolathlon"
+        and args.subagent_provider != "vllm"
+    ):
+        parser.error(
+            "--simple-agent-implementation toolathlon currently requires "
+            "--subagent-provider vllm"
+        )
+    if (
+        args.agent_mode == "simple"
+        and args.simple_agent_implementation == "toolathlon"
+        and args.agent_system_prompt != "toolathlon"
+    ):
+        parser.error(
+            "Toolathlon's native TaskAgent always uses the task-specific "
+            "system prompt"
+        )
     if args.subagent_recursion_limit < 1:
         parser.error("--subagent-recursion-limit must be at least 1")
     if args.vllm_data_parallel_size < 1:
@@ -336,6 +376,15 @@ def select_tasks(
     return selected
 
 
+def shared_task_resources(task: str) -> tuple[str, ...]:
+    resources = []
+    if task.startswith("finalpool/canvas-"):
+        resources.append("canvas")
+    if task.startswith("finalpool/k8s-"):
+        resources.append("k8s")
+    return tuple(resources)
+
+
 def count_statuses(manifest: dict[str, Any]) -> dict[str, int]:
     counts = {name: 0 for name in ("pending", "running", "completed", "failed")}
     for episode in manifest["episodes"]:
@@ -357,6 +406,10 @@ def evaluation_metrics(manifest: dict[str, Any]) -> dict[str, Any]:
         and all(isinstance(episode.get("score"), bool) for episode in episodes)
     ]
     scored_trials = sum(len(episodes) for episodes in scored_tasks)
+    unscored_trials = sum(
+        not isinstance(episode.get("score"), bool)
+        for episode in manifest["episodes"]
+    )
     passed_trials = sum(
         episode["score"] is True
         for episodes in scored_tasks
@@ -374,10 +427,7 @@ def evaluation_metrics(manifest: dict[str, Any]) -> dict[str, Any]:
         "expected_trials": benchmark_task_count * repetitions,
         "scored_task_count": len(scored_tasks),
         "scored_trials": scored_trials,
-        "unscored_trials": sum(
-            not isinstance(episode.get("score"), bool)
-            for episode in manifest["episodes"]
-        ),
+        "unscored_trials": unscored_trials,
         "pass@1": passed_trials / scored_trials if scored_trials else None,
         "pass@3": None,
         "pass^3": None,
@@ -400,6 +450,13 @@ def evaluation_metrics(manifest: dict[str, Any]) -> dict[str, Any]:
                 and all(episode.get("score") is True for episode in episodes)
                 for episodes in by_task.values()
             ) / benchmark_task_count
+        return result
+    if unscored_trials:
+        # A partial focused run must never look better merely because an
+        # incomplete task disappeared from the denominator.  Keep counts for
+        # diagnostics, but withhold all aggregate rates until every selected
+        # trial has a native boolean score.
+        result.update({"pass@1": None, "pass@3": None, "pass^3": None})
         return result
     if repetitions == 3 and scored_tasks:
         result["pass@3"] = sum(
@@ -500,6 +557,12 @@ def episode_command(
         "--repetition", str(repetition), "--attempt", str(attempt),
         "--purpose", args.purpose, "--model", args.model,
         "--agent-mode", args.agent_mode,
+        "--simple-agent-implementation", getattr(
+            args, "simple_agent_implementation", "toolathlon"
+        ),
+        "--agent-system-prompt", getattr(
+            args, "agent_system_prompt", "toolathlon"
+        ),
         "--decomposer-provider", getattr(args, "decomposer_provider", "openrouter"),
         "--decomposer-base-url",
         getattr(args, "decomposer_base_url", "http://127.0.0.1:8040/v1"),
@@ -522,6 +585,9 @@ def episode_command(
         "--n-jobs-per-worker", str(args.n_jobs_per_worker),
         "--agent-timeout", str(getattr(args, "agent_timeout", 2700)),
         "--max-steps", str(args.max_steps),
+        "--max-tool-output-chars", str(
+            getattr(args, "max_tool_output_chars", 100_000)
+        ),
         "--eval-config", args.eval_config,
         "--container-lock-file",
         str(
@@ -756,6 +822,13 @@ def main(
                     "subagent_provider": "vllm",
                 }
                 setattr(args, name, defaults_by_name[name])
+            elif name == "agent_system_prompt" and name not in manifest["config"]:
+                setattr(args, name, "generic")
+            elif (
+                name == "simple_agent_implementation"
+                and name not in manifest["config"]
+            ):
+                setattr(args, name, "langgraph")
             elif name == "decomposer_base_url" and name not in manifest["config"]:
                 setattr(args, name, "http://127.0.0.1:8040/v1")
             elif name == "decomposer_prompt" and name not in manifest["config"]:
@@ -774,6 +847,8 @@ def main(
                 setattr(args, name, 3300)
             elif name == "agent_timeout" and name not in manifest["config"]:
                 setattr(args, name, 2700)
+            elif name == "max_tool_output_chars" and name not in manifest["config"]:
+                setattr(args, name, 8_000)
             else:
                 setattr(args, name, manifest["config"][name])
     else:
@@ -867,9 +942,16 @@ def main(
         ] = {}
         remaining = iter(work)
         next_endpoint = 0
-        k8s_episode_lock = threading.Lock()
         task_episode_locks = {
             episode["task"]: threading.Lock() for episode in manifest["episodes"]
+        }
+        shared_resource_locks = {
+            resource: threading.Lock()
+            for resource in SHARED_MUTABLE_MCP_SERVERS
+        }
+        task_resources = {
+            task: shared_task_resources(task)
+            for task in task_episode_locks
         }
 
         def execute_scheduled_episode(
@@ -877,10 +959,12 @@ def main(
         ) -> dict[str, Any]:
             episode = kwargs["episode"]
             with task_episode_locks[episode["task"]]:
-                if episode["task"].startswith("finalpool/k8s-"):
-                    with k8s_episode_lock:
-                        return execute_episode(batch_args, **kwargs)
-                return execute_episode(batch_args, **kwargs)
+                with contextlib.ExitStack() as resource_stack:
+                    for resource in task_resources[episode["task"]]:
+                        resource_stack.enter_context(
+                            shared_resource_locks[resource]
+                        )
+                    return execute_episode(batch_args, **kwargs)
 
         def record_result(
             episode: dict[str, Any], result: dict[str, Any], *, interrupted_run: bool = False
