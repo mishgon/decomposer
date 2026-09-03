@@ -181,6 +181,38 @@ def test_subagent_reconnects_model_requests_for_data_parallel_balance(
     assert result is compiled
 
 
+def test_qwen_non_thinking_uses_official_sampling_parameters(monkeypatch) -> None:
+    captured = {}
+    compiled = object()
+
+    class FakeChatVLLM:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr(subagent_graph, "ChatVLLM", FakeChatVLLM)
+    monkeypatch.setattr(subagent_graph, "get_tools", lambda: [])
+    monkeypatch.setattr(
+        subagent_graph, "create_agent", lambda **_kwargs: compiled
+    )
+
+    result = subagent_graph._create_subagent(
+        "Qwen/Qwen3.5-4B", "UNSET_TEST_BASE_URL", 9999, thinking=False
+    )
+
+    assert captured["temperature"] == 0.7
+    assert captured["top_p"] == 0.8
+    assert captured["presence_penalty"] == 1.5
+    assert captured["extra_body"] == {
+        "top_k": 20,
+        "min_p": 0.0,
+        "repetition_penalty": 1.0,
+        "include_reasoning": False,
+        "chat_template_kwargs": {"enable_thinking": False},
+    }
+    asyncio.run(captured["http_async_client"].aclose())
+    assert result is compiled
+
+
 def test_deepseek_subagent_uses_configured_openrouter_model(monkeypatch) -> None:
     captured = {}
     compiled = object()
