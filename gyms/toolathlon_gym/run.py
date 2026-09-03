@@ -294,6 +294,12 @@ def start_vllm(
         "CUDA_VISIBLE_DEVICES": gpu,
         "VLLM_ENGINE_READY_TIMEOUT_S": str(max(1, int(timeout))),
     }
+    # vLLM and FlashInfer invoke helpers such as ``ninja`` by name. Preserve
+    # the virtualenv tool directory in detached/non-interactive launches.
+    executable_dir = str(Path(sys.executable).parent)
+    environment["PATH"] = os.pathsep.join(
+        part for part in (executable_dir, environment.get("PATH", "")) if part
+    )
     with log_path.open("ab") as log:
         reservation.close()
         process = subprocess.Popen(
