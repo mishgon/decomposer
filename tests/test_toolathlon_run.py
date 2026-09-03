@@ -125,6 +125,7 @@ def test_configured_subagents_are_registered() -> None:
     assert [item[0] for item in run.SUBAGENT_TYPES] == [
         "qwen_3_5_4b_non_thinking",
         "gemma_4_e4b_thinking",
+        "gemma_4_26b_a4b_non_thinking",
     ]
 
 
@@ -209,6 +210,35 @@ def test_qwen_non_thinking_uses_official_sampling_parameters(monkeypatch) -> Non
         "include_reasoning": False,
         "chat_template_kwargs": {"enable_thinking": False},
     }
+    asyncio.run(captured["http_async_client"].aclose())
+    assert result is compiled
+
+
+def test_gemma_non_thinking_uses_official_sampling_parameters(monkeypatch) -> None:
+    captured = {}
+    compiled = object()
+
+    class FakeChatVLLM:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr(subagent_graph, "ChatVLLM", FakeChatVLLM)
+    monkeypatch.setattr(subagent_graph, "get_tools", lambda: [])
+    monkeypatch.setattr(
+        subagent_graph, "create_agent", lambda **_kwargs: compiled
+    )
+
+    result = subagent_graph.gemma_4_26b_a4b_non_thinking()
+
+    assert captured["model"] == "google/gemma-4-26B-A4B-it"
+    assert captured["temperature"] == 1.0
+    assert captured["top_p"] == 0.95
+    assert captured["extra_body"] == {
+        "top_k": 64,
+        "include_reasoning": False,
+        "chat_template_kwargs": {"enable_thinking": False},
+    }
+    assert captured["preserve_reasoning"] is False
     asyncio.run(captured["http_async_client"].aclose())
     assert result is compiled
 
@@ -484,6 +514,24 @@ def test_vllm_command_uses_gemma_thinking_parsers() -> None:
     assert command[command.index("--tool-call-parser") + 1] == "gemma4"
     assert command[command.index("--reasoning-parser") + 1] == "gemma4"
     assert "--default-chat-template-kwargs" not in command
+
+
+def test_vllm_command_uses_gemma_26b_non_thinking() -> None:
+    command = run.vllm_command(
+        "/models/gemma-4-26B-A4B-it",
+        8030,
+        max_model_len=256000,
+        gpu_memory_utilization=0.9,
+    )
+
+    assert command[command.index("--served-model-name") + 1] == (
+        "google/gemma-4-26B-A4B-it"
+    )
+    assert command[command.index("--tool-call-parser") + 1] == "gemma4"
+    assert command[command.index("--reasoning-parser") + 1] == "gemma4"
+    assert command[command.index("--default-chat-template-kwargs") + 1] == (
+        '{"enable_thinking":false}'
+    )
 
 
 def test_start_vllm_refuses_an_occupied_port(tmp_path) -> None:

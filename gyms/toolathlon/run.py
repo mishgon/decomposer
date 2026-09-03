@@ -72,6 +72,11 @@ SUBAGENT_TYPES = (
     # subagent_type_id, assistant_id, model_description
     ("qwen_3_5_4b_non_thinking", "qwen_3_5_4b_non_thinking", "Qwen-3.5-4B non-thinking"),
     ("gemma_4_e4b_thinking", "gemma_4_e4b_thinking", "Gemma-4-E4B thinking"),
+    (
+        "gemma_4_26b_a4b_non_thinking",
+        "gemma_4_26b_a4b_non_thinking",
+        "Gemma-4-26B-A4B non-thinking",
+    ),
 )
 AGENT_MODES = ("simple", "decomposer")
 SUBAGENT_PROVIDERS = ("vllm", "openrouter")
@@ -366,11 +371,12 @@ def vllm_command(
 ) -> list[str]:
     model_lower = model.lower()
     is_gemma = "gemma-4" in model_lower
-    served_model = (
-        "google/gemma-4-E4B-it"
-        if "e4b" in model_lower
-        else DEFAULT_SUBAGENT_MODEL
-    )
+    if "gemma-4-26b-a4b" in model_lower:
+        served_model = "google/gemma-4-26B-A4B-it"
+    elif "gemma-4-e4b" in model_lower:
+        served_model = "google/gemma-4-E4B-it"
+    else:
+        served_model = DEFAULT_SUBAGENT_MODEL
     command = [
         str(Path(sys.executable).with_name("vllm")),
         "serve",
@@ -392,7 +398,7 @@ def vllm_command(
     ]
     if is_gemma:
         command.extend(["--reasoning-parser", "gemma4"])
-    else:
+    if not is_gemma or "gemma-4-26b-a4b" in model_lower:
         command.extend(
             ["--default-chat-template-kwargs", '{"enable_thinking":false}']
         )
@@ -1029,6 +1035,9 @@ async def _run_simple_agent(
     os.environ["GEMMA_4_E4B_BASE_URL"] = (
         f"http://127.0.0.1:{subagent_port}/v1"
     )
+    os.environ["GEMMA_4_26B_A4B_BASE_URL"] = (
+        f"http://127.0.0.1:{subagent_port}/v1"
+    )
     if __package__:
         from .subagents import graph, webapp
     else:
@@ -1036,11 +1045,13 @@ async def _run_simple_agent(
 
     async with webapp.lifespan(webapp.app):
         if provider == "vllm":
-            agent = (
-                graph.gemma_4_e4b_thinking()
-                if "gemma-4" in model.lower()
-                else graph.qwen_3_5_4b_non_thinking()
-            )
+            model_lower = model.lower()
+            if "gemma-4-26b-a4b" in model_lower:
+                agent = graph.gemma_4_26b_a4b_non_thinking()
+            elif "gemma-4-e4b" in model_lower:
+                agent = graph.gemma_4_e4b_thinking()
+            else:
+                agent = graph.qwen_3_5_4b_non_thinking()
         else:
             os.environ["TOOLATHLON_OPENROUTER_MODEL"] = model
             agent = graph.deepseek_openrouter()
