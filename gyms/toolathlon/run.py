@@ -397,6 +397,7 @@ def vllm_command(
         str(max_model_len),
         "--gpu-memory-utilization",
         str(gpu_memory_utilization),
+        "--enable-prefix-caching",
         "--language-model-only",
         "--enable-auto-tool-choice",
         "--tool-call-parser",
