@@ -613,9 +613,12 @@ def execute_episode(
     artifact_dir = root / "traces" / task / episode_id
     evaluation_path = root / "evals" / task / episode_id / "result.json"
     score = None
+    artifact_score = None
     if evaluation_path.is_file():
         try:
-            score = json.loads(evaluation_path.read_text(encoding="utf-8")).get("pass")
+            evaluation = json.loads(evaluation_path.read_text(encoding="utf-8"))
+            score = evaluation.get("pass")
+            artifact_score = evaluation.get("artifact_pass", score)
         except (json.JSONDecodeError, OSError):
             pass
     # A model can terminate without a textual final answer, hit its recursion
@@ -643,6 +646,7 @@ def execute_episode(
         "attempt": attempt,
         "status": "completed" if completed else "failed",
         "score": score,
+        "artifact_score": artifact_score,
         "artifact_path": str(artifact_dir if artifact_dir.is_dir() else attempt_dir),
         "attempt_log_path": str(attempt_dir),
         "evaluation_path": str(evaluation_path) if evaluation_path.is_file() else None,
