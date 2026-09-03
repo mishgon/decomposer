@@ -136,6 +136,24 @@ def test_decomposer_prompt_modes_select_student_and_teacher_prompts() -> None:
     )
 
 
+def test_agent_failure_keeps_artifact_grade_out_of_official_score() -> None:
+    official, artifact = run.evaluation_scores(
+        {"pass": True}, agent_success=False
+    )
+
+    assert official is None
+    assert artifact is True
+
+
+def test_successful_agent_uses_native_grade_as_official_score() -> None:
+    official, artifact = run.evaluation_scores(
+        {"pass": False}, agent_success=True
+    )
+
+    assert official is False
+    assert artifact is False
+
+
 def test_subagent_reconnects_model_requests_for_data_parallel_balance(
     monkeypatch,
 ) -> None:
@@ -1340,6 +1358,7 @@ def test_execute_episode_maps_deterministic_trace_and_eval_paths(
 
     assert result["status"] == "completed"
     assert result["score"] is False
+    assert result["artifact_score"] is False
     assert result["artifact_path"] == str(artifact_dir)
     assert result["evaluation_path"] == str(evaluation_path)
     command = popen_calls[0][0]

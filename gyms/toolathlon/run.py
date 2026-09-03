@@ -907,6 +907,16 @@ def write_trajectory(
     )
 
 
+def evaluation_scores(
+    eval_res: dict[str, Any], *, agent_success: bool
+) -> tuple[bool | None, bool | None]:
+    """Return strict benchmark score and artifact-only diagnostic score."""
+    artifact_pass = eval_res.get("pass")
+    if not isinstance(artifact_pass, bool):
+        artifact_pass = None
+    return artifact_pass if agent_success else None, artifact_pass
+
+
 def _cleanup_episode(
     *, episode_dir: Path, task_container: str, task: str = ""
 ) -> None:
@@ -1735,7 +1745,11 @@ def main() -> None:
                 "--require_resolved_task_config",
                 "--consume_bundle",
                 "--agent_exit_code",
-                str(agent_exit_code),
+                # Grade the artifacts even when the agent loop timed out or
+                # otherwise failed.  The host keeps that failure authoritative
+                # below and exposes this evaluator result only as diagnostic
+                # ``artifact_pass``; it never becomes the official pass score.
+                "0",
                 check=False,
             )
         finally:
@@ -1756,13 +1770,36 @@ def main() -> None:
                     f"exit code {eval_run.returncode}"
                 ),
             }
+
+        # container_eval temporarily promotes the trajectory to SUCCESS so the
+        # native evaluator does not short-circuit.  Restore the real agent
+        # status in the persisted trace after grading.
+        if not agent_success:
+            trajectory_path = episode_dir / "traj_log.json"
+            trajectory = json.loads(trajectory_path.read_text(encoding="utf-8"))
+            trajectory["status"] = "failed"
+            if agent_error is not None:
+                trajectory["error"] = agent_error
+            trajectory_path.write_text(
+                json.dumps(trajectory, ensure_ascii=False, indent=2, default=str),
+                encoding="utf-8",
+            )
         trusted_bundle_file.replace(episode_dir / "task_bundle.json")
         os.chmod(episode_dir / "task_bundle.json", 0o600)
 
+        official_pass, artifact_pass = evaluation_scores(
+            eval_res, agent_success=agent_success
+        )
         evaluation = {
             "episode_id": episode_id,
             "task": args.task,
-            "pass": eval_res.get("pass"),
+            # Official Toolathlon metrics require a successful agent finish.
+            "pass": official_pass,
+            # Diagnostic only: whether the artifacts present at termination
+            # satisfy the native evaluator, including after timeouts.
+            "artifact_pass": artifact_pass,
+            "agent_success": agent_success,
+            "agent_error": agent_error,
             "details": eval_res.get("details"),
             "failure": eval_res.get("failure"),
             "agent_exit_code": agent_exit_code,
@@ -1778,7 +1815,10 @@ def main() -> None:
 
         print(answer)
         print(f"\nArtifacts: {episode_dir}")
-        print(f"Evaluation: {evaluation['pass']} ({evaluation_path})")
+        print(
+            f"Evaluation: {evaluation['pass']} "
+            f"(artifact_pass={evaluation['artifact_pass']}, {evaluation_path})"
+        )
 
         # The evaluation artifacts above are preserved, but a failed agent
         # loop must still fail the episode, matching the benchmark's exit
