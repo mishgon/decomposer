@@ -1019,6 +1019,59 @@ def test_evaluator_isolation_restarts_task_container(monkeypatch) -> None:
     assert readiness_calls == [("task-container", 37)]
 
 
+def test_canvas_dependency_is_probed_from_task_container(monkeypatch) -> None:
+    probes = []
+    results = iter(
+        [
+            subprocess.CompletedProcess([], 1, "", "connection refused"),
+            subprocess.CompletedProcess([], 0, "", ""),
+        ]
+    )
+
+    def fake_exec(container, *args, **kwargs):
+        probes.append((container, args, kwargs))
+        return next(results)
+
+    monkeypatch.setattr(run, "_exec_in_container", fake_exec)
+    monkeypatch.setattr(run.time, "sleep", lambda _: None)
+
+    run.wait_for_task_dependencies(
+        "task-container", "finalpool/canvas-do-quiz", 30
+    )
+
+    assert len(probes) == 2
+    assert probes[0][0] == "task-container"
+    assert probes[0][1][-2:] == ("127.0.0.1", "10001")
+    assert run.task_external_tcp_dependencies("finalpool/arrange-workspace") == ()
+
+
+@pytest.mark.parametrize(
+    "output",
+    [
+        "Cannot connect: Connection refused",
+        "Course setup encountered errors. Check logs for details.",
+    ],
+)
+def test_zero_exit_preprocess_fatal_output_is_detected(output) -> None:
+    failure = run.preprocess_output_failure(
+        "finalpool/canvas-do-quiz", output, ""
+    )
+
+    assert failure is not None
+    assert "despite exiting zero" in failure
+
+
+def test_normal_preprocess_output_is_not_rejected() -> None:
+    assert (
+        run.preprocess_output_failure(
+            "finalpool/canvas-do-quiz",
+            "Canvas environment preprocessing completed successfully!",
+            "",
+        )
+        is None
+    )
+
+
 def test_k8s_tasks_have_post_evaluation_cluster_cleanup() -> None:
     assert set(run.K8S_TASK_CLEANUP_COMMANDS) == {
         "finalpool/k8s-deployment-cleanup",
