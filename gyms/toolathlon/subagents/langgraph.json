@@ -5,6 +5,7 @@
   "graphs": {
     "qwen_3_5_4b_non_thinking": "./graph.py:qwen_3_5_4b_non_thinking",
     "gemma_4_e4b_thinking": "./graph.py:gemma_4_e4b_thinking",
+    "gemma_4_26b_a4b_non_thinking": "./graph.py:gemma_4_26b_a4b_non_thinking",
     "deepseek_openrouter": "./graph.py:deepseek_openrouter"
   },
   "http": {
