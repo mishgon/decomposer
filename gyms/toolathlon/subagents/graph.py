@@ -29,25 +29,45 @@ def _create_subagent(
     *,
     thinking: bool,
 ) -> CompiledStateGraph:
-    extra_body = {"top_k": 64}
-    if not thinking:
-        extra_body.update(
-            {
-                "include_reasoning": False,
-                "chat_template_kwargs": {"enable_thinking": False},
-            }
-        )
+    qwen_non_thinking = "qwen3.5" in model_id.lower() and not thinking
+    if qwen_non_thinking:
+        # Official Qwen3.5 recommendation for general non-thinking tasks.
+        temperature = 0.7
+        top_p = 0.8
+        presence_penalty = 1.5
+        extra_body = {
+            "top_k": 20,
+            "min_p": 0.0,
+            "repetition_penalty": 1.0,
+            "include_reasoning": False,
+            "chat_template_kwargs": {"enable_thinking": False},
+        }
+    else:
+        temperature = 1.0
+        top_p = 0.95
+        presence_penalty = None
+        extra_body = {"top_k": 64}
+        if not thinking:
+            extra_body.update(
+                {
+                    "include_reasoning": False,
+                    "chat_template_kwargs": {"enable_thinking": False},
+                }
+            )
 
     base_url = os.environ.get(
         base_url_env,
         f"http://127.0.0.1:{default_port}/v1",
     )
+    model_kwargs = {}
+    if presence_penalty is not None:
+        model_kwargs["presence_penalty"] = presence_penalty
     model = ChatVLLM(
         model=model_id,
         base_url=base_url,
         api_key=os.environ.get("VLLM_API_KEY", "EMPTY"),
-        temperature=1.0,
-        top_p=0.95,
+        temperature=temperature,
+        top_p=top_p,
         timeout=REQUEST_TIMEOUT_SECONDS,
         max_retries=REQUEST_MAX_RETRIES,
         # vLLM's local data-parallel frontend assigns accepted connections to
@@ -60,6 +80,7 @@ def _create_subagent(
         use_responses_api=False,
         preserve_reasoning=thinking,
         extra_body=extra_body,
+        **model_kwargs,
     )
     return create_agent(
         model=model,
