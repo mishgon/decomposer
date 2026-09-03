@@ -6,7 +6,7 @@ agent adapter, local execution, and MLSpace submission. Evaluation supports the
 restricted to the immutable execution train partition described below.
 
 The Gaia runtime is pinned through `external/gaia2` at commit
-`613c03c9d14d045aea9a34148b390740e9adfbdc`. Preparation materializes a
+`993389ceb9e789a3965576c4a31a4d74f3cbba5b`. Preparation materializes a
 clean, immutable checkout under Decomposer artifacts. Every preparation and
 run manifest records both repository commits.
 
@@ -377,7 +377,14 @@ check; its task reward is not an acceptance criterion.
 
 OpenRouter Responses API reasoning blocks remain available in the sidecar
 manager trace, but only visible text blocks are sent to the Gaia2 user
-interface.
+interface. Local Chat Completions reasoning is also captured and replayed on
+every later call. Simple-agent traces store it as a separate
+`reasoning_content` field; local Decomposer manager sidecars store it in the
+manager message metadata. Local Decomposer subagents receive their prior
+reasoning during the active run, but their private message histories are not
+copied into the parent sidecar. The runtime identity records
+`structured_reasoning_policy=capture_replay_v1`, so these runs cannot resume
+from or mix with older turn-local-reasoning artifacts.
 
 ARE emits one `output.jsonl` row per attempted rollout. Missing/empty manager
 answers, uncollected subagents, recursion limits, and scenario timeouts remain

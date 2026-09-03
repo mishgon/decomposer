@@ -168,6 +168,7 @@ def runtime_configuration(experiment: Experiment) -> dict[str, Any]:
         "max_completion_tokens": experiment.max_completion_tokens,
         "model_call_budget_semantics": "per_actor_policy_invocations_v1",
         "model_overflow_policy": "fail_actor_v1",
+        "structured_reasoning_policy": "capture_replay_v1",
         "sampling": sampling,
     }
     if isinstance(experiment, SimpleExperiment):

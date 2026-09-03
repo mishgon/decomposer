@@ -869,6 +869,9 @@ def test_model_call_budget_semantics_are_part_of_resume_identity(tmp_path) -> No
         limit=None,
     )
     assert expected["runtime_configuration"]["max_completion_tokens"] is None
+    assert expected["runtime_configuration"]["structured_reasoning_policy"] == (
+        "capture_replay_v1"
+    )
 
     capped = run_identity(
         replace(SIMPLE_QWEN_EXPERIMENT, max_completion_tokens=8192),
@@ -897,6 +900,14 @@ def test_model_call_budget_semantics_are_part_of_resume_identity(tmp_path) -> No
 
     legacy = json.loads(json.dumps(expected))
     legacy["runtime_configuration"].pop("model_overflow_policy")
+    marker.write_text(
+        json.dumps({"state": "complete", **legacy}) + "\n", encoding="utf-8"
+    )
+    with pytest.raises(ValueError, match="output identity mismatch"):
+        validate_run_identity(marker, expected, require_complete=True)
+
+    legacy = json.loads(json.dumps(expected))
+    legacy["runtime_configuration"].pop("structured_reasoning_policy")
     marker.write_text(
         json.dumps({"state": "complete", **legacy}) + "\n", encoding="utf-8"
     )

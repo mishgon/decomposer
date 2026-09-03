@@ -20,6 +20,7 @@ from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.memory import InMemorySaver
 from pydantic import BaseModel, Field
 
+from decomposer.chat_vllm import ChatVLLM
 from decomposer.core import TERMINAL_STATUSES, create_decomposer_agent
 from decomposer.prompts import (
     DECOMPOSER_SYSTEM_PROMPT,
@@ -74,6 +75,7 @@ def _model_from_config(value: dict[str, Any]) -> ChatOpenAI:
     api_key_env = value.get("api_key_env", "OPENAI_API_KEY")
     if api_key is None:
         api_key = os.environ.get(api_key_env, "EMPTY")
+    use_responses_api = value.get("use_responses_api", False)
     known = {
         "model": value["model"],
         "base_url": value.get("base_url"),
@@ -84,7 +86,7 @@ def _model_from_config(value: dict[str, Any]) -> ChatOpenAI:
         "max_completion_tokens": value.get("max_completion_tokens"),
         "reasoning_effort": value.get("reasoning_effort"),
         "reasoning": value.get("reasoning"),
-        "use_responses_api": value.get("use_responses_api", False),
+        "use_responses_api": use_responses_api,
         "timeout": value.get("timeout", 3300),
         "max_retries": value.get("max_retries", 2),
         "model_kwargs": {"parallel_tool_calls": parallel_tool_calls},
@@ -93,7 +95,9 @@ def _model_from_config(value: dict[str, Any]) -> ChatOpenAI:
     known = {key: item for key, item in known.items() if item is not None}
     if extra_body:
         known["extra_body"] = extra_body
-    return ChatOpenAI(**known)
+    if use_responses_api:
+        return ChatOpenAI(**known)
+    return ChatVLLM(preserve_reasoning=True, **known)
 
 
 def _usage(messages: list[Any]) -> dict[str, int]:

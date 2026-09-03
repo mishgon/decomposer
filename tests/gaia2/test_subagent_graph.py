@@ -352,7 +352,7 @@ def test_worker_model_forwards_non_thinking_sampling(monkeypatch):
         captured.update(kwargs)
         return object()
 
-    monkeypatch.setattr(graphs, "ChatOpenAI", fake_model)
+    monkeypatch.setattr(graphs, "ChatVLLM", fake_model)
     monkeypatch.setenv("GAIA2_SUBAGENT_MODEL", "worker")
     monkeypatch.setenv("GAIA2_SUBAGENT_ENDPOINT", "http://127.0.0.1:8023/v1")
     monkeypatch.setenv("GAIA2_SUBAGENT_TEMPERATURE", "0.7")
@@ -372,6 +372,7 @@ def test_worker_model_forwards_non_thinking_sampling(monkeypatch):
     assert captured["top_p"] == 0.8
     assert captured["presence_penalty"] == 1.5
     assert captured["max_completion_tokens"] == 4096
+    assert captured["preserve_reasoning"] is True
     assert captured["extra_body"] == {
         "top_k": 20,
         "min_p": 0.0,
@@ -388,13 +389,14 @@ def test_worker_model_omits_completion_limit_by_default(monkeypatch):
         captured.update(kwargs)
         return object()
 
-    monkeypatch.setattr(graphs, "ChatOpenAI", fake_model)
+    monkeypatch.setattr(graphs, "ChatVLLM", fake_model)
     monkeypatch.setenv("GAIA2_SUBAGENT_MODEL", "worker")
     monkeypatch.delenv("GAIA2_SUBAGENT_MAX_COMPLETION_TOKENS", raising=False)
 
     graphs._model()
 
     assert "max_completion_tokens" not in captured
+    assert captured["preserve_reasoning"] is True
 
 
 def test_worker_model_rejects_nonpositive_completion_limit(monkeypatch):

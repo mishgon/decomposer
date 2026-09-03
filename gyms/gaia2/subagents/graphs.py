@@ -16,6 +16,7 @@ from langgraph.runtime import Runtime
 
 from are.simulation.schema_reminders import render_openai_tool_retry_reminder
 
+from decomposer.chat_vllm import ChatVLLM
 from gyms.gaia2.model_overflow import (
     ExactModelCallLimitMiddleware,
     Gaia2ModelOverflowMiddleware,
@@ -192,7 +193,7 @@ def _model() -> ChatOpenAI:
         kwargs["presence_penalty"] = float(presence_penalty)
     if extra_body:
         kwargs["extra_body"] = extra_body
-    return ChatOpenAI(**kwargs)
+    return ChatVLLM(preserve_reasoning=True, **kwargs)
 
 
 def _worker_tools(context: EpisodeContext, consumer: str) -> list[StructuredTool]:

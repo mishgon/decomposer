@@ -169,16 +169,40 @@ def test_episode_persists_thread_and_forwards_runtime_context(monkeypatch):
 
 
 def test_uncollected_subagent_is_reported_as_outstanding():
-    _, outstanding = service._subagent_summary(
+    summaries, outstanding = service._subagent_summary(
         {
             "subagent_runs": {
                 "running": {"status": "running", "report": None},
                 "uncollected": {"status": "success", "report": None},
-                "collected": {"status": "success", "report": {"content": "ok"}},
+                "collected": {
+                    "status": "success",
+                    "report": {"content": "ok"},
+                    "messages": [
+                        AIMessage(
+                            content="",
+                            additional_kwargs={"reasoning_content": "private"},
+                        )
+                    ],
+                },
             }
         }
     )
     assert outstanding == ["running", "uncollected"]
+    assert all("messages" not in summary for summary in summaries)
+
+
+def test_manager_sidecar_message_keeps_structured_reasoning_separate():
+    serialized = service._safe_message(
+        AIMessage(
+            content="visible",
+            additional_kwargs={"reasoning_content": "private rationale"},
+        )
+    )
+
+    assert serialized["data"]["content"] == "visible"
+    assert serialized["data"]["additional_kwargs"]["reasoning_content"] == (
+        "private rationale"
+    )
 
 
 def test_openrouter_content_blocks_return_only_visible_text(monkeypatch):
@@ -313,7 +337,7 @@ def test_manager_model_forwards_non_thinking_sampling(monkeypatch):
         captured.update(kwargs)
         return object()
 
-    monkeypatch.setattr(service, "ChatOpenAI", fake_model)
+    monkeypatch.setattr(service, "ChatVLLM", fake_model)
     service._model_from_config(
         {
             "model": "manager",
@@ -332,6 +356,7 @@ def test_manager_model_forwards_non_thinking_sampling(monkeypatch):
     assert captured["temperature"] == 1.0
     assert captured["top_p"] == 0.95
     assert captured["max_completion_tokens"] == 4096
+    assert captured["preserve_reasoning"] is True
     assert captured["model_kwargs"] == {"parallel_tool_calls": False}
     assert captured["extra_body"] == {
         "top_k": 64,
@@ -347,7 +372,7 @@ def test_manager_model_allows_parallel_tool_call_override(monkeypatch):
         captured.update(kwargs)
         return object()
 
-    monkeypatch.setattr(service, "ChatOpenAI", fake_model)
+    monkeypatch.setattr(service, "ChatVLLM", fake_model)
     service._model_from_config(
         {
             "model": "manager",
@@ -356,6 +381,33 @@ def test_manager_model_allows_parallel_tool_call_override(monkeypatch):
     )
 
     assert captured["model_kwargs"] == {"parallel_tool_calls": True}
+    assert captured["preserve_reasoning"] is True
+
+
+def test_responses_api_manager_keeps_native_responses_adapter(monkeypatch):
+    captured = {}
+
+    def fake_responses_model(**kwargs):
+        captured.update(kwargs)
+        return object()
+
+    def unexpected_vllm_model(**kwargs):
+        raise AssertionError("Responses API must not use the Chat Completions adapter")
+
+    monkeypatch.setattr(service, "ChatOpenAI", fake_responses_model)
+    monkeypatch.setattr(service, "ChatVLLM", unexpected_vllm_model)
+
+    service._model_from_config(
+        {
+            "model": "remote-manager",
+            "use_responses_api": True,
+            "reasoning": {"effort": "high"},
+        }
+    )
+
+    assert captured["use_responses_api"] is True
+    assert captured["reasoning"] == {"effort": "high"}
+    assert "preserve_reasoning" not in captured
 
 
 def test_manager_model_rejects_non_boolean_parallel_tool_calls():
