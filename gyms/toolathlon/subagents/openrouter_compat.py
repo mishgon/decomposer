@@ -34,10 +34,14 @@ def create_openrouter_model(
     *,
     model: str,
     reasoning: dict[str, Any],
-    max_tokens: int,
     timeout: float,
     max_retries: int,
+    max_tokens: int | None = None,
 ) -> ToolathlonOpenRouterChat:
+    model_kwargs = {}
+    if max_tokens is not None:
+        model_kwargs["max_tokens"] = max_tokens
+
     return ToolathlonOpenRouterChat(
         model=model,
         api_key=os.environ["OPENROUTER_API_KEY"],
@@ -46,8 +50,8 @@ def create_openrouter_model(
         ),
         temperature=1.0,
         top_p=1.0,
-        max_tokens=max_tokens,
         timeout=timeout,
         max_retries=max_retries,
         extra_body={"reasoning": reasoning},
+        **model_kwargs,
     )

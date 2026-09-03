@@ -251,14 +251,14 @@ def parse_args(argv: Sequence[str], defaults: dict[str, Any]) -> argparse.Namesp
     parser.add_argument(
         "--agent-timeout",
         type=float,
-        default=1800,
-        help="Maximum seconds spent in the agent loop (default: 1800).",
+        default=2700,
+        help="Maximum seconds spent in the agent loop (default: 2700).",
     )
     parser.add_argument(
         "--episode-timeout",
         type=float,
-        default=2400,
-        help="Maximum total wall-clock seconds for one episode (default: 2400).",
+        default=3300,
+        help="Maximum total wall-clock seconds for one episode (default: 3300).",
     )
     args = parser.parse_args(argv)
     if args.resume and (args.all or args.all_valid or args.tasks):
@@ -520,7 +520,7 @@ def episode_command(
         "--stashes-dir", str(root / "stashes"),
         "--startup-timeout", str(args.startup_timeout),
         "--n-jobs-per-worker", str(args.n_jobs_per_worker),
-        "--agent-timeout", str(getattr(args, "agent_timeout", 1800)),
+        "--agent-timeout", str(getattr(args, "agent_timeout", 2700)),
         "--max-steps", str(args.max_steps),
         "--eval-config", args.eval_config,
         "--container-lock-file",
@@ -767,9 +767,9 @@ def main(
             elif name == "container_slots" and name not in manifest["config"]:
                 setattr(args, name, 1)
             elif name == "episode_timeout" and name not in manifest["config"]:
-                setattr(args, name, 2400)
+                setattr(args, name, 3300)
             elif name == "agent_timeout" and name not in manifest["config"]:
-                setattr(args, name, 1800)
+                setattr(args, name, 2700)
             else:
                 setattr(args, name, manifest["config"][name])
     else:
