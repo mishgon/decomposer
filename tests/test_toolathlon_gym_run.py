@@ -1,4 +1,5 @@
 import json
+import socket
 import subprocess
 import sys
 import threading
@@ -90,6 +91,37 @@ def test_vllm_command_uses_current_environment_and_gemma_parsers() -> None:
 
 def test_postgres_image_is_fully_qualified_for_podman() -> None:
     assert run.POSTGRES_IMAGE == "docker.io/library/postgres:15"
+
+
+def test_start_vllm_adds_virtualenv_tools_to_path(tmp_path, monkeypatch) -> None:
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    listener.bind(("127.0.0.1", 0))
+    port = listener.getsockname()[1]
+    listener.close()
+    captured = {}
+    process = SimpleNamespace()
+
+    def fake_popen(command, **kwargs):
+        captured.update(command=command, **kwargs)
+        return process
+
+    monkeypatch.setattr(run.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(run, "wait_for_vllm", lambda *args, **kwargs: None)
+    monkeypatch.setenv("PATH", "/usr/bin")
+
+    assert run.start_vllm(
+        model="model",
+        port=port,
+        gpu="0",
+        max_model_len=1024,
+        gpu_memory_utilization=0.5,
+        timeout=1,
+        log_path=tmp_path / "vllm.log",
+        reuse=False,
+    ) is process
+    assert captured["env"]["PATH"].split(run.os.pathsep)[0] == str(
+        Path(sys.executable).parent
+    )
 
 
 def test_postgres_environment_uses_container_ip_instead_of_dns(monkeypatch) -> None:
