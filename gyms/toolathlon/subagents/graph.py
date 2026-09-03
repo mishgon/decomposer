@@ -17,7 +17,6 @@ except ImportError:  # Loaded by `langgraph dev` with this directory on sys.path
 
 REQUEST_TIMEOUT_SECONDS = 600.0
 REQUEST_MAX_RETRIES = 2
-MAX_OUTPUT_TOKENS = 8192
 DEEPSEEK_REASONING_EFFORT = os.environ.get(
     "TOOLATHLON_DEEPSEEK_REASONING_EFFORT", "high"
 )
@@ -49,10 +48,6 @@ def _create_subagent(
         api_key=os.environ.get("VLLM_API_KEY", "EMPTY"),
         temperature=1.0,
         top_p=0.95,
-        # A malformed turn can otherwise generate until the server-wide model
-        # limit and monopolize one DP worker for minutes. Toolathlon tool calls
-        # and final answers are comfortably below this ceiling.
-        max_tokens=MAX_OUTPUT_TOKENS,
         timeout=REQUEST_TIMEOUT_SECONDS,
         max_retries=REQUEST_MAX_RETRIES,
         # vLLM's local data-parallel frontend assigns accepted connections to
@@ -99,7 +94,6 @@ def deepseek_openrouter() -> CompiledStateGraph:
             "deepseek/deepseek-v4-flash-0731",
         ),
         reasoning={"effort": DEEPSEEK_REASONING_EFFORT},
-        max_tokens=MAX_OUTPUT_TOKENS,
         timeout=REQUEST_TIMEOUT_SECONDS,
         max_retries=REQUEST_MAX_RETRIES,
     )

@@ -166,8 +166,8 @@ uv run python gyms/toolathlon/run.py --all \
 ```
 
 OpenRouter tool-agent servers run on the host, so the API key is never exposed
-inside task containers. Agent loops default to a 30-minute limit and complete
-episodes to a 40-minute total limit; override these with `--agent-timeout` and
+inside task containers. Agent loops default to a 45-minute limit and complete
+episodes to a 55-minute total limit; override these with `--agent-timeout` and
 `--episode-timeout` for intentionally longer experiments.
 
 If OpenRouter blocks the remote host's public IP, keep the API egress local.
@@ -185,7 +185,7 @@ evaluation command. The relay has a fixed `openrouter.ai` upstream, binds only
 to loopback, and does not log authenticated request paths, headers, or bodies.
 
 Use the hosted Qwen3.6 teacher through lmrouter with thinking explicitly
-disabled:
+enabled:
 
 ```bash
 uv run python gyms/toolathlon/run.py --tasks finalpool/find-alita-paper \

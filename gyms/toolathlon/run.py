@@ -1099,7 +1099,7 @@ def main() -> None:
     parser.add_argument("--stashes-dir", type=Path, default=DEFAULT_STASHES_DIR)
     parser.add_argument("--startup-timeout", type=float, default=180)
     parser.add_argument("--n-jobs-per-worker", type=int, default=16)
-    parser.add_argument("--agent-timeout", type=float, default=1800)
+    parser.add_argument("--agent-timeout", type=float, default=2700)
     parser.add_argument("--max-steps", type=int, default=DEFAULT_MAX_STEPS)
     parser.add_argument("--eval-config", default=DEFAULT_EVAL_CONFIG)
     parser.add_argument("--container-sleep", type=int, default=DEFAULT_CONTAINER_SLEEP)
@@ -1544,7 +1544,6 @@ def main() -> None:
                             base_url=args.decomposer_base_url,
                             temperature=1,
                             top_p=1,
-                            max_tokens=8192,
                             timeout=180,
                             max_retries=5,
                             preserve_reasoning="gemma-4" in args.model.lower(),
@@ -1552,7 +1551,6 @@ def main() -> None:
                         if args.decomposer_provider == "vllm"
                         else create_lmrouter_teacher(
                             model=args.model,
-                            max_tokens=8192,
                             timeout=180,
                             max_retries=5,
                         )
@@ -1560,7 +1558,6 @@ def main() -> None:
                         else create_openrouter_model(
                             model=args.model,
                             reasoning={"effort": DEEPSEEK_REASONING_EFFORT},
-                            max_tokens=8192,
                             # A single stalled OpenRouter response must not consume
                             # ten minutes and fail the whole episode. DeepSeek's
                             # normal responses are comfortably below this bound;

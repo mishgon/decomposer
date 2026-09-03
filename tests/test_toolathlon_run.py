@@ -158,7 +158,7 @@ def test_subagent_reconnects_model_requests_for_data_parallel_balance(
 
     client = captured["http_async_client"]
     assert client._transport._pool._max_keepalive_connections == 0
-    assert captured["max_tokens"] == subagent_graph.MAX_OUTPUT_TOKENS
+    assert "max_tokens" not in captured
     asyncio.run(client.aclose())
     assert result is compiled
 
@@ -183,7 +183,7 @@ def test_deepseek_subagent_uses_configured_openrouter_model(monkeypatch) -> None
     result = subagent_graph.deepseek_openrouter()
 
     assert captured["model"] == "deepseek/test"
-    assert captured["max_tokens"] == subagent_graph.MAX_OUTPUT_TOKENS
+    assert "max_tokens" not in captured
     assert captured["reasoning"] == {"effort": "high"}
     assert result is compiled
 
@@ -211,7 +211,6 @@ def test_lmrouter_teacher_is_thinking(monkeypatch) -> None:
 
     model = teacher_models.create_lmrouter_teacher(
         model="Qwen/Qwen3.6-35B-A3B-FP8",
-        max_tokens=8192,
         timeout=180,
         max_retries=5,
     )
@@ -221,6 +220,7 @@ def test_lmrouter_teacher_is_thinking(monkeypatch) -> None:
     assert model.extra_body["include_reasoning"] is True
     assert model.preserve_reasoning is True
     assert model.parse_qwen_xml_tool_calls is True
+    assert model.max_tokens is None
 
 
 def test_usage_summary_separates_decomposer_and_subagents() -> None:

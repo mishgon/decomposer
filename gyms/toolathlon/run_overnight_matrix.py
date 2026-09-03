@@ -101,11 +101,11 @@ def batch_command(*extra: str, context_tokens: int = 256000) -> list[str]:
         "--container-slots",
         "4",
         "--agent-timeout",
-        "1800",
+        "2700",
         "--startup-timeout",
         "300",
         "--episode-timeout",
-        "2400",
+        "3300",
         *extra,
     ]
 
