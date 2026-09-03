@@ -129,6 +129,19 @@ K8S_TASK_CLEANUP_COMMANDS = {
     ),
 }
 
+# These services live outside the per-episode task container.  A successful
+# ``docker run`` therefore says nothing about whether preprocessing can reach
+# them.  In particular, several Canvas preprocessors catch API failures and
+# still exit zero, which would otherwise turn a missing service into a model
+# failure.
+TASK_EXTERNAL_TCP_DEPENDENCIES = {
+    "finalpool/canvas-": (("Canvas", "127.0.0.1", 10001),),
+}
+PREPROCESS_FATAL_OUTPUT_PATTERNS = (
+    re.compile(r"connection refused", re.IGNORECASE),
+    re.compile(r"course setup encountered errors", re.IGNORECASE),
+)
+
 
 DOCKER_SOCKET_CANDIDATES = (
     "/var/run/docker.sock",
@@ -796,6 +809,61 @@ def wait_for_container_ready(container: str, timeout: float) -> None:
             return
         time.sleep(1)
     raise TimeoutError(f"Task container {container} was not ready within {timeout:g}s")
+
+
+def task_external_tcp_dependencies(task: str) -> tuple[tuple[str, str, int], ...]:
+    dependencies: list[tuple[str, str, int]] = []
+    for task_prefix, services in TASK_EXTERNAL_TCP_DEPENDENCIES.items():
+        if task.startswith(task_prefix):
+            dependencies.extend(services)
+    return tuple(dependencies)
+
+
+def wait_for_task_dependencies(container: str, task: str, timeout: float) -> None:
+    """Prove shared services are reachable from the task's network namespace."""
+    probe_script = (
+        "import socket,sys; "
+        "connection=socket.create_connection((sys.argv[1],int(sys.argv[2])),2); "
+        "connection.close()"
+    )
+    for name, host, port in task_external_tcp_dependencies(task):
+        deadline = time.monotonic() + timeout
+        last_detail = ""
+        while time.monotonic() < deadline:
+            probe = _exec_in_container(
+                container,
+                "uv",
+                "run",
+                "python",
+                "-c",
+                probe_script,
+                host,
+                str(port),
+                check=False,
+                timeout=5,
+            )
+            if probe.returncode == 0:
+                break
+            last_detail = (probe.stderr or probe.stdout or "").strip()
+            time.sleep(1)
+        else:
+            detail = f": {last_detail}" if last_detail else ""
+            raise TimeoutError(
+                f"{name} dependency was not reachable from {container} at "
+                f"{host}:{port} within {timeout:g}s{detail}"
+            )
+
+
+def preprocess_output_failure(task: str, stdout: str, stderr: str) -> str | None:
+    """Return a fatal semantic failure hidden behind a zero process exit."""
+    output = f"{stdout}\n{stderr}"
+    for pattern in PREPROCESS_FATAL_OUTPUT_PATTERNS:
+        if pattern.search(output):
+            return (
+                f"preprocess for {task} reported a fatal error despite exiting zero "
+                f"(matched {pattern.pattern!r})"
+            )
+    return None
 
 
 def restart_container_for_evaluation(container: str, timeout: float) -> None:
@@ -1470,6 +1538,8 @@ def main() -> None:
         _docker("cp", str(task_dir), f"{container}:/workspace/tasks/{args.task.rsplit('/', 1)[0]}/")
         _copy_user_configs(container)
 
+        wait_for_task_dependencies(container, args.task, args.startup_timeout)
+
         print("Running container preprocess...", flush=True)
         preprocess_attempts = 3 if args.task in K8S_TASK_CLEANUP_COMMANDS else 1
         preprocess_failure = "preprocess did not run"
@@ -1515,7 +1585,10 @@ def main() -> None:
                 log.write(preprocess.stdout)
                 log.write(preprocess.stderr)
 
-            if preprocess.returncode == 0:
+            reported_failure = preprocess_output_failure(
+                args.task, preprocess.stdout, preprocess.stderr
+            )
+            if preprocess.returncode == 0 and reported_failure is None:
                 _docker(
                     "cp",
                     f"{container}:{preprocess_bundle_path}",
@@ -1537,10 +1610,12 @@ def main() -> None:
                     "preprocess reported success but omitted required runtime "
                     f"files: {', '.join(missing)}"
                 )
-            else:
+            elif preprocess.returncode != 0:
                 preprocess_failure = (
                     f"preprocess exited with code {preprocess.returncode}"
                 )
+            else:
+                preprocess_failure = reported_failure
 
             _exec_in_container(
                 container, "rm", "-f", "--", preprocess_bundle_path, check=False
