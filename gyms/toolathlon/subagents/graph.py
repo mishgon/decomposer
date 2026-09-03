@@ -28,6 +28,7 @@ def _create_subagent(
     default_port: int,
     *,
     thinking: bool,
+    system_prompt: str | None = None,
 ) -> CompiledStateGraph:
     qwen_non_thinking = "qwen3.5" in model_id.lower() and not thinking
     if qwen_non_thinking:
@@ -87,48 +88,66 @@ def _create_subagent(
     return create_agent(
         model=model,
         tools=get_tools(),
-        system_prompt=SUBAGENT_SYSTEM_PROMPT,
+        system_prompt=(
+            system_prompt
+            or os.environ.get("TOOLATHLON_AGENT_SYSTEM_PROMPT")
+            or SUBAGENT_SYSTEM_PROMPT
+        ),
         middleware=[durable_model_call_log, truncate_mcp_tool_output],
     )
 
 
-def qwen_3_5_4b_non_thinking() -> CompiledStateGraph:
+def qwen_3_5_4b_non_thinking(
+    *, system_prompt: str | None = None
+) -> CompiledStateGraph:
     return _create_subagent(
         "Qwen/Qwen3.5-4B",
         "QWEN_3_5_4B_BASE_URL",
         8030,
         thinking=False,
+        system_prompt=system_prompt,
     )
 
 
-def gemma_4_e4b_thinking() -> CompiledStateGraph:
+def gemma_4_e4b_thinking(
+    *, system_prompt: str | None = None
+) -> CompiledStateGraph:
     return _create_subagent(
         "google/gemma-4-E4B-it",
         "GEMMA_4_E4B_BASE_URL",
         8030,
         thinking=True,
+        system_prompt=system_prompt,
     )
 
 
-def gemma_4_31b_thinking() -> CompiledStateGraph:
+def gemma_4_31b_thinking(
+    *, system_prompt: str | None = None
+) -> CompiledStateGraph:
     return _create_subagent(
         "google/gemma-4-31B-it",
         "GEMMA_4_31B_BASE_URL",
         8030,
         thinking=True,
+        system_prompt=system_prompt,
     )
 
 
-def gemma_4_26b_a4b_non_thinking() -> CompiledStateGraph:
+def gemma_4_26b_a4b_non_thinking(
+    *, system_prompt: str | None = None
+) -> CompiledStateGraph:
     return _create_subagent(
         "google/gemma-4-26B-A4B-it",
         "GEMMA_4_26B_A4B_BASE_URL",
         8030,
         thinking=False,
+        system_prompt=system_prompt,
     )
 
 
-def deepseek_openrouter() -> CompiledStateGraph:
+def deepseek_openrouter(
+    *, system_prompt: str | None = None
+) -> CompiledStateGraph:
     model = create_openrouter_model(
         model=os.environ.get(
             "TOOLATHLON_OPENROUTER_MODEL",
@@ -141,6 +160,10 @@ def deepseek_openrouter() -> CompiledStateGraph:
     return create_agent(
         model=model,
         tools=get_tools(),
-        system_prompt=SUBAGENT_SYSTEM_PROMPT,
+        system_prompt=(
+            system_prompt
+            or os.environ.get("TOOLATHLON_AGENT_SYSTEM_PROMPT")
+            or SUBAGENT_SYSTEM_PROMPT
+        ),
         middleware=[durable_model_call_log, truncate_mcp_tool_output],
     )
