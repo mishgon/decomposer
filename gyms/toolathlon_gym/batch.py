@@ -128,14 +128,14 @@ def parse_args(argv: Sequence[str], defaults: dict[str, Any]) -> argparse.Namesp
     parser.add_argument(
         "--agent-timeout",
         type=float,
-        default=1800,
-        help="Maximum seconds spent in the Decomposer loop (default: 1800).",
+        default=2700,
+        help="Maximum seconds spent in the Decomposer loop (default: 2700).",
     )
     parser.add_argument(
         "--episode-timeout",
         type=float,
-        default=2400,
-        help="Maximum total wall-clock seconds for one episode (default: 2400).",
+        default=3300,
+        help="Maximum total wall-clock seconds for one episode (default: 3300).",
     )
     args = parser.parse_args(argv)
     if args.resume and (args.all or args.tasks):
@@ -290,7 +290,7 @@ def episode_command(
         "--evals-dir", str(root / "evals"),
         "--startup-timeout", str(args.startup_timeout),
         "--n-jobs-per-worker", str(args.n_jobs_per_worker),
-        "--agent-timeout", str(getattr(args, "agent_timeout", 1800)),
+        "--agent-timeout", str(getattr(args, "agent_timeout", 2700)),
         "--container-lock-file",
         str(
             root

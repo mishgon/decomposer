@@ -87,6 +87,7 @@ class SubagentRun(TypedDict):
     status: str
     prompt: str
     tool_calls: NotRequired[list[SubagentToolCall]]
+    messages: NotRequired[list[dict[str, Any]]]
     response: NotRequired[str | None]
     # Zero-based order in which wait() returned this run's response.
     response_sequence_number: NotRequired[int]
@@ -645,6 +646,7 @@ def _build_wait_tool(
                     **subagent_run,
                     "status": status,
                     "tool_calls": tool_calls,
+                    "messages": run_messages,
                     "response": response,
                     "error": error,
                     "response_sequence_number": response_sequence_number,
@@ -779,6 +781,7 @@ def _build_wait_tool(
                     **subagent_run,
                     "status": status,
                     "tool_calls": tool_calls,
+                    "messages": run_messages,
                     "response": response,
                     "error": error,
                     "response_sequence_number": response_sequence_number,

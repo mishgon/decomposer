@@ -9,7 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from gyms.toolathlon_gym import batch, mlspace_serve, run
+from gyms.toolathlon_gym import batch, mlspace_serve, run, usage
 
 
 def test_configured_subagents_are_registered() -> None:
@@ -143,6 +143,56 @@ def test_task_selection_ignores_helpers_and_validates_subset(tmp_path) -> None:
 
     assert batch.wants_batch(["--repetitions=2"])
     assert batch.wants_batch(["-n2"])
+
+
+def test_batch_uses_uncapped_teacher_and_extended_timeouts(monkeypatch) -> None:
+    monkeypatch.delenv("DECOMPOSER_MAX_TOKENS", raising=False)
+    args = batch.parse_args(
+        ["--all", "--purpose", "trace-generation"],
+        {
+            "model": "teacher",
+            "subagent_model": "student",
+            "subagent_port": 8031,
+            "image": "image",
+            "artifacts_dir": Path("artifacts"),
+        },
+    )
+
+    assert args.agent_timeout == 2700
+    assert args.episode_timeout == 3300
+
+
+def test_usage_summary_separates_teacher_and_subagents() -> None:
+    def message(input_tokens, output_tokens, *, cache=0, reasoning=0):
+        return {
+            "type": "ai",
+            "data": {
+                "usage_metadata": {
+                    "input_tokens": input_tokens,
+                    "output_tokens": output_tokens,
+                    "total_tokens": input_tokens + output_tokens,
+                    "input_token_details": {"cache_read": cache},
+                    "output_token_details": {"reasoning": reasoning},
+                }
+            },
+        }
+
+    summary = usage.build_usage_summary(
+        [message(100, 10, cache=40, reasoning=3)],
+        {
+            "sub-1": {
+                "subagent_type_id": "qwen",
+                "status": "success",
+                "messages": [message(20, 5)],
+            }
+        },
+    )
+
+    assert summary["decomposer"]["total_tokens"] == 110
+    assert summary["subagents"]["sub-1"]["total_tokens"] == 25
+    assert summary["totals"]["total_tokens"] == 135
+    assert summary["totals"]["cache_read_tokens"] == 40
+    assert summary["totals"]["reasoning_tokens"] == 3
 
 
 def test_teacher_credentials_accept_lmrouter(monkeypatch) -> None:
