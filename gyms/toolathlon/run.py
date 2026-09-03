@@ -798,6 +798,19 @@ def wait_for_container_ready(container: str, timeout: float) -> None:
     raise TimeoutError(f"Task container {container} was not ready within {timeout:g}s")
 
 
+def restart_container_for_evaluation(container: str, timeout: float) -> None:
+    """Kill every agent-side process before trusted evaluator files return.
+
+    A host timeout kills the ``docker exec`` client, but Docker and Podman leave
+    its process running inside the container.  Restarting the task container
+    preserves its filesystem and mounted workspace while terminating the
+    agent, MCP servers, and gateways as one isolation boundary.
+    """
+    _docker("kill", container)
+    _docker("start", container)
+    wait_for_container_ready(container, timeout)
+
+
 def _stage_bundle(container: str, host_bundle: Path) -> str:
     probe = _exec_in_container(
         container, "mktemp", "/run/toolathlon-decoupled-bundle.XXXXXX.json"
@@ -1883,6 +1896,17 @@ def main() -> None:
             agent_error = repr(error)
             if agent_state is None:
                 agent_state = {}
+
+        # The evaluator and its ground truth must never become visible while a
+        # timed-out agent or an in-flight delegated subagent can still run.
+        # Docker/Podman do not terminate the in-container process when the
+        # client-side ``exec`` times out, so use a container restart as the
+        # explicit phase boundary even after apparently successful runs.
+        stop_vllm(subagent_server_process)
+        subagent_server_process = None
+        print("Isolating evaluator from agent processes...", flush=True)
+        restart_container_for_evaluation(container, args.startup_timeout)
+
         messages = agent_state.get("messages", [])
         subagent_runs = agent_state.get("subagent_runs", {}) or {}
         answer = (
