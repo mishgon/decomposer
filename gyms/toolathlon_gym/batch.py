@@ -32,7 +32,9 @@ RESUME_CONFIG_FIELDS = (
     "vllm_data_parallel_size",
     "vllm_startup_timeout",
     "startup_timeout",
+    "n_jobs_per_worker",
     "container_slots",
+    "concurrency",
     "agent_timeout",
     "episode_timeout",
 )
@@ -502,6 +504,13 @@ def main(
                 setattr(args, name, 1800)
             elif name == "episode_timeout" and name not in manifest["config"]:
                 setattr(args, name, 2400)
+            elif (
+                name in {"n_jobs_per_worker", "concurrency"}
+                and name not in manifest["config"]
+            ):
+                # Older manifests did not persist these scheduler settings.
+                # Keep the resume-time CLI value or parser default.
+                continue
             else:
                 setattr(args, name, manifest["config"][name])
     else:
