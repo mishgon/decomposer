@@ -500,6 +500,18 @@ def test_vllm_command_uses_qwen_parsers() -> None:
     ] == "1"
 
 
+def test_served_subagent_model_names_cover_supported_local_models() -> None:
+    assert run.served_subagent_model_name("/models/Qwen3.5-4B") == (
+        "Qwen/Qwen3.5-4B"
+    )
+    assert run.served_subagent_model_name("/models/gemma-4-E4B-it") == (
+        "google/gemma-4-E4B-it"
+    )
+    assert run.served_subagent_model_name("/models/gemma-4-26B-A4B-it") == (
+        "google/gemma-4-26B-A4B-it"
+    )
+
+
 def test_vllm_command_uses_gemma_thinking_parsers() -> None:
     command = run.vllm_command(
         "/models/gemma-4-E4B-it",

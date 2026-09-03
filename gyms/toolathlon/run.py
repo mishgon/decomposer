@@ -361,6 +361,15 @@ def _exec_in_container(
     return _docker(*args, check=check, timeout=timeout)
 
 
+def served_subagent_model_name(model: str) -> str:
+    model_lower = model.lower()
+    if "gemma-4-26b-a4b" in model_lower:
+        return "google/gemma-4-26B-A4B-it"
+    if "gemma-4-e4b" in model_lower:
+        return "google/gemma-4-E4B-it"
+    return DEFAULT_SUBAGENT_MODEL
+
+
 def vllm_command(
     model: str,
     port: int,
@@ -371,12 +380,7 @@ def vllm_command(
 ) -> list[str]:
     model_lower = model.lower()
     is_gemma = "gemma-4" in model_lower
-    if "gemma-4-26b-a4b" in model_lower:
-        served_model = "google/gemma-4-26B-A4B-it"
-    elif "gemma-4-e4b" in model_lower:
-        served_model = "google/gemma-4-E4B-it"
-    else:
-        served_model = DEFAULT_SUBAGENT_MODEL
+    served_model = served_subagent_model_name(model)
     command = [
         str(Path(sys.executable).with_name("vllm")),
         "serve",
@@ -476,11 +480,7 @@ def start_vllm(
         wait_for_vllm(
             None,
             port=port,
-            expected_model=(
-                "google/gemma-4-E4B-it"
-                if "gemma-4" in model.lower() and "e4b" in model.lower()
-                else DEFAULT_SUBAGENT_MODEL
-            ),
+            expected_model=served_subagent_model_name(model),
             timeout=2,
             log_path=log_path,
         )
@@ -533,11 +533,7 @@ def start_vllm(
         wait_for_vllm(
             process,
             port=port,
-            expected_model=(
-                "google/gemma-4-E4B-it"
-                if "gemma-4" in model.lower() and "e4b" in model.lower()
-                else DEFAULT_SUBAGENT_MODEL
-            ),
+            expected_model=served_subagent_model_name(model),
             timeout=timeout,
             log_path=log_path,
         )
