@@ -556,6 +556,7 @@ def test_vllm_command_uses_gemma_thinking_parsers() -> None:
     )
     assert command[command.index("--tool-call-parser") + 1] == "gemma4"
     assert command[command.index("--reasoning-parser") + 1] == "gemma4"
+    assert "--enable-prefix-caching" in command
     assert command[command.index("--default-chat-template-kwargs") + 1] == (
         '{"enable_thinking":true}'
     )
