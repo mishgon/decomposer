@@ -215,12 +215,19 @@ def hydra_flow_mapping(values: Mapping[str, Any]) -> str:
 
 
 def runtime_configuration(experiment: Experiment) -> dict[str, Any]:
+    structured_reasoning_policy = "capture_replay_v2_template_preserved"
+    if (
+        isinstance(experiment, DecomposerExperiment)
+        and experiment.requires_llm_proxy
+    ):
+        structured_reasoning_policy = "capture_only_upstream_no_replay_v1"
     if isinstance(experiment, SimpleExperiment):
         return {
             "max_model_len": experiment.max_model_len,
             "max_output_tokens": experiment.max_output_tokens,
             "max_model_calls": experiment.max_steps,
             "thinking": experiment.thinking,
+            "structured_reasoning_policy": structured_reasoning_policy,
             "sampling": {
                 "temperature": experiment.temperature,
                 "top_p": experiment.top_p,
@@ -234,6 +241,7 @@ def runtime_configuration(experiment: Experiment) -> dict[str, Any]:
         "max_model_len": experiment.max_model_len,
         "max_output_tokens": experiment.max_output_tokens,
         "evaluation_prompt_profile": experiment.evaluation_prompt_profile,
+        "structured_reasoning_policy": structured_reasoning_policy,
         "manager": {
             "backend": experiment.manager_backend,
             "reasoning_mode": experiment.manager_reasoning_mode,
@@ -517,7 +525,13 @@ def decomposer_vllm_command(
         "--tool-call-parser",
         model.tool_call_parser,
         "--default-chat-template-kwargs",
-        json.dumps({"enable_thinking": model.thinking}, separators=(",", ":")),
+        json.dumps(
+            {
+                "enable_thinking": model.thinking,
+                **({"preserve_thinking": True} if model.thinking else {}),
+            },
+            separators=(",", ":"),
+        ),
     ]
     if model.dtype is not None:
         command.extend(["--dtype", model.dtype])

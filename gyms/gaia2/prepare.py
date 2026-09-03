@@ -169,16 +169,19 @@ def experiment_models(experiment: Experiment, *, full_hashes: bool) -> dict[str,
                 experiment.checkpoint, full_hashes=full_hashes
             )
         }
-    models = {
-        "worker": validate_checkpoint(
-            experiment.worker_checkpoint, full_hashes=full_hashes
-        )
-    }
+    worker = validate_checkpoint(
+        experiment.worker_checkpoint, full_hashes=full_hashes
+    )
+    models = {"worker": worker}
     if experiment.requires_local_manager:
         if experiment.manager_checkpoint is None:
             raise ValueError("Local manager requires manager_checkpoint")
-        models["manager"] = validate_checkpoint(
-            experiment.manager_checkpoint, full_hashes=full_hashes
+        models["manager"] = (
+            worker
+            if experiment.share_local_vllm
+            else validate_checkpoint(
+                experiment.manager_checkpoint, full_hashes=full_hashes
+            )
         )
     else:
         models["manager"] = {

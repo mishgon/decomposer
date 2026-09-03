@@ -140,6 +140,20 @@ GEMMA4_E4B_BASE = (
     / "snapshots"
     / "ee0ef6023621cff504d758262d4e04895a5af4a2"
 )
+GEMMA4_E2B_BASE = (
+    HF_HOME
+    / "hub"
+    / "models--google--gemma-4-E2B-it"
+    / "snapshots"
+    / "3e22461f65e89153144f8adb70e3b8c2cc9845a7"
+)
+GEMMA4_31B_BASE = (
+    HF_HOME
+    / "hub"
+    / "models--google--gemma-4-31B-it"
+    / "snapshots"
+    / "842da3794eaa0b77d5f08bae87a17459d91ff475"
+)
 GEMMA4_26B_A4B_BASE = (
     HF_HOME
     / "hub"
@@ -377,6 +391,7 @@ class DecomposerExperiment:
     worker_language_model_only: bool = True
     worker_trust_remote_code: bool = False
     worker_gdn_prefill_backend: str | None = None
+    share_local_vllm: bool = False
     manager_max_model_calls: int | None = 80
     subagent_max_model_calls: int | None = 80
     manager_recursion_limit: int = 200
@@ -400,7 +415,63 @@ class DecomposerExperiment:
                 raise ValueError(f"{self.name}: {field_name} must be at least 1")
         if self.manager_backend == "local_vllm" and self.manager_checkpoint is None:
             raise ValueError("A local_vllm manager requires manager_checkpoint")
-        expected_gpus = 2 if self.manager_backend == "local_vllm" else 1
+        if self.share_local_vllm:
+            if self.manager_backend != "local_vllm":
+                raise ValueError(
+                    f"{self.name}: share_local_vllm requires a local_vllm manager"
+                )
+            if self.manager_checkpoint != self.worker_checkpoint:
+                raise ValueError(
+                    f"{self.name}: a shared manager/worker server requires one checkpoint"
+                )
+            if self.manager_served_name != self.worker_served_name:
+                raise ValueError(
+                    f"{self.name}: a shared manager/worker server requires one served name"
+                )
+            if self.manager_port != self.worker_port:
+                raise ValueError(
+                    f"{self.name}: a shared manager/worker server requires one port"
+                )
+            server_pairs = (
+                (
+                    "tool_call_parser",
+                    self.manager_tool_call_parser,
+                    self.worker_tool_call_parser,
+                ),
+                (
+                    "reasoning_parser",
+                    self.manager_reasoning_parser,
+                    self.worker_reasoning_parser,
+                ),
+                (
+                    "language_model_only",
+                    self.manager_language_model_only,
+                    self.worker_language_model_only,
+                ),
+                (
+                    "trust_remote_code",
+                    self.manager_trust_remote_code,
+                    self.worker_trust_remote_code,
+                ),
+                (
+                    "gdn_prefill_backend",
+                    self.manager_gdn_prefill_backend,
+                    self.worker_gdn_prefill_backend,
+                ),
+            )
+            mismatched = [
+                name
+                for name, manager, worker in server_pairs
+                if manager != worker
+            ]
+            if mismatched:
+                raise ValueError(
+                    f"{self.name}: shared manager/worker server options differ: "
+                    + ", ".join(mismatched)
+                )
+        expected_gpus = (
+            1 if self.share_local_vllm or self.manager_backend != "local_vllm" else 2
+        )
         if self.num_gpus != expected_gpus:
             raise ValueError(
                 f"{self.manager_backend} Decomposer requires {expected_gpus} GPU(s)"
@@ -767,6 +838,10 @@ DEEPSEEK_QWEN_AMBIGUITY_POLICY_EXPERIMENT = replace(
     ),
     manager_prompt_addendum_profile="gaia2-ambiguity",
 )
+# Known upstream fault for every Qwen3.6 llm_proxy profile below: the Responses
+# deployment returns reasoning, but discards reasoning items that the harness
+# sends back in later inputs. We save output reasoning, yet these experiments
+# remain capture-only and are not clean comparisons with replayed DeepSeek/Gemma.
 QWEN36_QWEN_EXPERIMENT = replace(
     DEEPSEEK_QWEN_EXPERIMENT,
     name="qwen36-35b-a3b-teacher-qwen35-4b-non-thinking",
@@ -800,6 +875,7 @@ GEMMA4_TEXT_DEFAULTS_DECOMPOSER_EXPERIMENT = DecomposerExperiment(
 )
 _QWEN36_NON_THINKING_SAMPLING = qwen36_non_thinking_sampling()
 _QWEN36_THINKING_SAMPLING = qwen36_thinking_sampling()
+# Capture-only upstream fault; see the Qwen3.6 llm_proxy warning above.
 QWEN36_TEXT_DEFAULTS_DECOMPOSER_EXPERIMENT = replace(
     DEEPSEEK_QWEN_EXPERIMENT,
     name=(
@@ -831,6 +907,8 @@ QWEN36_TEXT_DEFAULTS_DECOMPOSER_EXPERIMENT = replace(
     manager_recursion_limit=1000,
     subagent_recursion_limit=1000,
 )
+# Capture-only upstream fault; replayed reasoning is discarded by the proxy
+# deployment even though this thinking profile captures and sends it.
 QWEN36_THINKING_TEXT_DEFAULTS_DECOMPOSER_EXPERIMENT = replace(
     DEEPSEEK_QWEN_EXPERIMENT,
     name=(
@@ -862,9 +940,117 @@ QWEN36_THINKING_TEXT_DEFAULTS_DECOMPOSER_EXPERIMENT = replace(
     manager_recursion_limit=1000,
     subagent_recursion_limit=1000,
 )
-SIMPLE_EXPERIMENT = SimpleExperiment(
-    name="gemma4-e4b-it-thinking",
-    checkpoint=GEMMA4_E4B_BASE,
+DEEPSEEK_GEMMA4_26B_NON_THINKING_EXPERIMENT = DecomposerExperiment(
+    name="deepseek-v4-flash-0731-teacher-gemma4-26b-a4b-non-thinking",
+    worker_checkpoint=GEMMA4_26B_A4B_BASE,
+    manager_backend="openrouter",
+    prompt_profile="teacher",
+    num_gpus=1,
+    manager_served_name="deepseek/deepseek-v4-flash-0731",
+    manager_thinking=True,
+    worker_served_name="google/gemma-4-26B-A4B-it",
+    worker_port=8032,
+    service_port=8135,
+    subagent_port=2035,
+    max_model_len=131072,
+    worker_thinking=False,
+    manager_max_model_calls=80,
+    subagent_max_model_calls=80,
+    manager_recursion_limit=1000,
+    subagent_recursion_limit=1000,
+)
+GEMMA4_26B_SHARED_DECOMPOSER_EXPERIMENT = DecomposerExperiment(
+    name=(
+        "gemma4-26b-a4b-thinking-teacher-"
+        "gemma4-26b-a4b-non-thinking-text-defaults"
+    ),
+    worker_checkpoint=GEMMA4_26B_A4B_BASE,
+    manager_checkpoint=GEMMA4_26B_A4B_BASE,
+    prompt_profile="teacher",
+    num_gpus=1,
+    manager_served_name="google/gemma-4-26B-A4B-it",
+    worker_served_name="google/gemma-4-26B-A4B-it",
+    manager_port=8033,
+    worker_port=8033,
+    service_port=8136,
+    subagent_port=2036,
+    max_model_len=131072,
+    manager_thinking=True,
+    worker_thinking=False,
+    share_local_vllm=True,
+    manager_max_model_calls=80,
+    subagent_max_model_calls=80,
+    manager_recursion_limit=1000,
+    subagent_recursion_limit=1000,
+)
+
+
+def _gemma4_simple_experiment(
+    name: str, checkpoint: Path, served_name: str, *, thinking: bool
+) -> SimpleExperiment:
+    return SimpleExperiment(
+        name=name,
+        checkpoint=checkpoint,
+        served_name=served_name,
+        max_model_len=131072,
+        temperature=1.0,
+        top_p=0.95,
+        top_k=64,
+        thinking=thinking,
+        tool_call_parser="gemma4",
+        reasoning_parser="gemma4",
+        language_model_only=True,
+        max_model_calls=80,
+    )
+
+
+SIMPLE_GEMMA4_E2B_NON_THINKING_EXPERIMENT = _gemma4_simple_experiment(
+    "gemma4-e2b-it-non-thinking",
+    GEMMA4_E2B_BASE,
+    "google/gemma-4-E2B-it",
+    thinking=False,
+)
+SIMPLE_GEMMA4_E2B_THINKING_EXPERIMENT = _gemma4_simple_experiment(
+    "gemma4-e2b-it-thinking",
+    GEMMA4_E2B_BASE,
+    "google/gemma-4-E2B-it",
+    thinking=True,
+)
+SIMPLE_GEMMA4_E4B_NON_THINKING_EXPERIMENT = _gemma4_simple_experiment(
+    "gemma4-e4b-it-non-thinking",
+    GEMMA4_E4B_BASE,
+    "google/gemma-4-E4B-it",
+    thinking=False,
+)
+SIMPLE_EXPERIMENT = _gemma4_simple_experiment(
+    "gemma4-e4b-it-thinking",
+    GEMMA4_E4B_BASE,
+    "google/gemma-4-E4B-it",
+    thinking=True,
+)
+SIMPLE_GEMMA4_31B_NON_THINKING_EXPERIMENT = _gemma4_simple_experiment(
+    "gemma4-31b-it-non-thinking",
+    GEMMA4_31B_BASE,
+    "google/gemma-4-31B-it",
+    thinking=False,
+)
+SIMPLE_GEMMA4_31B_THINKING_EXPERIMENT = _gemma4_simple_experiment(
+    "gemma4-31b-it-thinking",
+    GEMMA4_31B_BASE,
+    "google/gemma-4-31B-it",
+    thinking=True,
+)
+SIMPLE_GEMMA4_26B_NON_THINKING_EXPERIMENT = _gemma4_simple_experiment(
+    "gemma4-26b-a4b-it-non-thinking",
+    GEMMA4_26B_A4B_BASE,
+    "google/gemma-4-26B-A4B-it",
+    thinking=False,
+)
+SIMPLE_GEMMA4_26B_THINKING_EXPERIMENT = _gemma4_simple_experiment(
+    "gemma4-26b-a4b-it-thinking",
+    GEMMA4_26B_A4B_BASE,
+    "google/gemma-4-26B-A4B-it",
+    thinking=True,
 )
 
 
@@ -952,7 +1138,16 @@ ALL_EXPERIMENTS: tuple[Experiment, ...] = (
     GEMMA4_TEXT_DEFAULTS_DECOMPOSER_EXPERIMENT,
     QWEN36_TEXT_DEFAULTS_DECOMPOSER_EXPERIMENT,
     QWEN36_THINKING_TEXT_DEFAULTS_DECOMPOSER_EXPERIMENT,
+    DEEPSEEK_GEMMA4_26B_NON_THINKING_EXPERIMENT,
+    GEMMA4_26B_SHARED_DECOMPOSER_EXPERIMENT,
+    SIMPLE_GEMMA4_E2B_NON_THINKING_EXPERIMENT,
+    SIMPLE_GEMMA4_E2B_THINKING_EXPERIMENT,
+    SIMPLE_GEMMA4_E4B_NON_THINKING_EXPERIMENT,
     SIMPLE_EXPERIMENT,
+    SIMPLE_GEMMA4_31B_NON_THINKING_EXPERIMENT,
+    SIMPLE_GEMMA4_31B_THINKING_EXPERIMENT,
+    SIMPLE_GEMMA4_26B_NON_THINKING_EXPERIMENT,
+    SIMPLE_GEMMA4_26B_THINKING_EXPERIMENT,
     SIMPLE_QWEN_EXPERIMENT,
     SIMPLE_QWEN_2B_EXPERIMENT,
     SIMPLE_QWEN_9B_EXPERIMENT,

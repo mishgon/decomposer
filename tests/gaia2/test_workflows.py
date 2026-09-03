@@ -23,6 +23,7 @@ from gyms.gaia2.experiments import (
     AMBIGUITY_DOMAIN,
     BASE_IMAGE,
     DATASET_REVISION,
+    DEEPSEEK_GEMMA4_26B_NON_THINKING_EXPERIMENT,
     DEEPSEEK_GEMMA_EXPERIMENT,
     DEEPSEEK_QWEN_AMBIGUITY_POLICY_EXPERIMENT,
     DEEPSEEK_QWEN_EXPERIMENT,
@@ -30,6 +31,8 @@ from gyms.gaia2.experiments import (
     DecomposerExperiment,
     DOMAIN,
     GEMMA4_E4B_TEXT_DEFAULTS_SIMPLE_EXPERIMENT,
+    GEMMA4_26B_SHARED_DECOMPOSER_EXPERIMENT,
+    GEMMA4_31B_BASE,
     GEMMA4_TEXT_DEFAULTS_DECOMPOSER_EXPERIMENT,
     INSTANCE_TYPES_BY_NUM_GPUS,
     QWEN35_BASE_DECOMPOSER_EXPERIMENT,
@@ -49,6 +52,13 @@ from gyms.gaia2.experiments import (
     SCENARIO_COUNT,
     SIMPLE_DEEPSEEK_EXPERIMENT,
     SIMPLE_EXPERIMENT,
+    SIMPLE_GEMMA4_26B_NON_THINKING_EXPERIMENT,
+    SIMPLE_GEMMA4_26B_THINKING_EXPERIMENT,
+    SIMPLE_GEMMA4_31B_NON_THINKING_EXPERIMENT,
+    SIMPLE_GEMMA4_31B_THINKING_EXPERIMENT,
+    SIMPLE_GEMMA4_E2B_NON_THINKING_EXPERIMENT,
+    SIMPLE_GEMMA4_E2B_THINKING_EXPERIMENT,
+    SIMPLE_GEMMA4_E4B_NON_THINKING_EXPERIMENT,
     SIMPLE_QWEN_2B_EXPERIMENT,
     SIMPLE_QWEN_9B_EXPERIMENT,
     SIMPLE_QWEN_EXPERIMENT,
@@ -85,6 +95,7 @@ from gyms.gaia2.run import (
     prompt_sha256,
     remote_manager_proxy_command,
     run_identity,
+    runtime_configuration,
     selected_output_dir,
     selected_cuda_devices,
     simple_vllm_command,
@@ -529,7 +540,16 @@ def test_experiment_registry_contains_local_and_openrouter_profiles() -> None:
         GEMMA4_TEXT_DEFAULTS_DECOMPOSER_EXPERIMENT,
         QWEN36_TEXT_DEFAULTS_DECOMPOSER_EXPERIMENT,
         QWEN36_THINKING_TEXT_DEFAULTS_DECOMPOSER_EXPERIMENT,
+        DEEPSEEK_GEMMA4_26B_NON_THINKING_EXPERIMENT,
+        GEMMA4_26B_SHARED_DECOMPOSER_EXPERIMENT,
+        SIMPLE_GEMMA4_E2B_NON_THINKING_EXPERIMENT,
+        SIMPLE_GEMMA4_E2B_THINKING_EXPERIMENT,
+        SIMPLE_GEMMA4_E4B_NON_THINKING_EXPERIMENT,
         SIMPLE_EXPERIMENT,
+        SIMPLE_GEMMA4_31B_NON_THINKING_EXPERIMENT,
+        SIMPLE_GEMMA4_31B_THINKING_EXPERIMENT,
+        SIMPLE_GEMMA4_26B_NON_THINKING_EXPERIMENT,
+        SIMPLE_GEMMA4_26B_THINKING_EXPERIMENT,
         SIMPLE_QWEN_EXPERIMENT,
         SIMPLE_QWEN_2B_EXPERIMENT,
         SIMPLE_QWEN_9B_EXPERIMENT,
@@ -786,6 +806,166 @@ def test_gemma_text_defaults_use_pinned_thinking_models(tmp_path) -> None:
     assert environment["GAIA2_SUBAGENT_MAX_MODEL_CALLS"] == "80"
 
 
+def test_requested_gemma_simple_profiles_use_matched_text_defaults() -> None:
+    profiles = (
+        SIMPLE_GEMMA4_E2B_NON_THINKING_EXPERIMENT,
+        SIMPLE_GEMMA4_E2B_THINKING_EXPERIMENT,
+        SIMPLE_GEMMA4_E4B_NON_THINKING_EXPERIMENT,
+        SIMPLE_EXPERIMENT,
+        SIMPLE_GEMMA4_31B_NON_THINKING_EXPERIMENT,
+        SIMPLE_GEMMA4_31B_THINKING_EXPERIMENT,
+        SIMPLE_GEMMA4_26B_NON_THINKING_EXPERIMENT,
+        SIMPLE_GEMMA4_26B_THINKING_EXPERIMENT,
+    )
+    assert GEMMA4_31B_BASE.name == "842da3794eaa0b77d5f08bae87a17459d91ff475"
+    assert {profile.served_name for profile in profiles} == {
+        "google/gemma-4-E2B-it",
+        "google/gemma-4-E4B-it",
+        "google/gemma-4-31B-it",
+        "google/gemma-4-26B-A4B-it",
+    }
+    for profile in profiles:
+        assert profile.num_gpus == 1
+        assert profile.max_model_len == 131072
+        assert profile.max_completion_tokens is None
+        assert profile.max_model_calls == 80
+        assert (profile.temperature, profile.top_p, profile.top_k) == (
+            1.0,
+            0.95,
+            64,
+        )
+        command = simple_vllm_command(profile)
+        assert _default_chat_template_kwargs(command) == {
+            "enable_thinking": profile.thinking,
+            **({"preserve_thinking": True} if profile.thinking else {}),
+        }
+
+
+def test_shared_gemma26_decomposer_uses_one_server_and_one_gpu(
+    tmp_path, monkeypatch
+) -> None:
+    experiment = GEMMA4_26B_SHARED_DECOMPOSER_EXPERIMENT
+    ports = Gaia2PortLayout(12000)
+    assert experiment.num_gpus == 1
+    assert experiment.prompt_profile == "teacher"
+    assert experiment.share_local_vllm is True
+    assert ports.manager_port(experiment) == ports.worker_port(experiment) == 20033
+
+    manager, shared = decomposer_vllm_commands(experiment, ports)
+    assert manager is None
+    assert shared[shared.index("--served-model-name") + 1] == (
+        "google/gemma-4-26B-A4B-it"
+    )
+    assert _default_chat_template_kwargs(shared) == {
+        "enable_thinking": True,
+        "preserve_thinking": True,
+    }
+
+    service_path, _ = _runtime_configs(Path.cwd(), tmp_path, experiment, ports)
+    service = json.loads(service_path.read_text())
+    assert service["manager"]["base_url"] == "http://127.0.0.1:20033/v1"
+    assert service["manager"]["extra_body"]["chat_template_kwargs"] == {
+        "enable_thinking": True,
+        "preserve_thinking": True,
+    }
+    assert subagent_environment(experiment, ports)["GAIA2_SUBAGENT_ENDPOINT"] == (
+        "http://127.0.0.1:20033/v1"
+    )
+    assert subagent_environment(experiment, ports)["GAIA2_SUBAGENT_THINKING"] == "0"
+
+    plan = _dry_plan(
+        Path.cwd(),
+        experiment,
+        tmp_path / "dry",
+        ("7",),
+        3,
+        None,
+        domain="execution",
+        ports=ports,
+    )
+    assert plan["gpu_assignments"] == {"manager_worker_vllm": "7"}
+    assert plan["port_layout"]["manager"] == plan["port_layout"]["worker"]
+    assert plan["runtime_configuration"]["manager"]["local_model_topology"] == (
+        "shared"
+    )
+    trace_plan = _dry_plan(
+        Path.cwd(),
+        experiment,
+        tmp_path / "trace-dry",
+        ("7",),
+        2,
+        None,
+        purpose="trace-generation",
+        partition="train",
+        rollout_offset=3,
+        domain="execution",
+        ports=ports,
+    )
+    assert trace_plan["gpu_assignments"] == {"manager_worker_vllm": "7"}
+    assert len(
+        [service for service in trace_plan["services"] if "vllm serve" in service]
+    ) == 1
+
+    calls = []
+
+    def fake_validate_checkpoint(path, *, full_hashes):
+        calls.append((path, full_hashes))
+        return {"path": str(path)}
+
+    monkeypatch.setattr(prepare, "validate_checkpoint", fake_validate_checkpoint)
+    models = prepare.experiment_models(experiment, full_hashes=True)
+    assert calls == [(experiment.worker_checkpoint, True)]
+    assert models["manager"] == models["worker"]
+
+    with pytest.raises(ValueError, match="one served name"):
+        replace(experiment, manager_served_name="different-model-name")
+    with pytest.raises(ValueError, match="one port"):
+        replace(experiment, manager_port=experiment.worker_port + 1)
+    with pytest.raises(ValueError, match="server options differ"):
+        replace(experiment, manager_reasoning_parser=None)
+
+
+def test_deepseek_gemma26_profile_uses_teacher_and_non_thinking_worker() -> None:
+    experiment = DEEPSEEK_GEMMA4_26B_NON_THINKING_EXPERIMENT
+    assert experiment.prompt_profile == "teacher"
+    assert experiment.manager_backend == "openrouter"
+    assert experiment.manager_thinking is True
+    assert experiment.worker_thinking is False
+    assert experiment.num_gpus == 1
+    assert experiment.max_model_len == 131072
+    manager, worker = decomposer_vllm_commands(experiment)
+    assert manager is None
+    assert _default_chat_template_kwargs(worker) == {"enable_thinking": False}
+    assert runtime_configuration(experiment)["manager"]["local_model_topology"] is None
+
+
+def test_every_local_gemma_thinking_actor_enables_template_replay(tmp_path) -> None:
+    for experiment in ALL_EXPERIMENTS:
+        if isinstance(experiment, SimpleExperiment):
+            if experiment.backend == "local_vllm" and experiment.thinking:
+                assert _default_chat_template_kwargs(
+                    simple_vllm_command(experiment)
+                )["preserve_thinking"] is True
+            continue
+
+        manager_command, worker_command = decomposer_vllm_commands(experiment)
+        if experiment.requires_local_manager and experiment.manager_thinking:
+            command = worker_command if experiment.share_local_vllm else manager_command
+            assert command is not None
+            assert _default_chat_template_kwargs(command)["preserve_thinking"] is True
+            service_path, _ = _runtime_configs(
+                Path.cwd(), tmp_path / experiment.name, experiment
+            )
+            service = json.loads(service_path.read_text())
+            assert service["manager"]["extra_body"]["chat_template_kwargs"][
+                "preserve_thinking"
+            ] is True
+        if experiment.worker_thinking:
+            assert _default_chat_template_kwargs(worker_command)[
+                "preserve_thinking"
+            ] is True
+
+
 def test_text_default_simple_profiles_use_provider_output_length() -> None:
     gemma = GEMMA4_E4B_TEXT_DEFAULTS_SIMPLE_EXPERIMENT
     qwen = QWEN35_4B_TEXT_DEFAULTS_SIMPLE_EXPERIMENT
@@ -883,7 +1063,7 @@ def test_model_call_budget_semantics_are_part_of_resume_identity(tmp_path) -> No
     )
     assert expected["runtime_configuration"]["max_completion_tokens"] is None
     assert expected["runtime_configuration"]["structured_reasoning_policy"] == (
-        "capture_replay_v1"
+        "capture_replay_v2_template_preserved"
     )
 
     qwen_proxy = None

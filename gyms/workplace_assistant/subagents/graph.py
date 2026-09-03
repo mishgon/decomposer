@@ -107,7 +107,10 @@ def _gemma_subagent(
     extra_body: dict[str, Any] = {
         "top_k": 64,
         "include_reasoning": thinking,
-        "chat_template_kwargs": {"enable_thinking": thinking},
+        "chat_template_kwargs": {
+            "enable_thinking": thinking,
+            **({"preserve_thinking": True} if thinking else {}),
+        },
     }
     model = ChatVLLM(
         model=model_id,

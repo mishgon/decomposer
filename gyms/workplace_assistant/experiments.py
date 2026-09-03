@@ -293,7 +293,10 @@ class SimpleExperiment:
 
     @property
     def chat_template_kwargs(self) -> dict[str, bool]:
-        return {"enable_thinking": self.thinking}
+        return {
+            "enable_thinking": self.thinking,
+            **({"preserve_thinking": True} if self.thinking else {}),
+        }
 
     @property
     def chat_template_kwargs_b64(self) -> str:
@@ -346,7 +349,7 @@ MODELS = (
         HF_HUB_ROOT
         / "models--google--gemma-4-E2B-it"
         / "snapshots"
-        / "9dbdf8a839e4e9e0eb56ed80cc8886661d3817cf",
+        / "3e22461f65e89153144f8adb70e3b8c2cc9845a7",
         8020,
         0,
         0.30,
@@ -514,6 +517,10 @@ WORKPLACE_QWEN35_4B_GAIA2_EXECUTION_ONLY_SFT_FINAL = (
 _QWEN36_NON_THINKING_SAMPLING = qwen36_non_thinking_sampling()
 _QWEN36_THINKING_SAMPLING = qwen36_thinking_sampling()
 
+# Known upstream fault for every Qwen3.6 llm_proxy profile below: the Responses
+# deployment returns reasoning, but discards reasoning items that the harness
+# sends back in later inputs. We save output reasoning, yet these experiments
+# remain capture-only and are not clean comparisons with replayed DeepSeek/Gemma.
 DECOMPOSER_EXPERIMENTS = (
     DecomposerExperiment(
         name="gemma4-26b-a4b-thinking-gemma4-e4b-thinking-text-defaults",
@@ -543,6 +550,25 @@ DECOMPOSER_EXPERIMENTS = (
             ),
         ),
     ),
+    DecomposerExperiment(
+        name=(
+            "gemma4-26b-a4b-thinking-teacher-"
+            "gemma4-26b-a4b-non-thinking-text-defaults"
+        ),
+        gym_config_filename=(
+            "workplace_assistant_gemma4_26b_a4b_thinking_teacher_"
+            "gemma4_26b_a4b_non_thinking_text_defaults.yaml"
+        ),
+        manager_backend="local_vllm",
+        evaluation_prompt_profile="teacher",
+        num_gpus=1,
+        max_model_len=131072,
+        max_num_seqs=16,
+        subagent_graph="repository",
+        model_ids=("google/gemma-4-26B-A4B-it",),
+    ),
+    # Capture-only upstream fault: this Qwen3.6 proxy deployment discards
+    # reasoning items replayed in later Responses inputs.
     DecomposerExperiment(
         name=(
             "qwen36-35b-a3b-non-thinking-teacher-"
@@ -582,6 +608,8 @@ DECOMPOSER_EXPERIMENTS = (
             ),
         ),
     ),
+    # Capture-only upstream fault: output reasoning is saved and replay is sent,
+    # but this Qwen3.6 proxy deployment discards the replayed input items.
     DecomposerExperiment(
         name=(
             "qwen36-35b-a3b-thinking-teacher-"
@@ -977,6 +1005,8 @@ DECOMPOSER_EXPERIMENTS = (
             ),
         ),
     ),
+    # Capture-only upstream fault: the service-default Qwen3.6 proxy path also
+    # discards input reasoning items, so it is not a full-replay comparison.
     DecomposerExperiment(
         name="qwen36-35b-a3b-teacher-qwen35-4b-non-thinking",
         gym_config_filename=(
@@ -1062,6 +1092,19 @@ DECOMPOSER_EXPERIMENTS = (
         model_ids=("google/gemma-4-26B-A4B-it",),
     ),
     DecomposerExperiment(
+        name="deepseek-v4-flash-0731-teacher-gemma4-26b-a4b-non-thinking",
+        gym_config_filename=(
+            "workplace_assistant_deepseek_v4_flash_0731_teacher_"
+            "gemma4_26b_a4b_non_thinking.yaml"
+        ),
+        evaluation_prompt_profile="teacher",
+        num_gpus=1,
+        max_model_len=131072,
+        max_num_seqs=16,
+        subagent_graph="repository",
+        model_ids=("google/gemma-4-26B-A4B-it",),
+    ),
+    DecomposerExperiment(
         name="deepseek-v4-flash-0731-gemma4-e4b-thinking",
         gym_config_filename=(
             "workplace_assistant_deepseek_v4_flash_0731_gemma4_e4b_thinking.yaml"
@@ -1083,6 +1126,12 @@ GEMMA4_E2B_BASE = MODELS[0].snapshot
 GEMMA4_E4B_BASE = MODELS[1].snapshot
 GEMMA4_12B_BASE = MODELS[2].snapshot
 GEMMA4_26B_A4B_BASE = MODELS[3].snapshot
+GEMMA4_31B_BASE = (
+    HF_HUB_ROOT
+    / "models--google--gemma-4-31B-it"
+    / "snapshots"
+    / "842da3794eaa0b77d5f08bae87a17459d91ff475"
+)
 
 
 def _gemma4_simple_experiments() -> list[SimpleExperiment]:
@@ -1090,6 +1139,7 @@ def _gemma4_simple_experiments() -> list[SimpleExperiment]:
         ("e2b", GEMMA4_E2B_BASE),
         ("e4b", GEMMA4_E4B_BASE),
         ("12b", GEMMA4_12B_BASE),
+        ("31b", GEMMA4_31B_BASE),
         ("26b-a4b", GEMMA4_26B_A4B_BASE),
     )
     return [

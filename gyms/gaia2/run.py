@@ -96,6 +96,8 @@ class Gaia2PortLayout:
     def manager_port(self, experiment: DecomposerExperiment) -> int | None:
         if experiment.requires_openrouter:
             return None
+        if experiment.share_local_vllm:
+            return self.worker_port(experiment)
         return self.shifted(experiment.manager_port)
 
     def worker_port(self, experiment: DecomposerExperiment) -> int:
@@ -163,7 +165,7 @@ def runtime_configuration(experiment: Experiment) -> dict[str, Any]:
         )
         if getattr(experiment, name) is not None
     }
-    structured_reasoning_policy = "capture_replay_v1"
+    structured_reasoning_policy = "capture_replay_v2_template_preserved"
     if (
         isinstance(experiment, DecomposerExperiment)
         and experiment.requires_llm_proxy
@@ -190,6 +192,15 @@ def runtime_configuration(experiment: Experiment) -> dict[str, Any]:
             {
                 "manager": {
                     "backend": experiment.manager_backend,
+                    "local_model_topology": (
+                        "shared"
+                        if experiment.share_local_vllm
+                        else (
+                            "dedicated"
+                            if experiment.requires_local_manager
+                            else None
+                        )
+                    ),
                     "thinking": experiment.manager_thinking,
                     "reasoning_mode": experiment.manager_reasoning_mode,
                     "max_model_calls": experiment.manager_max_model_calls,
@@ -681,25 +692,30 @@ def decomposer_vllm_commands(
     if experiment.requires_local_manager:
         if experiment.manager_checkpoint is None:
             raise ValueError("Local manager requires manager_checkpoint")
-        manager = _common_vllm_command(
-            experiment.manager_checkpoint,
-            experiment.manager_served_name,
-            ports.manager_port(experiment),
-            thinking=experiment.manager_thinking,
-            max_model_len=experiment.max_model_len,
-            max_num_seqs=experiment.max_num_seqs,
-            gpu_memory_utilization=experiment.gpu_memory_utilization,
-            tool_call_parser=experiment.manager_tool_call_parser,
-            reasoning_parser=experiment.manager_reasoning_parser,
-            language_model_only=experiment.manager_language_model_only,
-            trust_remote_code=experiment.manager_trust_remote_code,
-            gdn_prefill_backend=experiment.manager_gdn_prefill_backend,
-        )
+        if not experiment.share_local_vllm:
+            manager = _common_vllm_command(
+                experiment.manager_checkpoint,
+                experiment.manager_served_name,
+                ports.manager_port(experiment),
+                thinking=experiment.manager_thinking,
+                max_model_len=experiment.max_model_len,
+                max_num_seqs=experiment.max_num_seqs,
+                gpu_memory_utilization=experiment.gpu_memory_utilization,
+                tool_call_parser=experiment.manager_tool_call_parser,
+                reasoning_parser=experiment.manager_reasoning_parser,
+                language_model_only=experiment.manager_language_model_only,
+                trust_remote_code=experiment.manager_trust_remote_code,
+                gdn_prefill_backend=experiment.manager_gdn_prefill_backend,
+            )
     worker = _common_vllm_command(
         experiment.worker_checkpoint,
         experiment.worker_served_name,
         ports.worker_port(experiment),
-        thinking=experiment.worker_thinking,
+        thinking=(
+            experiment.manager_thinking or experiment.worker_thinking
+            if experiment.share_local_vllm
+            else experiment.worker_thinking
+        ),
         max_model_len=experiment.max_model_len,
         max_num_seqs=experiment.max_num_seqs,
         gpu_memory_utilization=experiment.gpu_memory_utilization,
@@ -978,7 +994,13 @@ def validate_preparation(
                 raise ValueError("Local manager requires manager_checkpoint")
             if Path(manager.get("path", "")) != experiment.manager_checkpoint:
                 raise ValueError("Preparation manifest points at an unexpected manager")
-            _validate_file_manifest(experiment.manager_checkpoint, manager)
+            if experiment.share_local_vllm:
+                if manager != worker:
+                    raise ValueError(
+                        "Shared manager/worker preparation manifests must be identical"
+                    )
+            else:
+                _validate_file_manifest(experiment.manager_checkpoint, manager)
         elif manager != {
             "backend": experiment.manager_backend,
             "model": experiment.manager_served_name,
@@ -1605,7 +1627,9 @@ def _dry_plan(
         )
         services.append(langgraph_argv)
         services.append(service_command(experiment, service_config, ports))
-        if experiment.requires_local_manager:
+        if experiment.share_local_vllm:
+            gpu_assignments = {"manager_worker_vllm": visible_devices[0]}
+        elif experiment.requires_local_manager:
             gpu_assignments = {
                 "manager_vllm": visible_devices[0],
                 "worker_vllm": visible_devices[1],
@@ -1869,9 +1893,17 @@ def execute_trace_generation(local_repo: Path, args: argparse.Namespace) -> int:
                 cwd=local_repo,
                 env={"CUDA_VISIBLE_DEVICES": visible_devices[0]},
             )
-        worker_device_index = 1 if experiment.requires_local_manager else 0
+        worker_device_index = (
+            1
+            if experiment.requires_local_manager and not experiment.share_local_vllm
+            else 0
+        )
         worker_process = supervisor.start(
-            "worker_vllm",
+            (
+                "manager_worker_vllm"
+                if experiment.share_local_vllm
+                else "worker_vllm"
+            ),
             worker_command,
             cwd=local_repo,
             env={"CUDA_VISIBLE_DEVICES": visible_devices[worker_device_index]},
@@ -2243,9 +2275,18 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
                     cwd=local_repo,
                     env={"CUDA_VISIBLE_DEVICES": visible_devices[0]},
                 )
-            worker_device_index = 1 if experiment.requires_local_manager else 0
+            worker_device_index = (
+                1
+                if experiment.requires_local_manager
+                and not experiment.share_local_vllm
+                else 0
+            )
             worker_process = supervisor.start(
-                "worker_vllm",
+                (
+                    "manager_worker_vllm"
+                    if experiment.share_local_vllm
+                    else "worker_vllm"
+                ),
                 worker_command,
                 cwd=local_repo,
                 env={"CUDA_VISIBLE_DEVICES": visible_devices[worker_device_index]},

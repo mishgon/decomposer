@@ -56,14 +56,45 @@ The matched text-default profiles are:
 - `qwen36-35b-a3b-thinking-teacher-qwen35-4b-non-thinking-text-defaults`
   keeps the same teacher prompt, local Qwen3.5-4B non-thinking worker, 128K
   context, and runtime limits, but explicitly enables Qwen3.6 thinking through
-  the LLM proxy and preserves its reasoning across manager turns. Raw traces
-  retain that reasoning; current non-thinking SFT preprocessing removes it.
+  the LLM proxy. Output reasoning is captured, but the upstream Responses
+  deployment discards reasoning items replayed by the harness. This profile is
+  capture-only and is not a clean comparison with full-replay local Gemma or
+  OpenRouter DeepSeek.
+- `deepseek-v4-flash-0731-teacher-gemma4-26b-a4b-non-thinking`: OpenRouter
+  DeepSeek with high reasoning and the teacher prompt, plus one local
+  non-thinking Gemma-4-26B-A4B worker.
+- `gemma4-26b-a4b-thinking-teacher-gemma4-26b-a4b-non-thinking-text-defaults`:
+  a local thinking Gemma-4-26B-A4B teacher and non-thinking worker using the
+  teacher prompt. The actors share one checkpoint, vLLM process, endpoint, and
+  GPU while retaining distinct per-request thinking modes.
 
-All five profiles use 128K context and provider-controlled output length.
+All these profiles use 128K context and provider-controlled output length.
 Workplace simple agents have 100 model calls; each Decomposer manager and each
 spawned subagent has its own 100-model-call limit. The runner omits
 `max_output_tokens` unless an experiment explicitly requests a bounded-output
 ablation.
+
+The simple-agent registry also contains matched thinking and non-thinking
+Gemma-4 pairs for E2B, E4B, dense 31B, and 26B-A4B:
+`gemma4-{e2b,e4b,31b,26b-a4b}-it-{non-thinking,thinking}`. They use the same
+128K context, provider-controlled output length, Gemma text sampling defaults,
+and 100-call budget. The dense 31B pair targets one 140 GB H200. Install its
+pinned snapshot with:
+
+```bash
+HF_HOME=/mnt/shared_ru.ml.SZ-5_000264/.cache/huggingface \
+  .venv/bin/hf download google/gemma-4-31B-it \
+  --revision 842da3794eaa0b77d5f08bae87a17459d91ff475 \
+  --max-workers 8
+```
+
+Local thinking profiles capture structured reasoning, save it separately from
+visible text, replay it through `ChatVLLM`, and set Gemma's
+`preserve_thinking=true` template option. Their run identity records
+`capture_replay_v2_template_preserved`. Every Qwen3.6 profile using
+`LLM_PROXY_URL` is explicitly marked
+`capture_only_upstream_no_replay_v1`: the harness sends prior reasoning, but
+that upstream service discards it.
 
 ```bash
 # Simple agent backed by one local policy vLLM.

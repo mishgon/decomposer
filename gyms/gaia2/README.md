@@ -118,6 +118,17 @@ validation files:
 
 ## Run locally
 
+The Gemma profiles use pinned Hugging Face snapshots. The dense 31B checkpoint
+is intended for one 140 GB H200 and can be installed into the registry's shared
+cache with:
+
+```bash
+HF_HOME=/mnt/shared_ru.ml.SZ-5_000264/.cache/huggingface \
+  .venv/bin/hf download google/gemma-4-31B-it \
+  --revision 842da3794eaa0b77d5f08bae87a17459d91ff475 \
+  --max-workers 8
+```
+
 The registered experiments are:
 
 - `gemma4-e4b-sft-deepseek-e4b-v1-8k-non-thinking-gemma4-e4b-thinking`:
@@ -145,15 +156,22 @@ The registered experiments are:
   provider-controlled completion length, and independent 80-model-call caps.
 - `qwen36-35b-a3b-thinking-teacher-qwen35-4b-non-thinking-text-defaults`:
   the matched explicit-thinking Qwen3.6 manager, also reached through the
-  credential-isolating LLM proxy. It uses Qwen's thinking preset and preserves
-  manager reasoning across the ReAct loop; the prompt and local worker are
-  identical to the non-thinking comparison. Raw traces retain manager
-  reasoning, while current non-thinking SFT preprocessing removes it.
+  credential-isolating LLM proxy. It uses Qwen's thinking preset and captures
+  manager reasoning, but the upstream Responses deployment discards reasoning
+  items replayed by the harness. It is therefore a capture-only diagnostic,
+  not a clean comparison with full-replay DeepSeek or local Gemma.
 - `gemma4-26b-a4b-thinking-gemma4-e4b-thinking-text-defaults`: local thinking
   Gemma-4-26B-A4B manager and thinking Gemma-4-E4B worker using Gemma's
   `temperature=1.0`, `top_p=0.95`, `top_k=64` preset and the student prompt.
   Both models use 128K context, provider-controlled completion length, and
   independent 80-model-call caps.
+- `deepseek-v4-flash-0731-teacher-gemma4-26b-a4b-non-thinking`: OpenRouter
+  DeepSeek with high reasoning and the teacher prompt, plus one local
+  non-thinking Gemma-4-26B-A4B worker on one GPU.
+- `gemma4-26b-a4b-thinking-teacher-gemma4-26b-a4b-non-thinking-text-defaults`:
+  a thinking Gemma-4-26B-A4B teacher and non-thinking worker using the teacher
+  prompt. Both actors share one checkpoint, vLLM process, GPU, and endpoint;
+  their per-request chat-template settings select thinking independently.
 - `qwen35-4b-sft-workplace-v1-3765-32k-non-thinking-qwen35-4b-non-thinking`:
   the Workplace-trained non-thinking Qwen3.5-4B manager on the first GPU and
   a base non-thinking Qwen3.5-4B worker on the second GPU, using the student
@@ -182,7 +200,12 @@ The registered experiments are:
   untuned non-thinking Qwen3.5-4B manager and worker using the full teacher
   prompt. This is a separate experiment so its manifest and results cannot
   collide with the student-prompt baseline.
-- `gemma4-e4b-it-thinking`: vanilla thinking E4B simple agent on one GPU.
+- `gemma4-e2b-it-{non-thinking,thinking}`,
+  `gemma4-e4b-it-{non-thinking,thinking}`,
+  `gemma4-31b-it-{non-thinking,thinking}`, and
+  `gemma4-26b-a4b-it-{non-thinking,thinking}`: matched vanilla Gemma-4 simple
+  agents on one GPU. Every profile uses the official text sampling preset,
+  128K context, provider-controlled output length, and an 80-call budget.
 - `qwen35-4b-non-thinking`: vanilla non-thinking Qwen3.5-4B simple agent on
   one GPU, using the recommended general-task sampling parameters and 128K
   context.
@@ -385,8 +408,9 @@ manager sidecars store it in the manager message metadata. Local Decomposer
 subagents receive their prior reasoning during the active run, but their
 private message histories are not copied into the parent sidecar. The runtime
 identity records
-`structured_reasoning_policy=capture_replay_v1`, so these runs cannot resume
-from or mix with older turn-local-reasoning artifacts. Qwen3.6 managers reached
+`structured_reasoning_policy=capture_replay_v2_template_preserved`, so these
+runs cannot resume from or mix with older turn-local-reasoning artifacts.
+Qwen3.6 managers reached
 through the current LLM-proxy Responses transport are the explicit exception:
 the upstream service captures output reasoning but discards replayed input
 reasoning, so their identity records

@@ -49,9 +49,9 @@ from gyms.qwen_sampling import qwen35_general_sampling
 
 
 def test_registry_is_global_and_unique() -> None:
-    assert len(DECOMPOSER_EXPERIMENTS) == 20
-    assert len(SIMPLE_EXPERIMENTS) == 30
-    assert len(experiments.EXPERIMENTS) == 50
+    assert len(DECOMPOSER_EXPERIMENTS) == 22
+    assert len(SIMPLE_EXPERIMENTS) == 32
+    assert len(experiments.EXPERIMENTS) == 54
     assert experiments.BASE_IMAGE.endswith("py3.12-torch2.7.0:0.0.42")
     assert {experiment.kind for experiment in experiments.ALL_EXPERIMENTS} == {
         "decomposer",
@@ -422,7 +422,7 @@ def test_gemma_text_defaults_use_pinned_thinking_manager_and_worker(tmp_path) ->
         command = run_module.decomposer_vllm_command(model, experiment)
         assert command[command.index("--max-model-len") + 1] == "131072"
         assert "--language-model-only" in command
-        assert '{"enable_thinking":true}' in command
+        assert '{"enable_thinking":true,"preserve_thinking":true}' in command
 
     config = yaml.safe_load(
         (
@@ -450,6 +450,164 @@ def test_gemma_text_defaults_use_pinned_thinking_manager_and_worker(tmp_path) ->
         / "subagents"
     )
     assert "langgraph.json" in " ".join(command)
+
+
+def test_requested_gemma_simple_profiles_use_matched_128k_defaults() -> None:
+    names = [
+        f"gemma4-{size}-it-{mode}"
+        for size in ("e2b", "e4b", "31b", "26b-a4b")
+        for mode in ("non-thinking", "thinking")
+    ]
+    profiles = [get_experiment(name) for name in names]
+    assert all(isinstance(profile, SimpleExperiment) for profile in profiles)
+    assert experiments.GEMMA4_E2B_BASE.name == (
+        "3e22461f65e89153144f8adb70e3b8c2cc9845a7"
+    )
+    assert experiments.GEMMA4_31B_BASE.name == (
+        "842da3794eaa0b77d5f08bae87a17459d91ff475"
+    )
+    for profile in profiles:
+        assert isinstance(profile, SimpleExperiment)
+        assert profile.num_gpus == 1
+        assert profile.max_model_len == 131072
+        assert profile.max_output_tokens is None
+        assert profile.max_steps == 100
+        assert (profile.temperature, profile.top_p, profile.top_k) == (
+            1.0,
+            0.95,
+            64,
+        )
+        command = run_module.simple_vllm_command(profile)
+        template_kwargs = json.loads(
+            command[command.index("--default-chat-template-kwargs") + 1]
+        )
+        assert template_kwargs == {
+            "enable_thinking": profile.thinking,
+            **({"preserve_thinking": True} if profile.thinking else {}),
+        }
+
+
+def test_shared_gemma26_teacher_manager_and_worker_use_one_server(tmp_path) -> None:
+    experiment = get_experiment(
+        "gemma4-26b-a4b-thinking-teacher-"
+        "gemma4-26b-a4b-non-thinking-text-defaults"
+    )
+    assert isinstance(experiment, DecomposerExperiment)
+    assert experiment.manager_backend == "local_vllm"
+    assert experiment.evaluation_prompt_profile == "teacher"
+    assert experiment.num_gpus == 1
+    assert experiment.max_model_len == 131072
+    models = models_for_experiment(experiment)
+    assert len(models) == 1
+    assert models[0].model_id == "google/gemma-4-26B-A4B-it"
+    assert models[0].thinking is True
+
+    server = run_module.decomposer_vllm_command(models[0], experiment)
+    assert json.loads(
+        server[server.index("--default-chat-template-kwargs") + 1]
+    ) == {"enable_thinking": True, "preserve_thinking": True}
+
+    config_path, _ = run_module.runtime_decomposer_config(
+        Path.cwd(),
+        experiment,
+        tmp_path,
+        run_module.WorkplacePortLayout(12000),
+        materialize=True,
+    )
+    config = yaml.safe_load(config_path.read_text())
+    policy = config["policy_model"]["responses_api_models"]["vllm_model"]
+    assert policy["base_url"] == "http://127.0.0.1:20023/v1"
+    assert policy["chat_template_kwargs"] == {
+        "enable_thinking": True,
+        "preserve_thinking": True,
+    }
+    subagent = config["decomposer"]["responses_api_agents"]["decomposer_agent"]
+    assert subagent["decomposer_system_prompt_profile"] == "teacher"
+    assert subagent["subagent_types"][0]["assistant_id"] == (
+        "gemma_4_26b_a4b_non_thinking"
+    )
+
+
+def test_deepseek_gemma26_teacher_profile_is_matched_and_single_gpu() -> None:
+    experiment = get_experiment(
+        "deepseek-v4-flash-0731-teacher-gemma4-26b-a4b-non-thinking"
+    )
+    assert isinstance(experiment, DecomposerExperiment)
+    assert experiment.requires_openrouter is True
+    assert experiment.evaluation_prompt_profile == "teacher"
+    assert experiment.num_gpus == 1
+    assert experiment.max_model_len == 131072
+    models = models_for_experiment(experiment)
+    assert [model.model_id for model in models] == [
+        "google/gemma-4-26B-A4B-it"
+    ]
+    assert models[0].thinking is True
+    config = yaml.safe_load(
+        (
+            Path.cwd()
+            / "gyms"
+            / "workplace_assistant"
+            / "configs"
+            / experiment.gym_config_filename
+        ).read_text()
+    )
+    agent = config["decomposer"]["responses_api_agents"]["decomposer_agent"]
+    assert agent["decomposer_system_prompt_profile"] == "teacher"
+    assert agent["subagent_types"][0]["assistant_id"] == (
+        "gemma_4_26b_a4b_non_thinking"
+    )
+
+
+def test_reasoning_policy_identity_distinguishes_proxy_capture_only() -> None:
+    local = get_experiment("gemma4-e2b-it-thinking")
+    proxy = get_experiment(
+        "qwen36-35b-a3b-thinking-teacher-"
+        "qwen35-4b-non-thinking-text-defaults"
+    )
+    assert run_module.runtime_configuration(local)[
+        "structured_reasoning_policy"
+    ] == "capture_replay_v2_template_preserved"
+    assert run_module.runtime_configuration(proxy)[
+        "structured_reasoning_policy"
+    ] == "capture_only_upstream_no_replay_v1"
+
+
+def test_every_local_gemma_thinking_path_enables_template_replay() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    for experiment in experiments.ALL_EXPERIMENTS:
+        if isinstance(experiment, SimpleExperiment):
+            if experiment.thinking:
+                command = run_module.simple_vllm_command(experiment)
+                kwargs = json.loads(
+                    command[command.index("--default-chat-template-kwargs") + 1]
+                )
+                assert kwargs["preserve_thinking"] is True
+            continue
+
+        for model in models_for_experiment(experiment):
+            if model.thinking:
+                command = run_module.decomposer_vllm_command(model, experiment)
+                kwargs = json.loads(
+                    command[command.index("--default-chat-template-kwargs") + 1]
+                )
+                assert kwargs["preserve_thinking"] is True
+
+        config = yaml.safe_load(
+            (
+                repo_root
+                / "gyms"
+                / "workplace_assistant"
+                / "configs"
+                / experiment.gym_config_filename
+            ).read_text()
+        )
+        policy_models = config.get("policy_model", {}).get(
+            "responses_api_models", {}
+        )
+        for policy in policy_models.values():
+            kwargs = policy.get("chat_template_kwargs", {})
+            if kwargs.get("enable_thinking") is True:
+                assert kwargs["preserve_thinking"] is True
 
 
 def test_text_default_simple_profiles_use_matched_workplace_limits() -> None:
@@ -1106,7 +1264,7 @@ def test_deepseek_e4b_thinking_profile_is_single_type_and_single_gpu() -> None:
         "google/gemma-4-E4B-it"
     )
     assert command[command.index("--default-chat-template-kwargs") + 1] == (
-        '{"enable_thinking":true}'
+        '{"enable_thinking":true,"preserve_thinking":true}'
     )
 
     payload = run_eval.build_payload(
@@ -1459,7 +1617,7 @@ def test_local_e4b_manager_shares_thinking_subagent_server() -> None:
 
     server = run_module.decomposer_vllm_command(selected[0], experiment)
     assert server[server.index("--default-chat-template-kwargs") + 1] == (
-        '{"enable_thinking":true}'
+        '{"enable_thinking":true,"preserve_thinking":true}'
     )
     assert prepare_module.components_for_experiments((experiment,)) == (
         "resources_servers/workplace_assistant",
@@ -1523,7 +1681,7 @@ def test_sft_e4b_manager_and_vanilla_subagent_use_dedicated_gpus() -> None:
     ] == ('{"enable_thinking":false}')
     assert subagent_server[
         subagent_server.index("--default-chat-template-kwargs") + 1
-    ] == ('{"enable_thinking":true}')
+    ] == ('{"enable_thinking":true,"preserve_thinking":true}')
 
     repo_root = Path(__file__).resolve().parents[2]
     config = yaml.safe_load(

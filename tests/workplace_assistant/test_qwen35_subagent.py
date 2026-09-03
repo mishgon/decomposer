@@ -127,7 +127,10 @@ def test_gemma_worker_uses_official_thinking_sampling(monkeypatch) -> None:
     assert captured["extra_body"] == {
         "top_k": 64,
         "include_reasoning": True,
-        "chat_template_kwargs": {"enable_thinking": True},
+        "chat_template_kwargs": {
+            "enable_thinking": True,
+            "preserve_thinking": True,
+        },
     }
     limiter = next(
         item
