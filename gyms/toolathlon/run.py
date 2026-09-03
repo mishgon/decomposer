@@ -363,6 +363,8 @@ def _exec_in_container(
 
 def served_subagent_model_name(model: str) -> str:
     model_lower = model.lower()
+    if "gemma-4-31b" in model_lower:
+        return "google/gemma-4-31B-it"
     if "gemma-4-26b-a4b" in model_lower:
         return "google/gemma-4-26B-A4B-it"
     if "gemma-4-e4b" in model_lower:
@@ -402,10 +404,17 @@ def vllm_command(
     ]
     if is_gemma:
         command.extend(["--reasoning-parser", "gemma4"])
-    if not is_gemma or "gemma-4-26b-a4b" in model_lower:
-        command.extend(
-            ["--default-chat-template-kwargs", '{"enable_thinking":false}']
-        )
+    thinking = is_gemma and "gemma-4-26b-a4b" not in model_lower
+    command.extend(
+        [
+            "--default-chat-template-kwargs",
+            (
+                '{"enable_thinking":true}'
+                if thinking
+                else '{"enable_thinking":false}'
+            ),
+        ]
+    )
     if data_parallel_size > 1:
         command.extend(
             [
@@ -1031,6 +1040,9 @@ async def _run_simple_agent(
     os.environ["GEMMA_4_E4B_BASE_URL"] = (
         f"http://127.0.0.1:{subagent_port}/v1"
     )
+    os.environ["GEMMA_4_31B_BASE_URL"] = (
+        f"http://127.0.0.1:{subagent_port}/v1"
+    )
     os.environ["GEMMA_4_26B_A4B_BASE_URL"] = (
         f"http://127.0.0.1:{subagent_port}/v1"
     )
@@ -1042,7 +1054,9 @@ async def _run_simple_agent(
     async with webapp.lifespan(webapp.app):
         if provider == "vllm":
             model_lower = model.lower()
-            if "gemma-4-26b-a4b" in model_lower:
+            if "gemma-4-31b" in model_lower:
+                agent = graph.gemma_4_31b_thinking()
+            elif "gemma-4-26b-a4b" in model_lower:
                 agent = graph.gemma_4_26b_a4b_non_thinking()
             elif "gemma-4-e4b" in model_lower:
                 agent = graph.gemma_4_e4b_thinking()

@@ -243,6 +243,34 @@ def test_gemma_non_thinking_uses_official_sampling_parameters(monkeypatch) -> No
     assert result is compiled
 
 
+def test_gemma_31b_thinking_uses_official_sampling_parameters(monkeypatch) -> None:
+    captured = {}
+    compiled = object()
+
+    class FakeChatVLLM:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr(subagent_graph, "ChatVLLM", FakeChatVLLM)
+    monkeypatch.setattr(subagent_graph, "get_tools", lambda: [])
+    monkeypatch.setattr(
+        subagent_graph, "create_agent", lambda **_kwargs: compiled
+    )
+
+    result = subagent_graph.gemma_4_31b_thinking()
+
+    assert captured["model"] == "google/gemma-4-31B-it"
+    assert captured["temperature"] == 1.0
+    assert captured["top_p"] == 0.95
+    assert captured["extra_body"] == {
+        "top_k": 64,
+        "chat_template_kwargs": {"enable_thinking": True},
+    }
+    assert captured["preserve_reasoning"] is True
+    asyncio.run(captured["http_async_client"].aclose())
+    assert result is compiled
+
+
 def test_deepseek_subagent_uses_configured_openrouter_model(monkeypatch) -> None:
     captured = {}
     compiled = object()
@@ -510,6 +538,9 @@ def test_served_subagent_model_names_cover_supported_local_models() -> None:
     assert run.served_subagent_model_name("/models/gemma-4-26B-A4B-it") == (
         "google/gemma-4-26B-A4B-it"
     )
+    assert run.served_subagent_model_name("/models/gemma-4-31B-it") == (
+        "google/gemma-4-31B-it"
+    )
 
 
 def test_vllm_command_uses_gemma_thinking_parsers() -> None:
@@ -525,7 +556,27 @@ def test_vllm_command_uses_gemma_thinking_parsers() -> None:
     )
     assert command[command.index("--tool-call-parser") + 1] == "gemma4"
     assert command[command.index("--reasoning-parser") + 1] == "gemma4"
-    assert "--default-chat-template-kwargs" not in command
+    assert command[command.index("--default-chat-template-kwargs") + 1] == (
+        '{"enable_thinking":true}'
+    )
+
+
+def test_vllm_command_uses_gemma_31b_thinking() -> None:
+    command = run.vllm_command(
+        "/models/gemma-4-31B-it",
+        8030,
+        max_model_len=131072,
+        gpu_memory_utilization=0.9,
+    )
+
+    assert command[command.index("--served-model-name") + 1] == (
+        "google/gemma-4-31B-it"
+    )
+    assert command[command.index("--tool-call-parser") + 1] == "gemma4"
+    assert command[command.index("--reasoning-parser") + 1] == "gemma4"
+    assert command[command.index("--default-chat-template-kwargs") + 1] == (
+        '{"enable_thinking":true}'
+    )
 
 
 def test_vllm_command_uses_gemma_26b_non_thinking() -> None:
