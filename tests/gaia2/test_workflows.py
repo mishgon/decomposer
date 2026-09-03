@@ -101,6 +101,10 @@ from gyms.gaia2.run_eval import build_payload, normalize_job_desc, redact_payloa
 from gyms.gaia2.snapshot_trace_prefix import create_trace_prefix_snapshot
 
 
+def _default_chat_template_kwargs(command: list[str]) -> dict:
+    return json.loads(command[command.index("--default-chat-template-kwargs") + 1])
+
+
 def test_port_layout_offsets_each_gaia2_service_role() -> None:
     ports = Gaia2PortLayout(12000)
 
@@ -745,7 +749,7 @@ def test_qwen36_thinking_text_defaults_preserve_reasoning(tmp_path) -> None:
     ] == "80"
 
 
-def test_gemma_text_defaults_use_pinned_thinking_models() -> None:
+def test_gemma_text_defaults_use_pinned_thinking_models(tmp_path) -> None:
     experiment = GEMMA4_TEXT_DEFAULTS_DECOMPOSER_EXPERIMENT
     assert experiment.manager_checkpoint.name == (
         "4d7ae4984b7db7de8f8457170b3f1a419ee76d52"
@@ -767,7 +771,16 @@ def test_gemma_text_defaults_use_pinned_thinking_models() -> None:
     for command in (manager, worker):
         assert command[command.index("--max-model-len") + 1] == "131072"
         assert "--language-model-only" in command
-        assert '{"enable_thinking":true}' in command
+        assert _default_chat_template_kwargs(command) == {
+            "enable_thinking": True,
+            "preserve_thinking": True,
+        }
+    service_path, _ = _runtime_configs(Path.cwd(), tmp_path, experiment)
+    service = json.loads(service_path.read_text())
+    assert service["manager"]["extra_body"]["chat_template_kwargs"] == {
+        "enable_thinking": True,
+        "preserve_thinking": True,
+    }
     environment = subagent_environment(experiment)
     assert "GAIA2_SUBAGENT_MAX_COMPLETION_TOKENS" not in environment
     assert environment["GAIA2_SUBAGENT_MAX_MODEL_CALLS"] == "80"
@@ -873,6 +886,39 @@ def test_model_call_budget_semantics_are_part_of_resume_identity(tmp_path) -> No
         "capture_replay_v1"
     )
 
+    qwen_proxy = None
+    for experiment in (
+        QWEN36_QWEN_EXPERIMENT,
+        QWEN36_TEXT_DEFAULTS_DECOMPOSER_EXPERIMENT,
+        QWEN36_THINKING_TEXT_DEFAULTS_DECOMPOSER_EXPERIMENT,
+    ):
+        identity = run_identity(
+            experiment,
+            domain="execution",
+            purpose="evaluation",
+            partition="test",
+            num_repeats=3,
+            concurrency=4,
+            limit=None,
+        )
+        assert identity["runtime_configuration"]["structured_reasoning_policy"] == (
+            "capture_only_upstream_no_replay_v1"
+        )
+        if experiment is QWEN36_THINKING_TEXT_DEFAULTS_DECOMPOSER_EXPERIMENT:
+            qwen_proxy = identity
+    assert qwen_proxy is not None
+    incorrect_qwen_marker = json.loads(json.dumps(qwen_proxy))
+    incorrect_qwen_marker["runtime_configuration"]["structured_reasoning_policy"] = (
+        "capture_replay_v1"
+    )
+    marker = tmp_path / ".eval_done.json"
+    marker.write_text(
+        json.dumps({"state": "complete", **incorrect_qwen_marker}) + "\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="output identity mismatch"):
+        validate_run_identity(marker, qwen_proxy, require_complete=True)
+
     capped = run_identity(
         replace(SIMPLE_QWEN_EXPERIMENT, max_completion_tokens=8192),
         domain="execution",
@@ -882,7 +928,6 @@ def test_model_call_budget_semantics_are_part_of_resume_identity(tmp_path) -> No
         concurrency=4,
         limit=None,
     )
-    marker = tmp_path / ".eval_done.json"
     marker.write_text(
         json.dumps({"state": "complete", **capped}) + "\n", encoding="utf-8"
     )
@@ -1029,9 +1074,15 @@ def test_vllm_commands_use_current_e4b_thinking_profiles() -> None:
     manager, worker = decomposer_vllm_commands(DECOMPOSER_EXPERIMENT)
 
     assert "gemma4" in simple
-    assert '{"enable_thinking":true}' in simple
+    assert _default_chat_template_kwargs(simple) == {
+        "enable_thinking": True,
+        "preserve_thinking": True,
+    }
     assert '{"enable_thinking":false}' in manager
-    assert '{"enable_thinking":true}' in worker
+    assert _default_chat_template_kwargs(worker) == {
+        "enable_thinking": True,
+        "preserve_thinking": True,
+    }
     assert str(DECOMPOSER_EXPERIMENT.manager_checkpoint) in manager
     assert str(DECOMPOSER_EXPERIMENT.worker_checkpoint) in worker
 

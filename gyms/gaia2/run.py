@@ -163,12 +163,18 @@ def runtime_configuration(experiment: Experiment) -> dict[str, Any]:
         )
         if getattr(experiment, name) is not None
     }
+    structured_reasoning_policy = "capture_replay_v1"
+    if (
+        isinstance(experiment, DecomposerExperiment)
+        and experiment.requires_llm_proxy
+    ):
+        structured_reasoning_policy = "capture_only_upstream_no_replay_v1"
     configuration: dict[str, Any] = {
         "max_model_len": experiment.max_model_len,
         "max_completion_tokens": experiment.max_completion_tokens,
         "model_call_budget_semantics": "per_actor_policy_invocations_v1",
         "model_overflow_policy": "fail_actor_v1",
-        "structured_reasoning_policy": "capture_replay_v1",
+        "structured_reasoning_policy": structured_reasoning_policy,
         "sampling": sampling,
     }
     if isinstance(experiment, SimpleExperiment):
@@ -539,7 +545,13 @@ def _common_vllm_command(
         "--tool-call-parser",
         tool_call_parser,
         "--default-chat-template-kwargs",
-        json.dumps({"enable_thinking": thinking}, separators=(",", ":")),
+        json.dumps(
+            {
+                "enable_thinking": thinking,
+                **({"preserve_thinking": True} if thinking else {}),
+            },
+            separators=(",", ":"),
+        ),
     ]
     if reasoning_parser is not None:
         command.extend(["--reasoning-parser", reasoning_parser])
@@ -1371,7 +1383,14 @@ def _runtime_configs(
         manager_extra_body: dict[str, Any] = {
             "top_k": experiment.top_k,
             "include_reasoning": experiment.manager_thinking,
-            "chat_template_kwargs": {"enable_thinking": experiment.manager_thinking},
+            "chat_template_kwargs": {
+                "enable_thinking": experiment.manager_thinking,
+                **(
+                    {"preserve_thinking": True}
+                    if experiment.manager_thinking
+                    else {}
+                ),
+            },
         }
         if experiment.min_p is not None:
             manager_extra_body["min_p"] = experiment.min_p

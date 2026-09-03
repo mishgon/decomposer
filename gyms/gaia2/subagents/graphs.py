@@ -166,11 +166,14 @@ def _model() -> ChatOpenAI:
         extra_body["min_p"] = float(min_p)
     if repetition_penalty := os.environ.get("GAIA2_SUBAGENT_REPETITION_PENALTY"):
         extra_body["repetition_penalty"] = float(repetition_penalty)
+    extra_body["chat_template_kwargs"] = {
+        "enable_thinking": thinking,
+        **({"preserve_thinking": True} if thinking else {}),
+    }
     if not thinking:
         extra_body.update(
             {
                 "include_reasoning": False,
-                "chat_template_kwargs": {"enable_thinking": False},
             }
         )
     if os.environ.get("GAIA2_SUBAGENT_EXTRA_BODY"):

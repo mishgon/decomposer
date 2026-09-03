@@ -382,6 +382,36 @@ def test_worker_model_forwards_non_thinking_sampling(monkeypatch):
     }
 
 
+def test_worker_model_preserves_thinking_across_later_user_turns(monkeypatch):
+    captured = {}
+
+    def fake_model(**kwargs):
+        captured.update(kwargs)
+        return object()
+
+    monkeypatch.setattr(graphs, "ChatVLLM", fake_model)
+    monkeypatch.setenv("GAIA2_SUBAGENT_MODEL", "worker")
+    monkeypatch.setenv("GAIA2_SUBAGENT_THINKING", "1")
+    monkeypatch.setenv("GAIA2_SUBAGENT_TOP_K", "64")
+    for name in (
+        "GAIA2_SUBAGENT_MIN_P",
+        "GAIA2_SUBAGENT_REPETITION_PENALTY",
+        "GAIA2_SUBAGENT_EXTRA_BODY",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    graphs._model()
+
+    assert captured["preserve_reasoning"] is True
+    assert captured["extra_body"] == {
+        "top_k": 64,
+        "chat_template_kwargs": {
+            "enable_thinking": True,
+            "preserve_thinking": True,
+        },
+    }
+
+
 def test_worker_model_omits_completion_limit_by_default(monkeypatch):
     captured = {}
 
