@@ -47,7 +47,9 @@ def _create_subagent(
         top_p = 0.95
         presence_penalty = None
         extra_body = {"top_k": 64}
-        if not thinking:
+        if thinking:
+            extra_body["chat_template_kwargs"] = {"enable_thinking": True}
+        else:
             extra_body.update(
                 {
                     "include_reasoning": False,
@@ -103,6 +105,15 @@ def gemma_4_e4b_thinking() -> CompiledStateGraph:
     return _create_subagent(
         "google/gemma-4-E4B-it",
         "GEMMA_4_E4B_BASE_URL",
+        8030,
+        thinking=True,
+    )
+
+
+def gemma_4_31b_thinking() -> CompiledStateGraph:
+    return _create_subagent(
+        "google/gemma-4-31B-it",
+        "GEMMA_4_31B_BASE_URL",
         8030,
         thinking=True,
     )
