@@ -80,6 +80,9 @@ class SubagentRun(TypedDict):
     status: str
     prompt: str
     tool_calls: NotRequired[list[SubagentToolCall]]
+    # Complete per-run LangGraph message history. This preserves every model
+    # response and tool result for evaluation traces, not only the final report.
+    messages: NotRequired[list[dict[str, Any]]]
     report: NotRequired[SubagentReport | None]
     # Zero-based order in which wait() returned this run's report.
     report_sequence_number: NotRequired[int]
@@ -429,6 +432,7 @@ def _build_wait_tool(
                     **subagent_run,
                     "status": run["status"],
                     "tool_calls": tool_calls,
+                    "messages": run_messages,
                     "report": report,
                     "report_sequence_number": report_sequence_number,
                 }
@@ -546,6 +550,7 @@ def _build_wait_tool(
                     **subagent_run,
                     "status": run["status"],
                     "tool_calls": tool_calls,
+                    "messages": run_messages,
                     "report": report,
                     "report_sequence_number": report_sequence_number,
                 }

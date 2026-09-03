@@ -24,6 +24,11 @@ from decomposer.chat_vllm import ChatVLLM
 from decomposer.core import create_decomposer_agent
 from decomposer.prompts import DECOMPOSER_TEACHER_SYSTEM_PROMPT
 
+try:
+    from .usage import build_usage_summary
+except ImportError:  # Executed directly as a script.
+    from usage import build_usage_summary
+
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 TOOLATHLON_ROOT = REPO_ROOT / "external" / "toolathlon_gym"
@@ -359,7 +364,7 @@ def main() -> None:
     parser.add_argument("--evals-dir", type=Path, default=DEFAULT_EVALS_DIR)
     parser.add_argument("--startup-timeout", type=float, default=180)
     parser.add_argument("--n-jobs-per-worker", type=int, default=1000)
-    parser.add_argument("--agent-timeout", type=float, default=1800)
+    parser.add_argument("--agent-timeout", type=float, default=2700)
     parser.add_argument("--container-lock-file", type=Path, help=argparse.SUPPRESS)
     args = parser.parse_args()
     if args.n_jobs_per_worker < 1:
@@ -550,6 +555,8 @@ def main() -> None:
             "--env",
             f"N_JOBS_PER_WORKER={args.n_jobs_per_worker}",
             "--env",
+            "TOOLATHLON_SUBAGENT_CALL_LOG=/artifacts/data/subagent_model_calls.jsonl",
+            "--env",
             (
                 "QWEN_3_5_4B_BASE_URL="
                 f"http://host.docker.internal:{args.subagent_port}/v1"
@@ -615,8 +622,14 @@ def main() -> None:
         reasoning_effort = os.environ.get(
             "DECOMPOSER_REASONING_EFFORT", "high"
         ).lower()
-        decomposer_max_tokens = int(
-            os.environ.get("DECOMPOSER_MAX_TOKENS", "8192")
+        configured_max_tokens = os.environ.get("DECOMPOSER_MAX_TOKENS")
+        decomposer_max_tokens = (
+            int(configured_max_tokens) if configured_max_tokens else None
+        )
+        max_tokens_kwargs = (
+            {"max_tokens": decomposer_max_tokens}
+            if decomposer_max_tokens is not None
+            else {}
         )
         openrouter_timeout = float(
             os.environ.get("DECOMPOSER_OPENROUTER_TIMEOUT", "600")
@@ -636,7 +649,7 @@ def main() -> None:
                 api_key=llm_proxy_key,
                 temperature=1.0,
                 top_p=0.95,
-                max_tokens=decomposer_max_tokens,
+                **max_tokens_kwargs,
                 timeout=openrouter_timeout,
                 max_retries=openrouter_max_retries,
                 disable_streaming=True,
@@ -658,7 +671,7 @@ def main() -> None:
                 temperature=1.0,
                 top_p=1.0,
                 reasoning=reasoning,
-                max_tokens=decomposer_max_tokens,
+                **max_tokens_kwargs,
                 # DeepSeek V4 high-reasoning decompositions can legitimately
                 # take several minutes. Preserve that response window while
                 # allowing transient backend failures to retry; the outer
@@ -725,6 +738,9 @@ def main() -> None:
             except BaseException:
                 state = {}
         messages = state.get("messages", [])
+        serialized_messages = [message_to_dict(message) for message in messages]
+        subagent_runs = state.get("subagent_runs", {})
+        usage = build_usage_summary(serialized_messages, subagent_runs)
         (episode_dir / "trace.json").write_text(
             json.dumps(
                 {
@@ -745,13 +761,17 @@ def main() -> None:
                     "started_at": started_at,
                     "finished_at": datetime.now(timezone.utc).isoformat(),
                     "agent_error": agent_error,
-                    "messages": [message_to_dict(message) for message in messages],
-                    "subagent_runs": state.get("subagent_runs", {}),
+                    "messages": serialized_messages,
+                    "subagent_runs": subagent_runs,
                 },
                 indent=2,
                 ensure_ascii=False,
                 default=str,
             ),
+            encoding="utf-8",
+        )
+        (episode_dir / "usage.json").write_text(
+            json.dumps(usage, indent=2, ensure_ascii=False),
             encoding="utf-8",
         )
         answer = str(messages[-1].content) if messages else ""

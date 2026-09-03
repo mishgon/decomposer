@@ -1,13 +1,16 @@
 import os
 
+import httpx
 from decomposer.prompts import SUBAGENT_SYSTEM_PROMPT
 from decomposer.chat_vllm import ChatVLLM
 from langchain.agents import create_agent
 from langgraph.graph.state import CompiledStateGraph
+from model_logging import durable_model_call_log
 from webapp import get_tools, truncate_mcp_tool_output
 
 
-REQUEST_TIMEOUT_SECONDS = 300.0
+REQUEST_TIMEOUT_SECONDS = 600.0
+REQUEST_MAX_RETRIES = 2
 
 
 def _create_subagent(
@@ -37,7 +40,10 @@ def _create_subagent(
         temperature=1.0,
         top_p=0.95,
         timeout=REQUEST_TIMEOUT_SECONDS,
-        max_retries=0,
+        max_retries=REQUEST_MAX_RETRIES,
+        http_async_client=httpx.AsyncClient(
+            limits=httpx.Limits(max_keepalive_connections=0)
+        ),
         disable_streaming=True,
         use_responses_api=False,
         preserve_reasoning=thinking,
@@ -47,7 +53,7 @@ def _create_subagent(
         model=model,
         tools=get_tools(),
         system_prompt=SUBAGENT_SYSTEM_PROMPT,
-        middleware=[truncate_mcp_tool_output],
+        middleware=[durable_model_call_log, truncate_mcp_tool_output],
     )
 
 
