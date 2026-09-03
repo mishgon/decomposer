@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import concurrent.futures
-import contextlib
 import hashlib
 import json
 import os
@@ -938,33 +937,17 @@ def main(
         )
         active: dict[
             concurrent.futures.Future[dict[str, Any]],
-            tuple[int, dict[str, Any], int],
+            tuple[int, dict[str, Any], int, tuple[str, ...], int],
         ] = {}
-        remaining = iter(work)
+        remaining = list(work)
         next_endpoint = 0
-        task_episode_locks = {
-            episode["task"]: threading.Lock() for episode in manifest["episodes"]
-        }
-        shared_resource_locks = {
-            resource: threading.Lock()
-            for resource in SHARED_MUTABLE_MCP_SERVERS
-        }
+        active_tasks: set[str] = set()
+        active_resources: set[str] = set()
+        available_container_slots = set(range(args.container_slots))
         task_resources = {
             task: shared_task_resources(task)
-            for task in task_episode_locks
+            for task in {episode["task"] for episode in manifest["episodes"]}
         }
-
-        def execute_scheduled_episode(
-            batch_args: argparse.Namespace, **kwargs: Any
-        ) -> dict[str, Any]:
-            episode = kwargs["episode"]
-            with task_episode_locks[episode["task"]]:
-                with contextlib.ExitStack() as resource_stack:
-                    for resource in task_resources[episode["task"]]:
-                        resource_stack.enter_context(
-                            shared_resource_locks[resource]
-                        )
-                    return execute_episode(batch_args, **kwargs)
 
         def record_result(
             episode: dict[str, Any], result: dict[str, Any], *, interrupted_run: bool = False
@@ -987,10 +970,23 @@ def main(
 
         def submit_next() -> bool:
             nonlocal next_endpoint
-            try:
-                index, episode, attempt = next(remaining)
-            except StopIteration:
+            if not available_container_slots:
                 return False
+            selected = None
+            for position, (index, episode, attempt) in enumerate(remaining):
+                resources = task_resources[episode["task"]]
+                if episode["task"] in active_tasks:
+                    continue
+                if active_resources.intersection(resources):
+                    continue
+                selected = position, index, episode, attempt, resources
+                break
+            if selected is None:
+                return False
+            position, index, episode, attempt, resources = selected
+            remaining.pop(position)
+            container_slot = min(available_container_slots)
+            available_container_slots.remove(container_slot)
             print(
                 f"[{index}/{manifest['counts']['total']}] {episode['key']} "
                 f"attempt {attempt}",
@@ -1000,7 +996,7 @@ def main(
             save_manifest(run_dir, manifest)
             append_event(run_dir, "episode_started", key=episode["key"], attempt=attempt)
             future = executor.submit(
-                execute_scheduled_episode,
+                execute_episode,
                 args,
                 runner_path=repo_root / "gyms" / "toolathlon" / "run.py",
                 root=root,
@@ -1009,10 +1005,12 @@ def main(
                 attempt=attempt,
                 stop_event=stop_event,
                 subagent_port=args.subagent_ports[next_endpoint],
-                container_slot=(index - 1) % args.container_slots,
+                container_slot=container_slot,
             )
             next_endpoint = (next_endpoint + 1) % len(args.subagent_ports)
-            active[future] = (index, episode, attempt)
+            active_tasks.add(episode["task"])
+            active_resources.update(resources)
+            active[future] = (index, episode, attempt, resources, container_slot)
             return True
 
         try:
@@ -1024,7 +1022,10 @@ def main(
                     return_when=concurrent.futures.FIRST_COMPLETED,
                 )
                 for future in done:
-                    _index, episode, attempt = active.pop(future)
+                    _index, episode, attempt, resources, container_slot = active.pop(future)
+                    active_tasks.remove(episode["task"])
+                    active_resources.difference_update(resources)
+                    available_container_slots.add(container_slot)
                     try:
                         result = future.result()
                     except Exception as error:
@@ -1037,7 +1038,13 @@ def main(
                     submit_next()
         except BaseException:
             stop_event.set()
-            for future, (_index, episode, attempt) in list(active.items()):
+            for future, (
+                _index,
+                episode,
+                attempt,
+                _resources,
+                _container_slot,
+            ) in list(active.items()):
                 try:
                     result = future.result()
                 except BaseException as error:

@@ -2,7 +2,8 @@
 
 The upstream decoupled gateway exposes MCP servers and ``claim_done`` only.
 Our LangGraph executors do not instantiate Toolathlon's ``TaskAgent``, so they
-otherwise lose native tools such as ``python_execute`` and ``web_search``.
+otherwise lose native tools such as ``python_execute``, ``web_search``, and the
+helpers for reading full outputs after Toolathlon's 100K truncation boundary.
 """
 
 from __future__ import annotations
@@ -20,7 +21,14 @@ from scripts.decoupled import container_tool_gateway as upstream
 from utils.roles.task_agent import local_tool_mappings
 
 
-EXPOSED_LOCAL_TOOLS = frozenset({"python_execute", "web_search"})
+EXPOSED_LOCAL_TOOLS = frozenset(
+    {
+        "handle_overlong_tool_outputs",
+        "python_execute",
+        "sleep",
+        "web_search",
+    }
+)
 
 
 class ContainerToolGateway(upstream.ContainerToolGateway):
@@ -42,19 +50,21 @@ class ContainerToolGateway(upstream.ContainerToolGateway):
 
         requested = set(self.bundle.get("needed_local_tools") or [])
         for config_name in sorted(requested.intersection(EXPOSED_LOCAL_TOOLS)):
-            tool = local_tool_mappings[config_name]
-            exposed_name = self.registry._allocate_name(
-                tool.name, "local", always_prefix=False
-            )
-            self.registry._records[exposed_name] = upstream.ToolRecord(
-                exposed_name=exposed_name,
-                backend_type="native_local",
-                backend_name=tool.name,
-                description=tool.description,
-                input_schema=tool.params_json_schema,
-                server_name=None,
-            )
-            self._local_callbacks[exposed_name] = tool.on_invoke_tool
+            configured = local_tool_mappings[config_name]
+            tools = configured if isinstance(configured, list) else [configured]
+            for tool in tools:
+                exposed_name = self.registry._allocate_name(
+                    tool.name, "local", always_prefix=False
+                )
+                self.registry._records[exposed_name] = upstream.ToolRecord(
+                    exposed_name=exposed_name,
+                    backend_type="native_local",
+                    backend_name=tool.name,
+                    description=tool.description,
+                    input_schema=tool.params_json_schema,
+                    server_name=None,
+                )
+                self._local_callbacks[exposed_name] = tool.on_invoke_tool
 
     async def _remote_call(
         self, tool_record: upstream.ToolRecord, arguments: dict[str, Any]
