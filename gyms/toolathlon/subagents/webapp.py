@@ -50,7 +50,9 @@ async def truncate_mcp_tool_output(request, handler):
                 output_path.parent.mkdir(parents=True, exist_ok=True)
                 output_path.write_text(content, encoding="utf-8")
                 saved_note = (
-                    f" The complete output is available at {relative_path}."
+                    " The complete output is available through the overlong-output "
+                    f"tools with shortuuid identifier {output_id}, and at "
+                    f"{relative_path}."
                 )
             response = response.model_copy(
                 update={

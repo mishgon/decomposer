@@ -161,6 +161,7 @@ Select the tool-agent provider independently with `--subagent-provider`:
 # DeepSeek direct tool agent
 uv run python gyms/toolathlon/run.py --all \
   --purpose evaluation --agent-mode simple \
+  --simple-agent-implementation langgraph \
   --subagent-provider openrouter \
   --subagent-model deepseek/deepseek-v4-flash-0731
 

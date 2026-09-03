@@ -491,6 +491,7 @@ def test_overlong_tool_output_is_preserved_in_workspace(
     assert json.loads(output_files[0].read_text()) == [
         {"type": "text", "text": "x" * 20}
     ]
+    assert f"shortuuid identifier {output_files[0].stem}" in response.content
     assert str(output_files[0].relative_to(tmp_path)) in response.content
 
 
@@ -1396,6 +1397,8 @@ def test_batch_runs_episodes_with_requested_concurrency(tmp_path, monkeypatch) -
             "trace-generation",
             "--concurrency",
             "4",
+            "--container-slots",
+            "4",
             "--bench-artifacts-dir",
             str(artifacts),
         ],
@@ -1413,6 +1416,84 @@ def test_batch_runs_episodes_with_requested_concurrency(tmp_path, monkeypatch) -
 
     assert maximum_active == 4
     assert manifest["counts"]["completed"] == 4
+
+
+def test_batch_serializes_shared_resources_without_blocking_worker_slots(
+    tmp_path, monkeypatch
+) -> None:
+    toolathlon_root = tmp_path / "toolathlon"
+    tasks = [
+        "finalpool/canvas-alpha",
+        "finalpool/canvas-beta",
+        "finalpool/independent",
+    ]
+    for task in tasks:
+        (toolathlon_root / "tasks" / task).mkdir(parents=True)
+    artifacts = tmp_path / "artifacts"
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    monkeypatch.setattr(batch, "new_run_id", lambda: "resource-aware-run")
+
+    canvas_alpha_started = threading.Event()
+    independent_started = threading.Event()
+    canvas_alpha_finished = threading.Event()
+    canvas_beta_started_early = False
+
+    def fake_execute_episode(args, **kwargs):
+        nonlocal canvas_beta_started_early
+        task = kwargs["episode"]["task"]
+        if task == "finalpool/canvas-alpha":
+            canvas_alpha_started.set()
+            independent_started.wait(timeout=1)
+            time.sleep(0.02)
+            canvas_alpha_finished.set()
+        elif task == "finalpool/independent":
+            canvas_alpha_started.wait(timeout=1)
+            independent_started.set()
+        elif task == "finalpool/canvas-beta":
+            canvas_beta_started_early = not canvas_alpha_finished.is_set()
+        attempt = kwargs["attempt"]
+        return {
+            "attempt": attempt,
+            "status": "completed",
+            "score": True,
+            "artifact_path": "/trace",
+            "evaluation_path": "/eval/result.json",
+            "started_at": "start",
+            "finished_at": "finish",
+            "duration_seconds": 0.02,
+            "returncode": 0,
+            "error": None,
+        }
+
+    monkeypatch.setattr(batch, "execute_episode", fake_execute_episode)
+    manifest = batch.main(
+        [
+            "--tasks",
+            *tasks,
+            "--purpose",
+            "trace-generation",
+            "--concurrency",
+            "2",
+            "--container-slots",
+            "2",
+            "--bench-artifacts-dir",
+            str(artifacts),
+        ],
+        repo_root=tmp_path,
+        toolathlon_root=toolathlon_root,
+        default_artifacts_dir=artifacts,
+        default_image="image",
+        default_model="decomposer-model",
+        default_subagent_model="subagent-model",
+        default_subagent_port=8030,
+        start_vllm=lambda **kwargs: "process",
+        stop_vllm=lambda process: None,
+        docker=lambda *args, **kwargs: subprocess.CompletedProcess(args, 0, "", ""),
+    )
+
+    assert independent_started.is_set()
+    assert canvas_beta_started_early is False
+    assert manifest["counts"]["completed"] == 3
 
 
 def test_batch_distributes_episodes_across_external_vllm_ports(
@@ -1457,6 +1538,8 @@ def test_batch_distributes_episodes_across_external_vllm_ports(
             "18201",
             "18202",
             "--concurrency",
+            "3",
+            "--container-slots",
             "3",
             "--bench-artifacts-dir",
             str(artifacts),
