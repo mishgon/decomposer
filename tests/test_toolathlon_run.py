@@ -1,5 +1,6 @@
 import asyncio
 import json
+import signal
 import socket
 import subprocess
 import sys
@@ -991,6 +992,54 @@ def test_official_simple_agent_bundle_can_match_verified_generation_defaults() -
         "max_tokens": 65_536,
         "reasoning": {"effort": "high"},
     }
+
+
+def test_official_simple_agent_bundle_can_match_ornith_128k_limit() -> None:
+    source = {
+        "container_paths": {
+            "task_root": "/workspace/dumps",
+            "agent_workspace": "/workspace/dumps/workspace",
+            "log_file": "/workspace/dumps/traj_log.json",
+        },
+        "host_paths": {},
+        "eval_config": {
+            "global_task_config": {"max_steps_under_single_turn_mode": 1},
+            "agent": {},
+        },
+    }
+    args = SimpleNamespace(
+        subagent_model="/models/gemma-4-31B-it",
+        vllm_max_model_len=262_144,
+        max_steps=200,
+        native_generation_profile="toolathlon-verified-128k",
+    )
+
+    result = run.official_simple_agent_bundle(source, args)
+
+    assert result["eval_config"]["agent"]["generation"] == {
+        "max_tokens": 131_072,
+        "reasoning": {"effort": "high"},
+    }
+
+
+def test_ornith_128k_profile_rejects_128k_model_context() -> None:
+    source = {
+        "container_paths": {},
+        "host_paths": {},
+        "eval_config": {
+            "global_task_config": {"max_steps_under_single_turn_mode": 1},
+            "agent": {},
+        },
+    }
+    args = SimpleNamespace(
+        subagent_model="/models/gemma-4-31B-it",
+        vllm_max_model_len=131_072,
+        max_steps=200,
+        native_generation_profile="toolathlon-verified-128k",
+    )
+
+    with pytest.raises(ValueError, match="vllm-max-model-len >= 262144"):
+        run.official_simple_agent_bundle(source, args)
 
 
 def test_native_agent_config_persists_resolved_runtime_settings(tmp_path) -> None:
@@ -2638,3 +2687,59 @@ def test_execute_episode_counts_evaluated_agent_failure_once(
     assert result["agent_success"] is False
     assert result["agent_error"] == "agent exceeded 2700 seconds"
     assert result["error"] is None
+
+
+def test_execute_episode_timeout_uses_sigterm_for_nohup_children(
+    tmp_path, monkeypatch
+) -> None:
+    root = tmp_path / "artifacts"
+    run_dir = root / "runs" / "run-id"
+    signals = []
+
+    class FakeProcess:
+        def __init__(self):
+            self.wait_calls = 0
+
+        def wait(self, timeout=None):
+            self.wait_calls += 1
+            if self.wait_calls == 1:
+                raise subprocess.TimeoutExpired("runner", timeout)
+            return 1
+
+        def send_signal(self, signum):
+            signals.append(signum)
+
+    monkeypatch.setattr(
+        batch.subprocess, "Popen", lambda command, **kwargs: FakeProcess()
+    )
+    args = SimpleNamespace(
+        purpose="evaluation",
+        agent_mode="simple",
+        model="unused",
+        subagent_model="subagent",
+        subagent_port=8030,
+        subagent_gpu="1",
+        vllm_max_model_len=262_144,
+        vllm_gpu_memory_utilization=0.8,
+        vllm_startup_timeout=30,
+        image="image",
+        docker_socket=None,
+        startup_timeout=10,
+        n_jobs_per_worker=1,
+        max_steps=200,
+        eval_config="scripts/formal_run_v0.json",
+        episode_timeout=0,
+    )
+
+    result = batch.execute_episode(
+        args,
+        runner_path=tmp_path / "run.py",
+        root=root,
+        run_dir=run_dir,
+        episode={"task": "finalpool/alpha", "repetition": 1},
+        attempt=1,
+    )
+
+    assert signals == [signal.SIGTERM]
+    assert result["status"] == "failed"
+    assert result["error"]["type"] == "EpisodeTimeout"
