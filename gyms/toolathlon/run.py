@@ -459,18 +459,34 @@ def official_simple_agent_bundle(bundle: dict, args: argparse.Namespace) -> dict
     native_generation_profile = getattr(
         args, "native_generation_profile", "model-card"
     )
-    if native_generation_profile == "toolathlon-verified":
+    if native_generation_profile in {
+        "toolathlon-verified",
+        "toolathlon-verified-128k",
+    }:
         if not gemma_thinking:
             raise ValueError(
-                "--native-generation-profile toolathlon-verified is currently "
-                "defined only for thinking Gemma-4 models"
+                f"--native-generation-profile {native_generation_profile} is "
+                "currently defined only for thinking Gemma-4 models"
+            )
+        if (
+            native_generation_profile == "toolathlon-verified-128k"
+            and args.vllm_max_model_len < 262_144
+        ):
+            raise ValueError(
+                "--native-generation-profile toolathlon-verified-128k requires "
+                "--vllm-max-model-len >= 262144 so a 128K output allowance "
+                "does not leave less than 128K for tools and conversation history"
             )
         # The public Toolathlon-Verified documentation specifies a 64K output
         # budget and explicit reasoning effort while leaving temperature and
         # nucleus sampling to the upstream provider.  On vLLM, reasoning_effort
         # also enables the model's thinking chat-template path.
         generation = {
-            "max_tokens": 65_536,
+            "max_tokens": (
+                131_072
+                if native_generation_profile == "toolathlon-verified-128k"
+                else 65_536
+            ),
             "reasoning": {"effort": "high"},
         }
     elif is_qwen_non_thinking:
@@ -1528,12 +1544,18 @@ def main() -> None:
     )
     parser.add_argument(
         "--native-generation-profile",
-        choices=("model-card", "toolathlon-verified"),
+        choices=(
+            "model-card",
+            "toolathlon-verified",
+            "toolathlon-verified-128k",
+        ),
         default="model-card",
         help=(
             "Sampling/output profile for Toolathlon's native simple agent. "
             "The default follows each local model card; toolathlon-verified "
-            "reproduces the benchmark's documented 64K/reasoning defaults."
+            "reproduces the benchmark's documented 64K/reasoning defaults; "
+            "toolathlon-verified-128k uses the 128K output limit reported by "
+            "the Ornith evaluation with a required 256K model context."
         ),
     )
     parser.add_argument(

@@ -281,7 +281,11 @@ def parse_args(argv: Sequence[str], defaults: dict[str, Any]) -> argparse.Namesp
     )
     parser.add_argument(
         "--native-generation-profile",
-        choices=("model-card", "toolathlon-verified"),
+        choices=(
+            "model-card",
+            "toolathlon-verified",
+            "toolathlon-verified-128k",
+        ),
         default="model-card",
     )
     parser.add_argument(
@@ -856,7 +860,12 @@ def execute_episode(
                         args, "episode_timeout", 6000
                     ):
                         timed_out = True
-                        process.send_signal(signal.SIGINT)
+                        # The batch is commonly launched under nohup.  SIGINT
+                        # is inherited as ignored across exec in that case,
+                        # while the episode runner explicitly installs a
+                        # SIGTERM handler that unwinds through its evaluator
+                        # and cleanup path.
+                        process.send_signal(signal.SIGTERM)
                         try:
                             returncode = process.wait(timeout=120)
                         except subprocess.TimeoutExpired:
@@ -867,7 +876,7 @@ def execute_episode(
                         raise KeyboardInterrupt("batch interrupted")
         except BaseException:
             if process.poll() is None:
-                process.send_signal(signal.SIGINT)
+                process.send_signal(signal.SIGTERM)
                 try:
                     process.wait(timeout=120)
                 except subprocess.TimeoutExpired:
