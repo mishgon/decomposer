@@ -22,6 +22,11 @@ DEEPSEEK_REASONING_EFFORT = os.environ.get(
 )
 
 
+def _explicit_system_prompt(value: object | None) -> str | None:
+    """Ignore RunnableConfig injected positionally by the LangGraph server."""
+    return value if isinstance(value, str) else None
+
+
 def _create_subagent(
     model_id: str,
     base_url_env: str,
@@ -98,55 +103,55 @@ def _create_subagent(
 
 
 def qwen_3_5_4b_non_thinking(
-    *, system_prompt: str | None = None
+    system_prompt: object | None = None,
 ) -> CompiledStateGraph:
     return _create_subagent(
         "Qwen/Qwen3.5-4B",
         "QWEN_3_5_4B_BASE_URL",
         8030,
         thinking=False,
-        system_prompt=system_prompt,
+        system_prompt=_explicit_system_prompt(system_prompt),
     )
 
 
 def gemma_4_e4b_thinking(
-    *, system_prompt: str | None = None
+    system_prompt: object | None = None,
 ) -> CompiledStateGraph:
     return _create_subagent(
         "google/gemma-4-E4B-it",
         "GEMMA_4_E4B_BASE_URL",
         8030,
         thinking=True,
-        system_prompt=system_prompt,
+        system_prompt=_explicit_system_prompt(system_prompt),
     )
 
 
 def gemma_4_31b_thinking(
-    *, system_prompt: str | None = None
+    system_prompt: object | None = None,
 ) -> CompiledStateGraph:
     return _create_subagent(
         "google/gemma-4-31B-it",
         "GEMMA_4_31B_BASE_URL",
         8030,
         thinking=True,
-        system_prompt=system_prompt,
+        system_prompt=_explicit_system_prompt(system_prompt),
     )
 
 
 def gemma_4_26b_a4b_non_thinking(
-    *, system_prompt: str | None = None
+    system_prompt: object | None = None,
 ) -> CompiledStateGraph:
     return _create_subagent(
         "google/gemma-4-26B-A4B-it",
         "GEMMA_4_26B_A4B_BASE_URL",
         8030,
         thinking=False,
-        system_prompt=system_prompt,
+        system_prompt=_explicit_system_prompt(system_prompt),
     )
 
 
 def deepseek_openrouter(
-    *, system_prompt: str | None = None
+    system_prompt: object | None = None,
 ) -> CompiledStateGraph:
     model = create_openrouter_model(
         model=os.environ.get(
@@ -161,7 +166,7 @@ def deepseek_openrouter(
         model=model,
         tools=get_tools(),
         system_prompt=(
-            system_prompt
+            _explicit_system_prompt(system_prompt)
             or os.environ.get("TOOLATHLON_AGENT_SYSTEM_PROMPT")
             or SUBAGENT_SYSTEM_PROMPT
         ),
