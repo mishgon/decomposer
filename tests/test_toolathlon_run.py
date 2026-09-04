@@ -746,6 +746,39 @@ def test_answer_from_native_trajectory_uses_last_assistant_message() -> None:
     ) == "done"
 
 
+def test_native_agent_timeout_preserves_partial_trajectory(tmp_path) -> None:
+    trajectory_path = tmp_path / "traj_log.json"
+    partial = {
+        "status": "max_turns_reached",
+        "messages": [{"role": "assistant", "content": "partial work"}],
+    }
+    trajectory_path.write_text(json.dumps(partial), encoding="utf-8")
+    timeout = RuntimeError("docker exec timed out after 2700s")
+
+    trajectory, failure = run.native_agent_outcome(
+        trajectory_path, native_run=None, execution_error=timeout
+    )
+
+    assert trajectory == partial
+    assert failure is timeout
+
+
+def test_native_agent_nonzero_exit_preserves_trajectory(tmp_path) -> None:
+    trajectory_path = tmp_path / "traj_log.json"
+    partial = {"status": "max_turns_reached", "messages": []}
+    trajectory_path.write_text(json.dumps(partial), encoding="utf-8")
+
+    trajectory, failure = run.native_agent_outcome(
+        trajectory_path,
+        native_run=subprocess.CompletedProcess([], 1, "", ""),
+        execution_error=None,
+    )
+
+    assert trajectory == partial
+    assert isinstance(failure, RuntimeError)
+    assert "max_turns_reached" in str(failure)
+
+
 def test_vllm_command_uses_gemma_thinking_parsers() -> None:
     command = run.vllm_command(
         "/models/gemma-4-E4B-it",
@@ -1158,9 +1191,12 @@ def test_evaluator_isolation_stops_only_native_agent_process_group(monkeypatch) 
     assert len(exec_calls) == 1
     args, kwargs = exec_calls[0]
     assert args[:3] == ("task-container", "bash", "-c")
+    assert 'kill -INT -- "-$pid"' in args[3]
     assert 'kill -TERM -- "-$pid"' in args[3]
     assert 'kill -KILL -- "-$pid"' in args[3]
-    assert kwargs == {"check": False, "timeout": 10}
+    assert args[3].index("kill -INT") < args[3].index("kill -TERM")
+    assert args[3].index("kill -TERM") < args[3].index("kill -KILL")
+    assert kwargs == {"check": False, "timeout": 30}
     assert "exec setsid --wait bash -c" in Path(run.__file__).read_text(
         encoding="utf-8"
     )

@@ -499,6 +499,35 @@ def answer_from_native_trajectory(trajectory: dict) -> str:
     return ""
 
 
+def native_agent_outcome(
+    trajectory_path: Path,
+    native_run: subprocess.CompletedProcess[str] | None,
+    execution_error: BaseException | None,
+) -> tuple[dict | None, BaseException | None]:
+    """Load a native trace even when the agent process timed out or failed."""
+    if not trajectory_path.is_file():
+        if execution_error is not None:
+            return None, execution_error
+        return None, RuntimeError(
+            "Toolathlon TaskAgent produced no traj_log.json; "
+            f"exit code {native_run.returncode if native_run is not None else 'unknown'}"
+        )
+    try:
+        trajectory = json.loads(trajectory_path.read_text(encoding="utf-8"))
+    except BaseException as error:
+        return None, error
+    if execution_error is not None:
+        return trajectory, execution_error
+    if native_run is None:
+        return trajectory, RuntimeError("Toolathlon TaskAgent has no process result")
+    if native_run.returncode != 0 or trajectory.get("status") != "success":
+        return trajectory, RuntimeError(
+            "Toolathlon TaskAgent failed with exit code "
+            f"{native_run.returncode} and status {trajectory.get('status')!r}"
+        )
+    return trajectory, None
+
+
 def vllm_command(
     model: str,
     port: int,
@@ -1031,6 +1060,13 @@ def stop_container_process_group(container: str, pid_file: str) -> None:
             "if test -s \"$pid_file\"; then "
             "pid=$(cat \"$pid_file\"); "
             "case \"$pid\" in (*[!0-9]*|'') exit 2;; esac; "
+            # Let asyncio unwind TaskAgent.run() so its finally block can save
+            # the partial trajectory before evaluation. Escalate deterministically
+            # if the model client or an MCP process ignores the interrupt.
+            "kill -INT -- \"-$pid\" 2>/dev/null || true; "
+            "for _ in $(seq 1 200); do "
+            "kill -0 -- \"-$pid\" 2>/dev/null || break; sleep 0.1; "
+            "done; "
             "kill -TERM -- \"-$pid\" 2>/dev/null || true; "
             "for _ in $(seq 1 50); do "
             "kill -0 -- \"-$pid\" 2>/dev/null || break; sleep 0.1; "
@@ -1039,7 +1075,7 @@ def stop_container_process_group(container: str, pid_file: str) -> None:
             "fi; rm -f -- \"$pid_file\""
         ),
         check=False,
-        timeout=10,
+        timeout=30,
     )
 
 
@@ -2003,36 +2039,41 @@ def main() -> None:
                     container_bundle_path = _stage_bundle(
                         container, runtime_bundle_file
                     )
+                    native_run: subprocess.CompletedProcess[str] | None = None
+                    native_execution_error: BaseException | None = None
                     try:
-                        native_run = _exec_in_container(
-                            container,
-                            "bash",
-                            "-c",
-                            (
-                                "exec setsid --wait bash -c "
-                                + shlex.quote(
-                                    f"echo $$ > {native_agent_pid_file}; "
-                                    f"trap 'rm -f -- {native_agent_pid_file}' EXIT; "
-                                    "uv run python -m "
-                                    "scripts.containerized.container_agent "
-                                    f"--bundle_file {container_bundle_path}"
-                                )
-                                + " "
-                                "> /workspace/dumps/native_agent.log 2>&1"
-                            ),
-                            env={
-                                "VLLM_BASE_URL": (
-                                    args.subagent_base_url
-                                    or f"http://127.0.0.1:{args.subagent_port}/v1"
+                        try:
+                            native_run = _exec_in_container(
+                                container,
+                                "bash",
+                                "-c",
+                                (
+                                    "exec setsid --wait bash -c "
+                                    + shlex.quote(
+                                        f"echo $$ > {native_agent_pid_file}; "
+                                        f"trap 'rm -f -- {native_agent_pid_file}' EXIT; "
+                                        "uv run python -m "
+                                        "scripts.containerized.container_agent "
+                                        f"--bundle_file {container_bundle_path}"
+                                    )
+                                    + " "
+                                    "> /workspace/dumps/native_agent.log 2>&1"
                                 ),
-                                "BENCH_MAX_SINGLE_TURN_RETURN_CHARS": str(
-                                    args.max_tool_output_chars
-                                ),
-                                "PYTHONUNBUFFERED": "1",
-                            },
-                            check=False,
-                            timeout=args.agent_timeout,
-                        )
+                                env={
+                                    "VLLM_BASE_URL": (
+                                        args.subagent_base_url
+                                        or f"http://127.0.0.1:{args.subagent_port}/v1"
+                                    ),
+                                    "BENCH_MAX_SINGLE_TURN_RETURN_CHARS": str(
+                                        args.max_tool_output_chars
+                                    ),
+                                    "PYTHONUNBUFFERED": "1",
+                                },
+                                check=False,
+                                timeout=args.agent_timeout,
+                            )
+                        except BaseException as error:
+                            native_execution_error = error
                     finally:
                         stop_container_process_group(
                             container, native_agent_pid_file
@@ -2041,23 +2082,13 @@ def main() -> None:
                         container_bundle_path = None
                         runtime_bundle_file.unlink(missing_ok=True)
                     trajectory_path = episode_dir / "traj_log.json"
-                    if not trajectory_path.is_file():
-                        raise RuntimeError(
-                            "Toolathlon TaskAgent produced no traj_log.json; "
-                            f"exit code {native_run.returncode}"
-                        )
-                    native_trajectory = json.loads(
-                        trajectory_path.read_text(encoding="utf-8")
+                    native_trajectory, native_failure = native_agent_outcome(
+                        trajectory_path,
+                        native_run,
+                        native_execution_error,
                     )
-                    if (
-                        native_run.returncode != 0
-                        or native_trajectory.get("status") != "success"
-                    ):
-                        raise RuntimeError(
-                            "Toolathlon TaskAgent failed with exit code "
-                            f"{native_run.returncode} and status "
-                            f"{native_trajectory.get('status')!r}"
-                        )
+                    if native_failure is not None:
+                        raise native_failure
                     agent_state = {}
                 else:
                     os.environ["TOOLATHLON_SUBAGENT_CALL_LOG"] = str(
