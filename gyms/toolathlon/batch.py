@@ -276,8 +276,11 @@ def parse_args(argv: Sequence[str], defaults: dict[str, Any]) -> argparse.Namesp
     parser.add_argument(
         "--episode-timeout",
         type=float,
-        default=3300,
-        help="Maximum total wall-clock seconds for one episode (default: 3300).",
+        default=5400,
+        help=(
+            "Maximum total wall-clock seconds for one episode (default: 5400, "
+            "covering preprocess, a 45-minute agent, and native evaluation)."
+        ),
     )
     args = parser.parse_args(argv)
     if args.resume and (args.all or args.all_valid or args.tasks):
@@ -843,7 +846,7 @@ def main(
             elif name == "container_slots" and name not in manifest["config"]:
                 setattr(args, name, 1)
             elif name == "episode_timeout" and name not in manifest["config"]:
-                setattr(args, name, 3300)
+                setattr(args, name, 5400)
             elif name == "agent_timeout" and name not in manifest["config"]:
                 setattr(args, name, 2700)
             elif name == "max_tool_output_chars" and name not in manifest["config"]:

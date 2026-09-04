@@ -23,6 +23,23 @@ def test_evaluation_runtime_settings_are_uniform() -> None:
     assert settings.DEEPSEEK_REASONING_EFFORT == "high"
 
 
+def test_default_episode_watchdog_covers_all_bounded_phases(tmp_path) -> None:
+    args = batch.parse_args(
+        ["--tasks", "finalpool/example", "--purpose", "evaluation"],
+        {
+            "model": "teacher",
+            "subagent_model": "subagent",
+            "subagent_port": 8030,
+            "image": "image",
+            "artifacts_dir": tmp_path,
+        },
+    )
+
+    assert args.agent_timeout == 2700
+    assert args.episode_timeout == 5400
+    assert args.episode_timeout >= args.agent_timeout + 600 + 1800
+
+
 def test_batch_rejects_more_than_one_gpu_per_model() -> None:
     defaults = {
         "model": "teacher",
