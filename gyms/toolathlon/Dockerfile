@@ -8,6 +8,16 @@ LABEL org.opencontainers.image.revision="${DECOMPOSER_REVISION}" \
       io.decomposer.toolathlon.revision="${TOOLATHLON_REVISION}"
 ENV SUBAGENT_VENV=/opt/subagents
 
+# Bitnami's legacy chart endpoint now redirects to a Cloudflare-protected URL
+# that rejects non-browser clients. Pull the same immutable chart version from
+# Bitnami's OCI registry once at build time so K8s preprocessing is offline.
+RUN mkdir -p /opt/decomposer/vendor \
+    && helm pull oci://registry-1.docker.io/bitnamicharts/redis \
+        --version 19.0.0 \
+        --destination /opt/decomposer/vendor \
+    && echo "b1b32db5ec8f0aca14d0c74d712fe3e4ffbf7980aef38c806f9cb8a4a3c499f4  /opt/decomposer/vendor/redis-19.0.0.tgz" \
+        | sha256sum --check --strict
+
 # Bake the pinned benchmark sources into /workspace. The image's own
 # pyproject.toml, uv.lock, and .venv are intentionally preserved so that
 # `uv run` in the container reuses the image environment without re-syncing,

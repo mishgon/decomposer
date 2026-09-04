@@ -129,6 +129,12 @@ K8S_TASK_CLEANUP_COMMANDS = {
         "stop",
     ),
 }
+TASK_RUNTIME_PATCHES = {
+    "finalpool/k8s-redis-helm-upgrade": (
+        "scripts/init_redis_helm.sh",
+        "/opt/decomposer/gyms/toolathlon/patches/k8s-redis-local-chart.patch",
+    ),
+}
 
 # These services live outside the per-episode task container.  A successful
 # ``docker run`` therefore says nothing about whether preprocessing can reach
@@ -1790,6 +1796,17 @@ def main() -> None:
         )
         _exec_in_container(container, "rm", "-rf", "--", container_task_path)
         _docker("cp", str(task_dir), f"{container}:/workspace/tasks/{args.task.rsplit('/', 1)[0]}/")
+        runtime_patch = TASK_RUNTIME_PATCHES.get(args.task)
+        if runtime_patch is not None:
+            relative_target, patch_path = runtime_patch
+            _exec_in_container(
+                container,
+                "patch",
+                "--batch",
+                "--forward",
+                f"{container_task_path}/{relative_target}",
+                f"--input={patch_path}",
+            )
         _copy_user_configs(container)
 
         wait_for_task_dependencies(container, args.task, args.startup_timeout)

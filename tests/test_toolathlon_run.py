@@ -97,6 +97,19 @@ def test_container_cli_explicit_command_is_tokenized(monkeypatch) -> None:
     assert run._container_cli() == ["/usr/bin/podman", "--remote"]
 
 
+def test_redis_runtime_patch_uses_bundled_pinned_chart() -> None:
+    target, patch = run.TASK_RUNTIME_PATCHES[
+        "finalpool/k8s-redis-helm-upgrade"
+    ]
+    contents = (run.REPO_ROOT / patch.removeprefix("/opt/decomposer/")).read_text()
+    dockerfile = (run.REPO_ROOT / "gyms/toolathlon/Dockerfile").read_text()
+
+    assert target == "scripts/init_redis_helm.sh"
+    assert "redis-19.0.0.tgz" in contents
+    assert 'helm install "$helm_release_name" "$helm_chart_package"' in contents
+    assert "b1b32db5ec8f0aca14d0c74d712fe3e4ffbf7980aef38c806f9cb8a4a3c499f4" in dockerfile
+
+
 def test_native_preprocess_uses_the_actual_served_model_identity() -> None:
     args = SimpleNamespace(
         agent_mode="simple",
