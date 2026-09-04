@@ -1155,6 +1155,18 @@ def test_configured_web_search_credential_is_accepted(
     run.validate_task_credentials(task_dir)
 
 
+def test_container_image_redacts_task_credentials_from_normal_logs() -> None:
+    dockerfile = (run.REPO_ROOT / "gyms/toolathlon/Dockerfile").read_text()
+    patch = (
+        run.REPO_ROOT / "gyms/toolathlon/patches/redact-task-config.patch"
+    ).read_text()
+
+    assert "redact-task-config.patch" in dockerfile
+    assert "if debug:" in patch
+    assert "pprint(task_config)" in patch
+    assert "Task: {task_config.task_dir}" in patch
+
+
 def test_k8s_tasks_have_post_evaluation_cluster_cleanup() -> None:
     assert set(run.K8S_TASK_CLEANUP_COMMANDS) == {
         "finalpool/k8s-deployment-cleanup",
