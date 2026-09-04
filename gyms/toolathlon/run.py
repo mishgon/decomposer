@@ -398,6 +398,26 @@ def served_subagent_model_name(model: str) -> str:
     return DEFAULT_SUBAGENT_MODEL
 
 
+def selected_subagent_specs(
+    provider: str, model: str
+) -> tuple[tuple[str, str, str], ...]:
+    """Advertise only subagents backed by the model that is actually served."""
+    if provider == "openrouter":
+        return (("deepseek_openrouter", "deepseek_openrouter", model),)
+
+    model_lower = model.lower()
+    if "qwen3.5-4b" in model_lower:
+        selected_id = "qwen_3_5_4b_non_thinking"
+    elif "gemma-4-e4b" in model_lower:
+        selected_id = "gemma_4_e4b_thinking"
+    elif "gemma-4-26b-a4b" in model_lower:
+        selected_id = "gemma_4_26b_a4b_non_thinking"
+    else:
+        raise ValueError(f"No Decomposer subagent graph matches model {model!r}")
+
+    return tuple(spec for spec in SUBAGENT_TYPES if spec[0] == selected_id)
+
+
 def official_simple_agent_bundle(bundle: dict, args: argparse.Namespace) -> dict:
     """Build a container-local bundle for Toolathlon's native TaskAgent."""
     runtime_bundle = copy.deepcopy(bundle)
@@ -2156,16 +2176,9 @@ def main() -> None:
                             "url": f"http://127.0.0.1:{subagent_webapp_port}",
                         }
                         for subagent_type_id, assistant_id, model_description in (
-                            tuple(
-                                spec
-                                for spec in SUBAGENT_TYPES
-                                if (
-                                    ("gemma" in spec[0])
-                                    == ("gemma-4" in args.subagent_model.lower())
-                                )
+                            selected_subagent_specs(
+                                args.subagent_provider, args.subagent_model
                             )
-                            if args.subagent_provider == "vllm"
-                            else (("deepseek_openrouter", "deepseek_openrouter", args.subagent_model),)
                         )
                     ],
                     decomposer_system_prompt=DECOMPOSER_PROMPTS[
