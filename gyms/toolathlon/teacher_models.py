@@ -7,6 +7,40 @@ import os
 from decomposer.chat_vllm import ChatVLLM
 
 
+def create_vllm_teacher(
+    *, model: str, base_url: str, timeout: float, max_retries: int
+) -> ChatVLLM:
+    """Create a thinking teacher with the model family's recommended sampling."""
+    model_lower = model.lower()
+    if "gemma-4" in model_lower:
+        top_k = 64
+    elif "qwen" in model_lower:
+        top_k = 20
+    else:
+        raise ValueError(f"Unsupported local Decomposer teacher model: {model!r}")
+
+    extra_body: dict[str, object] = {
+        "top_k": top_k,
+        "include_reasoning": True,
+        "chat_template_kwargs": {"enable_thinking": True},
+    }
+    if "qwen" in model_lower:
+        extra_body.update({"min_p": 0.0, "repetition_penalty": 1.0})
+
+    return ChatVLLM(
+        model=model,
+        api_key="EMPTY",
+        base_url=base_url,
+        temperature=1.0,
+        top_p=0.95,
+        timeout=timeout,
+        max_retries=max_retries,
+        use_responses_api=False,
+        preserve_reasoning=True,
+        extra_body=extra_body,
+    )
+
+
 def create_lmrouter_teacher(
     *,
     model: str,

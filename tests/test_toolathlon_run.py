@@ -451,6 +451,34 @@ def test_lmrouter_teacher_is_thinking(monkeypatch) -> None:
     assert model.max_tokens is None
 
 
+@pytest.mark.parametrize(
+    ("model_name", "top_k"),
+    [
+        ("google/gemma-4-26B-A4B-it", 64),
+        ("Qwen/Qwen3.6-35B-A3B", 20),
+    ],
+)
+def test_local_vllm_teacher_uses_thinking_model_card_sampling(
+    model_name, top_k
+) -> None:
+    model = teacher_models.create_vllm_teacher(
+        model=model_name,
+        base_url="http://127.0.0.1:8040/v1",
+        timeout=180,
+        max_retries=5,
+    )
+
+    assert model.temperature == 1.0
+    assert model.top_p == 0.95
+    assert model.preserve_reasoning is True
+    assert model.extra_body["top_k"] == top_k
+    assert model.extra_body["include_reasoning"] is True
+    assert model.extra_body["chat_template_kwargs"] == {"enable_thinking": True}
+    if "qwen" in model_name.lower():
+        assert model.extra_body["min_p"] == 0.0
+        assert model.extra_body["repetition_penalty"] == 1.0
+
+
 def test_usage_summary_separates_decomposer_and_subagents() -> None:
     def message(input_tokens, output_tokens, *, cache=0, reasoning=0, cost=None):
         return {

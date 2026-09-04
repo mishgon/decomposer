@@ -22,7 +22,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from langchain_core.messages import message_to_dict
-from decomposer.chat_vllm import ChatVLLM
 from decomposer.core import create_decomposer_agent
 from decomposer.prompts import (
     DECOMPOSER_SYSTEM_PROMPT,
@@ -31,7 +30,7 @@ from decomposer.prompts import (
 
 try:
     from .subagents.openrouter_compat import create_openrouter_model
-    from .teacher_models import create_lmrouter_teacher
+    from .teacher_models import create_lmrouter_teacher, create_vllm_teacher
     from .usage import build_usage_summary
     from .settings import (
         DECOMPOSER_RECURSION_LIMIT,
@@ -41,7 +40,7 @@ try:
     )
 except ImportError:  # Executed directly as ``python gyms/toolathlon/run.py``.
     from subagents.openrouter_compat import create_openrouter_model
-    from teacher_models import create_lmrouter_teacher
+    from teacher_models import create_lmrouter_teacher, create_vllm_teacher
     from usage import build_usage_summary
     from settings import (  # type: ignore[no-redef]
         DECOMPOSER_RECURSION_LIMIT,
@@ -2136,15 +2135,11 @@ def main() -> None:
                 print("Running Decomposer...", flush=True)
                 agent = create_decomposer_agent(
                     decomposer_model=(
-                        ChatVLLM(
+                        create_vllm_teacher(
                             model=args.model,
-                            api_key="EMPTY",
                             base_url=args.decomposer_base_url,
-                            temperature=1,
-                            top_p=1,
                             timeout=180,
                             max_retries=5,
-                            preserve_reasoning="gemma-4" in args.model.lower(),
                         )
                         if args.decomposer_provider == "vllm"
                         else create_lmrouter_teacher(
@@ -2287,9 +2282,7 @@ def main() -> None:
                     ),
                     "decomposer_thinking_enabled": (
                         True
-                        if args.decomposer_provider == "lmrouter"
-                        else "gemma-4" in args.model.lower()
-                        if args.decomposer_provider == "vllm"
+                        if args.decomposer_provider in {"lmrouter", "vllm"}
                         else None
                     ),
                     "decomposer_recursion_limit": DECOMPOSER_RECURSION_LIMIT,
