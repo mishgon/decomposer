@@ -1793,7 +1793,9 @@ def test_batch_repetitions_and_resume_skip_completed(tmp_path, monkeypatch) -> N
     assert len(vllm_starts) == 2
 
 
-def test_batch_runs_episodes_with_requested_concurrency(tmp_path, monkeypatch) -> None:
+def test_container_phase_slots_do_not_cap_episode_concurrency(
+    tmp_path, monkeypatch
+) -> None:
     toolathlon_root = tmp_path / "toolathlon"
     tasks = [f"finalpool/task-{index}" for index in range(4)]
     for task in tasks:
@@ -1838,7 +1840,7 @@ def test_batch_runs_episodes_with_requested_concurrency(tmp_path, monkeypatch) -
             "--concurrency",
             "4",
             "--container-slots",
-            "4",
+            "1",
             "--bench-artifacts-dir",
             str(artifacts),
         ],
