@@ -115,9 +115,12 @@ RESUME_CONFIG_FIELDS = (
 )
 
 # These services are shared mutable environments, not per-episode MCP
-# processes.  Different tasks can otherwise reset the same Canvas courses or
-# Kubernetes cluster while another agent is still working in it.
-SHARED_MUTABLE_MCP_SERVERS = frozenset({"canvas", "k8s"})
+# processes.  Different tasks can otherwise reset the same Canvas courses,
+# mailboxes, WooCommerce store, or Kubernetes cluster while another agent is
+# still working in it.
+SHARED_MUTABLE_MCP_SERVERS = frozenset(
+    {"canvas", "emails", "k8s", "woocommerce"}
+)
 
 
 def utc_now() -> str:
@@ -385,13 +388,32 @@ def select_tasks(
     return selected
 
 
-def shared_task_resources(task: str) -> tuple[str, ...]:
-    resources = []
+def shared_task_resources(
+    task: str, tasks_root: Path | None = None
+) -> tuple[str, ...]:
+    """Return shared mutable services that must be held for an entire episode.
+
+    Toolathlon preprocessors and evaluators mutate long-lived services on the
+    host.  The resource set must therefore come from ``needed_mcp_servers``;
+    task-name prefixes miss mixed tasks such as ``filter-low-selling-products``
+    (WooCommerce plus email) and ``meeting-assign`` (email).  Keep the prefix
+    checks as a fail-safe for malformed legacy fixtures/configs.
+    """
+    resources: set[str] = set()
     if task.startswith("finalpool/canvas-"):
-        resources.append("canvas")
+        resources.add("canvas")
     if task.startswith("finalpool/k8s-"):
-        resources.append("k8s")
-    return tuple(resources)
+        resources.add("k8s")
+    if tasks_root is not None:
+        task_config_path = tasks_root / task / "task_config.json"
+        if task_config_path.is_file():
+            task_config = json.loads(task_config_path.read_text(encoding="utf-8"))
+            resources.update(
+                server
+                for server in task_config.get("needed_mcp_servers") or ()
+                if server in SHARED_MUTABLE_MCP_SERVERS
+            )
+    return tuple(sorted(resources))
 
 
 def count_statuses(manifest: dict[str, Any]) -> dict[str, int]:
@@ -962,7 +984,7 @@ def main(
         active_resources: set[str] = set()
         available_container_slots = set(range(args.container_slots))
         task_resources = {
-            task: shared_task_resources(task)
+            task: shared_task_resources(task, toolathlon_root / "tasks")
             for task in {episode["task"] for episode in manifest["episodes"]}
         }
 

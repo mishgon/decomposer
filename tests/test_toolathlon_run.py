@@ -1282,12 +1282,35 @@ def test_k8s_tasks_have_post_evaluation_cluster_cleanup() -> None:
     )
 
 
-def test_shared_mutable_services_are_serialized_across_tasks() -> None:
-    assert batch.shared_task_resources("finalpool/canvas-art-manager") == (
-        "canvas",
+def test_shared_mutable_services_are_derived_from_task_config(tmp_path) -> None:
+    tasks_root = tmp_path / "tasks"
+    configs = {
+        "finalpool/canvas-art-manager": ["canvas", "emails"],
+        "finalpool/k8s-mysql": ["k8s"],
+        "finalpool/meeting-assign": ["emails"],
+        "finalpool/filter-low-selling-products": ["woocommerce", "emails"],
+        "finalpool/independent": ["filesystem"],
+    }
+    for task, servers in configs.items():
+        task_dir = tasks_root / task
+        task_dir.mkdir(parents=True)
+        (task_dir / "task_config.json").write_text(
+            json.dumps({"needed_mcp_servers": servers}), encoding="utf-8"
+        )
+
+    assert batch.shared_task_resources(
+        "finalpool/canvas-art-manager", tasks_root
+    ) == ("canvas", "emails")
+    assert batch.shared_task_resources("finalpool/k8s-mysql", tasks_root) == (
+        "k8s",
     )
-    assert batch.shared_task_resources("finalpool/k8s-mysql") == ("k8s",)
-    assert batch.shared_task_resources("finalpool/meeting-assign") == ()
+    assert batch.shared_task_resources("finalpool/meeting-assign", tasks_root) == (
+        "emails",
+    )
+    assert batch.shared_task_resources(
+        "finalpool/filter-low-selling-products", tasks_root
+    ) == ("emails", "woocommerce")
+    assert batch.shared_task_resources("finalpool/independent", tasks_root) == ()
 
 
 def test_episode_command_passes_docker_socket(tmp_path) -> None:
