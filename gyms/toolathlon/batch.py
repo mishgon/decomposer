@@ -980,9 +980,9 @@ def main(
         ] = {}
         remaining = list(work)
         next_endpoint = 0
+        next_container_slot = 0
         active_tasks: set[str] = set()
         active_resources: set[str] = set()
-        available_container_slots = set(range(args.container_slots))
         task_resources = {
             task: shared_task_resources(task, toolathlon_root / "tasks")
             for task in {episode["task"] for episode in manifest["episodes"]}
@@ -1008,9 +1008,7 @@ def main(
             )
 
         def submit_next() -> bool:
-            nonlocal next_endpoint
-            if not available_container_slots:
-                return False
+            nonlocal next_endpoint, next_container_slot
             selected = None
             for position, (index, episode, attempt) in enumerate(remaining):
                 resources = task_resources[episode["task"]]
@@ -1024,8 +1022,11 @@ def main(
                 return False
             position, index, episode, attempt, resources = selected
             remaining.pop(position)
-            container_slot = min(available_container_slots)
-            available_container_slots.remove(container_slot)
+            # Slots select phase-lock files; they do not represent episode
+            # workers. Multiple active episodes may share a slot and wait only
+            # around container startup/preprocess and final cleanup.
+            container_slot = next_container_slot
+            next_container_slot = (next_container_slot + 1) % args.container_slots
             print(
                 f"[{index}/{manifest['counts']['total']}] {episode['key']} "
                 f"attempt {attempt}",
@@ -1061,10 +1062,9 @@ def main(
                     return_when=concurrent.futures.FIRST_COMPLETED,
                 )
                 for future in done:
-                    _index, episode, attempt, resources, container_slot = active.pop(future)
+                    _index, episode, attempt, resources, _container_slot = active.pop(future)
                     active_tasks.remove(episode["task"])
                     active_resources.difference_update(resources)
-                    available_container_slots.add(container_slot)
                     try:
                         result = future.result()
                     except Exception as error:
