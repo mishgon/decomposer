@@ -23,6 +23,63 @@ def test_evaluation_runtime_settings_are_uniform() -> None:
     assert settings.DEEPSEEK_REASONING_EFFORT == "high"
 
 
+def test_image_provenance_extracts_immutable_identity_and_source_labels() -> None:
+    inspection = subprocess.CompletedProcess(
+        ["docker", "image", "inspect"],
+        0,
+        json.dumps(
+            [
+                {
+                    "Id": "sha256:abc",
+                    "RepoDigests": ["image@sha256:def"],
+                    "Config": {
+                        "Labels": {
+                            "org.opencontainers.image.revision": "repo-rev",
+                            "io.decomposer.toolathlon.revision": "bench-rev",
+                        }
+                    },
+                }
+            ]
+        ),
+        "",
+    )
+
+    assert batch.image_provenance(inspection, "image:tag") == {
+        "reference": "image:tag",
+        "id": "sha256:abc",
+        "repo_digests": ["image@sha256:def"],
+        "decomposer_revision": "repo-rev",
+        "toolathlon_revision": "bench-rev",
+        "verified": True,
+    }
+
+
+def test_labeled_stale_image_is_rejected(tmp_path, monkeypatch) -> None:
+    repo = tmp_path / "repo"
+    toolathlon = tmp_path / "toolathlon"
+    repo.mkdir()
+    toolathlon.mkdir()
+    revisions = {repo: "current-repo", toolathlon: "current-bench"}
+    monkeypatch.setattr(batch, "checked_out_revision", revisions.get)
+
+    with pytest.raises(RuntimeError, match="Task image source mismatch"):
+        batch.verify_image_sources(
+            {
+                "verified": True,
+                "decomposer_revision": "stale-repo",
+                "toolathlon_revision": "current-bench",
+            },
+            repo_root=repo,
+            toolathlon_root=toolathlon,
+        )
+
+
+def test_legacy_unlabeled_image_remains_usable(tmp_path) -> None:
+    batch.verify_image_sources(
+        {"verified": False}, repo_root=tmp_path, toolathlon_root=tmp_path
+    )
+
+
 def test_native_preprocess_uses_the_actual_served_model_identity() -> None:
     args = SimpleNamespace(
         agent_mode="simple",
