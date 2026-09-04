@@ -706,6 +706,34 @@ def test_official_simple_agent_bundle_uses_local_vllm_and_native_paths() -> None
     assert agent["tool"]["max_inner_turns"] == 200
 
 
+def test_official_simple_agent_bundle_can_match_verified_generation_defaults() -> None:
+    source = {
+        "container_paths": {
+            "task_root": "/workspace/dumps",
+            "agent_workspace": "/workspace/dumps/workspace",
+            "log_file": "/workspace/dumps/traj_log.json",
+        },
+        "host_paths": {},
+        "eval_config": {
+            "global_task_config": {"max_steps_under_single_turn_mode": 1},
+            "agent": {},
+        },
+    }
+    args = SimpleNamespace(
+        subagent_model="/models/gemma-4-31B-it",
+        vllm_max_model_len=131072,
+        max_steps=200,
+        native_generation_profile="toolathlon-verified",
+    )
+
+    result = run.official_simple_agent_bundle(source, args)
+
+    assert result["eval_config"]["agent"]["generation"] == {
+        "max_tokens": 65_536,
+        "reasoning": {"effort": "high"},
+    }
+
+
 def test_answer_from_native_trajectory_uses_last_assistant_message() -> None:
     assert run.answer_from_native_trajectory(
         {
