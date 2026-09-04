@@ -940,6 +940,40 @@ def test_batch_fails_when_checkout_incomplete(tmp_path, monkeypatch) -> None:
         )
 
 
+def test_batch_preflight_failure_does_not_create_phantom_run(
+    tmp_path, monkeypatch
+) -> None:
+    toolathlon_root = tmp_path / "toolathlon"
+    (toolathlon_root / "tasks" / "finalpool" / "example").mkdir(parents=True)
+    artifacts = tmp_path / "artifacts"
+    monkeypatch.setattr(batch, "new_run_id", lambda: "must-not-exist")
+
+    def missing_image(*args, **kwargs):
+        raise RuntimeError("image unavailable")
+
+    with pytest.raises(RuntimeError, match="image unavailable"):
+        batch.main(
+            [
+                "--tasks", "finalpool/example",
+                "--purpose", "evaluation",
+                "--agent-mode", "simple",
+                "--bench-artifacts-dir", str(artifacts),
+            ],
+            repo_root=tmp_path,
+            toolathlon_root=toolathlon_root,
+            default_artifacts_dir=artifacts,
+            default_image="missing-image",
+            default_model="decomposer-model",
+            default_subagent_model="subagent-model",
+            default_subagent_port=8030,
+            start_vllm=lambda **kwargs: None,
+            stop_vllm=lambda process: None,
+            docker=missing_image,
+        )
+
+    assert not (artifacts / "runs" / "must-not-exist").exists()
+
+
 def test_resolve_docker_socket_explicit_wins(tmp_path, monkeypatch) -> None:
     socket_path = tmp_path / "custom.sock"
     socket_path.touch()

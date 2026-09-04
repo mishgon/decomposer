@@ -859,17 +859,6 @@ def main(
         tasks = select_tasks(tasks_root, args.all, args.all_valid, args.tasks)
         all_tasks = select_tasks(tasks_root, True, False, None)
         run_dir = root / "runs" / new_run_id()
-        run_dir.mkdir(parents=True, exist_ok=False)
-        manifest = create_manifest(run_dir.name, tasks, args.repetitions, args)
-        manifest["config"].update(
-            benchmark_task_count=len(all_tasks) if args.all_valid else len(tasks),
-            unrun_tasks_are_failures=args.all_valid,
-            assumed_failed_tasks=(
-                sorted(set(all_tasks) - set(tasks)) if args.all_valid else []
-            ),
-        )
-        save_manifest(run_dir, manifest)
-        append_event(run_dir, "run_created", tasks=tasks, repetitions=args.repetitions)
 
     needs_openrouter = args.subagent_provider == "openrouter" or (
         args.agent_mode == "decomposer" and args.decomposer_provider == "openrouter"
@@ -885,6 +874,21 @@ def main(
         if missing:
             raise RuntimeError("Set " + " and ".join(missing) + " for lmrouter")
     docker("image", "inspect", args.image)
+    if not args.resume:
+        # Do not create a tracked run until every read-only launch preflight has
+        # passed. Otherwise a missing Docker shim/image or credential leaves a
+        # phantom pending manifest even though no episode was ever attempted.
+        run_dir.mkdir(parents=True, exist_ok=False)
+        manifest = create_manifest(run_dir.name, tasks, args.repetitions, args)
+        manifest["config"].update(
+            benchmark_task_count=len(all_tasks) if args.all_valid else len(tasks),
+            unrun_tasks_are_failures=args.all_valid,
+            assumed_failed_tasks=(
+                sorted(set(all_tasks) - set(tasks)) if args.all_valid else []
+            ),
+        )
+        save_manifest(run_dir, manifest)
+        append_event(run_dir, "run_created", tasks=tasks, repetitions=args.repetitions)
     manifest.update(status="running", finished_at=None)
     manifest.setdefault("invocations", []).append(
         {
