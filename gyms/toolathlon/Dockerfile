@@ -17,6 +17,12 @@ COPY external/toolathlon/deployment/ /workspace/deployment/
 COPY external/toolathlon/global_preparation/check_installation.py /workspace/global_preparation/check_installation.py
 COPY external/toolathlon/local_binary/ /workspace/local_binary/
 COPY gyms/toolathlon/patches/12306-mcp-cookie.patch /tmp/12306-mcp-cookie.patch
+COPY gyms/toolathlon/patches/redact-task-config.patch /tmp/redact-task-config.patch
+
+# TaskConfig contains task-specific API credentials. The native runner used
+# to pprint it into the episode log even when debug=False.
+RUN patch --batch /workspace/utils/task_runner/runner.py \
+        < /tmp/redact-task-config.patch
 
 # 12306 retired /otn/lcQuery/init, and its replacement now indents the
 # lc_search_url declaration with a tab.  Both changes make the benchmark's

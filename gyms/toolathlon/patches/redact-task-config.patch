@@ -1,0 +1,30 @@
+--- runner.py.orig
++++ runner.py
+@@ -38,14 +38,19 @@ class TaskRunner:
+         agent_hooks = AgentLifecycle()
+         run_hooks = RunLifecycle(debug)
+ 
+-        print_color("=== Actual task config ===", "magenta")
+-        pprint(task_config)
+-        print_color("=== Actual agent config ===", "magenta")
+-        pprint(agent_config)
+-        print_color("=== Actual user config ===", "magenta")
+-        pprint(user_config)
+-        print_color("=== Actual mcp config ===", "magenta")
+-        pprint(mcp_config)
++        if debug:
++            print_color("=== Actual task config ===", "magenta")
++            pprint(task_config)
++            print_color("=== Actual agent config ===", "magenta")
++            pprint(agent_config)
++            print_color("=== Actual user config ===", "magenta")
++            pprint(user_config)
++            print_color("=== Actual mcp config ===", "magenta")
++            pprint(mcp_config)
++        else:
++            print_color(f"Task: {task_config.task_dir}", "magenta")
++            print_color(f"Agent model: {agent_config.model.short_name}", "magenta")
++            print_color(f"MCP servers: {task_config.needed_mcp_servers}", "magenta")
+ 
+         # Create and run TaskAgent
+         task_agent = TaskAgent(
