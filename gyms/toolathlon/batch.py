@@ -714,11 +714,15 @@ def execute_episode(
     evaluation_path = root / "evals" / task / episode_id / "result.json"
     score = None
     artifact_score = None
+    agent_success = None
+    agent_error = None
     if evaluation_path.is_file():
         try:
             evaluation = json.loads(evaluation_path.read_text(encoding="utf-8"))
             score = evaluation.get("pass")
             artifact_score = evaluation.get("artifact_pass", score)
+            agent_success = evaluation.get("agent_success")
+            agent_error = evaluation.get("agent_error")
         except (json.JSONDecodeError, OSError):
             pass
     # A model can terminate without a textual final answer, hit its recursion
@@ -726,7 +730,18 @@ def execute_episode(
     # native evaluation result.  Those are benchmark failures, not missing
     # infrastructure episodes: retain the model's false score and complete the
     # episode.  Infrastructure failures do not produce a boolean native score.
-    completed = evaluation_path.is_file() and isinstance(score, bool)
+    # An agent-loop timeout, recursion exhaustion, or missing final answer is a
+    # terminal benchmark failure once run.py has successfully reached and
+    # persisted native evaluation.  Its official per-episode result remains
+    # null (because the agent did not finish), but the aggregate score must
+    # count the attempt as false and --resume must not retry it as though the
+    # infrastructure failed.
+    terminal_agent_failure = evaluation_path.is_file() and agent_success is False
+    if terminal_agent_failure:
+        score = False
+    completed = evaluation_path.is_file() and (
+        isinstance(score, bool) or terminal_agent_failure
+    )
     error = None
     if not completed:
         stderr_tail = (attempt_dir / "runner.stderr.log").read_text(
@@ -747,6 +762,8 @@ def execute_episode(
         "status": "completed" if completed else "failed",
         "score": score,
         "artifact_score": artifact_score,
+        "agent_success": agent_success,
+        "agent_error": agent_error,
         "artifact_path": str(artifact_dir if artifact_dir.is_dir() else attempt_dir),
         "attempt_log_path": str(attempt_dir),
         "evaluation_path": str(evaluation_path) if evaluation_path.is_file() else None,

@@ -2200,3 +2200,66 @@ def test_execute_episode_maps_deterministic_trace_and_eval_paths(
     assert command[command.index("--container-lock-file") + 1] == str(
         root / "runs" / "run-id" / "container.lock"
     )
+
+
+def test_execute_episode_counts_evaluated_agent_failure_once(
+    tmp_path, monkeypatch
+) -> None:
+    root = tmp_path / "artifacts"
+    run_dir = root / "runs" / "run-id"
+    episode_id = batch.episode_id_for("run-id", "finalpool/alpha", 1, 1)
+    evaluation_path = (
+        root / "evals" / "finalpool" / "alpha" / episode_id / "result.json"
+    )
+    evaluation_path.parent.mkdir(parents=True)
+    evaluation_path.write_text(
+        json.dumps(
+            {
+                "pass": None,
+                "artifact_pass": True,
+                "agent_success": False,
+                "agent_error": "agent exceeded 2700 seconds",
+            }
+        )
+    )
+
+    class FakeProcess:
+        def wait(self, timeout=None):
+            return 1
+
+    monkeypatch.setattr(
+        batch.subprocess, "Popen", lambda command, **kwargs: FakeProcess()
+    )
+    args = SimpleNamespace(
+        purpose="evaluation",
+        agent_mode="decomposer",
+        model="teacher",
+        subagent_model="subagent",
+        subagent_port=8030,
+        subagent_gpu="1",
+        vllm_max_model_len=256_000,
+        vllm_gpu_memory_utilization=0.8,
+        vllm_startup_timeout=30,
+        image="image",
+        docker_socket=None,
+        startup_timeout=10,
+        n_jobs_per_worker=1000,
+        max_steps=410,
+        eval_config="scripts/formal_run_v0.json",
+    )
+
+    result = batch.execute_episode(
+        args,
+        runner_path=tmp_path / "run.py",
+        root=root,
+        run_dir=run_dir,
+        episode={"task": "finalpool/alpha", "repetition": 1},
+        attempt=1,
+    )
+
+    assert result["status"] == "completed"
+    assert result["score"] is False
+    assert result["artifact_score"] is True
+    assert result["agent_success"] is False
+    assert result["agent_error"] == "agent exceeded 2700 seconds"
+    assert result["error"] is None
