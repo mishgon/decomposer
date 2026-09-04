@@ -189,6 +189,14 @@ def image_provenance(
     return result
 
 
+def immutable_image_reference(
+    provenance: dict[str, object], fallback: str
+) -> str:
+    """Pin a batch to the inspected image instead of a mutable tag."""
+    image_id = provenance.get("id")
+    return image_id if isinstance(image_id, str) and image_id else fallback
+
+
 def checked_out_revision(root: Path) -> str | None:
     process = subprocess.run(
         ["git", "rev-parse", "HEAD"], cwd=root, capture_output=True, text=True
@@ -1100,6 +1108,9 @@ def main(
     verify_image_sources(
         image_info, repo_root=repo_root, toolathlon_root=toolathlon_root
     )
+    # A long batch may outlive a rebuild of ``:latest``.  Pass the immutable
+    # ID to every episode so one run can never mix two task images.
+    args.image = immutable_image_reference(image_info, args.image)
     tasks_needing_services = (
         tasks
         if not args.resume
