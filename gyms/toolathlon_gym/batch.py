@@ -24,6 +24,27 @@ except ImportError:  # Executed through gyms/toolathlon_gym/run.py.
 
 
 SCHEMA_VERSION = 1
+OPENROUTER_TRANSIENT_MARKERS = (
+    "httpx.writetimeout",
+    "writetimeout",
+    "httpx.readtimeout",
+    "readtimeout",
+    "httpx.connecttimeout",
+    "connecttimeout",
+    "httpx.pooltimeout",
+    "pooltimeout",
+    "httpx.remoteprotocolerror",
+    "remoteprotocolerror",
+    "httpx.connecterror",
+    "connecterror",
+    "apiconnectionerror",
+    "ratelimiterror",
+    "the run is no longer active",
+    "status code: 429",
+    "status code: 502",
+    "status code: 503",
+    "status code: 504",
+)
 RESUME_CONFIG_FIELDS = (
     "model",
     "subagent_model",
@@ -71,6 +92,100 @@ def append_event(run_dir: Path, event: str, **fields: Any) -> None:
         output.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
         output.flush()
         os.fsync(output.fileno())
+
+
+class ProviderBackoffBarrier:
+    """Shared launch barrier for a provider outage observed by many episodes."""
+
+    def __init__(
+        self,
+        *,
+        initial_seconds: float = 30.0,
+        maximum_seconds: float = 300.0,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self.initial_seconds = initial_seconds
+        self.maximum_seconds = maximum_seconds
+        self._clock = clock
+        self._condition = threading.Condition()
+        self._generation = 0
+        self._consecutive_failures = 0
+        self._blocked_until = 0.0
+
+    def generation(self) -> int:
+        with self._condition:
+            return self._generation
+
+    def register_failure(self, generation: int) -> float | None:
+        """Close the barrier once per outage generation and return its delay."""
+        with self._condition:
+            if generation != self._generation:
+                return None
+            self._consecutive_failures += 1
+            delay = min(
+                self.maximum_seconds,
+                self.initial_seconds * (2 ** (self._consecutive_failures - 1)),
+            )
+            self._generation += 1
+            self._blocked_until = self._clock() + delay
+            self._condition.notify_all()
+            return delay
+
+    def register_success(self, generation: int) -> bool:
+        """Reset escalation only after work from the current generation succeeds."""
+        with self._condition:
+            if generation != self._generation or not self._consecutive_failures:
+                return False
+            self._consecutive_failures = 0
+            self._blocked_until = 0.0
+            self._condition.notify_all()
+            return True
+
+    def wait(self, stop_event: threading.Event | None = None) -> int:
+        with self._condition:
+            while True:
+                if stop_event is not None and stop_event.is_set():
+                    raise KeyboardInterrupt("batch interrupted during provider backoff")
+                remaining = self._blocked_until - self._clock()
+                if remaining <= 0:
+                    return self._generation
+                self._condition.wait(timeout=min(remaining, 1.0))
+
+
+def openrouter_transient_failure(result: dict[str, Any]) -> str | None:
+    """Return evidence only for transient failures in the Decomposer provider path."""
+    if result.get("status") == "completed":
+        return None
+    evidence: list[str] = []
+    error = result.get("error")
+    if isinstance(error, dict):
+        for key in ("message", "stderr_tail", "traceback"):
+            value = error.get(key)
+            if isinstance(value, str):
+                evidence.append(value)
+    artifact = result.get("artifact_path")
+    if artifact:
+        trace_path = Path(artifact) / "trace.json"
+        try:
+            trace = json.loads(trace_path.read_text(encoding="utf-8"))
+            agent_error = trace.get("agent_error")
+            if isinstance(agent_error, str):
+                evidence.insert(0, agent_error)
+        except (OSError, json.JSONDecodeError):
+            pass
+    combined = "\n".join(evidence)
+    lowered = combined.lower()
+    teacher_path = (
+        "decomposer agent loop failed" in lowered
+        or "agent_error" in lowered
+        or bool(artifact and (Path(artifact) / "trace.json").is_file())
+    )
+    if not teacher_path:
+        return None
+    for marker in OPENROUTER_TRANSIENT_MARKERS:
+        if marker in lowered:
+            return marker
+    return None
 
 
 def validate_teacher_credentials() -> None:
@@ -693,6 +808,7 @@ def main(
             externally_managed=args.reuse_vllm,
             ports=args.subagent_ports,
         )
+        provider_backoff = ProviderBackoffBarrier()
         next_endpoint = 0
         while True:
             work: list[tuple[int, dict[str, Any], int]] = []
@@ -734,7 +850,7 @@ def main(
             )
             active: dict[
                 concurrent.futures.Future[dict[str, Any]],
-                tuple[int, dict[str, Any], int],
+                tuple[int, dict[str, Any], int, int],
             ] = {}
             remaining = iter(work)
 
@@ -766,6 +882,7 @@ def main(
                     index, episode, attempt = next(remaining)
                 except StopIteration:
                     return False
+                provider_generation = provider_backoff.wait(stop_event)
                 print(
                     f"[{index}/{manifest['counts']['total']}] {episode['key']} "
                     f"attempt {attempt}",
@@ -794,8 +911,37 @@ def main(
                     container_slot=(index - 1) % args.container_slots,
                 )
                 next_endpoint = (next_endpoint + 1) % len(args.subagent_ports)
-                active[future] = (index, episode, attempt)
+                active[future] = (index, episode, attempt, provider_generation)
                 return True
+
+            def update_provider_backoff(
+                result: dict[str, Any], provider_generation: int
+            ) -> None:
+                marker = openrouter_transient_failure(result)
+                if marker is not None:
+                    delay = provider_backoff.register_failure(provider_generation)
+                    if delay is not None:
+                        print(
+                            "OpenRouter transient failure; pausing new episodes "
+                            f"for {delay:g}s ({marker})",
+                            flush=True,
+                        )
+                        append_event(
+                            run_dir,
+                            "provider_backoff_started",
+                            provider="openrouter",
+                            delay_seconds=delay,
+                            marker=marker,
+                        )
+                    return
+                if result.get("status") == "completed" and (
+                    provider_backoff.register_success(provider_generation)
+                ):
+                    append_event(
+                        run_dir,
+                        "provider_backoff_reset",
+                        provider="openrouter",
+                    )
 
             try:
                 for _ in range(min(args.concurrency, len(work))):
@@ -806,7 +952,7 @@ def main(
                         return_when=concurrent.futures.FIRST_COMPLETED,
                     )
                     for future in done:
-                        _index, episode, attempt = active.pop(future)
+                        _index, episode, attempt, provider_generation = active.pop(future)
                         try:
                             result = future.result()
                         except Exception as error:
@@ -816,10 +962,16 @@ def main(
                             record_result(episode, result, interrupted_run=True)
                             raise
                         record_result(episode, result)
+                        update_provider_backoff(result, provider_generation)
                         submit_next()
             except BaseException:
                 stop_event.set()
-                for future, (_index, episode, attempt) in list(active.items()):
+                for future, (
+                    _index,
+                    episode,
+                    attempt,
+                    _provider_generation,
+                ) in list(active.items()):
                     try:
                         result = future.result()
                     except BaseException as error:
