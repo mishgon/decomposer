@@ -708,6 +708,7 @@ def test_docker_failure_includes_stderr(monkeypatch) -> None:
         )
 
     monkeypatch.setattr(run.subprocess, "run", fake_run)
+    monkeypatch.setattr(run, "_container_cli", lambda: ["docker"])
 
     with pytest.raises(
         RuntimeError,
@@ -722,6 +723,7 @@ def test_docker_timeout_names_the_command(monkeypatch) -> None:
         raise subprocess.TimeoutExpired(args[0], kwargs["timeout"])
 
     monkeypatch.setattr(run.subprocess, "run", fake_run)
+    monkeypatch.setattr(run, "_container_cli", lambda: ["docker"])
 
     with pytest.raises(RuntimeError, match="docker inspect x timed out after 60s"):
         run._docker("inspect", "x")
