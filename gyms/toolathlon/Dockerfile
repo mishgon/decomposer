@@ -19,6 +19,7 @@ COPY external/toolathlon/local_binary/ /workspace/local_binary/
 COPY gyms/toolathlon/patches/12306-mcp-cookie.patch /tmp/12306-mcp-cookie.patch
 COPY gyms/toolathlon/patches/redact-task-config.patch /tmp/redact-task-config.patch
 COPY gyms/toolathlon/patches/vllm-reasoning-field.patch /tmp/vllm-reasoning-field.patch
+COPY gyms/toolathlon/patches/clean-python-tool.patch /tmp/clean-python-tool.patch
 
 # TaskConfig contains task-specific API credentials. The native runner used
 # to pprint it into the episode log even when debug=False.
@@ -30,6 +31,12 @@ RUN patch --batch /workspace/utils/task_runner/runner.py \
 # and would otherwise discard every thinking trace between tool calls.
 RUN patch --batch /workspace/utils/api_model/model_provider.py \
         < /tmp/vllm-reasoning-field.patch
+
+# Local Python is an ephemeral execution tool.  Its implementation must not
+# leave .python_tmp scripts in agent workspaces that exact-tree evaluators then
+# mistake for model output.
+RUN patch --batch /workspace/utils/aux_tools/python_interpretor.py \
+        < /tmp/clean-python-tool.patch
 
 # 12306 retired /otn/lcQuery/init, and its replacement now indents the
 # lc_search_url declaration with a tab.  Both changes make the benchmark's
