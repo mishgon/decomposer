@@ -625,7 +625,7 @@ def test_vllm_command_uses_qwen_parsers() -> None:
     assert command[command.index("--served-model-name") + 1] == (
         run.DEFAULT_SUBAGENT_MODEL
     )
-    assert command[command.index("--tool-call-parser") + 1] == "qwen3_xml"
+    assert command[command.index("--tool-call-parser") + 1] == "qwen3_coder"
     assert command[command.index("--default-chat-template-kwargs") + 1] == (
         '{"enable_thinking":false}'
     )

@@ -86,7 +86,7 @@ def vllm_command(args: argparse.Namespace, port: int) -> list[str]:
         "--language-model-only",
         "--enable-auto-tool-choice",
         "--tool-call-parser",
-        "qwen3_xml",
+        "qwen3_coder",
         "--default-chat-template-kwargs",
         '{"enable_thinking":false}',
     ]
