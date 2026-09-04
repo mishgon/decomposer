@@ -1482,6 +1482,7 @@ def main() -> None:
     container = f"decomposer-bench-{args.task.replace('/', '-')}-{uuid.uuid4().hex[:8]}"
     container_task_path = CONTAINER_TASK_ROOT_TEMPLATE.format(task=args.task)
     started_at = datetime.now(timezone.utc).isoformat()
+    code_at_start = git_provenance(REPO_ROOT)
     vllm_log = (
         args.artifacts_dir.resolve().parent
         / "logs"
@@ -2093,7 +2094,7 @@ def main() -> None:
                     "repetition": args.repetition,
                     "attempt": args.attempt,
                     "purpose": args.purpose,
-                    "code": git_provenance(REPO_ROOT),
+                    "code": code_at_start,
                     "agent_mode": args.agent_mode,
                     "simple_agent_implementation": (
                         args.simple_agent_implementation
