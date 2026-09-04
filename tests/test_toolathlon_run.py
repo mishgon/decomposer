@@ -1462,7 +1462,9 @@ def test_batch_repetitions_and_resume_skip_completed(tmp_path, monkeypatch) -> N
         return "process"
 
     def fake_execute_episode(args, **kwargs):
-        episode_calls.append(kwargs)
+        episode_calls.append(
+            {**kwargs, "max_tool_output_chars": args.max_tool_output_chars}
+        )
         task = kwargs["episode"]["task"]
         repetition = kwargs["episode"]["repetition"]
         attempt = kwargs["attempt"]
@@ -1516,6 +1518,9 @@ def test_batch_repetitions_and_resume_skip_completed(tmp_path, monkeypatch) -> N
     assert all(episode["score"] is False for episode in manifest["episodes"])
 
     manifest["episodes"][1]["status"] = "failed"
+    # Old manifests predate the explicit cap field. Resuming one must use the
+    # current native Toolathlon default rather than restoring the removed 8K cap.
+    manifest["config"].pop("max_tool_output_chars")
     batch.save_manifest(artifacts / "runs" / "test-run", manifest)
     episode_calls.clear()
     resumed = batch.main(
@@ -1530,6 +1535,7 @@ def test_batch_repetitions_and_resume_skip_completed(tmp_path, monkeypatch) -> N
     assert episode_calls[0]["episode"]["task"] == "finalpool/beta"
     assert episode_calls[0]["episode"]["repetition"] == 1
     assert episode_calls[0]["attempt"] == 2
+    assert episode_calls[0]["max_tool_output_chars"] == 100_000
     assert resumed["counts"]["completed"] == 4
     assert len(resumed["episodes"][1]["attempts"]) == 2
     assert len(vllm_starts) == 2

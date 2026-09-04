@@ -851,7 +851,7 @@ def main(
             elif name == "agent_timeout" and name not in manifest["config"]:
                 setattr(args, name, 2700)
             elif name == "max_tool_output_chars" and name not in manifest["config"]:
-                setattr(args, name, 8_000)
+                setattr(args, name, 100_000)
             else:
                 setattr(args, name, manifest["config"][name])
     else:
