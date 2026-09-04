@@ -18,11 +18,31 @@ else
     exit 1
 fi
 
+REPO_IMAGE_INPUTS=(README.md pyproject.toml src/decomposer gyms/toolathlon)
+if ! git -C "$PROJECT_ROOT" diff --quiet HEAD -- "${REPO_IMAGE_INPUTS[@]}"; then
+    echo "Error: tracked task-image inputs differ from HEAD; commit them before building." >&2
+    exit 1
+fi
+if git -C "$PROJECT_ROOT" ls-files --others --exclude-standard -- \
+    "${REPO_IMAGE_INPUTS[@]}" | grep -q .; then
+    echo "Error: untracked task-image inputs exist; commit or ignore them before building." >&2
+    exit 1
+fi
+
 PINNED="$(git -C "$PROJECT_ROOT" ls-tree HEAD external/toolathlon | awk '{print $3}')"
 CHECKED_OUT="$(git -C "$PROJECT_ROOT/external/toolathlon" rev-parse HEAD 2>/dev/null || true)"
 if [ -n "$PINNED" ] && [ "$PINNED" != "$CHECKED_OUT" ]; then
     echo "Error: external/toolathlon is at ${CHECKED_OUT:-<missing>}, but the repository pins ${PINNED}." >&2
     echo "Run 'git submodule update --init external/toolathlon' before building." >&2
+    exit 1
+fi
+TOOLATHLON_IMAGE_INPUTS=(
+    scripts configs utils main.py tasks deployment
+    global_preparation/check_installation.py local_binary
+)
+if ! git -C "$PROJECT_ROOT/external/toolathlon" diff --quiet HEAD -- \
+    "${TOOLATHLON_IMAGE_INPUTS[@]}"; then
+    echo "Error: tracked Toolathlon image inputs differ from HEAD; commit them before building." >&2
     exit 1
 fi
 
