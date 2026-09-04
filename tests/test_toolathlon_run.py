@@ -1228,6 +1228,18 @@ def test_container_image_preserves_vllm_reasoning_between_tool_turns() -> None:
     assert 'json.dumps({"field_name": field_name, "value": value})' in patch
 
 
+def test_container_image_removes_local_python_tool_artifacts() -> None:
+    dockerfile = (run.REPO_ROOT / "gyms/toolathlon/Dockerfile").read_text()
+    patch = (
+        run.REPO_ROOT / "gyms/toolathlon/patches/clean-python-tool.patch"
+    ).read_text()
+
+    assert "clean-python-tool.patch" in dockerfile
+    assert "filename = os.path.basename(filename)" in patch
+    assert "os.remove(file_path)" in patch
+    assert "os.rmdir(tmp_dir)" in patch
+
+
 def test_k8s_tasks_have_post_evaluation_cluster_cleanup() -> None:
     assert set(run.K8S_TASK_CLEANUP_COMMANDS) == {
         "finalpool/k8s-deployment-cleanup",

@@ -1,0 +1,42 @@
+--- python_interpretor.py
++++ python_interpretor.py
+@@ -15,5 +15,9 @@ async def on_python_execute_tool_invoke(context: RunContextWrapper, params_str:
+         filename = params.get("filename", f"{uuid.uuid4()}.py")
+         timeout = params.get("timeout", 30)  # Default 30 seconds
++
++        # Tool implementation details must not become benchmark artifacts, and
++        # a caller-supplied filename must never escape the private temp folder.
++        filename = os.path.basename(filename) or f"{uuid.uuid4()}.py"
+         
+         # Ensure timeout is not greater than 120 seconds
+         if timeout > 120:
+@@ -42,18 +46,27 @@ async def on_python_execute_tool_invoke(context: RunContextWrapper, params_str:
+         start_time = time.time()
+         
+         # Execute Python file
+-        cmd = f"uv run --directory {agent_workspace} ./.python_tmp/{filename}"
++        cmd = ["uv", "run", "--directory", agent_workspace, file_path]
+         try:
+             result = subprocess.run(
+                 cmd,
+-                shell=True,
++                shell=False,
+                 capture_output=True,
+                 text=True,
+                 encoding='utf-8',
+                 timeout=timeout
+             )
+         except subprocess.TimeoutExpired:
+             execution_time = time.time() - start_time
+             return f"=== EXECUTION TIMEOUT ===\nExecution timed out after {timeout} seconds\nExecution time: {execution_time:.3f} seconds"
++        finally:
++            try:
++                os.remove(file_path)
++            except FileNotFoundError:
++                pass
++            try:
++                os.rmdir(tmp_dir)
++            except OSError:
++                pass
+         
+         # Calculate execution time
