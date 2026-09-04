@@ -1828,6 +1828,19 @@ def test_container_image_preserves_vllm_reasoning_between_tool_turns() -> None:
     assert 'json.dumps({"field_name": field_name, "value": value})' in patch
 
 
+def test_container_image_does_not_truncate_managed_mcp_outputs_twice() -> None:
+    dockerfile = (run.REPO_ROOT / "gyms/toolathlon/Dockerfile").read_text()
+    patch = (
+        run.REPO_ROOT
+        / "gyms/toolathlon/patches/idempotent-overlong-tool-output.patch"
+    ).read_text()
+
+    assert "idempotent-overlong-tool-output.patch" in dockerfile
+    assert "MANAGED_OVERLONG_TOOL_OUTPUT_MARKER" in patch
+    assert 'and ".overlong_tool_outputs/" in tool_output_text' in patch
+    assert "return tool_output" in patch
+
+
 def test_container_image_removes_local_python_tool_artifacts() -> None:
     dockerfile = (run.REPO_ROOT / "gyms/toolathlon/Dockerfile").read_text()
     patch = (

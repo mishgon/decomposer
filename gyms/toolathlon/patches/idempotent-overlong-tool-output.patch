@@ -1,0 +1,28 @@
+--- custom_run_impl.py
++++ custom_run_impl.py
+@@ -7,6 +7,9 @@ import shortuuid
+ 
+ 
+ MAX_SINGLE_TURN_RETURN_CHARS = int(os.getenv("BENCH_MAX_SINGLE_TURN_RETURN_CHARS", 100000))
++MANAGED_OVERLONG_TOOL_OUTPUT_MARKER = (
++    "(The output of the tool call (shortuuid identifier:"
++)
+ 
+ 
+ def _resolve_registered_tool_name(returned_name: str, registered_names) -> str | None:
+@@ -33,6 +36,15 @@ def _truncate_overlong_tool_output(
+     tool_output: Any, context_wrapper: RunContextWrapper[Any]
+ ) -> Any:
+     tool_output_text = tool_output if isinstance(tool_output, str) else str(tool_output)
++    # MCPUtil already persists and truncates oversized MCP results.  Those
++    # results flow through this generic function-tool hook afterwards; doing
++    # the same work again replaces the usable full-result ID with an ID for an
++    # already-truncated, often invalid JSON prefix.
++    if (
++        MANAGED_OVERLONG_TOOL_OUTPUT_MARKER in tool_output_text
++        and ".overlong_tool_outputs/" in tool_output_text
++    ):
++        return tool_output
+     if len(tool_output_text) <= MAX_SINGLE_TURN_RETURN_CHARS:
+         return tool_output
+ 

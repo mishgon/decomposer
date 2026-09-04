@@ -30,6 +30,7 @@ COPY gyms/toolathlon/patches/12306-mcp-cookie.patch /tmp/12306-mcp-cookie.patch
 COPY gyms/toolathlon/patches/redact-task-config.patch /tmp/redact-task-config.patch
 COPY gyms/toolathlon/patches/vllm-reasoning-field.patch /tmp/vllm-reasoning-field.patch
 COPY gyms/toolathlon/patches/clean-python-tool.patch /tmp/clean-python-tool.patch
+COPY gyms/toolathlon/patches/idempotent-overlong-tool-output.patch /tmp/idempotent-overlong-tool-output.patch
 
 # TaskConfig contains task-specific API credentials. The native runner used
 # to pprint it into the episode log even when debug=False.
@@ -41,6 +42,12 @@ RUN patch --batch /workspace/utils/task_runner/runner.py \
 # and would otherwise discard every thinking trace between tool calls.
 RUN patch --batch /workspace/utils/api_model/model_provider.py \
         < /tmp/vllm-reasoning-field.patch
+
+# MCP results pass through both MCPUtil and the generic function-tool runner.
+# Make overlong-output persistence idempotent so the second layer does not
+# replace a full-result handle with a handle to truncated, invalid JSON.
+RUN patch --batch /workspace/utils/openai_agents_monkey_patch/custom_run_impl.py \
+        < /tmp/idempotent-overlong-tool-output.patch
 
 # Local Python is an ephemeral execution tool.  Its implementation must not
 # leave .python_tmp scripts in agent workspaces that exact-tree evaluators then
