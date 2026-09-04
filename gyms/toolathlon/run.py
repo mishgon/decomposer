@@ -528,7 +528,7 @@ def vllm_command(
         "--language-model-only",
         "--enable-auto-tool-choice",
         "--tool-call-parser",
-        "gemma4" if is_gemma else "qwen3_xml",
+        "gemma4" if is_gemma else "qwen3_coder",
     ]
     if is_gemma:
         command.extend(["--reasoning-parser", "gemma4"])
