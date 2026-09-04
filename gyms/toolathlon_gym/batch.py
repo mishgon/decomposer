@@ -22,6 +22,7 @@ SCHEMA_VERSION = 1
 RESUME_CONFIG_FIELDS = (
     "model",
     "subagent_model",
+    "subagent_api_model",
     "subagent_port",
     "subagent_ports",
     "subagent_gpu",
@@ -103,6 +104,10 @@ def parse_args(argv: Sequence[str], defaults: dict[str, Any]) -> argparse.Namesp
     parser.add_argument("--purpose", choices=("trace-generation",), required=True)
     parser.add_argument("--model", default=defaults["model"])
     parser.add_argument("--subagent-model", default=defaults["subagent_model"])
+    parser.add_argument(
+        "--subagent-api-model",
+        default=defaults.get("subagent_api_model", defaults["subagent_model"]),
+    )
     parser.add_argument("--subagent-port", type=int, default=defaults["subagent_port"])
     parser.add_argument(
         "--subagent-ports",
@@ -281,6 +286,8 @@ def episode_command(
         "--repetition", str(repetition), "--attempt", str(attempt),
         "--purpose", args.purpose, "--model", args.model,
         "--subagent-model", args.subagent_model,
+        "--subagent-api-model",
+        getattr(args, "subagent_api_model", args.subagent_model),
         "--subagent-port", str(port),
         "--subagent-gpu", args.subagent_gpu,
         "--vllm-max-model-len", str(args.vllm_max_model_len),
@@ -475,6 +482,7 @@ def main(
     default_image: str,
     default_model: str,
     default_subagent_model: str,
+    default_subagent_api_model: str | None = None,
     default_subagent_port: int,
     start_vllm: Callable[..., subprocess.Popen[bytes] | None],
     stop_vllm: Callable[[subprocess.Popen[bytes] | None], None],
@@ -485,6 +493,7 @@ def main(
         "image": default_image,
         "model": default_model,
         "subagent_model": default_subagent_model,
+        "subagent_api_model": default_subagent_api_model or default_subagent_model,
         "subagent_port": default_subagent_port,
     }
     args = parse_args(argv, defaults)
@@ -547,6 +556,7 @@ def main(
             processes.append(
                 start_vllm(
                     model=args.subagent_model,
+                    served_model_name=args.subagent_api_model,
                     port=port,
                     gpu=args.subagent_gpu,
                     max_model_len=args.vllm_max_model_len,
