@@ -1167,6 +1167,17 @@ def test_container_image_redacts_task_credentials_from_normal_logs() -> None:
     assert "Task: {task_config.task_dir}" in patch
 
 
+def test_container_image_preserves_vllm_reasoning_between_tool_turns() -> None:
+    dockerfile = (run.REPO_ROOT / "gyms/toolathlon/Dockerfile").read_text()
+    patch = (
+        run.REPO_ROOT / "gyms/toolathlon/patches/vllm-reasoning-field.patch"
+    ).read_text()
+
+    assert "vllm-reasoning-field.patch" in dockerfile
+    assert '("reasoning", "reasoning_content", "reasoning_details")' in patch
+    assert 'json.dumps({"field_name": field_name, "value": value})' in patch
+
+
 def test_k8s_tasks_have_post_evaluation_cluster_cleanup() -> None:
     assert set(run.K8S_TASK_CLEANUP_COMMANDS) == {
         "finalpool/k8s-deployment-cleanup",
