@@ -215,6 +215,17 @@ def test_openrouter_decomposer_advertises_one_configured_model() -> None:
     )
 
 
+def test_all_local_subagent_graphs_receive_configured_vllm_url() -> None:
+    base_url = "http://host.docker.internal:19030/v1"
+
+    assert run.local_vllm_base_url_environment(base_url) == {
+        "QWEN_3_5_4B_BASE_URL": base_url,
+        "GEMMA_4_E4B_BASE_URL": base_url,
+        "GEMMA_4_31B_BASE_URL": base_url,
+        "GEMMA_4_26B_A4B_BASE_URL": base_url,
+    }
+
+
 def test_decomposer_prompt_modes_select_student_and_teacher_prompts() -> None:
     assert run.DECOMPOSER_PROMPTS["student"] == run.DECOMPOSER_SYSTEM_PROMPT
     assert (

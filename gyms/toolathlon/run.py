@@ -417,6 +417,16 @@ def selected_subagent_specs(
     return tuple(spec for spec in SUBAGENT_TYPES if spec[0] == selected_id)
 
 
+def local_vllm_base_url_environment(base_url: str) -> dict[str, str]:
+    """Route every registered local graph to the one actually served model."""
+    return {
+        "QWEN_3_5_4B_BASE_URL": base_url,
+        "GEMMA_4_E4B_BASE_URL": base_url,
+        "GEMMA_4_31B_BASE_URL": base_url,
+        "GEMMA_4_26B_A4B_BASE_URL": base_url,
+    }
+
+
 def official_simple_agent_bundle(bundle: dict, args: argparse.Namespace) -> dict:
     """Build a container-local bundle for Toolathlon's native TaskAgent."""
     runtime_bundle = copy.deepcopy(bundle)
@@ -1422,17 +1432,10 @@ async def _run_simple_agent(
     os.environ["TOOLATHLON_GATEWAY_URL"] = (
         f"http://127.0.0.1:{gateway_port}/sse"
     )
-    os.environ["QWEN_3_5_4B_BASE_URL"] = (
-        f"http://127.0.0.1:{subagent_port}/v1"
-    )
-    os.environ["GEMMA_4_E4B_BASE_URL"] = (
-        f"http://127.0.0.1:{subagent_port}/v1"
-    )
-    os.environ["GEMMA_4_31B_BASE_URL"] = (
-        f"http://127.0.0.1:{subagent_port}/v1"
-    )
-    os.environ["GEMMA_4_26B_A4B_BASE_URL"] = (
-        f"http://127.0.0.1:{subagent_port}/v1"
+    os.environ.update(
+        local_vllm_base_url_environment(
+            f"http://127.0.0.1:{subagent_port}/v1"
+        )
     )
     os.environ["TOOLATHLON_AGENT_WORKSPACE"] = agent_workspace
     if __package__:
@@ -1997,11 +2000,7 @@ def main() -> None:
                     ">> /workspace/dumps/subagent_server.log 2>&1",
                     detach=True,
                     env={
-                        "QWEN_3_5_4B_BASE_URL": (
-                            args.subagent_base_url
-                            or f"http://127.0.0.1:{args.subagent_port}/v1"
-                        ),
-                        "GEMMA_4_E4B_BASE_URL": (
+                        **local_vllm_base_url_environment(
                             args.subagent_base_url
                             or f"http://127.0.0.1:{args.subagent_port}/v1"
                         ),
