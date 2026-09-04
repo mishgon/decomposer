@@ -1503,6 +1503,98 @@ def test_declared_email_and_woocommerce_dependencies_are_preflighted() -> None:
     assert 10003 in woo_ports
 
 
+def test_batch_preflight_checks_unique_declared_external_dependencies(
+    tmp_path, monkeypatch
+) -> None:
+    tasks_root = tmp_path / "tasks"
+    for task, servers in {
+        "finalpool/canvas-one": ["canvas", "emails"],
+        "finalpool/canvas-two": ["canvas"],
+    }.items():
+        task_dir = tasks_root / task
+        task_dir.mkdir(parents=True)
+        (task_dir / "task_config.json").write_text(
+            json.dumps({"needed_mcp_servers": servers}), encoding="utf-8"
+        )
+
+    calls = []
+
+    class Connection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+    def connect(address, timeout):
+        calls.append((address, timeout))
+        if address[1] == 20001:
+            raise ConnectionRefusedError("proxy stopped")
+        return Connection()
+
+    monkeypatch.setattr(batch.socket, "create_connection", connect)
+
+    with pytest.raises(RuntimeError, match=r"Canvas proxy at 127\.0\.0\.1:20001"):
+        batch.preflight_external_tcp_dependencies(
+            ["finalpool/canvas-one", "finalpool/canvas-two"], tasks_root
+        )
+
+    assert calls.count((("127.0.0.1", 10001), 2.0)) == 1
+    assert calls.count((("127.0.0.1", 20001), 2.0)) == 1
+    assert calls.count((("127.0.0.1", 1143), 2.0)) == 1
+    assert calls.count((("127.0.0.1", 1587), 2.0)) == 1
+
+
+def test_batch_rejects_dead_external_service_before_model_start(
+    tmp_path, monkeypatch
+) -> None:
+    toolathlon_root = tmp_path / "toolathlon"
+    task_dir = toolathlon_root / "tasks" / "finalpool/canvas-task"
+    task_dir.mkdir(parents=True)
+    (task_dir / "task_config.json").write_text(
+        json.dumps({"needed_mcp_servers": ["canvas"]}), encoding="utf-8"
+    )
+    artifacts = tmp_path / "artifacts"
+    starts = []
+    monkeypatch.setattr(batch, "new_run_id", lambda: "no-service-run")
+    monkeypatch.setattr(
+        batch.socket,
+        "create_connection",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            ConnectionRefusedError("service stopped")
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="before model startup"):
+        batch.main(
+            [
+                "--tasks",
+                "finalpool/canvas-task",
+                "--purpose",
+                "evaluation",
+                "--agent-mode",
+                "simple",
+                "--bench-artifacts-dir",
+                str(artifacts),
+            ],
+            repo_root=tmp_path,
+            toolathlon_root=toolathlon_root,
+            default_artifacts_dir=artifacts,
+            default_image="image",
+            default_model="decomposer-model",
+            default_subagent_model="subagent-model",
+            default_subagent_port=8030,
+            start_vllm=lambda **kwargs: starts.append(kwargs),
+            stop_vllm=lambda process: None,
+            docker=lambda *args, **kwargs: subprocess.CompletedProcess(
+                args, 0, "", ""
+            ),
+        )
+
+    assert starts == []
+    assert not (artifacts / "runs" / "no-service-run").exists()
+
+
 @pytest.mark.parametrize(
     "output",
     [
