@@ -583,8 +583,8 @@ def test_cleanup_continues_when_log_capture_fails(tmp_path, monkeypatch) -> None
         network="episode-network",
     )
 
-    assert ("rm", "--force", "task-container") in calls
-    assert ("rm", "--force", "pg-container") in calls
+    assert ("rm", "--force", "--volumes", "task-container") in calls
+    assert ("rm", "--force", "--volumes", "pg-container") in calls
     assert ("network", "rm", "episode-network") in calls
     cleanup = json.loads((tmp_path / "cleanup.json").read_text())
     assert cleanup["captures"][0]["error"] == "OSError('capture failed')"

@@ -139,8 +139,8 @@ def _cleanup_episode(
                     {"container": label, "kind": kind, "error": repr(error)}
                 )
     for command in (
-        ("rm", "--force", task_container),
-        ("rm", "--force", pg_container),
+        ("rm", "--force", "--volumes", task_container),
+        ("rm", "--force", "--volumes", pg_container),
         ("network", "rm", network),
     ):
         try:
