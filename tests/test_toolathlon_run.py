@@ -74,10 +74,19 @@ def test_labeled_stale_image_is_rejected(tmp_path, monkeypatch) -> None:
         )
 
 
-def test_legacy_unlabeled_image_remains_usable(tmp_path) -> None:
+def test_missing_inspection_payload_is_tolerated_for_test_doubles(tmp_path) -> None:
     batch.verify_image_sources(
         {"verified": False}, repo_root=tmp_path, toolathlon_root=tmp_path
     )
+
+
+def test_real_unlabeled_image_is_rejected(tmp_path) -> None:
+    with pytest.raises(RuntimeError, match="lacks.*source labels"):
+        batch.verify_image_sources(
+            {"verified": False, "id": "sha256:legacy"},
+            repo_root=tmp_path,
+            toolathlon_root=tmp_path,
+        )
 
 
 def test_container_cli_falls_back_to_podman(monkeypatch) -> None:
