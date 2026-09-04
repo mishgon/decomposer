@@ -2,6 +2,10 @@ ARG TOOLATHLON_BASE_IMAGE=docker.io/lockon0927/toolathlon-task-image:1016beta
 FROM ${TOOLATHLON_BASE_IMAGE}
 
 ARG PYTHON_VERSION=3.12
+ARG DECOMPOSER_REVISION=unknown
+ARG TOOLATHLON_REVISION=unknown
+LABEL org.opencontainers.image.revision="${DECOMPOSER_REVISION}" \
+      io.decomposer.toolathlon.revision="${TOOLATHLON_REVISION}"
 ENV SUBAGENT_VENV=/opt/subagents
 
 # Bake the pinned benchmark sources into /workspace. The image's own

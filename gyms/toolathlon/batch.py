@@ -145,6 +145,69 @@ def git_provenance(root: Path) -> dict[str, object]:
     }
 
 
+def image_provenance(
+    inspection: subprocess.CompletedProcess[str], image: str
+) -> dict[str, object]:
+    """Extract immutable image identity and source labels from inspect output."""
+    result: dict[str, object] = {
+        "reference": image,
+        "id": None,
+        "repo_digests": [],
+        "decomposer_revision": None,
+        "toolathlon_revision": None,
+        "verified": False,
+    }
+    try:
+        payload = json.loads(inspection.stdout)
+        item = payload[0] if isinstance(payload, list) and payload else payload
+        if not isinstance(item, dict):
+            return result
+        config = item.get("Config")
+        labels = config.get("Labels") if isinstance(config, dict) else None
+        labels = labels if isinstance(labels, dict) else {}
+        result.update(
+            id=item.get("Id"),
+            repo_digests=item.get("RepoDigests") or [],
+            decomposer_revision=labels.get("org.opencontainers.image.revision"),
+            toolathlon_revision=labels.get("io.decomposer.toolathlon.revision"),
+        )
+        result["verified"] = bool(
+            result["decomposer_revision"] and result["toolathlon_revision"]
+        )
+    except (json.JSONDecodeError, TypeError, AttributeError):
+        pass
+    return result
+
+
+def checked_out_revision(root: Path) -> str | None:
+    process = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=root, capture_output=True, text=True
+    )
+    return process.stdout.strip() if process.returncode == 0 else None
+
+
+def verify_image_sources(
+    provenance: dict[str, object], *, repo_root: Path, toolathlon_root: Path
+) -> None:
+    """Reject a labeled task image when it was built from different sources."""
+    if not provenance.get("verified"):
+        return
+    expected = {
+        "decomposer_revision": checked_out_revision(repo_root),
+        "toolathlon_revision": checked_out_revision(toolathlon_root),
+    }
+    mismatches = [
+        f"{name}={provenance.get(name)} (checkout={revision})"
+        for name, revision in expected.items()
+        if revision and provenance.get(name) != revision
+    ]
+    if mismatches:
+        raise RuntimeError(
+            "Task image source mismatch; rebuild with gyms/toolathlon/build.sh: "
+            + "; ".join(mismatches)
+        )
+
+
 def write_json(path: Path, value: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
@@ -921,7 +984,11 @@ def main(
         ]
         if missing:
             raise RuntimeError("Set " + " and ".join(missing) + " for lmrouter")
-    docker("image", "inspect", args.image)
+    image_inspection = docker("image", "inspect", args.image)
+    image_info = image_provenance(image_inspection, args.image)
+    verify_image_sources(
+        image_info, repo_root=repo_root, toolathlon_root=toolathlon_root
+    )
     if not args.resume:
         # Do not create a tracked run until every read-only launch preflight has
         # passed. Otherwise a missing Docker shim/image or credential leaves a
@@ -945,6 +1012,7 @@ def main(
             "hostname": platform.node(),
             "python": sys.version,
             "code": git_provenance(repo_root),
+            "image": image_info,
         }
     )
     save_manifest(run_dir, manifest)

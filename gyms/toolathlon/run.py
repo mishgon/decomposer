@@ -309,10 +309,10 @@ def ensure_benchmark_checkout(toolathlon_root: Path) -> None:
             flush=True,
         )
     (configs / ".mcp-auth").mkdir(parents=True, exist_ok=True)
-    _warn_submodule_drift(toolathlon_root)
+    _verify_submodule_revision(toolathlon_root)
 
 
-def _warn_submodule_drift(toolathlon_root: Path) -> None:
+def _verify_submodule_revision(toolathlon_root: Path) -> None:
     try:
         listing = subprocess.run(
             [
@@ -337,11 +337,10 @@ def _warn_submodule_drift(toolathlon_root: Path) -> None:
     except (OSError, subprocess.CalledProcessError):
         return
     if pinned and current and not current.startswith(pinned):
-        print(
-            f"Warning: external/toolathlon is at {current[:12]} but the "
-            f"repository pins {pinned[:12]}; the task image may not match the "
-            "checkout.",
-            flush=True,
+        raise RuntimeError(
+            f"external/toolathlon is at {current[:12]} but the repository "
+            f"pins {pinned[:12]}; run: git submodule update --init "
+            "external/toolathlon"
         )
 
 
@@ -1636,9 +1635,13 @@ def main() -> None:
     docker_socket = resolve_docker_socket(args.docker_socket)
 
     try:
-        _docker("image", "inspect", args.image)
+        image_inspection = _docker("image", "inspect", args.image)
     except RuntimeError as exc:
         raise RuntimeError(f"{exc} (build it with gyms/toolathlon/build.sh)") from exc
+    image_info = batch.image_provenance(image_inspection, args.image)
+    batch.verify_image_sources(
+        image_info, repo_root=REPO_ROOT, toolathlon_root=TOOLATHLON_ROOT
+    )
 
     episode_id = args.episode_id or (
         datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ-")
@@ -2258,6 +2261,7 @@ def main() -> None:
                     "attempt": args.attempt,
                     "purpose": args.purpose,
                     "code": code_at_start,
+                    "image": image_info,
                     "agent_mode": args.agent_mode,
                     "simple_agent_implementation": (
                         args.simple_agent_implementation
