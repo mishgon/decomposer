@@ -989,6 +989,31 @@ def test_official_simple_agent_bundle_can_match_verified_generation_defaults() -
     }
 
 
+def test_native_agent_config_persists_resolved_runtime_settings(tmp_path) -> None:
+    runtime_bundle = {
+        "eval_config": {
+            "agent": {
+                "model": {
+                    "short_name": "google/gemma-4-31B-it",
+                    "provider": "local_vllm",
+                    "context_window": 131_072,
+                },
+                "generation": {
+                    "max_tokens": 65_536,
+                    "reasoning": {"effort": "high"},
+                },
+                "tool": {"tool_choice": "auto"},
+            }
+        }
+    }
+
+    path = run.write_native_agent_config(tmp_path, runtime_bundle)
+
+    assert json.loads(path.read_text(encoding="utf-8")) == runtime_bundle[
+        "eval_config"
+    ]["agent"]
+
+
 def test_answer_from_native_trajectory_uses_last_assistant_message() -> None:
     assert run.answer_from_native_trajectory(
         {
