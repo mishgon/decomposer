@@ -308,6 +308,44 @@ def test_configured_subagents_are_registered() -> None:
     ]
 
 
+def test_langgraph_factory_does_not_treat_injected_config_as_system_prompt(
+    monkeypatch,
+) -> None:
+    captured = {}
+    compiled = object()
+
+    def fake_create(*args, **kwargs):
+        captured.update(kwargs)
+        return compiled
+
+    monkeypatch.setattr(subagent_graph, "_create_subagent", fake_create)
+
+    result = subagent_graph.qwen_3_5_4b_non_thinking(
+        {"tags": [], "metadata": {}, "recursion_limit": 410}
+    )
+
+    assert result is compiled
+    assert captured["system_prompt"] is None
+
+
+def test_direct_subagent_factory_preserves_explicit_system_prompt(
+    monkeypatch,
+) -> None:
+    captured = {}
+    compiled = object()
+
+    def fake_create(*args, **kwargs):
+        captured.update(kwargs)
+        return compiled
+
+    monkeypatch.setattr(subagent_graph, "_create_subagent", fake_create)
+
+    result = subagent_graph.qwen_3_5_4b_non_thinking("task prompt")
+
+    assert result is compiled
+    assert captured["system_prompt"] == "task prompt"
+
+
 @pytest.mark.parametrize(
     ("model", "expected_id"),
     [
