@@ -13,6 +13,17 @@ REQUEST_TIMEOUT_SECONDS = 600.0
 REQUEST_MAX_RETRIES = 2
 
 
+def configured_non_thinking() -> CompiledStateGraph:
+    return _create_subagent(
+        os.environ.get(
+            "DECOMPOSER_SUBAGENT_MODEL", "google/gemma-4-26B-A4B-it"
+        ),
+        "DECOMPOSER_SUBAGENT_BASE_URL",
+        8023,
+        thinking=False,
+    )
+
+
 def _create_subagent(
     model_id: str,
     base_url_env: str,

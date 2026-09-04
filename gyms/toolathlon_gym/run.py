@@ -38,6 +38,7 @@ DEFAULT_EVALS_DIR = DEFAULT_GYM_ARTIFACTS_DIR / "evals"
 DEFAULT_IMAGE = "decomposer-toolathlon:latest"
 DEFAULT_MODEL = "deepseek/deepseek-v4-flash-0731"
 DEFAULT_SUBAGENT_MODEL = "google/gemma-4-26B-A4B-it"
+DEFAULT_SUBAGENT_API_MODEL = "google/gemma-4-26B-A4B-it"
 DEFAULT_SUBAGENT_PORT = 8023
 POSTGRES_IMAGE = "docker.io/library/postgres:15"
 POSTGRES_ENV = {
@@ -48,20 +49,13 @@ POSTGRES_ENV = {
     "PGPASSWORD": "camel",
     "PGDATABASE": "toolathlon_gym",
 }
-SUBAGENT_TYPES = (
-    # subagent_type_id, assistant_id, model_description
-    # ("gemma_4_2b_thinking", "gemma_4_2b_thinking", "Gemma-4-2B thinking"),
-    # ("gemma_4_2b_non_thinking", "gemma_4_2b_non_thinking", "Gemma-4-2B non-thinking"),
-    # ("gemma_4_4b_thinking", "gemma_4_4b_thinking", "Gemma-4-4B thinking"),
-    # ("gemma_4_4b_non_thinking", "gemma_4_4b_non_thinking", "Gemma-4-4B non-thinking"),
-    # ("gemma_4_12b_thinking", "gemma_4_12b_thinking", "Gemma-4-12B thinking"),
-    # ("gemma_4_12b_non_thinking", "gemma_4_12b_non_thinking", "Gemma-4-12B non-thinking"),
-    (
-        "gemma_4_26b_a4b_non_thinking",
-        "gemma_4_26b_a4b_non_thinking",
-        "Gemma-4-26B-A4B non-thinking",
-    ),
-)
+SUBAGENT_TYPE_ID = "configured_non_thinking"
+# Retained for compatibility with callers that inspect the historical default.
+SUBAGENT_TYPES = ((
+    "gemma_4_26b_a4b_non_thinking",
+    "gemma_4_26b_a4b_non_thinking",
+    "Gemma-4-26B-A4B non-thinking",
+),)
 
 
 def _docker(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -170,6 +164,7 @@ def vllm_command(
     model: str,
     port: int,
     *,
+    served_model_name: str = DEFAULT_SUBAGENT_API_MODEL,
     max_model_len: int,
     gpu_memory_utilization: float,
     data_parallel_size: int = 1,
@@ -179,7 +174,7 @@ def vllm_command(
         "serve",
         model,
         "--served-model-name",
-        DEFAULT_SUBAGENT_MODEL,
+        served_model_name,
         "--host",
         "0.0.0.0",
         "--port",
@@ -245,6 +240,7 @@ def wait_for_vllm(
 def start_vllm(
     *,
     model: str,
+    served_model_name: str = DEFAULT_SUBAGENT_API_MODEL,
     port: int,
     gpu: str,
     max_model_len: int,
@@ -270,7 +266,7 @@ def start_vllm(
         wait_for_vllm(
             None,
             port=port,
-            expected_model=DEFAULT_SUBAGENT_MODEL,
+            expected_model=served_model_name,
             timeout=2,
             log_path=log_path,
         )
@@ -290,6 +286,7 @@ def start_vllm(
     command = vllm_command(
         model,
         port,
+        served_model_name=served_model_name,
         max_model_len=max_model_len,
         gpu_memory_utilization=gpu_memory_utilization,
         data_parallel_size=data_parallel_size,
@@ -318,7 +315,7 @@ def start_vllm(
         wait_for_vllm(
             process,
             port=port,
-            expected_model=DEFAULT_SUBAGENT_MODEL,
+            expected_model=served_model_name,
             timeout=timeout,
             log_path=log_path,
         )
@@ -363,6 +360,7 @@ def main() -> None:
     parser.add_argument("--purpose", choices=("trace-generation",), required=True)
     parser.add_argument("--model", default=DEFAULT_MODEL)
     parser.add_argument("--subagent-model", default=DEFAULT_SUBAGENT_MODEL)
+    parser.add_argument("--subagent-api-model", default=DEFAULT_SUBAGENT_API_MODEL)
     parser.add_argument("--subagent-port", type=int, default=DEFAULT_SUBAGENT_PORT)
     parser.add_argument("--subagent-gpu", default="0")
     parser.add_argument("--vllm-max-model-len", type=int, default=256000)
@@ -433,6 +431,7 @@ def main() -> None:
     print(f"Starting vLLM on GPU {args.subagent_gpu}...", flush=True)
     vllm_process = start_vllm(
         model=args.subagent_model,
+        served_model_name=args.subagent_api_model,
         port=args.subagent_port,
         gpu=args.subagent_gpu,
         max_model_len=args.vllm_max_model_len,
@@ -571,8 +570,10 @@ def main() -> None:
             "--env",
             "TOOLATHLON_SUBAGENT_CALL_LOG=/artifacts/data/subagent_model_calls.jsonl",
             "--env",
+            f"DECOMPOSER_SUBAGENT_MODEL={args.subagent_api_model}",
+            "--env",
             (
-                "GEMMA_4_26B_A4B_BASE_URL="
+                "DECOMPOSER_SUBAGENT_BASE_URL="
                 f"http://host.docker.internal:{args.subagent_port}/v1"
             ),
             *postgres_env,
@@ -725,18 +726,15 @@ def main() -> None:
             teacher_backend = "openrouter"
         agent = create_decomposer_agent(
             decomposer_model=decomposer_model,
-            subagent_types=[
-                {
-                    "subagent_type_id": subagent_type_id,
-                    "description": (
-                        f"Tool-calling agent based on a {model_description} model. "
-                        "Has access to all the available tools."
-                    ),
-                    "assistant_id": assistant_id,
-                    "url": subagent_url,
-                }
-                for subagent_type_id, assistant_id, model_description in SUBAGENT_TYPES
-            ],
+            subagent_types=[{
+                "subagent_type_id": SUBAGENT_TYPE_ID,
+                "description": (
+                    f"Tool-calling agent based on {args.subagent_api_model} in "
+                    "non-thinking mode. Has access to all the available tools."
+                ),
+                "assistant_id": SUBAGENT_TYPE_ID,
+                "url": subagent_url,
+            }],
             decomposer_system_prompt=DECOMPOSER_TEACHER_SYSTEM_PROMPT,
             checkpointer=checkpointer,
             subagent_recursion_limit=410,
@@ -910,6 +908,7 @@ if __name__ == "__main__":
             default_image=DEFAULT_IMAGE,
             default_model=DEFAULT_MODEL,
             default_subagent_model=DEFAULT_SUBAGENT_MODEL,
+            default_subagent_api_model=DEFAULT_SUBAGENT_API_MODEL,
             default_subagent_port=DEFAULT_SUBAGENT_PORT,
             start_vllm=start_vllm,
             stop_vllm=stop_vllm,
