@@ -521,6 +521,21 @@ def official_simple_agent_bundle(bundle: dict, args: argparse.Namespace) -> dict
     return runtime_bundle
 
 
+def write_native_agent_config(episode_dir: Path, runtime_bundle: dict) -> Path:
+    """Persist the resolved native model settings used for this episode."""
+    path = episode_dir / "native_agent_config.json"
+    path.write_text(
+        json.dumps(
+            runtime_bundle["eval_config"]["agent"],
+            indent=2,
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return path
+
+
 def preprocess_agent_identity(args: argparse.Namespace) -> tuple[str, str]:
     """Return the model identity the native scaffold must resolve up front."""
     if (
@@ -2081,9 +2096,11 @@ def main() -> None:
                 if args.simple_agent_implementation == "toolathlon":
                     runtime_bundle_file = trusted_stash_dir / "native_bundle.json"
                     native_agent_pid_file = "/run/toolathlon-native-agent.pid"
+                    runtime_bundle = official_simple_agent_bundle(bundle, args)
+                    write_native_agent_config(episode_dir, runtime_bundle)
                     runtime_bundle_file.write_text(
                         json.dumps(
-                            official_simple_agent_bundle(bundle, args),
+                            runtime_bundle,
                             ensure_ascii=False,
                         ),
                         encoding="utf-8",
