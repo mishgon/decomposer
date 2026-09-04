@@ -1624,6 +1624,73 @@ def test_batch_rejects_dead_external_service_before_model_start(
     assert not (artifacts / "runs" / "no-service-run").exists()
 
 
+def test_batch_rejects_missing_serper_key_before_model_start(
+    tmp_path, monkeypatch
+) -> None:
+    toolathlon_root = tmp_path / "toolathlon"
+    task_dir = toolathlon_root / "tasks" / "finalpool/search-task"
+    task_dir.mkdir(parents=True)
+    (task_dir / "task_config.json").write_text(
+        json.dumps({"needed_local_tools": ["web_search"]}), encoding="utf-8"
+    )
+    configs = toolathlon_root / "configs"
+    configs.mkdir()
+    (configs / "token_key_session.py").write_text(
+        "from addict import Dict\nall_token_key_session = Dict(serper_api_key='XX')\n",
+        encoding="utf-8",
+    )
+    artifacts = tmp_path / "artifacts"
+    starts = []
+    monkeypatch.setattr(batch, "new_run_id", lambda: "no-credential-run")
+
+    with pytest.raises(RuntimeError, match="no usable serper_api_key"):
+        batch.main(
+            [
+                "--tasks",
+                "finalpool/search-task",
+                "--purpose",
+                "evaluation",
+                "--agent-mode",
+                "simple",
+                "--bench-artifacts-dir",
+                str(artifacts),
+            ],
+            repo_root=tmp_path,
+            toolathlon_root=toolathlon_root,
+            default_artifacts_dir=artifacts,
+            default_image="image",
+            default_model="decomposer-model",
+            default_subagent_model="subagent-model",
+            default_subagent_port=8030,
+            start_vllm=lambda **kwargs: starts.append(kwargs),
+            stop_vllm=lambda process: None,
+            docker=lambda *args, **kwargs: subprocess.CompletedProcess(
+                args, 0, "", ""
+            ),
+        )
+
+    assert starts == []
+    assert not (artifacts / "runs" / "no-credential-run").exists()
+
+
+def test_batch_accepts_non_placeholder_serper_key(tmp_path) -> None:
+    toolathlon_root = tmp_path / "toolathlon"
+    task_dir = toolathlon_root / "tasks" / "finalpool/search-task"
+    task_dir.mkdir(parents=True)
+    (task_dir / "task_config.json").write_text(
+        json.dumps({"needed_local_tools": ["web_search"]}), encoding="utf-8"
+    )
+    configs = toolathlon_root / "configs"
+    configs.mkdir()
+    (configs / "token_key_session.py").write_text(
+        "from addict import Dict\n"
+        "all_token_key_session = Dict(serper_api_key='first-key, second-key')\n",
+        encoding="utf-8",
+    )
+
+    batch.preflight_task_credentials(["finalpool/search-task"], toolathlon_root)
+
+
 @pytest.mark.parametrize(
     "output",
     [
@@ -2085,6 +2152,8 @@ def test_batch_repetitions_and_resume_skip_completed(tmp_path, monkeypatch) -> N
     assert len(vllm_starts) == 1
     assert vllm_stops == ["process"]
     assert all(episode["score"] is False for episode in manifest["episodes"])
+    assert manifest["config"]["concurrency"] == 1
+    assert manifest["invocations"][-1]["concurrency"] == 1
 
     manifest["episodes"][1]["status"] = "failed"
     # Old manifests predate the explicit cap field. Resuming one must use the

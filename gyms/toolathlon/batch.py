@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import concurrent.futures
 import hashlib
 import json
@@ -526,6 +527,55 @@ def preflight_external_tcp_dependencies(
         )
 
 
+def configured_python_keyword(path: Path, keyword: str) -> object | None:
+    """Read one literal keyword from a top-level Dict-style config."""
+    if not path.is_file():
+        return None
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    for node in tree.body:
+        value = node.value if isinstance(node, (ast.Assign, ast.AnnAssign)) else None
+        if not isinstance(value, ast.Call):
+            continue
+        for item in value.keywords:
+            if item.arg == keyword:
+                try:
+                    return ast.literal_eval(item.value)
+                except (ValueError, TypeError):
+                    return None
+    return None
+
+
+def preflight_task_credentials(tasks: Sequence[str], toolathlon_root: Path) -> None:
+    """Reject missing required credentials before model startup or run creation."""
+    web_search_tasks: list[str] = []
+    for task in tasks:
+        task_config_path = toolathlon_root / "tasks" / task / "task_config.json"
+        if not task_config_path.is_file():
+            continue
+        task_config = json.loads(task_config_path.read_text(encoding="utf-8"))
+        if "web_search" in (task_config.get("needed_local_tools") or ()):
+            web_search_tasks.append(task)
+    if not web_search_tasks:
+        return
+
+    configured = configured_python_keyword(
+        toolathlon_root / "configs" / "token_key_session.py",
+        "serper_api_key",
+    )
+    candidates = (
+        [item.strip() for item in configured.split(",")]
+        if isinstance(configured, str)
+        else []
+    )
+    placeholders = {"", "xx", "xxx", "to_be_filled", "replace_me"}
+    if not any(item.lower() not in placeholders for item in candidates):
+        raise RuntimeError(
+            "Selected Toolathlon tasks require local web_search, but "
+            "configs/token_key_session.py has no usable serper_api_key: "
+            + ", ".join(web_search_tasks)
+        )
+
+
 def count_statuses(manifest: dict[str, Any]) -> dict[str, int]:
     counts = {name: 0 for name in ("pending", "running", "completed", "failed")}
     for episode in manifest["episodes"]:
@@ -652,7 +702,12 @@ def create_manifest(
         for task in tasks
     ]
     config = {name: getattr(args, name) for name in RESUME_CONFIG_FIELDS}
-    config.update(tasks=list(tasks), repetitions=repetitions, purpose=args.purpose)
+    config.update(
+        tasks=list(tasks),
+        repetitions=repetitions,
+        purpose=args.purpose,
+        concurrency=args.concurrency,
+    )
     now = utc_now()
     manifest = {
         "schema_version": SCHEMA_VERSION,
@@ -1045,6 +1100,7 @@ def main(
             if episode["status"] != "completed"
         ]
     )
+    preflight_task_credentials(tasks_needing_services, toolathlon_root)
     preflight_external_tcp_dependencies(
         tasks_needing_services, toolathlon_root / "tasks"
     )
@@ -1070,6 +1126,7 @@ def main(
             "argv": sys.argv,
             "hostname": platform.node(),
             "python": sys.version,
+            "concurrency": args.concurrency,
             "code": git_provenance(repo_root),
             "image": image_info,
         }
