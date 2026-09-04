@@ -145,6 +145,9 @@ def test_task_image_build_context_excludes_runtime_credentials() -> None:
         assert f"external/toolathlon/{path}" in dockerignore
     assert "external/toolathlon/configs/.mcp-auth/" in dockerignore
     assert "external/toolathlon/deployment/k8s/" in dockerignore
+    assert "external/toolathlon/deployment/*/*" in dockerignore
+    assert "!external/toolathlon/deployment/*/scripts/**" in dockerignore
+    assert "!external/toolathlon/deployment/utils/**" in dockerignore
 
 
 def test_task_image_revision_args_do_not_invalidate_build_layers() -> None:
