@@ -134,8 +134,16 @@ K8S_TASK_CLEANUP_COMMANDS = {
 # them.  In particular, several Canvas preprocessors catch API failures and
 # still exit zero, which would otherwise turn a missing service into a model
 # failure.
-TASK_EXTERNAL_TCP_DEPENDENCIES = {
-    "finalpool/canvas-": (("Canvas", "127.0.0.1", 10001),),
+MCP_EXTERNAL_TCP_DEPENDENCIES = {
+    "canvas": (
+        ("Canvas backend", "127.0.0.1", 10001),
+        ("Canvas proxy", "127.0.0.1", 20001),
+    ),
+    "woocommerce": (("WooCommerce", "127.0.0.1", 10003),),
+    "emails": (
+        ("email IMAP", "127.0.0.1", 1143),
+        ("email SMTP", "127.0.0.1", 1587),
+    ),
 }
 PREPROCESS_FATAL_OUTPUT_PATTERNS = (
     re.compile(r"connection refused", re.IGNORECASE),
@@ -812,10 +820,11 @@ def wait_for_container_ready(container: str, timeout: float) -> None:
 
 
 def task_external_tcp_dependencies(task: str) -> tuple[tuple[str, str, int], ...]:
+    task_config_path = TOOLATHLON_ROOT / "tasks" / task / "task_config.json"
+    task_config = json.loads(task_config_path.read_text(encoding="utf-8"))
     dependencies: list[tuple[str, str, int]] = []
-    for task_prefix, services in TASK_EXTERNAL_TCP_DEPENDENCIES.items():
-        if task.startswith(task_prefix):
-            dependencies.extend(services)
+    for server_name in task_config.get("needed_mcp_servers") or []:
+        dependencies.extend(MCP_EXTERNAL_TCP_DEPENDENCIES.get(server_name, ()))
     return tuple(dependencies)
 
 

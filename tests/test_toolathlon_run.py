@@ -1025,6 +1025,7 @@ def test_canvas_dependency_is_probed_from_task_container(monkeypatch) -> None:
         [
             subprocess.CompletedProcess([], 1, "", "connection refused"),
             subprocess.CompletedProcess([], 0, "", ""),
+            subprocess.CompletedProcess([], 0, "", ""),
         ]
     )
 
@@ -1039,10 +1040,29 @@ def test_canvas_dependency_is_probed_from_task_container(monkeypatch) -> None:
         "task-container", "finalpool/canvas-do-quiz", 30
     )
 
-    assert len(probes) == 2
+    assert len(probes) == 3
     assert probes[0][0] == "task-container"
     assert probes[0][1][-2:] == ("127.0.0.1", "10001")
+    assert probes[-1][1][-2:] == ("127.0.0.1", "20001")
     assert run.task_external_tcp_dependencies("finalpool/arrange-workspace") == ()
+
+
+def test_declared_email_and_woocommerce_dependencies_are_preflighted() -> None:
+    email_ports = {
+        port
+        for _, _, port in run.task_external_tcp_dependencies(
+            "finalpool/apply-phd-email"
+        )
+    }
+    woo_ports = {
+        port
+        for _, _, port in run.task_external_tcp_dependencies(
+            "finalpool/woocommerce-new-product"
+        )
+    }
+
+    assert email_ports == {1143, 1587}
+    assert 10003 in woo_ports
 
 
 @pytest.mark.parametrize(
