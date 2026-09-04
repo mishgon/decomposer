@@ -105,7 +105,7 @@ def batch_command(*extra: str, context_tokens: int = 256000) -> list[str]:
         "--startup-timeout",
         "300",
         "--episode-timeout",
-        "5400",
+        "6000",
         *extra,
     ]
 
