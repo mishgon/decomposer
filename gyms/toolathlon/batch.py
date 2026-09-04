@@ -276,10 +276,11 @@ def parse_args(argv: Sequence[str], defaults: dict[str, Any]) -> argparse.Namesp
     parser.add_argument(
         "--episode-timeout",
         type=float,
-        default=5400,
+        default=6000,
         help=(
-            "Maximum total wall-clock seconds for one episode (default: 5400, "
-            "covering preprocess, a 45-minute agent, and native evaluation)."
+            "Maximum total wall-clock seconds for one episode (default: 6000, "
+            "covering container startup, preprocess, a 45-minute agent, "
+            "evaluator isolation, and native evaluation)."
         ),
     )
     args = parser.parse_args(argv)
@@ -656,7 +657,7 @@ def execute_episode(
                     break
                 except subprocess.TimeoutExpired:
                     if time.monotonic() - started >= getattr(
-                        args, "episode_timeout", 2400
+                        args, "episode_timeout", 6000
                     ):
                         timed_out = True
                         process.send_signal(signal.SIGINT)
@@ -703,7 +704,7 @@ def execute_episode(
         error = {
             "type": "EpisodeTimeout" if timed_out else "EpisodeProcessError",
             "message": (
-                f"Episode exceeded {getattr(args, 'episode_timeout', 2400):g}s"
+                f"Episode exceeded {getattr(args, 'episode_timeout', 6000):g}s"
                 if timed_out
                 else f"Episode runner exited with code {returncode}"
             ),
@@ -846,7 +847,7 @@ def main(
             elif name == "container_slots" and name not in manifest["config"]:
                 setattr(args, name, 1)
             elif name == "episode_timeout" and name not in manifest["config"]:
-                setattr(args, name, 5400)
+                setattr(args, name, 6000)
             elif name == "agent_timeout" and name not in manifest["config"]:
                 setattr(args, name, 2700)
             elif name == "max_tool_output_chars" and name not in manifest["config"]:

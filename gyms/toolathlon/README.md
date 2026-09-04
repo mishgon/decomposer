@@ -175,9 +175,10 @@ uv run python gyms/toolathlon/run.py --all \
 
 OpenRouter tool-agent servers run on the host, so the API key is never exposed
 inside task containers. Agent loops default to a 45-minute limit and use a
-90-minute outer episode watchdog. The larger outer budget covers the separate
-10-minute preprocessing and 30-minute native-evaluation timeouts, so a model
-that uses its full allowance can still be scored. Override these with
+100-minute outer episode watchdog. The larger outer budget covers container
+startup, the separate 10-minute preprocessing timeout, evaluator isolation,
+and the 30-minute native-evaluation timeout, so a model that uses its full
+allowance can still be scored. Override these with
 `--agent-timeout` and `--episode-timeout` for intentionally different limits.
 
 If OpenRouter blocks the remote host's public IP, keep the API egress local.

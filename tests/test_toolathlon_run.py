@@ -36,8 +36,8 @@ def test_default_episode_watchdog_covers_all_bounded_phases(tmp_path) -> None:
     )
 
     assert args.agent_timeout == 2700
-    assert args.episode_timeout == 5400
-    assert args.episode_timeout >= args.agent_timeout + 600 + 1800
+    assert args.episode_timeout == 6000
+    assert args.episode_timeout >= args.agent_timeout + 600 + 180 + 1800
 
 
 def test_batch_rejects_more_than_one_gpu_per_model() -> None:
