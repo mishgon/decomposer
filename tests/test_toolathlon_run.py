@@ -1817,6 +1817,19 @@ def test_container_image_redacts_task_credentials_from_normal_logs() -> None:
     assert "Task: {task_config.task_dir}" in patch
 
 
+def test_batch_pins_inspected_image_id() -> None:
+    assert (
+        batch.immutable_image_reference(
+            {"id": "sha256:immutable-image"}, "mutable:latest"
+        )
+        == "sha256:immutable-image"
+    )
+    assert (
+        batch.immutable_image_reference({"id": None}, "mutable:latest")
+        == "mutable:latest"
+    )
+
+
 def test_container_image_preserves_vllm_reasoning_between_tool_turns() -> None:
     dockerfile = (run.REPO_ROOT / "gyms/toolathlon/Dockerfile").read_text()
     patch = (
