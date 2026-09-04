@@ -9,6 +9,7 @@ import json
 import os
 import posixpath
 import re
+import shlex
 import shutil
 import signal
 import socket
@@ -928,17 +929,34 @@ def validate_task_credentials(task_dir: Path) -> None:
         )
 
 
-def restart_container_for_evaluation(container: str, timeout: float) -> None:
-    """Kill every agent-side process before trusted evaluator files return.
+def stop_container_process_group(container: str, pid_file: str) -> None:
+    """Stop one detached exec tree without restarting the task container.
 
-    A host timeout kills the ``docker exec`` client, but Docker and Podman leave
-    its process running inside the container.  Restarting the task container
-    preserves its filesystem and mounted workspace while terminating the
-    agent, MCP servers, and gateways as one isolation boundary.
+    ``docker exec`` can outlive a timed-out host client.  The native agent is
+    therefore launched in its own session and records its process-group ID in
+    ``pid_file``.  Terminating that group preserves preprocess-started services
+    and other evaluator-visible container state, as required by Toolathlon's
+    decoupled runner.
     """
-    _docker("kill", container)
-    _docker("start", container)
-    wait_for_container_ready(container, timeout)
+    _exec_in_container(
+        container,
+        "bash",
+        "-c",
+        (
+            f"pid_file={shlex.quote(pid_file)}; "
+            "if test -s \"$pid_file\"; then "
+            "pid=$(cat \"$pid_file\"); "
+            "case \"$pid\" in (*[!0-9]*|'') exit 2;; esac; "
+            "kill -TERM -- \"-$pid\" 2>/dev/null || true; "
+            "for _ in $(seq 1 50); do "
+            "kill -0 -- \"-$pid\" 2>/dev/null || break; sleep 0.1; "
+            "done; "
+            "kill -KILL -- \"-$pid\" 2>/dev/null || true; "
+            "fi; rm -f -- \"$pid_file\""
+        ),
+        check=False,
+        timeout=10,
+    )
 
 
 def _stage_bundle(container: str, host_bundle: Path) -> str:
@@ -1879,6 +1897,7 @@ def main() -> None:
                 print(f"Running simple {args.subagent_model} agent...", flush=True)
                 if args.simple_agent_implementation == "toolathlon":
                     runtime_bundle_file = trusted_stash_dir / "native_bundle.json"
+                    native_agent_pid_file = "/run/toolathlon-native-agent.pid"
                     runtime_bundle_file.write_text(
                         json.dumps(
                             official_simple_agent_bundle(bundle, args),
@@ -1896,9 +1915,15 @@ def main() -> None:
                             "bash",
                             "-c",
                             (
-                                "exec uv run python -m "
-                                "scripts.containerized.container_agent "
-                                f"--bundle_file {container_bundle_path} "
+                                "exec setsid bash -c "
+                                + shlex.quote(
+                                    f"echo $$ > {native_agent_pid_file}; "
+                                    f"trap 'rm -f -- {native_agent_pid_file}' EXIT; "
+                                    "uv run python -m "
+                                    "scripts.containerized.container_agent "
+                                    f"--bundle_file {container_bundle_path}"
+                                )
+                                + " "
                                 "> /workspace/dumps/native_agent.log 2>&1"
                             ),
                             env={
@@ -1915,6 +1940,9 @@ def main() -> None:
                             timeout=args.agent_timeout,
                         )
                     finally:
+                        stop_container_process_group(
+                            container, native_agent_pid_file
+                        )
                         _discard_bundle(container, container_bundle_path)
                         container_bundle_path = None
                         runtime_bundle_file.unlink(missing_ok=True)
@@ -2037,15 +2065,18 @@ def main() -> None:
             if agent_state is None:
                 agent_state = {}
 
-        # The evaluator and its ground truth must never become visible while a
-        # timed-out agent or an in-flight delegated subagent can still run.
-        # Docker/Podman do not terminate the in-container process when the
-        # client-side ``exec`` times out, so use a container restart as the
-        # explicit phase boundary even after apparently successful runs.
+        # The evaluator and its ground truth must never become visible while an
+        # in-flight delegated subagent can still run.  Native in-container
+        # agents are stopped by process group above; host-side subagent servers
+        # are stopped here.  Do not restart the task container: preprocess may
+        # have started evaluator-visible services that must survive this phase
+        # boundary.
         stop_vllm(subagent_server_process)
         subagent_server_process = None
-        print("Isolating evaluator from agent processes...", flush=True)
-        restart_container_for_evaluation(container, args.startup_timeout)
+        print(
+            "Agent processes stopped; preserving task container for evaluation...",
+            flush=True,
+        )
 
         messages = agent_state.get("messages", [])
         subagent_runs = agent_state.get("subagent_runs", {}) or {}

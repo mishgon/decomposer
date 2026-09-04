@@ -1071,27 +1071,24 @@ def test_container_socket_is_available_to_docker_and_podman() -> None:
     ]
 
 
-def test_evaluator_isolation_restarts_task_container(monkeypatch) -> None:
-    docker_calls = []
-    readiness_calls = []
+def test_evaluator_isolation_stops_only_native_agent_process_group(monkeypatch) -> None:
+    exec_calls = []
     monkeypatch.setattr(
         run,
-        "_docker",
-        lambda *args, **kwargs: docker_calls.append((args, kwargs)),
-    )
-    monkeypatch.setattr(
-        run,
-        "wait_for_container_ready",
-        lambda container, timeout: readiness_calls.append((container, timeout)),
+        "_exec_in_container",
+        lambda *args, **kwargs: exec_calls.append((args, kwargs)),
     )
 
-    run.restart_container_for_evaluation("task-container", 37)
+    run.stop_container_process_group(
+        "task-container", "/run/toolathlon-native-agent.pid"
+    )
 
-    assert docker_calls == [
-        (("kill", "task-container"), {}),
-        (("start", "task-container"), {}),
-    ]
-    assert readiness_calls == [("task-container", 37)]
+    assert len(exec_calls) == 1
+    args, kwargs = exec_calls[0]
+    assert args[:3] == ("task-container", "bash", "-c")
+    assert 'kill -TERM -- "-$pid"' in args[3]
+    assert 'kill -KILL -- "-$pid"' in args[3]
+    assert kwargs == {"check": False, "timeout": 10}
 
 
 def test_canvas_dependency_is_probed_from_task_container(monkeypatch) -> None:
