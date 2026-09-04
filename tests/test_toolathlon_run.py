@@ -80,6 +80,23 @@ def test_legacy_unlabeled_image_remains_usable(tmp_path) -> None:
     )
 
 
+def test_container_cli_falls_back_to_podman(monkeypatch) -> None:
+    monkeypatch.delenv("CONTAINER_CLI", raising=False)
+    monkeypatch.setattr(
+        run.shutil,
+        "which",
+        lambda name: "/usr/bin/podman" if name == "podman" else None,
+    )
+
+    assert run._container_cli() == ["/usr/bin/podman"]
+
+
+def test_container_cli_explicit_command_is_tokenized(monkeypatch) -> None:
+    monkeypatch.setenv("CONTAINER_CLI", "/usr/bin/podman --remote")
+
+    assert run._container_cli() == ["/usr/bin/podman", "--remote"]
+
+
 def test_native_preprocess_uses_the_actual_served_model_identity() -> None:
     args = SimpleNamespace(
         agent_mode="simple",
@@ -663,6 +680,7 @@ def test_docker(monkeypatch) -> None:
         return subprocess.CompletedProcess(args, 0, "output", "")
 
     monkeypatch.setattr(run.subprocess, "run", fake_run)
+    monkeypatch.setattr(run, "_container_cli", lambda: ["docker"])
 
     result = run._docker("ps", check=False)
 

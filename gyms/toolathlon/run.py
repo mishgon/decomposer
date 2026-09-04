@@ -162,6 +162,20 @@ DOCKER_COMMAND_TIMEOUT = 60.0
 DOCKER_EXEC_TIMEOUT = 1800.0
 
 
+def _container_cli() -> list[str]:
+    explicit = os.environ.get("CONTAINER_CLI")
+    if explicit:
+        command = shlex.split(explicit)
+        if command:
+            return command
+        raise RuntimeError("CONTAINER_CLI is empty")
+    for candidate in ("docker", "podman"):
+        executable = shutil.which(candidate)
+        if executable:
+            return [executable]
+    raise RuntimeError("Neither docker nor podman is available")
+
+
 class _TeeTextIO:
     def __init__(self, console, log) -> None:
         self.console = console
@@ -198,6 +212,7 @@ def _docker(
     check: bool = True,
     timeout: float | None = None,
 ) -> subprocess.CompletedProcess[str]:
+    container_cli = _container_cli()
     effective_timeout = (
         timeout
         if timeout is not None
@@ -205,19 +220,21 @@ def _docker(
     )
     try:
         process = subprocess.run(
-            ["docker", *args],
+            [*container_cli, *args],
             capture_output=True,
             text=True,
             timeout=effective_timeout,
         )
     except subprocess.TimeoutExpired as error:
         raise RuntimeError(
-            f"docker {' '.join(args)} timed out after {effective_timeout:g}s"
+            f"{' '.join(container_cli)} {' '.join(args)} timed out after "
+            f"{effective_timeout:g}s"
         ) from error
     if check and process.returncode != 0:
         detail = (process.stderr or process.stdout or "").strip()
         raise RuntimeError(
-            f"docker {' '.join(args)} failed with exit code {process.returncode}"
+            f"{' '.join(container_cli)} {' '.join(args)} failed with exit code "
+            f"{process.returncode}"
             + (f": {detail}" if detail else "")
         )
     return process
