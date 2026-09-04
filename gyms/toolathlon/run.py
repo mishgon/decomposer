@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import asyncio
 import copy
 import fcntl
@@ -875,6 +876,48 @@ def preprocess_output_failure(task: str, stdout: str, stderr: str) -> str | None
     return None
 
 
+def configured_python_keyword(path: Path, keyword: str) -> object | None:
+    """Read one literal keyword from a top-level ``Dict(...)`` config safely."""
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    for node in tree.body:
+        if not isinstance(node, (ast.Assign, ast.AnnAssign)):
+            continue
+        value = node.value
+        if not isinstance(value, ast.Call):
+            continue
+        for item in value.keywords:
+            if item.arg == keyword:
+                try:
+                    return ast.literal_eval(item.value)
+                except (ValueError, TypeError):
+                    return None
+    return None
+
+
+def validate_task_credentials(task_dir: Path) -> None:
+    """Reject known placeholder credentials required by the selected task."""
+    task_config = json.loads(
+        (task_dir / "task_config.json").read_text(encoding="utf-8")
+    )
+    required_local_tools = set(task_config.get("needed_local_tools") or [])
+    if "web_search" not in required_local_tools:
+        return
+
+    token_config = TOOLATHLON_ROOT / "configs" / "token_key_session.py"
+    configured = configured_python_keyword(token_config, "serper_api_key")
+    candidates = (
+        [item.strip() for item in configured.split(",")]
+        if isinstance(configured, str)
+        else []
+    )
+    placeholders = {"", "xx", "xxx", "to_be_filled", "replace_me"}
+    if not any(item.lower() not in placeholders for item in candidates):
+        raise RuntimeError(
+            f"Task {task_dir.name} requires local web_search, but "
+            "configs/token_key_session.py has no usable serper_api_key"
+        )
+
+
 def restart_container_for_evaluation(container: str, timeout: float) -> None:
     """Kill every agent-side process before trusted evaluator files return.
 
@@ -1396,6 +1439,7 @@ def main() -> None:
     task_dir = (tasks_root / args.task).resolve()
     if task_dir.parent.parent != tasks_root or not task_dir.is_dir():
         raise ValueError(f"Unknown Toolathlon task: {args.task!r}")
+    validate_task_credentials(task_dir)
     needs_openrouter = args.subagent_provider == "openrouter" or (
         args.agent_mode == "decomposer" and args.decomposer_provider == "openrouter"
     )

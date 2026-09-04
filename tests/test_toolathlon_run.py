@@ -817,7 +817,11 @@ def test_main_accepts_evaluation_purpose(monkeypatch) -> None:
 
 
 def test_main_fails_fast_when_no_docker_socket(tmp_path, monkeypatch) -> None:
-    (tmp_path / "tasks" / "finalpool" / "example").mkdir(parents=True)
+    task_dir = tmp_path / "tasks" / "finalpool" / "example"
+    task_dir.mkdir(parents=True)
+    (task_dir / "task_config.json").write_text(
+        json.dumps({"needed_local_tools": []}), encoding="utf-8"
+    )
     (tmp_path / "configs").mkdir()
     (tmp_path / "configs" / "global_configs.py").write_text("# test\n")
     monkeypatch.setattr(run, "TOOLATHLON_ROOT", tmp_path)
@@ -834,7 +838,11 @@ def test_main_fails_fast_when_no_docker_socket(tmp_path, monkeypatch) -> None:
 
 
 def test_main_bootstraps_global_configs_from_example(tmp_path, monkeypatch) -> None:
-    (tmp_path / "tasks" / "finalpool" / "example").mkdir(parents=True)
+    task_dir = tmp_path / "tasks" / "finalpool" / "example"
+    task_dir.mkdir(parents=True)
+    (task_dir / "task_config.json").write_text(
+        json.dumps({"needed_local_tools": []}), encoding="utf-8"
+    )
     configs = tmp_path / "configs"
     configs.mkdir()
     (configs / "global_configs_example.py").write_text("global_configs = {}\n")
@@ -1090,6 +1098,44 @@ def test_normal_preprocess_output_is_not_rejected() -> None:
         )
         is None
     )
+
+
+def test_placeholder_web_search_credential_is_rejected(
+    tmp_path, monkeypatch
+) -> None:
+    task_dir = tmp_path / "toolathlon" / "tasks" / "finalpool" / "search-task"
+    task_dir.mkdir(parents=True)
+    (task_dir / "task_config.json").write_text(
+        json.dumps({"needed_local_tools": ["web_search"]}), encoding="utf-8"
+    )
+    config_dir = tmp_path / "toolathlon" / "configs"
+    config_dir.mkdir()
+    (config_dir / "token_key_session.py").write_text(
+        'all_token_key_session = Dict(serper_api_key="XX")\n', encoding="utf-8"
+    )
+    monkeypatch.setattr(run, "TOOLATHLON_ROOT", tmp_path / "toolathlon")
+
+    with pytest.raises(RuntimeError, match="no usable serper_api_key"):
+        run.validate_task_credentials(task_dir)
+
+
+def test_configured_web_search_credential_is_accepted(
+    tmp_path, monkeypatch
+) -> None:
+    task_dir = tmp_path / "toolathlon" / "tasks" / "finalpool" / "search-task"
+    task_dir.mkdir(parents=True)
+    (task_dir / "task_config.json").write_text(
+        json.dumps({"needed_local_tools": ["web_search"]}), encoding="utf-8"
+    )
+    config_dir = tmp_path / "toolathlon" / "configs"
+    config_dir.mkdir()
+    (config_dir / "token_key_session.py").write_text(
+        'all_token_key_session = Dict(serper_api_key="configured-key")\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(run, "TOOLATHLON_ROOT", tmp_path / "toolathlon")
+
+    run.validate_task_credentials(task_dir)
 
 
 def test_k8s_tasks_have_post_evaluation_cluster_cleanup() -> None:
