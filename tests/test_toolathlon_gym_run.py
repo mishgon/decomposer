@@ -22,7 +22,7 @@ def test_configured_subagents_are_registered() -> None:
         assistant_id for _, assistant_id, _ in run.SUBAGENT_TYPES
     } <= registered.keys()
     assert [item[0] for item in run.SUBAGENT_TYPES] == [
-        "qwen_3_5_4b_non_thinking"
+        "gemma_4_26b_a4b_non_thinking"
     ]
 
 
@@ -69,7 +69,8 @@ def test_vllm_command_uses_current_environment_and_gemma_parsers() -> None:
     assert command[command.index("--served-model-name") + 1] == (
         run.DEFAULT_SUBAGENT_MODEL
     )
-    assert command[command.index("--tool-call-parser") + 1] == "qwen3_xml"
+    assert command[command.index("--tool-call-parser") + 1] == "gemma4"
+    assert command[command.index("--reasoning-parser") + 1] == "gemma4"
     assert command[command.index("--default-chat-template-kwargs") + 1] == (
         '{"enable_thinking":false}'
     )

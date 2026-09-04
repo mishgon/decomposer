@@ -36,8 +36,8 @@ DEFAULT_GYM_ARTIFACTS_DIR = REPO_ROOT / "artifacts" / "gyms" / "toolathlon_gym"
 DEFAULT_ARTIFACTS_DIR = DEFAULT_GYM_ARTIFACTS_DIR / "traces"
 DEFAULT_EVALS_DIR = DEFAULT_GYM_ARTIFACTS_DIR / "evals"
 DEFAULT_IMAGE = "decomposer-toolathlon:latest"
-DEFAULT_MODEL = "Qwen/Qwen3.6-35B-A3B-FP8"
-DEFAULT_SUBAGENT_MODEL = "Qwen/Qwen3.5-4B"
+DEFAULT_MODEL = "deepseek/deepseek-v4-flash-0731"
+DEFAULT_SUBAGENT_MODEL = "google/gemma-4-26B-A4B-it"
 DEFAULT_SUBAGENT_PORT = 8023
 POSTGRES_IMAGE = "docker.io/library/postgres:15"
 POSTGRES_ENV = {
@@ -56,8 +56,11 @@ SUBAGENT_TYPES = (
     # ("gemma_4_4b_non_thinking", "gemma_4_4b_non_thinking", "Gemma-4-4B non-thinking"),
     # ("gemma_4_12b_thinking", "gemma_4_12b_thinking", "Gemma-4-12B thinking"),
     # ("gemma_4_12b_non_thinking", "gemma_4_12b_non_thinking", "Gemma-4-12B non-thinking"),
-    # ("gemma_4_26b_a4b_thinking", "gemma_4_26b_a4b_thinking", "Gemma-4-26B-A4B thinking"),
-    ("qwen_3_5_4b_non_thinking", "qwen_3_5_4b_non_thinking", "Qwen-3.5-4B non-thinking"),
+    (
+        "gemma_4_26b_a4b_non_thinking",
+        "gemma_4_26b_a4b_non_thinking",
+        "Gemma-4-26B-A4B non-thinking",
+    ),
 )
 
 
@@ -188,7 +191,9 @@ def vllm_command(
         "--language-model-only",
         "--enable-auto-tool-choice",
         "--tool-call-parser",
-        "qwen3_xml",
+        "gemma4",
+        "--reasoning-parser",
+        "gemma4",
         "--default-chat-template-kwargs",
         '{"enable_thinking":false}',
     ]
@@ -564,7 +569,7 @@ def main() -> None:
             "TOOLATHLON_SUBAGENT_CALL_LOG=/artifacts/data/subagent_model_calls.jsonl",
             "--env",
             (
-                "QWEN_3_5_4B_BASE_URL="
+                "GEMMA_4_26B_A4B_BASE_URL="
                 f"http://host.docker.internal:{args.subagent_port}/v1"
             ),
             *postgres_env,
@@ -637,7 +642,7 @@ def main() -> None:
             if decomposer_max_tokens is not None
             else {}
         )
-        openrouter_timeout = float(
+        request_timeout_seconds = float(
             os.environ.get("DECOMPOSER_OPENROUTER_TIMEOUT", "600")
         )
         openrouter_max_retries = int(
@@ -656,7 +661,7 @@ def main() -> None:
                 temperature=1.0,
                 top_p=0.95,
                 **max_tokens_kwargs,
-                timeout=openrouter_timeout,
+                timeout=request_timeout_seconds,
                 max_retries=openrouter_max_retries,
                 disable_streaming=True,
                 use_responses_api=False,
@@ -675,14 +680,15 @@ def main() -> None:
             decomposer_model = ChatOpenRouter(
                 model=args.model,
                 temperature=1.0,
-                top_p=1.0,
+                top_p=0.95,
                 reasoning=reasoning,
                 **max_tokens_kwargs,
                 # DeepSeek V4 high-reasoning decompositions can legitimately
                 # take several minutes. Preserve that response window while
                 # allowing transient backend failures to retry; the outer
                 # agent timeout still caps total episode wall-clock time.
-                timeout=openrouter_timeout,
+                # langchain-openrouter/OpenRouter SDK timeouts are milliseconds.
+                timeout=max(1, int(request_timeout_seconds * 1000)),
                 max_retries=openrouter_max_retries,
                 openrouter_provider=(
                     {
@@ -761,7 +767,7 @@ def main() -> None:
                     "openrouter_provider": openrouter_provider,
                     "reasoning_effort": reasoning_effort,
                     "decomposer_max_tokens": decomposer_max_tokens,
-                    "openrouter_timeout": openrouter_timeout,
+                    "request_timeout_seconds": request_timeout_seconds,
                     "openrouter_max_retries": openrouter_max_retries,
                     "subagent_model": args.subagent_model,
                     "started_at": started_at,

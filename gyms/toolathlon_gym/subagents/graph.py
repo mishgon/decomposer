@@ -120,6 +120,15 @@ def gemma_4_26b_a4b_thinking() -> CompiledStateGraph:
     )
 
 
+def gemma_4_26b_a4b_non_thinking() -> CompiledStateGraph:
+    return _create_subagent(
+        "google/gemma-4-26B-A4B-it",
+        "GEMMA_4_26B_A4B_BASE_URL",
+        8023,
+        thinking=False,
+    )
+
+
 def qwen_3_5_4b_non_thinking() -> CompiledStateGraph:
     return _create_subagent(
         "Qwen/Qwen3.5-4B",
