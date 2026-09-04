@@ -1089,6 +1089,9 @@ def test_evaluator_isolation_stops_only_native_agent_process_group(monkeypatch) 
     assert 'kill -TERM -- "-$pid"' in args[3]
     assert 'kill -KILL -- "-$pid"' in args[3]
     assert kwargs == {"check": False, "timeout": 10}
+    assert "exec setsid --wait bash -c" in Path(run.__file__).read_text(
+        encoding="utf-8"
+    )
 
 
 def test_canvas_dependency_is_probed_from_task_container(monkeypatch) -> None:
