@@ -409,7 +409,24 @@ def official_simple_agent_bundle(bundle: dict, args: argparse.Namespace) -> dict
     is_gemma = "gemma-4" in model_lower
     gemma_thinking = is_gemma and "gemma-4-26b-a4b" not in model_lower
 
-    if is_qwen_non_thinking:
+    native_generation_profile = getattr(
+        args, "native_generation_profile", "model-card"
+    )
+    if native_generation_profile == "toolathlon-verified":
+        if not gemma_thinking:
+            raise ValueError(
+                "--native-generation-profile toolathlon-verified is currently "
+                "defined only for thinking Gemma-4 models"
+            )
+        # The public Toolathlon-Verified documentation specifies a 64K output
+        # budget and explicit reasoning effort while leaving temperature and
+        # nucleus sampling to the upstream provider.  On vLLM, reasoning_effort
+        # also enables the model's thinking chat-template path.
+        generation = {
+            "max_tokens": 65_536,
+            "reasoning": {"effort": "high"},
+        }
+    elif is_qwen_non_thinking:
         generation = {
             "temperature": 0.7,
             "top_p": 0.8,
@@ -1350,6 +1367,16 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--native-generation-profile",
+        choices=("model-card", "toolathlon-verified"),
+        default="model-card",
+        help=(
+            "Sampling/output profile for Toolathlon's native simple agent. "
+            "The default follows each local model card; toolathlon-verified "
+            "reproduces the benchmark's documented 64K/reasoning defaults."
+        ),
+    )
+    parser.add_argument(
         "--agent-system-prompt",
         choices=AGENT_SYSTEM_PROMPT_MODES,
         default="toolathlon",
@@ -2130,6 +2157,12 @@ def main() -> None:
                     "simple_agent_implementation": (
                         args.simple_agent_implementation
                         if args.agent_mode == "simple"
+                        else None
+                    ),
+                    "native_generation_profile": (
+                        args.native_generation_profile
+                        if args.agent_mode == "simple"
+                        and args.simple_agent_implementation == "toolathlon"
                         else None
                     ),
                     "agent_system_prompt": args.agent_system_prompt,

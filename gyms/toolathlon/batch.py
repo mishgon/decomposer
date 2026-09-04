@@ -84,6 +84,7 @@ VALID_EVALUATION_TASKS = (
 RESUME_CONFIG_FIELDS = (
     "agent_mode",
     "simple_agent_implementation",
+    "native_generation_profile",
     "agent_system_prompt",
     "model",
     "decomposer_provider",
@@ -196,6 +197,11 @@ def parse_args(argv: Sequence[str], defaults: dict[str, Any]) -> argparse.Namesp
         "--simple-agent-implementation",
         choices=("toolathlon", "langgraph"),
         default="toolathlon",
+    )
+    parser.add_argument(
+        "--native-generation-profile",
+        choices=("model-card", "toolathlon-verified"),
+        default="model-card",
     )
     parser.add_argument(
         "--agent-system-prompt",
@@ -562,6 +568,9 @@ def episode_command(
         "--agent-mode", args.agent_mode,
         "--simple-agent-implementation", getattr(
             args, "simple_agent_implementation", "toolathlon"
+        ),
+        "--native-generation-profile", getattr(
+            args, "native_generation_profile", "model-card"
         ),
         "--agent-system-prompt", getattr(
             args, "agent_system_prompt", "toolathlon"
