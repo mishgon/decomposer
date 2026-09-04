@@ -394,9 +394,12 @@ def main() -> None:
     task_dir = (tasks_dir / args.task).resolve()
     if task_dir.parent != tasks_dir or not task_dir.is_dir():
         raise ValueError(f"Unknown Toolathlon task: {args.task!r}")
+    decomposer_vllm_url = os.environ.get("DECOMPOSER_VLLM_BASE_URL")
     llm_proxy_url = os.environ.get("LLM_PROXY_URL")
     llm_proxy_key = os.environ.get("LLM_PROXY_MASTER_KEY")
-    if llm_proxy_url:
+    if decomposer_vllm_url:
+        pass
+    elif llm_proxy_url:
         if not llm_proxy_key:
             raise RuntimeError(
                 "Set LLM_PROXY_MASTER_KEY when LLM_PROXY_URL is configured"
@@ -653,7 +656,27 @@ def main() -> None:
             if reasoning_effort in {"none", "off", "disabled"}
             else {"effort": reasoning_effort}
         )
-        if llm_proxy_url:
+        if decomposer_vllm_url:
+            decomposer_model = ChatVLLM(
+                model=args.model,
+                base_url=decomposer_vllm_url,
+                api_key=os.environ.get("VLLM_API_KEY", "EMPTY"),
+                temperature=1.0,
+                top_p=0.95,
+                **max_tokens_kwargs,
+                timeout=request_timeout_seconds,
+                max_retries=openrouter_max_retries,
+                disable_streaming=True,
+                use_responses_api=False,
+                preserve_reasoning=True,
+                preserve_reasoning_on_tool_calls_only=True,
+                extra_body={
+                    "top_k": 64,
+                    "chat_template_kwargs": {"enable_thinking": True},
+                },
+            )
+            teacher_backend = "vllm"
+        elif llm_proxy_url:
             decomposer_model = ChatVLLM(
                 model=args.model,
                 base_url=llm_proxy_url,

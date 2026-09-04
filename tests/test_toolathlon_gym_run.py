@@ -236,6 +236,15 @@ def test_teacher_credentials_accept_lmrouter(monkeypatch) -> None:
     batch.validate_teacher_credentials()
 
 
+def test_teacher_credentials_accept_local_vllm(monkeypatch) -> None:
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.delenv("LLM_PROXY_URL", raising=False)
+    monkeypatch.delenv("LLM_PROXY_MASTER_KEY", raising=False)
+    monkeypatch.setenv("DECOMPOSER_VLLM_BASE_URL", "http://127.0.0.1:8031/v1")
+
+    batch.validate_teacher_credentials()
+
+
 def test_teacher_credentials_require_complete_lmrouter_config(monkeypatch) -> None:
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     monkeypatch.setenv("LLM_PROXY_URL", "https://lmrouter.example/v1")

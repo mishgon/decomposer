@@ -68,6 +68,8 @@ def append_event(run_dir: Path, event: str, **fields: Any) -> None:
 
 
 def validate_teacher_credentials() -> None:
+    if os.environ.get("DECOMPOSER_VLLM_BASE_URL"):
+        return
     proxy_url = os.environ.get("LLM_PROXY_URL")
     proxy_key = os.environ.get("LLM_PROXY_MASTER_KEY")
     if proxy_url or proxy_key:
