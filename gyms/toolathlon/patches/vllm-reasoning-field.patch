@@ -1,0 +1,47 @@
+--- model_provider.py
++++ model_provider.py
+@@ -144,21 +144,32 @@ class ConverterWithExplicitReasoningContent(Converter):
+         pure_thinking_str = None
+         has_reasoning_payload = False
+ 
+-        # for kimi, ds-reasoner, openrouter
+-        if hasattr(message, "reasoning_content") or hasattr(message, "reasoning_details"):
+-            # we assert they do not exist at the same time
+-            assert not (hasattr(message, "reasoning_content") and hasattr(message, "reasoning_details")), "WE DO NOT SUPPORT BOTH reasoning_content AND reasoning_details AT THE SAME TIME"
+-            if hasattr(message, "reasoning_content"):
+-                pure_thinking_str = message.reasoning_content
+-                reasoning_content = json.dumps({"field_name": "reasoning_content", "value": message.reasoning_content})
+-            else:
+-                reasoning_content = json.dumps({"field_name": "reasoning_details", "value": message.reasoning_details})
+-                pure_thinking_str = None
+-                assert isinstance(message.reasoning_details, list), "REASONING_DETAILS SHOULD BE A LIST IN OUR DESIGN"
+-                for detail in message.reasoning_details:
++        # Reasoning field names differ across OpenAI-compatible servers.  vLLM's
++        # Gemma reasoning parser returns ``reasoning``; other backends use
++        # ``reasoning_content`` or structured ``reasoning_details``.  Preserve
++        # whichever field was returned so tool-call turns retain their chain of
++        # thought when converted back into chat-completion messages.
++        reasoning_fields = {
++            field_name: value
++            for field_name in ("reasoning", "reasoning_content", "reasoning_details")
++            if (value := _get_message_extra_field(message, field_name)) is not None
++        }
++        if reasoning_fields:
++            assert len(reasoning_fields) == 1, (
++                "WE DO NOT SUPPORT MULTIPLE REASONING FIELDS AT THE SAME TIME"
++            )
++            field_name, value = next(iter(reasoning_fields.items()))
++            reasoning_content = json.dumps({"field_name": field_name, "value": value})
++            if field_name in ("reasoning", "reasoning_content"):
++                pure_thinking_str = value if isinstance(value, str) else None
++            else:
++                assert isinstance(value, list), (
++                    "REASONING_DETAILS SHOULD BE A LIST IN OUR DESIGN"
++                )
++                for detail in value:
+                     if detail.get('type') == 'reasoning.text':
+                         pure_thinking_str = detail.get('text')
+                         break
+             has_reasoning_payload = True
+ 
+         thinking_blocks = _get_message_extra_field(message, "thinking_blocks")
