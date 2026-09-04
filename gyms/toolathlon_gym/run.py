@@ -635,7 +635,7 @@ def main() -> None:
         checkpointer = InMemorySaver()
         openrouter_provider = os.environ.get("DECOMPOSER_OPENROUTER_PROVIDER")
         reasoning_effort = os.environ.get(
-            "DECOMPOSER_REASONING_EFFORT", "high"
+            "DECOMPOSER_REASONING_EFFORT", "max"
         ).lower()
         configured_max_tokens = os.environ.get("DECOMPOSER_MAX_TOKENS")
         decomposer_max_tokens = (
@@ -787,10 +787,24 @@ def main() -> None:
                     "teacher_backend": teacher_backend,
                     "openrouter_provider": openrouter_provider,
                     "reasoning_effort": reasoning_effort,
+                    "decomposer_generation_config": {
+                        "temperature": 1.0,
+                        "top_p": 0.95,
+                        "reasoning": reasoning,
+                    },
                     "decomposer_max_tokens": decomposer_max_tokens,
                     "request_timeout_seconds": request_timeout_seconds,
                     "openrouter_max_retries": openrouter_max_retries,
                     "subagent_model": args.subagent_model,
+                    "subagent_api_model": args.subagent_api_model,
+                    "subagent_generation_config": {
+                        "temperature": 1.0,
+                        "top_p": 0.95,
+                        "top_k": 64,
+                        "reasoning_effort": "none",
+                        "chat_template_kwargs": {"enable_thinking": False},
+                        "preserve_reasoning": False,
+                    },
                     "started_at": started_at,
                     "finished_at": datetime.now(timezone.utc).isoformat(),
                     "agent_error": agent_error,
