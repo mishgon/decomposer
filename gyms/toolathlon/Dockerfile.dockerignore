@@ -23,3 +23,18 @@ external/toolathlon/**/*.py[cod]
 external/toolathlon/.git
 external/toolathlon/node_modules/
 external/toolathlon/.venv/
+# Machine-local credentials are injected at runtime by run.py. They must never
+# become recoverable image layers.
+external/toolathlon/configs/global_configs.py
+external/toolathlon/configs/token_key_session.py
+external/toolathlon/configs/credentials.json
+external/toolathlon/configs/google_credentials.json
+external/toolathlon/configs/gcp-service_account.keys.json
+external/toolathlon/configs/gcp-oauth.keys.json
+external/toolathlon/configs/notion_state.json
+external/toolathlon/configs/snowflake_rsa_key.p8
+external/toolathlon/configs/snowflake_rsa_key.pub
+external/toolathlon/configs/.mcp-auth/
+external/toolathlon/configs/*.pem
+external/toolathlon/configs/*.key
+external/toolathlon/deployment/k8s/

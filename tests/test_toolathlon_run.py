@@ -136,6 +136,17 @@ def test_redis_runtime_patch_uses_bundled_pinned_chart() -> None:
     assert "b1b32db5ec8f0aca14d0c74d712fe3e4ffbf7980aef38c806f9cb8a4a3c499f4" in dockerfile
 
 
+def test_task_image_build_context_excludes_runtime_credentials() -> None:
+    dockerignore = (
+        run.REPO_ROOT / "gyms/toolathlon/Dockerfile.dockerignore"
+    ).read_text()
+
+    for path in run.USER_CONFIG_FILES:
+        assert f"external/toolathlon/{path}" in dockerignore
+    assert "external/toolathlon/configs/.mcp-auth/" in dockerignore
+    assert "external/toolathlon/deployment/k8s/" in dockerignore
+
+
 def test_native_preprocess_uses_the_actual_served_model_identity() -> None:
     args = SimpleNamespace(
         agent_mode="simple",
