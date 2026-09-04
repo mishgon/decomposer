@@ -456,6 +456,16 @@ def official_simple_agent_bundle(bundle: dict, args: argparse.Namespace) -> dict
     return runtime_bundle
 
 
+def preprocess_agent_identity(args: argparse.Namespace) -> tuple[str, str]:
+    """Return the model identity the native scaffold must resolve up front."""
+    if (
+        args.agent_mode == "simple"
+        and args.simple_agent_implementation == "toolathlon"
+    ):
+        return served_subagent_model_name(args.subagent_model), "local_vllm"
+    return "decomposer", "unified"
+
+
 def answer_from_native_trajectory(trajectory: dict) -> str:
     for message in reversed(trajectory.get("messages") or []):
         if not isinstance(message, dict) or message.get("role") != "assistant":
@@ -1594,6 +1604,7 @@ def main() -> None:
         wait_for_task_dependencies(container, args.task, args.startup_timeout)
 
         print("Running container preprocess...", flush=True)
+        preprocess_model, preprocess_provider = preprocess_agent_identity(args)
         preprocess_attempts = 3 if args.task in K8S_TASK_CLEANUP_COMMANDS else 1
         preprocess_failure = "preprocess did not run"
         bundle = None
@@ -1617,9 +1628,9 @@ def main() -> None:
                 "--max_steps_under_single_turn_mode",
                 str(args.max_steps),
                 "--model_short_name",
-                "decomposer",
+                preprocess_model,
                 "--provider",
-                "unified",
+                preprocess_provider,
                 "--bundle_file",
                 preprocess_bundle_path,
                 "--host_output_folder",

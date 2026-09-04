@@ -23,6 +23,22 @@ def test_evaluation_runtime_settings_are_uniform() -> None:
     assert settings.DEEPSEEK_REASONING_EFFORT == "high"
 
 
+def test_native_preprocess_uses_the_actual_served_model_identity() -> None:
+    args = SimpleNamespace(
+        agent_mode="simple",
+        simple_agent_implementation="toolathlon",
+        subagent_model="/models/gemma-4-31B-it",
+    )
+
+    assert run.preprocess_agent_identity(args) == (
+        "google/gemma-4-31B-it",
+        "local_vllm",
+    )
+
+    args.agent_mode = "decomposer"
+    assert run.preprocess_agent_identity(args) == ("decomposer", "unified")
+
+
 def test_default_episode_watchdog_covers_all_bounded_phases(tmp_path) -> None:
     args = batch.parse_args(
         ["--tasks", "finalpool/example", "--purpose", "evaluation"],
