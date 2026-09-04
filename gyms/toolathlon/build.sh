@@ -7,6 +7,16 @@ PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/../.." && pwd)"
 TOOLATHLON_BASE_IMAGE="${TOOLATHLON_BASE_IMAGE:-docker.io/lockon0927/toolathlon-task-image:1016beta}"
 TOOLATHLON_BENCH_IMAGE="${TOOLATHLON_BENCH_IMAGE:-decomposer-toolathlon-bench:latest}"
 DECOMPOSER_REVISION="$(git -C "$PROJECT_ROOT" rev-parse HEAD)"
+if [ -n "${CONTAINER_CLI:-}" ]; then
+    CONTAINER_COMMAND="$CONTAINER_CLI"
+elif command -v docker >/dev/null 2>&1; then
+    CONTAINER_COMMAND="docker"
+elif command -v podman >/dev/null 2>&1; then
+    CONTAINER_COMMAND="podman"
+else
+    echo "Error: neither docker nor podman is available." >&2
+    exit 1
+fi
 
 PINNED="$(git -C "$PROJECT_ROOT" ls-tree HEAD external/toolathlon | awk '{print $3}')"
 CHECKED_OUT="$(git -C "$PROJECT_ROOT/external/toolathlon" rev-parse HEAD 2>/dev/null || true)"
@@ -27,7 +37,7 @@ fi
 cp "$SCRIPT_DIR/Dockerfile.dockerignore" "$DOCKERIGNORE"
 trap 'rm -f -- "$DOCKERIGNORE"; [ -n "$RESTORE_DOCKERIGNORE" ] && mv "$RESTORE_DOCKERIGNORE" "$DOCKERIGNORE"' EXIT
 
-docker build \
+"$CONTAINER_COMMAND" build \
   --file "$SCRIPT_DIR/Dockerfile" \
   --build-arg "TOOLATHLON_BASE_IMAGE=$TOOLATHLON_BASE_IMAGE" \
   --build-arg "DECOMPOSER_REVISION=$DECOMPOSER_REVISION" \
