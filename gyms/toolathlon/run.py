@@ -1915,7 +1915,7 @@ def main() -> None:
                             "bash",
                             "-c",
                             (
-                                "exec setsid bash -c "
+                                "exec setsid --wait bash -c "
                                 + shlex.quote(
                                     f"echo $$ > {native_agent_pid_file}; "
                                     f"trap 'rm -f -- {native_agent_pid_file}' EXIT; "
