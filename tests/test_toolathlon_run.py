@@ -97,6 +97,23 @@ def test_container_cli_explicit_command_is_tokenized(monkeypatch) -> None:
     assert run._container_cli() == ["/usr/bin/podman", "--remote"]
 
 
+def test_artifact_guard_uses_selected_container_runtime(monkeypatch) -> None:
+    captured = {}
+    monkeypatch.setattr(run, "_container_cli", lambda: ["/usr/bin/podman"])
+
+    def fake_run(command, **kwargs):
+        captured["command"] = command
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(run.subprocess, "run", fake_run)
+    run._artifact_guard(
+        "stash", container="task-container", task_path="/workspace/task"
+    )
+
+    command = captured["command"]
+    assert command[command.index("--runtime") + 1] == "podman"
+
+
 def test_redis_runtime_patch_uses_bundled_pinned_chart() -> None:
     target, patch = run.TASK_RUNTIME_PATCHES[
         "finalpool/k8s-redis-helm-upgrade"

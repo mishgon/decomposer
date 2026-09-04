@@ -182,6 +182,16 @@ def _container_cli() -> list[str]:
     raise RuntimeError("Neither docker nor podman is available")
 
 
+def _container_runtime_name() -> str:
+    name = Path(_container_cli()[0]).name
+    if name not in {"docker", "podman"}:
+        raise RuntimeError(
+            "Toolathlon artifact guard requires a docker or podman executable, "
+            f"got {_container_cli()[0]!r}"
+        )
+    return name
+
+
 class _TeeTextIO:
     def __init__(self, console, log) -> None:
         self.console = console
@@ -1165,7 +1175,9 @@ def _artifact_guard(
         action,
     ]
     if action in {"stash", "restore"}:
-        command.extend(["--runtime", "docker", "--container", container or ""])
+        command.extend(
+            ["--runtime", _container_runtime_name(), "--container", container or ""]
+        )
         command.extend(["--task-path", task_path or ""])
     if action == "stash" and stash_root:
         command.extend(["--stash-root", stash_root])
