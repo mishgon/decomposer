@@ -407,6 +407,61 @@ def test_batch_runs_episodes_with_requested_concurrency(tmp_path, monkeypatch) -
     assert manifest["counts"]["completed"] == 4
 
 
+def test_provider_backoff_coalesces_failures_and_escalates_by_generation() -> None:
+    now = [100.0]
+    barrier = batch.ProviderBackoffBarrier(
+        initial_seconds=30, maximum_seconds=100, clock=lambda: now[0]
+    )
+
+    assert barrier.generation() == 0
+    assert barrier.register_failure(0) == 30
+    assert barrier.register_failure(0) is None
+    now[0] = 130.0
+    assert barrier.wait() == 1
+    assert barrier.register_failure(1) == 60
+    assert barrier.register_failure(1) is None
+    now[0] = 190.0
+    assert barrier.wait() == 2
+    assert barrier.register_failure(2) == 100
+
+
+def test_provider_backoff_resets_after_current_generation_success() -> None:
+    now = [0.0]
+    barrier = batch.ProviderBackoffBarrier(clock=lambda: now[0])
+
+    assert barrier.register_failure(0) == 30
+    assert barrier.register_success(0) is False
+    now[0] = 30.0
+    generation = barrier.wait()
+    assert barrier.register_success(generation) is True
+    assert barrier.register_failure(generation) == 30
+
+
+def test_openrouter_transient_failure_uses_saved_decomposer_error(tmp_path) -> None:
+    artifact = tmp_path / "trace"
+    artifact.mkdir()
+    (artifact / "trace.json").write_text(
+        json.dumps({"agent_error": "WriteTimeout('timed out')"})
+    )
+    result = {
+        "status": "failed",
+        "artifact_path": str(artifact),
+        "error": {"stderr_tail": "Decomposer agent loop failed"},
+    }
+
+    assert batch.openrouter_transient_failure(result) == "writetimeout"
+
+
+def test_openrouter_transient_failure_ignores_unrelated_local_timeout() -> None:
+    result = {
+        "status": "failed",
+        "artifact_path": None,
+        "error": {"stderr_tail": "local subagent raised httpx.WriteTimeout"},
+    }
+
+    assert batch.openrouter_transient_failure(result) is None
+
+
 def test_batch_distributes_episodes_across_external_vllm_ports(
     tmp_path, monkeypatch
 ) -> None:
