@@ -14,6 +14,7 @@ class ChatVLLM(ChatOpenAI):
     """ChatOpenAI adapter for vLLM's Chat Completions reasoning field."""
 
     preserve_reasoning: bool = Field(default=False, exclude=True)
+    preserve_reasoning_on_tool_calls_only: bool = Field(default=False, exclude=True)
     parse_qwen_xml_tool_calls: bool = Field(default=False, exclude=True)
 
     _TOOL_CALL_PATTERN: ClassVar[re.Pattern[str]] = re.compile(
@@ -140,6 +141,10 @@ class ChatVLLM(ChatOpenAI):
                 isinstance(message, AIMessage)
                 and isinstance(reasoning, str)
                 and reasoning
+                and (
+                    not self.preserve_reasoning_on_tool_calls_only
+                    or bool(message.tool_calls)
+                )
             ):
                 request_message["reasoning"] = reasoning
 

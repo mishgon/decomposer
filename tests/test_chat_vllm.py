@@ -61,6 +61,30 @@ def test_legacy_reasoning_round_trip() -> None:
     assert payload["messages"][0]["reasoning"] == "legacy reasoning"
 
 
+def test_reasoning_can_be_replayed_only_for_tool_call_turns() -> None:
+    model = ChatVLLM(
+        model="test",
+        api_key="test",
+        preserve_reasoning=True,
+        preserve_reasoning_on_tool_calls_only=True,
+        use_responses_api=False,
+    )
+    plain = AIMessage(
+        content="answer",
+        additional_kwargs={"reasoning_content": "do not replay"},
+    )
+    tool_turn = AIMessage(
+        content="",
+        additional_kwargs={"reasoning_content": "replay this"},
+        tool_calls=[{"id": "call-1", "name": "lookup", "args": {}}],
+    )
+
+    payload = model._get_request_payload([plain, tool_turn])
+
+    assert "reasoning" not in payload["messages"][0]
+    assert payload["messages"][1]["reasoning"] == "replay this"
+
+
 def test_length_limit_is_an_error() -> None:
     model = ChatVLLM(model="test", api_key="test")
 
