@@ -852,6 +852,50 @@ def test_start_vllm_adds_virtualenv_tools_to_path(tmp_path, monkeypatch) -> None
     )
 
 
+def test_start_vllm_probes_reused_endpoint_tool_calls(tmp_path, monkeypatch) -> None:
+    calls = []
+    monkeypatch.setattr(
+        run,
+        "wait_for_vllm",
+        lambda *args, **kwargs: calls.append(("ready", kwargs)),
+    )
+    monkeypatch.setattr(
+        run,
+        "probe_vllm_tool_call",
+        lambda **kwargs: calls.append(("tools", kwargs)),
+    )
+
+    assert run.start_vllm(
+        model="/models/Qwen3.5-4B",
+        port=8030,
+        gpu="1",
+        max_model_len=256_000,
+        gpu_memory_utilization=0.9,
+        timeout=1800,
+        log_path=tmp_path / "vllm.log",
+        reuse=True,
+    ) is None
+    assert calls == [
+        (
+            "ready",
+            {
+                "port": 8030,
+                "expected_model": "Qwen/Qwen3.5-4B",
+                "timeout": 2,
+                "log_path": tmp_path / "vllm.log",
+            },
+        ),
+        (
+            "tools",
+            {
+                "port": 8030,
+                "expected_model": "Qwen/Qwen3.5-4B",
+                "timeout": 120,
+            },
+        ),
+    ]
+
+
 def test_main_requires_explicit_purpose(monkeypatch) -> None:
     monkeypatch.setattr(sys, "argv", ["run.py", "finalpool/example"])
 

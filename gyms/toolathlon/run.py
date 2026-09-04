@@ -589,6 +589,67 @@ def wait_for_vllm(
     ) from last_error
 
 
+def probe_vllm_tool_call(*, port: int, expected_model: str, timeout: float) -> None:
+    """Verify that a reused endpoint exposes parsed OpenAI-style tool calls."""
+    tool_name = "toolathlon_readiness_probe"
+    request = urllib.request.Request(
+        f"http://127.0.0.1:{port}/v1/chat/completions",
+        data=json.dumps(
+            {
+                "model": expected_model,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": "Call the provided tool with value 7.",
+                    }
+                ],
+                "tools": [
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": tool_name,
+                            "description": "Report one integer.",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {"value": {"type": "integer"}},
+                                "required": ["value"],
+                            },
+                        },
+                    }
+                ],
+                "tool_choice": {
+                    "type": "function",
+                    "function": {"name": tool_name},
+                },
+                "parallel_tool_calls": False,
+                "temperature": 0,
+                "max_tokens": 1024,
+                # Isolate parser capability from a model's default reasoning
+                # mode; benchmark requests carry their own template kwargs.
+                "chat_template_kwargs": {"enable_thinking": False},
+            }
+        ).encode(),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            payload = json.load(response)
+        tool_calls = payload["choices"][0]["message"].get("tool_calls") or []
+        function = tool_calls[0]["function"]
+        arguments = function.get("arguments", "{}")
+        if isinstance(arguments, str):
+            arguments = json.loads(arguments)
+        if function.get("name") != tool_name or arguments.get("value") != 7:
+            raise ValueError("the forced readiness tool call was incorrect")
+    except (OSError, KeyError, IndexError, TypeError, ValueError, json.JSONDecodeError) as error:
+        raise RuntimeError(
+            f"Reused vLLM endpoint on port {port} serves {expected_model}, but "
+            "failed an OpenAI tool-call capability probe; verify "
+            "--enable-auto-tool-choice and --tool-call-parser"
+        ) from error
+
+
 def start_vllm(
     *,
     model: str,
@@ -614,12 +675,18 @@ def start_vllm(
     os.environ["no_proxy"] = no_proxy_value
 
     if reuse:
+        expected_model = served_subagent_model_name(model)
         wait_for_vllm(
             None,
             port=port,
-            expected_model=served_subagent_model_name(model),
+            expected_model=expected_model,
             timeout=2,
             log_path=log_path,
+        )
+        probe_vllm_tool_call(
+            port=port,
+            expected_model=expected_model,
+            timeout=min(max(timeout, 1), 120),
         )
         return None
 
