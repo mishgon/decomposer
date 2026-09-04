@@ -35,7 +35,7 @@ def _create_subagent(
     if not thinking:
         extra_body.update(
             {
-                "include_reasoning": False,
+                "reasoning_effort": "none",
                 "chat_template_kwargs": {"enable_thinking": False},
             }
         )
