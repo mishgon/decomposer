@@ -4,7 +4,7 @@ This gym integration keeps Decomposer and its model credentials on the host whil
 task container owns the Toolathlon workspace, MCP servers, and evaluator.
 The host runner owns one supervised vLLM process for a batch. Task containers
 reuse it and do not pay a per-example model cold start.
-The configured Qwen3.5-4B subagent runs in non-thinking mode.
+The configured Gemma4-26B-A4B subagent runs in non-thinking mode.
 
 ## Image layout
 
@@ -34,16 +34,15 @@ environment.
 
 The container resolves the host vLLM server through this variable:
 
-- `QWEN_3_5_4B_BASE_URL`
+- `GEMMA_4_26B_A4B_BASE_URL`
 
 It defaults to port 8023 on `host.docker.internal`.
 
-Set the hosted thinking-teacher endpoint and local subagent model once:
+Set the OpenRouter key and local subagent model once:
 
 ```bash
-export LLM_PROXY_URL=...
-export LLM_PROXY_MASTER_KEY=...
-QWEN=Qwen/Qwen3.5-4B
+export OPENROUTER_API_KEY=...
+GEMMA=/home/matrosov/models/gemma-4-26B-A4B-it
 ```
 
 Run the full dataset once (an omitted `-n` means one repetition):
@@ -51,8 +50,8 @@ Run the full dataset once (an omitted `-n` means one repetition):
 ```bash
 uv run python gyms/toolathlon_gym/run.py --all \
   --purpose trace-generation \
-  --model Qwen/Qwen3.6-35B-A3B-FP8 \
-  --subagent-model "$QWEN" \
+  --model deepseek/deepseek-v4-flash-0731 \
+  --subagent-model "$GEMMA" \
   --subagent-gpu 7 \
   --concurrency 16 \
   --container-slots 2 \
@@ -66,7 +65,7 @@ uv run python gyms/toolathlon_gym/run.py \
   --tasks howtocook-event-menu-ppt canvas-announcement-summary \
   -n 3 \
   --purpose trace-generation \
-  --subagent-model "$QWEN" \
+  --subagent-model "$GEMMA" \
   --subagent-gpu 1
 ```
 
@@ -89,7 +88,7 @@ The original one-task smoke interface remains available:
 ```bash
 uv run python gyms/toolathlon_gym/run.py howtocook-event-menu-ppt \
   --purpose trace-generation \
-  --subagent-model "$QWEN" \
+  --subagent-model "$GEMMA" \
   --subagent-gpu 0
 ```
 
