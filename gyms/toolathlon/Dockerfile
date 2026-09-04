@@ -4,8 +4,6 @@ FROM ${TOOLATHLON_BASE_IMAGE}
 ARG PYTHON_VERSION=3.12
 ARG DECOMPOSER_REVISION=unknown
 ARG TOOLATHLON_REVISION=unknown
-LABEL org.opencontainers.image.revision="${DECOMPOSER_REVISION}" \
-      io.decomposer.toolathlon.revision="${TOOLATHLON_REVISION}"
 ENV SUBAGENT_VENV=/opt/subagents
 
 # Bitnami's legacy chart endpoint now redirects to a Cloudflare-protected URL
@@ -94,3 +92,8 @@ ENV PATH=/opt/decomposer/bin:${PATH}
 COPY gyms/toolathlon /opt/decomposer/gyms/toolathlon
 
 WORKDIR /workspace
+
+# Keep volatile provenance at the end so a new commit label does not
+# invalidate every expensive dependency and task-image layer.
+LABEL org.opencontainers.image.revision="${DECOMPOSER_REVISION}" \
+      io.decomposer.toolathlon.revision="${TOOLATHLON_REVISION}"

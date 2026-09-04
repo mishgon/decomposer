@@ -190,6 +190,11 @@ def verify_image_sources(
     provenance: dict[str, object], *, repo_root: Path, toolathlon_root: Path
 ) -> None:
     """Reject a labeled task image when it was built from different sources."""
+    if not provenance.get("verified") and provenance.get("id"):
+        raise RuntimeError(
+            "Task image lacks Decomposer/Toolathlon source labels; rebuild "
+            "with gyms/toolathlon/build.sh"
+        )
     if not provenance.get("verified"):
         return
     expected = {
