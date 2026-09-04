@@ -184,6 +184,37 @@ def test_configured_subagents_are_registered() -> None:
     ]
 
 
+@pytest.mark.parametrize(
+    ("model", "expected_id"),
+    [
+        ("/models/Qwen3.5-4B", "qwen_3_5_4b_non_thinking"),
+        ("/models/gemma-4-E4B-it", "gemma_4_e4b_thinking"),
+        (
+            "/models/gemma-4-26B-A4B-it",
+            "gemma_4_26b_a4b_non_thinking",
+        ),
+    ],
+)
+def test_decomposer_advertises_only_the_actually_served_subagent(
+    model, expected_id
+) -> None:
+    specs = run.selected_subagent_specs("vllm", model)
+
+    assert [spec[0] for spec in specs] == [expected_id]
+
+
+def test_openrouter_decomposer_advertises_one_configured_model() -> None:
+    assert run.selected_subagent_specs(
+        "openrouter", "deepseek/deepseek-v4-flash-0731"
+    ) == (
+        (
+            "deepseek_openrouter",
+            "deepseek_openrouter",
+            "deepseek/deepseek-v4-flash-0731",
+        ),
+    )
+
+
 def test_decomposer_prompt_modes_select_student_and_teacher_prompts() -> None:
     assert run.DECOMPOSER_PROMPTS["student"] == run.DECOMPOSER_SYSTEM_PROMPT
     assert (
