@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 import uuid
@@ -24,6 +25,12 @@ GATEWAY_SSE_READ_TIMEOUT_SECONDS = 30 * 60
 GATEWAY_TOOL_READ_TIMEOUT_SECONDS = 300
 
 
+def _write_overlong_output(path: Path, content: str) -> None:
+    """Persist a large tool result without blocking LangGraph's event loop."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+
+
 @wrap_tool_call
 async def truncate_mcp_tool_output(request, handler):
     try:
@@ -47,8 +54,9 @@ async def truncate_mcp_tool_output(request, handler):
             saved_note = ""
             if workspace:
                 output_path = Path(workspace) / relative_path
-                output_path.parent.mkdir(parents=True, exist_ok=True)
-                output_path.write_text(content, encoding="utf-8")
+                await asyncio.to_thread(
+                    _write_overlong_output, output_path, content
+                )
                 saved_note = (
                     " The complete output is available through the overlong-output "
                     f"tools with shortuuid identifier {output_id}, and at "

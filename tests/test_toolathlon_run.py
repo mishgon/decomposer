@@ -147,6 +147,16 @@ def test_task_image_build_context_excludes_runtime_credentials() -> None:
     assert "external/toolathlon/deployment/k8s/" in dockerignore
 
 
+def test_task_image_revision_args_do_not_invalidate_build_layers() -> None:
+    dockerfile = (run.REPO_ROOT / "gyms/toolathlon/Dockerfile").read_text()
+
+    label = dockerfile.index("LABEL org.opencontainers.image.revision")
+    assert dockerfile.index("ARG DECOMPOSER_REVISION", label - 200) < label
+    assert dockerfile.index("ARG TOOLATHLON_REVISION", label - 200) < label
+    assert "DECOMPOSER_REVISION" not in dockerfile[: label - 200]
+    assert "TOOLATHLON_REVISION" not in dockerfile[: label - 200]
+
+
 def test_native_preprocess_uses_the_actual_served_model_identity() -> None:
     args = SimpleNamespace(
         agent_mode="simple",
@@ -737,6 +747,15 @@ def test_overlong_tool_output_is_preserved_in_workspace(
 ) -> None:
     from gyms.toolathlon.subagents import webapp
 
+    event_loop_thread = threading.get_ident()
+    writer_threads = []
+    original_writer = webapp._write_overlong_output
+
+    def recording_writer(path, content):
+        writer_threads.append(threading.get_ident())
+        original_writer(path, content)
+
+    monkeypatch.setattr(webapp, "_write_overlong_output", recording_writer)
     monkeypatch.setattr(webapp, "MAX_TOOL_OUTPUT_CHARS", 10)
     monkeypatch.setenv("TOOLATHLON_AGENT_WORKSPACE", str(tmp_path))
     request = SimpleNamespace(tool_call={"id": "call-1"})
@@ -758,6 +777,7 @@ def test_overlong_tool_output_is_preserved_in_workspace(
     ]
     assert f"shortuuid identifier {output_files[0].stem}" in response.content
     assert str(output_files[0].relative_to(tmp_path)) in response.content
+    assert writer_threads and writer_threads[0] != event_loop_thread
 
 
 def test_docker(monkeypatch) -> None:

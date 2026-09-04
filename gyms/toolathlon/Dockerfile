@@ -2,8 +2,6 @@ ARG TOOLATHLON_BASE_IMAGE=docker.io/lockon0927/toolathlon-task-image:1016beta
 FROM ${TOOLATHLON_BASE_IMAGE}
 
 ARG PYTHON_VERSION=3.12
-ARG DECOMPOSER_REVISION=unknown
-ARG TOOLATHLON_REVISION=unknown
 ENV SUBAGENT_VENV=/opt/subagents
 
 # Bitnami's legacy chart endpoint now redirects to a Cloudflare-protected URL
@@ -95,5 +93,7 @@ WORKDIR /workspace
 
 # Keep volatile provenance at the end so a new commit label does not
 # invalidate every expensive dependency and task-image layer.
+ARG DECOMPOSER_REVISION=unknown
+ARG TOOLATHLON_REVISION=unknown
 LABEL org.opencontainers.image.revision="${DECOMPOSER_REVISION}" \
       io.decomposer.toolathlon.revision="${TOOLATHLON_REVISION}"
