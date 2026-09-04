@@ -35,6 +35,7 @@ try:
     from .settings import (
         DECOMPOSER_RECURSION_LIMIT,
         DEEPSEEK_REASONING_EFFORT,
+        MCP_EXTERNAL_TCP_DEPENDENCIES,
         SUBAGENT_CONTEXT_TOKENS,
         SUBAGENT_RECURSION_LIMIT,
     )
@@ -45,6 +46,7 @@ except ImportError:  # Executed directly as ``python gyms/toolathlon/run.py``.
     from settings import (  # type: ignore[no-redef]
         DECOMPOSER_RECURSION_LIMIT,
         DEEPSEEK_REASONING_EFFORT,
+        MCP_EXTERNAL_TCP_DEPENDENCIES,
         SUBAGENT_CONTEXT_TOKENS,
         SUBAGENT_RECURSION_LIMIT,
     )
@@ -136,22 +138,6 @@ TASK_RUNTIME_PATCHES = {
     ),
 }
 
-# These services live outside the per-episode task container.  A successful
-# ``docker run`` therefore says nothing about whether preprocessing can reach
-# them.  In particular, several Canvas preprocessors catch API failures and
-# still exit zero, which would otherwise turn a missing service into a model
-# failure.
-MCP_EXTERNAL_TCP_DEPENDENCIES = {
-    "canvas": (
-        ("Canvas backend", "127.0.0.1", 10001),
-        ("Canvas proxy", "127.0.0.1", 20001),
-    ),
-    "woocommerce": (("WooCommerce", "127.0.0.1", 10003),),
-    "emails": (
-        ("email IMAP", "127.0.0.1", 1143),
-        ("email SMTP", "127.0.0.1", 1587),
-    ),
-}
 PREPROCESS_FATAL_OUTPUT_PATTERNS = (
     re.compile(r"connection refused", re.IGNORECASE),
     re.compile(r"course setup encountered errors", re.IGNORECASE),

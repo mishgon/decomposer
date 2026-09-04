@@ -7,6 +7,7 @@ import json
 import os
 import platform
 import signal
+import socket
 import subprocess
 import sys
 import threading
@@ -18,9 +19,17 @@ from pathlib import Path
 from typing import Any, Callable, Sequence
 
 if __package__:
-    from .settings import SUBAGENT_CONTEXT_TOKENS, SUBAGENT_RECURSION_LIMIT
+    from .settings import (
+        MCP_EXTERNAL_TCP_DEPENDENCIES,
+        SUBAGENT_CONTEXT_TOKENS,
+        SUBAGENT_RECURSION_LIMIT,
+    )
 else:
-    from settings import SUBAGENT_CONTEXT_TOKENS, SUBAGENT_RECURSION_LIMIT
+    from settings import (  # type: ignore[no-redef]
+        MCP_EXTERNAL_TCP_DEPENDENCIES,
+        SUBAGENT_CONTEXT_TOKENS,
+        SUBAGENT_RECURSION_LIMIT,
+    )
 
 
 SCHEMA_VERSION = 1
@@ -482,6 +491,39 @@ def shared_task_resources(
                 if server in SHARED_MUTABLE_MCP_SERVERS
             )
     return tuple(sorted(resources))
+
+
+def required_external_tcp_dependencies(
+    tasks: Sequence[str], tasks_root: Path
+) -> tuple[tuple[str, str, int], ...]:
+    """Return the unique host services declared by the selected tasks."""
+    dependencies: set[tuple[str, str, int]] = set()
+    for task in tasks:
+        task_config_path = tasks_root / task / "task_config.json"
+        if not task_config_path.is_file():
+            continue
+        task_config = json.loads(task_config_path.read_text(encoding="utf-8"))
+        for server in task_config.get("needed_mcp_servers") or ():
+            dependencies.update(MCP_EXTERNAL_TCP_DEPENDENCIES.get(server, ()))
+    return tuple(sorted(dependencies))
+
+
+def preflight_external_tcp_dependencies(
+    tasks: Sequence[str], tasks_root: Path, timeout: float = 2.0
+) -> None:
+    """Fail before loading a model when required host services are down."""
+    unavailable: list[str] = []
+    for name, host, port in required_external_tcp_dependencies(tasks, tasks_root):
+        try:
+            with socket.create_connection((host, port), timeout=timeout):
+                pass
+        except OSError as error:
+            unavailable.append(f"{name} at {host}:{port} ({error})")
+    if unavailable:
+        raise RuntimeError(
+            "External Toolathlon dependencies are unavailable before model "
+            "startup: " + "; ".join(unavailable)
+        )
 
 
 def count_statuses(manifest: dict[str, Any]) -> dict[str, int]:
@@ -993,6 +1035,18 @@ def main(
     image_info = image_provenance(image_inspection, args.image)
     verify_image_sources(
         image_info, repo_root=repo_root, toolathlon_root=toolathlon_root
+    )
+    tasks_needing_services = (
+        tasks
+        if not args.resume
+        else [
+            episode["task"]
+            for episode in manifest["episodes"]
+            if episode["status"] != "completed"
+        ]
+    )
+    preflight_external_tcp_dependencies(
+        tasks_needing_services, toolathlon_root / "tasks"
     )
     if not args.resume:
         # Do not create a tracked run until every read-only launch preflight has
