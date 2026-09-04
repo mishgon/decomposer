@@ -37,4 +37,13 @@ external/toolathlon/configs/snowflake_rsa_key.pub
 external/toolathlon/configs/.mcp-auth/
 external/toolathlon/configs/*.pem
 external/toolathlon/configs/*.key
+# Deployment startup creates live databases, logs, generated credentials, and
+# pid files beside the tracked scripts.  Include only the source files that Git
+# tracks there; live service state must neither invalidate builds nor enter an
+# image layer.
+external/toolathlon/deployment/*/*
+!external/toolathlon/deployment/utils/
+!external/toolathlon/deployment/utils/**
+!external/toolathlon/deployment/*/scripts/
+!external/toolathlon/deployment/*/scripts/**
 external/toolathlon/deployment/k8s/
