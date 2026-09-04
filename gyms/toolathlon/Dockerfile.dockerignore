@@ -46,4 +46,5 @@ external/toolathlon/deployment/*/*
 !external/toolathlon/deployment/utils/**
 !external/toolathlon/deployment/*/scripts/
 !external/toolathlon/deployment/*/scripts/**
+external/toolathlon/deployment/**/__pycache__/
 external/toolathlon/deployment/k8s/
