@@ -143,55 +143,112 @@ def test_bottom_cull_protects_unparsed_native_evaluations(tmp_path: Path) -> Non
     ) == ["zero"]
 
 
-def test_one_plus_two_plus_three_then_drop_zero_success(tmp_path: Path) -> None:
+def test_coverage_first_prioritizes_tasks_without_a_success(tmp_path: Path) -> None:
     tasks = [f"task-{index:02d}" for index in range(10)]
-    first_results = {}
     episodes = []
     for index, task in enumerate(tasks):
-        first_results[task] = evaluation(
+        result = evaluation(
             tmp_path,
             f"first-{task}",
             {
-                "pass": index == 9,
+                "pass": index < 5,
                 "native_result": {"passed": index, "failed": 10 - index},
             },
         )
-        episodes.append(episode(task, 1, attempt(first_results[task])))
+        episodes.append(episode(task, 1, attempt(result)))
     manifest = {"episodes": episodes}
     manifest["adaptive_scheduler"] = scheduler.new_scheduler_state(
         tasks, threshold=0.9, cull_fraction=0.1, target_successes=4
     )
 
     first_wave = scheduler.plan_next_wave(manifest)
-    assert len(first_wave) == 20
-    assert {item["repetition"] for item in manifest["episodes"]} == {1, 2, 3}
+    assert first_wave == [f"task-{index:02d}::rep-002" for index in range(5, 10)]
 
-    for item in manifest["episodes"]:
-        if item["status"] == "pending":
-            item.update(
-                status="failed",
-                attempts=[attempt(None, error={"type": "EpisodeTimeout"})],
-            )
+
+def test_coverage_first_water_fills_success_counts(tmp_path: Path) -> None:
+    one = evaluation(tmp_path, "one", {"pass": True, "native_result": None})
+    two = evaluation(tmp_path, "two", {"pass": True, "native_result": None})
+    manifest = {
+        "episodes": [
+            episode("alpha", 1, attempt(one)),
+            episode("alpha", 2, attempt(two)),
+            episode("beta", 1, attempt(one)),
+        ]
+    }
+    manifest["adaptive_scheduler"] = scheduler.new_scheduler_state(
+        ["alpha", "beta"], threshold=0.9, cull_fraction=0.1, target_successes=4
+    )
+
+    first_wave = scheduler.plan_next_wave(manifest)
+    assert first_wave == ["beta::rep-002"]
+
+    pending = manifest["episodes"][-1]
+    pending.update(status="completed", attempts=[attempt(two)])
     second_wave = scheduler.plan_next_wave(manifest)
-
-    assert "task-00" not in manifest["adaptive_scheduler"]["active_tasks"]
-    assert len(second_wave) == 27  # Three launches for each of nine survivors.
-
-    for item in manifest["episodes"]:
-        if item["status"] == "pending":
-            item.update(
-                status="failed",
-                attempts=[attempt(None, error={"type": "EpisodeTimeout"})],
-            )
-    scheduler.plan_next_wave(manifest)
-
-    # task-09 had a strict pass; every remaining zero-success task is retired
-    # after six consumed launches.
-    assert manifest["adaptive_scheduler"]["active_tasks"] == ["task-09"]
-    assert manifest["adaptive_scheduler"]["phase"] == "balance_successes"
+    assert second_wave == ["alpha::rep-003", "beta::rep-003"]
 
 
-def test_adaptive_batch_runs_three_plus_three_without_changing_models(
+def test_coverage_first_drops_known_zero_after_six_launches(tmp_path: Path) -> None:
+    zero = evaluation(
+        tmp_path,
+        "zero",
+        {"pass": False, "native_result": {"passed": 0, "failed": 10}},
+    )
+    manifest = {
+        "episodes": [episode("alpha", i, attempt(zero)) for i in range(1, 7)]
+    }
+    manifest["adaptive_scheduler"] = scheduler.new_scheduler_state(
+        ["alpha"], threshold=0.9, cull_fraction=0.1, target_successes=4
+    )
+
+    assert scheduler.plan_next_wave(manifest) == []
+    assert manifest["adaptive_scheduler"]["active_tasks"] == []
+    assert manifest["adaptive_scheduler"]["phase"] == "complete"
+
+
+def test_migration_removes_only_unstarted_legacy_queue(tmp_path: Path) -> None:
+    done = evaluation(tmp_path, "done", {"pass": True, "native_result": None})
+    manifest = {
+        "episodes": [
+            episode("alpha", 1, attempt(done)),
+            episode("alpha", 2),
+            episode("beta", 1, attempt(None, error={"interrupted": True})),
+            episode("beta", 2),
+        ],
+        "adaptive_scheduler": {
+            "schema_version": 1,
+            "phase": "drop_unsolved_after_six",
+            "success_threshold": 0.9,
+            "cull_fraction": 0.1,
+            "target_successes": 4,
+            "original_tasks": ["alpha", "beta", "culled"],
+            "active_tasks": ["alpha", "beta"],
+            "culled_tasks": [{"task": "culled"}],
+            "rounds": [
+                {
+                    "phase": "six_total",
+                    "episode_keys": ["alpha::rep-002", "beta::rep-001"],
+                }
+            ],
+        },
+    }
+
+    removed = scheduler.migrate_to_coverage_first(manifest)
+
+    assert removed == 2
+    assert [item["key"] for item in manifest["episodes"]] == [
+        "alpha::rep-001",
+        "beta::rep-001",
+    ]
+    state = manifest["adaptive_scheduler"]
+    assert state["policy"] == "coverage_first"
+    assert state["phase"] == "coverage_first"
+    assert state["active_tasks"] == ["alpha", "beta"]
+    assert state["culled_tasks"] == [{"task": "culled"}]
+    assert state["rounds"][0]["episode_keys"] == ["beta::rep-001"]
+
+
+def test_adaptive_batch_water_fills_without_changing_models(
     tmp_path: Path, monkeypatch
 ) -> None:
     tasks = [f"task-{index:02d}" for index in range(10)]
@@ -259,7 +316,7 @@ def test_adaptive_batch_runs_three_plus_three_without_changing_models(
         docker=lambda *args, **kwargs: subprocess.CompletedProcess(args, 0, "", ""),
     )
 
-    assert len(calls) == 60
+    assert len(calls) == 40
     assert {(teacher, student) for teacher, student, _task in calls} == {
         ("teacher-model", "student-model")
     }

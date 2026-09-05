@@ -256,7 +256,7 @@ def parse_args(argv: Sequence[str], defaults: dict[str, Any]) -> argparse.Namesp
         "--adaptive",
         action="store_true",
         help=(
-            "Use balanced 1+2+3 trace scheduling and task culling. Model and "
+            "Use coverage-first trace scheduling and task culling. Model and "
             "infrastructure settings retain their normal batch semantics."
         ),
     )
@@ -465,6 +465,7 @@ def configure_adaptive_scheduler(
                 f"Cannot change adaptive {name.replace('_', ' ')} after the "
                 f"scheduler starts ({state[name]!r} != {cli_value!r})"
             )
+    adaptive_scheduler.migrate_to_coverage_first(manifest)
     return state
 
 
