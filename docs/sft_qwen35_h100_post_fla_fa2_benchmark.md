@@ -92,7 +92,7 @@ uncommitted.
 - Native backend: source-built `flash-attn==2.8.3`, compiled for SM90 with an
   isolated CUDA 12.9.86 compiler, `MAX_JOBS=4`, and `NVCC_THREADS=2`.
 - Raw artifacts:
-  `/mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/training/sft/benchmarks/qwen35-4b-h100-post-fla-fa2-20260830`.
+  `/home/sukhorukov/decomposer_artifacts/training/sft/benchmarks/qwen35-4b-h100-post-fla-fa2-20260830`.
 
 The new artifact root is 219 MiB, of which 211 MiB is the native overlay. The
 native CUDA shared object is 217,636,792 bytes with SHA-256

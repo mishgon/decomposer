@@ -29,7 +29,7 @@ cache when present and otherwise downloads the dataset, then writes the 160
 serialized scenarios unchanged to:
 
 ```text
-/mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/
+/home/sukhorukov/decomposer_artifacts/
   evaluation/data/gaia2/<dataset-revision>/validation/execution/
 ```
 
@@ -123,7 +123,7 @@ is intended for one 140 GB H200 and can be installed into the registry's shared
 cache with:
 
 ```bash
-HF_HOME=/mnt/shared_ru.ml.SZ-5_000264/.cache/huggingface \
+HF_HOME=/home/sukhorukov/.cache/huggingface \
   .venv/bin/hf download google/gemma-4-31B-it \
   --revision 842da3794eaa0b77d5f08bae87a17459d91ff475 \
   --max-workers 8
@@ -426,7 +426,7 @@ a systemic failure and does not create `.eval_done.json`.
 ## Submit MLSpace jobs
 
 ```bash
-/mnt/shared_ru.ml.SZ-5_000264/sukhorukov/.venv-mls/bin/python \
+/home/sukhorukov/.venv-mls/bin/python \
   -m gyms.gaia2.run_eval \
   --experiment gemma4-e4b-it-thinking \
   --num-repeats 3 \
@@ -438,7 +438,7 @@ a systemic failure and does not create `.eval_done.json`.
   --experiment qwen35-4b-sft-mixed-v1-partial-3983f605-327-32k-non-thinking-qwen35-4b-non-thinking \
   --reuse-source
 
-/mnt/shared_ru.ml.SZ-5_000264/sukhorukov/.venv-mls/bin/python \
+/home/sukhorukov/.venv-mls/bin/python \
   -m gyms.gaia2.run_eval \
   --experiment qwen35-4b-sft-mixed-v1-partial-3983f605-327-32k-non-thinking-qwen35-4b-non-thinking \
   --num-repeats 3 \
@@ -450,7 +450,7 @@ a systemic failure and does not create `.eval_done.json`.
   --experiment qwen35-4b-sft-mixed-v1-final-493c24c4-404-filtered-p1-s279-non-thinking-qwen35-4b-non-thinking \
   --reuse-source
 
-/mnt/shared_ru.ml.SZ-5_000264/sukhorukov/.venv-mls/bin/python \
+/home/sukhorukov/.venv-mls/bin/python \
   -m gyms.gaia2.run_eval \
   --experiment qwen35-4b-sft-mixed-v1-final-493c24c4-404-filtered-p1-s279-non-thinking-qwen35-4b-non-thinking \
   --num-repeats 3 \
@@ -462,7 +462,7 @@ a systemic failure and does not create `.eval_done.json`.
   --experiment qwen35-4b-sft-mixed-v1-final-493c24c4-404-non-thinking-qwen35-4b-non-thinking \
   --reuse-source
 
-/mnt/shared_ru.ml.SZ-5_000264/sukhorukov/.venv-mls/bin/python \
+/home/sukhorukov/.venv-mls/bin/python \
   -m gyms.gaia2.run_eval \
   --experiment qwen35-4b-sft-mixed-v1-final-493c24c4-404-non-thinking-qwen35-4b-non-thinking \
   --num-repeats 3 \
@@ -474,7 +474,7 @@ a systemic failure and does not create `.eval_done.json`.
   --experiment qwen35-4b-base-non-thinking-teacher-qwen35-4b-non-thinking \
   --reuse-source
 
-/mnt/shared_ru.ml.SZ-5_000264/sukhorukov/.venv-mls/bin/python \
+/home/sukhorukov/.venv-mls/bin/python \
   -m gyms.gaia2.run_eval \
   --experiment qwen35-4b-base-non-thinking-teacher-qwen35-4b-non-thinking \
   --num-repeats 3 \
@@ -547,7 +547,7 @@ The matched Qwen3.6 teacher comparison uses three attempts and concurrency 16:
   --partition test \
   --reuse-source
 
-/mnt/shared_ru.ml.SZ-5_000264/sukhorukov/.venv-mls/bin/python \
+/home/sukhorukov/.venv-mls/bin/python \
   -m gyms.gaia2.run_eval \
   --experiment qwen36-35b-a3b-teacher-qwen35-4b-non-thinking \
   --purpose evaluation \
@@ -565,7 +565,7 @@ The matched Qwen3.6 teacher comparison uses three attempts and concurrency 16:
   --partition test \
   --reuse-source
 
-/mnt/shared_ru.ml.SZ-5_000264/sukhorukov/.venv-mls/bin/python \
+/home/sukhorukov/.venv-mls/bin/python \
   -m gyms.gaia2.run_eval \
   --experiment qwen35-4b-sft-mixed-v2-493c24c4-gaia2-110-n3-filtered-p2-non-thinking-qwen35-4b-non-thinking \
   --purpose evaluation \
@@ -604,7 +604,7 @@ Prepare all three experiments:
 Dry-run or submit the matched full-validation jobs together:
 
 ```bash
-/mnt/shared_ru.ml.SZ-5_000264/sukhorukov/.venv-mls/bin/python \
+/home/sukhorukov/.venv-mls/bin/python \
   -m gyms.gaia2.run_eval \
   --domain ambiguity \
   --partition full \
@@ -629,7 +629,7 @@ scenario, so dispatch covers all 110 scenarios before repeating any scenario.
 Logical rollout numbers 4 through 10 line up with the existing n=3 teacher run:
 
 ```bash
-/mnt/shared_ru.ml.SZ-5_000264/sukhorukov/.venv-mls/bin/python \
+/home/sukhorukov/.venv-mls/bin/python \
   -m gyms.gaia2.run_eval \
   --experiment deepseek-v4-flash-0731-teacher-qwen35-4b-non-thinking \
   --purpose trace-generation \

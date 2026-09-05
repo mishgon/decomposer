@@ -20,7 +20,7 @@ policy_model:
       openai_model: deepseek/deepseek-v4-flash-0731
       extra_body:
         reasoning:
-          effort: high
+          effort: max
 
 decomposer:
   responses_api_agents:

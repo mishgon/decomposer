@@ -82,7 +82,7 @@ and 100-call budget. The dense 31B pair targets one 140 GB H200. Install its
 pinned snapshot with:
 
 ```bash
-HF_HOME=/mnt/shared_ru.ml.SZ-5_000264/.cache/huggingface \
+HF_HOME=/home/sukhorukov/.cache/huggingface \
   .venv/bin/hf download google/gemma-4-31B-it \
   --revision 842da3794eaa0b77d5f08bae87a17459d91ff475 \
   --max-workers 8
@@ -219,7 +219,7 @@ active runs, stages a clean Git revision, and dispatches the shared local runner
 inside each worker. Run it with the Python environment that provides `mls`:
 
 ```bash
-MLSPY=/mnt/shared_ru.ml.SZ-5_000264/sukhorukov/.venv-mls/bin/python
+MLSPY=/home/sukhorukov/.venv-mls/bin/python
 
 $MLSPY -m gyms.workplace_assistant.run_eval \
   --purpose evaluation \
@@ -385,8 +385,8 @@ dedicated GPUs:
 
 ```bash
 uv run --group train python -m training.sft.vllm_compat \
-  --source /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/training/sft/jobs/gemma4-e4b-nonthinking-deepseek-e4b-v1-8k-full-4gpu/final \
-  --output /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/training/sft/jobs/gemma4-e4b-nonthinking-deepseek-e4b-v1-8k-full-4gpu/final-vllm
+  --source /home/sukhorukov/decomposer_artifacts/training/sft/jobs/gemma4-e4b-nonthinking-deepseek-e4b-v1-8k-full-4gpu/final \
+  --output /home/sukhorukov/decomposer_artifacts/training/sft/jobs/gemma4-e4b-nonthinking-deepseek-e4b-v1-8k-full-4gpu/final-vllm
 
 .venv/bin/python -m gyms.workplace_assistant.prepare eval \
   --split validation \
@@ -453,7 +453,7 @@ immutable; preparation refuses to replace an existing version directory.
 ## Artifact layout
 
 All generated data is outside the worktree under
-`/mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts`:
+`/home/sukhorukov/decomposer_artifacts`:
 
 ```text
 evaluation/data/workplace_assistant/       source files and preparation manifests

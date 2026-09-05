@@ -6,9 +6,9 @@ model:
   trust_remote_code: false
 
 data:
-  train_file: /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/datasets/sft/decomposer-workplace-all/v3/train.jsonl
-  validation_file: /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/datasets/sft/decomposer-workplace-all/v3/validation.jsonl
-  manifest_file: /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/datasets/sft/decomposer-workplace-all/v3/manifest.json
+  train_file: /home/sukhorukov/decomposer_artifacts/datasets/sft/decomposer-workplace-all/v3/train.jsonl
+  validation_file: /home/sukhorukov/decomposer_artifacts/datasets/sft/decomposer-workplace-all/v3/validation.jsonl
+  manifest_file: /home/sukhorukov/decomposer_artifacts/datasets/sft/decomposer-workplace-all/v3/manifest.json
   include_reasoning: false
   error_on_truncation: true
   num_proc: 2
@@ -16,7 +16,7 @@ data:
   max_eval_samples: 2
 
 training:
-  output_dir: /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/training/sft/smoke/gemma4-e2b-two-gpu-one-step
+  output_dir: /home/sukhorukov/decomposer_artifacts/training/sft/smoke/gemma4-e2b-two-gpu-one-step
   run_name: gemma4-e2b-decomposer-sft-smoke
   max_length: 32768
   max_steps: 1

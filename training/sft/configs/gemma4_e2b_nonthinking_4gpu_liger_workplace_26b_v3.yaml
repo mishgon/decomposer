@@ -6,9 +6,9 @@ model:
   trust_remote_code: false
 
 data:
-  train_file: /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/datasets/sft/decomposer-workplace-26b-a4b-nonthinking/v3/train.jsonl
-  validation_file: /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/datasets/sft/decomposer-workplace-26b-a4b-nonthinking/v3/validation.jsonl
-  manifest_file: /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/datasets/sft/decomposer-workplace-26b-a4b-nonthinking/v3/manifest.json
+  train_file: /home/sukhorukov/decomposer_artifacts/datasets/sft/decomposer-workplace-26b-a4b-nonthinking/v3/train.jsonl
+  validation_file: /home/sukhorukov/decomposer_artifacts/datasets/sft/decomposer-workplace-26b-a4b-nonthinking/v3/validation.jsonl
+  manifest_file: /home/sukhorukov/decomposer_artifacts/datasets/sft/decomposer-workplace-26b-a4b-nonthinking/v3/manifest.json
   include_reasoning: false
   error_on_truncation: true
   # The frozen 26B-source dataset has one 35,044-token training trace. Exclude
@@ -19,7 +19,7 @@ data:
   max_eval_samples: null
 
 training:
-  output_dir: /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/training/sft/checkpoints/gemma4-e2b-nonthinking-4gpu-liger-workplace-26b-v3
+  output_dir: /home/sukhorukov/decomposer_artifacts/training/sft/checkpoints/gemma4-e2b-nonthinking-4gpu-liger-workplace-26b-v3
   run_name: gemma4-e2b-decomposer-sft-nonthinking-4gpu-liger-workplace-26b-v3
   max_length: 32768
   per_device_train_batch_size: 1

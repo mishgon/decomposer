@@ -6,9 +6,9 @@ model:
   trust_remote_code: false
 
 data:
-  train_file: /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/datasets/sft/decomposer-toolathlon-gym-deepseek-qwen35-4b-nonthinking/candidate-v1-493c24c4-teacher-prompt-pass-or-qgt90-32k/train.jsonl
-  validation_file: /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/datasets/sft/decomposer-toolathlon-gym-deepseek-qwen35-4b-nonthinking/candidate-v1-493c24c4-teacher-prompt-pass-or-qgt90-32k/validation.jsonl
-  manifest_file: /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/datasets/sft/decomposer-toolathlon-gym-deepseek-qwen35-4b-nonthinking/candidate-v1-493c24c4-teacher-prompt-pass-or-qgt90-32k/manifest.json
+  train_file: /home/sukhorukov/decomposer_artifacts/datasets/sft/decomposer-toolathlon-gym-deepseek-qwen35-4b-nonthinking/candidate-v1-493c24c4-teacher-prompt-pass-or-qgt90-32k/train.jsonl
+  validation_file: /home/sukhorukov/decomposer_artifacts/datasets/sft/decomposer-toolathlon-gym-deepseek-qwen35-4b-nonthinking/candidate-v1-493c24c4-teacher-prompt-pass-or-qgt90-32k/validation.jsonl
+  manifest_file: /home/sukhorukov/decomposer_artifacts/datasets/sft/decomposer-toolathlon-gym-deepseek-qwen35-4b-nonthinking/candidate-v1-493c24c4-teacher-prompt-pass-or-qgt90-32k/manifest.json
   expected_system_prompt_profile: teacher
   include_reasoning: false
   require_prepared_tokenization: true
@@ -19,7 +19,7 @@ data:
   max_eval_samples: null
 
 training:
-  output_dir: /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/training/sft/checkpoints/qwen35-4b-nonthinking-toolathlon-only-v1-493c24c4-teacher-prompt-filtered-32k-hf-fa2-fla-b8-e8-4gpu
+  output_dir: /home/sukhorukov/decomposer_artifacts/training/sft/checkpoints/qwen35-4b-nonthinking-toolathlon-only-v1-493c24c4-teacher-prompt-filtered-32k-hf-fa2-fla-b8-e8-4gpu
   run_name: qwen35-4b-decomposer-sft-nonthinking-toolathlon-only-v1-493c24c4-teacher-prompt-filtered-32k-hf-fa2-fla-b8-e8-4gpu
   max_length: 32768
   per_device_train_batch_size: 2

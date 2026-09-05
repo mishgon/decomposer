@@ -44,7 +44,7 @@ uv sync --locked --group train
 
 .venv/bin/python -m training.sft.prepare_qwen35_fast_runtime \
   --cuda-home /home/jovyan/decomposer-artifacts/toolchains/cuda-12.9.86 \
-  --hf-cache-dir /mnt/shared_ru.ml.SZ-5_000264/.cache/huggingface \
+  --hf-cache-dir /home/sukhorukov/.cache/huggingface \
   --max-jobs 4
 ```
 
@@ -104,11 +104,11 @@ runtime environment variables. NVCC is not used by a job.
 Dry-run the two exact payloads:
 
 ```bash
-/mnt/shared_ru.ml.SZ-5_000264/sukhorukov/.venv-mls/bin/python \
+/home/sukhorukov/.venv-mls/bin/python \
   -m training.sft.run_train_jobs --dry --sanity-check --priority high \
   --filter hf-fa2-fla-b8-smoke-4gpu
 
-/mnt/shared_ru.ml.SZ-5_000264/sukhorukov/.venv-mls/bin/python \
+/home/sukhorukov/.venv-mls/bin/python \
   -m training.sft.run_train_jobs --dry --priority high \
   --filter hf-fa2-fla-b8-full-4gpu
 ```

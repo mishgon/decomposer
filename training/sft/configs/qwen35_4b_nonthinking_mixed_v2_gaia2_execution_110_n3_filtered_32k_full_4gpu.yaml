@@ -6,9 +6,9 @@ model:
   trust_remote_code: false
 
 data:
-  train_file: /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/datasets/sft/decomposer-mixed-deepseek-qwen35-4b-nonthinking/v2-493c24c4-gaia2-execution-110-n3-wp-r1-tool-pass-qgt90-or-missing-gaia-r1-32k/train.jsonl
-  validation_file: /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/datasets/sft/decomposer-mixed-deepseek-qwen35-4b-nonthinking/v2-493c24c4-gaia2-execution-110-n3-wp-r1-tool-pass-qgt90-or-missing-gaia-r1-32k/validation.jsonl
-  manifest_file: /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/datasets/sft/decomposer-mixed-deepseek-qwen35-4b-nonthinking/v2-493c24c4-gaia2-execution-110-n3-wp-r1-tool-pass-qgt90-or-missing-gaia-r1-32k/manifest.json
+  train_file: /home/sukhorukov/decomposer_artifacts/datasets/sft/decomposer-mixed-deepseek-qwen35-4b-nonthinking/v2-493c24c4-gaia2-execution-110-n3-wp-r1-tool-pass-qgt90-or-missing-gaia-r1-32k/train.jsonl
+  validation_file: /home/sukhorukov/decomposer_artifacts/datasets/sft/decomposer-mixed-deepseek-qwen35-4b-nonthinking/v2-493c24c4-gaia2-execution-110-n3-wp-r1-tool-pass-qgt90-or-missing-gaia-r1-32k/validation.jsonl
+  manifest_file: /home/sukhorukov/decomposer_artifacts/datasets/sft/decomposer-mixed-deepseek-qwen35-4b-nonthinking/v2-493c24c4-gaia2-execution-110-n3-wp-r1-tool-pass-qgt90-or-missing-gaia-r1-32k/manifest.json
   include_reasoning: false
   require_prepared_tokenization: true
   error_on_truncation: true
@@ -18,7 +18,7 @@ data:
   max_eval_samples: null
 
 training:
-  output_dir: /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/training/sft/checkpoints/qwen35-4b-nonthinking-mixed-v2-493c24c4-gaia2-110-n3-filtered-32k-4gpu
+  output_dir: /home/sukhorukov/decomposer_artifacts/training/sft/checkpoints/qwen35-4b-nonthinking-mixed-v2-493c24c4-gaia2-110-n3-filtered-32k-4gpu
   run_name: qwen35-4b-decomposer-sft-nonthinking-mixed-v2-493c24c4-gaia2-110-n3-filtered-32k-4gpu
   max_length: 32768
   per_device_train_batch_size: 1

@@ -44,7 +44,7 @@ modes.
   resolved by Transformers. These environment-only installs were not added to
   project requirements.
 - Raw artifacts:
-  `/mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/training/sft/benchmarks/qwen35-4b-h100-batch-fa2-20260830`.
+  `/home/sukhorukov/decomposer_artifacts/training/sft/benchmarks/qwen35-4b-h100-batch-fa2-20260830`.
 
 The SDPA and FlashAttention representative runs have identical
 `data_manifest.json` checksums:

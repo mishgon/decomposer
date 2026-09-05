@@ -14,8 +14,8 @@ from gyms.qwen_sampling import (
     qwen36_thinking_sampling,
 )
 
-ARTIFACTS_ROOT = Path("/mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts")
-PROJECT_ROOT = Path("/mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_sft")
+ARTIFACTS_ROOT = Path("/home/sukhorukov/decomposer_artifacts")
+PROJECT_ROOT = Path("/home/sukhorukov/decomposer_sft")
 PROJECT_VENV = PROJECT_ROOT / ".venv"
 DEFAULT_GAIA2_REPO = PROJECT_ROOT / "external" / "gaia2"
 
@@ -122,7 +122,7 @@ GAIA2_STAGING_ROOT = ARTIFACTS_ROOT / "code" / "gaia2"
 GAIA2_VENV_ROOT = ARTIFACTS_ROOT / "venvs" / "gaia2"
 UV_CACHE = ARTIFACTS_ROOT / "cache" / "uv"
 UV_BIN = ARTIFACTS_ROOT / "tools" / "uv"
-HF_HOME = Path("/mnt/shared_ru.ml.SZ-5_000264/.cache/huggingface")
+HF_HOME = Path("/home/sukhorukov/.cache/huggingface")
 
 BASE_IMAGE = "cr.ai.cloud.ru/aicloud-base-images/py3.12-torch2.7.0:0.0.42"
 INSTANCE_TYPES_BY_NUM_GPUS = {
@@ -368,7 +368,7 @@ class DecomposerExperiment:
     service_port: int = 8124
     subagent_port: int = 2024
     max_model_len: int = 65536
-    max_num_seqs: int = 16
+    max_num_seqs: int = 64
     max_completion_tokens: int | None = None
     temperature: float = 1.0
     top_p: float = 0.95
@@ -548,7 +548,7 @@ class SimpleExperiment:
     api_key_env: str | None = None
     reasoning_effort: str | None = None
     max_model_len: int = 65536
-    max_num_seqs: int = 16
+    max_num_seqs: int = 64
     max_completion_tokens: int | None = None
     temperature: float = 1.0
     top_p: float = 0.95
@@ -983,6 +983,50 @@ GEMMA4_26B_SHARED_DECOMPOSER_EXPERIMENT = DecomposerExperiment(
     manager_recursion_limit=1000,
     subagent_recursion_limit=1000,
 )
+GEMMA4_31B_SHARED_DECOMPOSER_EXPERIMENT = DecomposerExperiment(
+    name=(
+        "gemma4-31b-thinking-teacher-"
+        "gemma4-31b-non-thinking-text-defaults"
+    ),
+    worker_checkpoint=GEMMA4_31B_BASE,
+    manager_checkpoint=GEMMA4_31B_BASE,
+    prompt_profile="teacher",
+    num_gpus=1,
+    manager_served_name="google/gemma-4-31B-it",
+    worker_served_name="google/gemma-4-31B-it",
+    manager_port=8035,
+    worker_port=8035,
+    service_port=8138,
+    subagent_port=2038,
+    max_model_len=131072,
+    concurrency=32,
+    manager_thinking=True,
+    worker_thinking=False,
+    share_local_vllm=True,
+    manager_max_model_calls=80,
+    subagent_max_model_calls=80,
+    manager_recursion_limit=1000,
+    subagent_recursion_limit=1000,
+)
+DEEPSEEK_PRO_GEMMA4_26B_NON_THINKING_EXPERIMENT = DecomposerExperiment(
+    name="deepseek-v4-pro-0813-teacher-gemma4-26b-a4b-non-thinking",
+    worker_checkpoint=GEMMA4_26B_A4B_BASE,
+    manager_backend="openrouter",
+    prompt_profile="teacher",
+    num_gpus=1,
+    manager_served_name="deepseek/deepseek-v4-pro-0813",
+    manager_thinking=True,
+    worker_served_name="google/gemma-4-26B-A4B-it",
+    worker_port=8034,
+    service_port=8137,
+    subagent_port=2037,
+    max_model_len=131072,
+    worker_thinking=False,
+    manager_max_model_calls=80,
+    subagent_max_model_calls=80,
+    manager_recursion_limit=1000,
+    subagent_recursion_limit=1000,
+)
 
 
 def _gemma4_simple_experiment(
@@ -1108,7 +1152,7 @@ SIMPLE_DEEPSEEK_EXPERIMENT = SimpleExperiment(
     port=8140,
     base_url="https://openrouter.ai/api/v1",
     api_key_env="OPENROUTER_API_KEY_DECOMPOSER",
-    reasoning_effort="high",
+    reasoning_effort="max",
     temperature=1.0,
     top_p=1.0,
     top_k=None,
@@ -1140,6 +1184,7 @@ ALL_EXPERIMENTS: tuple[Experiment, ...] = (
     QWEN36_THINKING_TEXT_DEFAULTS_DECOMPOSER_EXPERIMENT,
     DEEPSEEK_GEMMA4_26B_NON_THINKING_EXPERIMENT,
     GEMMA4_26B_SHARED_DECOMPOSER_EXPERIMENT,
+    GEMMA4_31B_SHARED_DECOMPOSER_EXPERIMENT,
     SIMPLE_GEMMA4_E2B_NON_THINKING_EXPERIMENT,
     SIMPLE_GEMMA4_E2B_THINKING_EXPERIMENT,
     SIMPLE_GEMMA4_E4B_NON_THINKING_EXPERIMENT,
@@ -1154,6 +1199,7 @@ ALL_EXPERIMENTS: tuple[Experiment, ...] = (
     GEMMA4_E4B_TEXT_DEFAULTS_SIMPLE_EXPERIMENT,
     QWEN35_4B_TEXT_DEFAULTS_SIMPLE_EXPERIMENT,
     SIMPLE_DEEPSEEK_EXPERIMENT,
+    DEEPSEEK_PRO_GEMMA4_26B_NON_THINKING_EXPERIMENT,
 )
 EXPERIMENTS = {experiment.name: experiment for experiment in ALL_EXPERIMENTS}
 if len(EXPERIMENTS) != len(ALL_EXPERIMENTS):

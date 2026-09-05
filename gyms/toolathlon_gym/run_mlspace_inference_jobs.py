@@ -16,7 +16,7 @@ from gyms.toolathlon_gym.mlspace_experiments import (
 
 
 ARTIFACTS_ROOT = Path(
-    "/mnt/shared_ru.ml.SZ-5_000264/matrosov/decomposer-toolathlon-artifacts"
+    "/home/matrosov/decomposer-toolathlon-artifacts"
 )
 STAGING_ROOT = ARTIFACTS_ROOT / "code"
 SERVICES_ROOT = ARTIFACTS_ROOT / "inference"

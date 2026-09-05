@@ -76,7 +76,7 @@ committed.
 - Backend policy: `FLA_TILELANG=0`, forcing FLA's Triton backend. The installed
   TileLang path is not usable in this environment; details are below.
 - Raw artifacts:
-  `/mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/training/sft/benchmarks/qwen35-4b-h100-linear-attn-20260830`.
+  `/home/sukhorukov/decomposer_artifacts/training/sft/benchmarks/qwen35-4b-h100-linear-attn-20260830`.
 
 Artifact sizes at the end of the experiment were 3.4 GB total: 1.3 GB CUDA
 compiler prefix, 694 MB Triton overlay, 283 MB causal-conv1d overlay, 13 MB

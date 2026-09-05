@@ -11,7 +11,9 @@
     "gemma_4_12b_thinking": "./graph.py:gemma_4_12b_thinking",
     "gemma_4_12b_non_thinking": "./graph.py:gemma_4_12b_non_thinking",
     "gemma_4_26b_a4b_thinking": "./graph.py:gemma_4_26b_a4b_thinking",
-    "gemma_4_26b_a4b_non_thinking": "./graph.py:gemma_4_26b_a4b_non_thinking"
+    "gemma_4_26b_a4b_non_thinking": "./graph.py:gemma_4_26b_a4b_non_thinking",
+    "gemma_4_31b_thinking": "./graph.py:gemma_4_31b_thinking",
+    "gemma_4_31b_non_thinking": "./graph.py:gemma_4_31b_non_thinking"
   },
   "python_version": "3.12"
 }

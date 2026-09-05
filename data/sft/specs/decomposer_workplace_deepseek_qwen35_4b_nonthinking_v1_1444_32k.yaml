@@ -11,7 +11,7 @@ policy:
 sources:
   - id: workplace-deepseek-v4-flash-0731-qwen35-4b-nonthinking-n3-first-1444
     adapter: nemo_gym
-    path: /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/evaluation/snapshots/workplace_assistant/train/deepseek-v4-flash-0731-qwen35-4b-non-thinking-n3-first-1444
+    path: /home/sukhorukov/decomposer_artifacts/evaluation/snapshots/workplace_assistant/train/deepseek-v4-flash-0731-qwen35-4b-non-thinking-n3-first-1444
     benchmark: workplace_assistant
     environment: workplace_assistant
     partition: train

@@ -6,9 +6,9 @@ model:
   trust_remote_code: false
 
 data:
-  train_file: /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/datasets/sft/decomposer-workplace-deepseek-e4b-thinking/v1/train.jsonl
-  validation_file: /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/datasets/sft/decomposer-workplace-deepseek-e4b-thinking/v1/validation.jsonl
-  manifest_file: /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/datasets/sft/decomposer-workplace-deepseek-e4b-thinking/v1/manifest.json
+  train_file: /home/sukhorukov/decomposer_artifacts/datasets/sft/decomposer-workplace-deepseek-e4b-thinking/v1/train.jsonl
+  validation_file: /home/sukhorukov/decomposer_artifacts/datasets/sft/decomposer-workplace-deepseek-e4b-thinking/v1/validation.jsonl
+  manifest_file: /home/sukhorukov/decomposer_artifacts/datasets/sft/decomposer-workplace-deepseek-e4b-thinking/v1/manifest.json
   include_reasoning: false
   error_on_truncation: true
   # Keep the established 8K memory envelope and record every excluded trace.
@@ -19,7 +19,7 @@ data:
   max_eval_samples: null
 
 training:
-  output_dir: /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/training/sft/checkpoints/gemma4-e4b-nonthinking-deepseek-e4b-v1-8k-4gpu
+  output_dir: /home/sukhorukov/decomposer_artifacts/training/sft/checkpoints/gemma4-e4b-nonthinking-deepseek-e4b-v1-8k-4gpu
   run_name: gemma4-e4b-decomposer-sft-nonthinking-deepseek-e4b-v1-8k-4gpu
   max_length: 8192
   per_device_train_batch_size: 1

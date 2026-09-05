@@ -23,7 +23,7 @@ the original all-subagent Workplace source pair with:
 ```bash
 uv run --group train python -m gyms.workplace_assistant.prepare sft \
   --dataset workplace-all-v3 \
-  --output-root /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/datasets/sft
+  --output-root /home/sukhorukov/decomposer_artifacts/datasets/sft
 ```
 
 Build the 26B-A4B non-thinking source pair with:
@@ -31,7 +31,7 @@ Build the 26B-A4B non-thinking source pair with:
 ```bash
 uv run --group train python -m gyms.workplace_assistant.prepare sft \
   --dataset workplace-26b-nonthinking-v3 \
-  --output-root /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/datasets/sft
+  --output-root /home/sukhorukov/decomposer_artifacts/datasets/sft
 ```
 
 Both specifications use exact reward `1.0`, prompt-fixed validation fraction
@@ -55,11 +55,11 @@ hash-namespaced immutable location:
 
 ```bash
 .venv/bin/python -m data.sft.import_toolathlon \
-  --archive /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/traces_full.tar.gz \
+  --archive /home/sukhorukov/traces_full.tar.gz \
   --archive-prefix matrosov/decomposer-qwen/artifacts/gyms/toolathlon_gym \
   --run-id 20260826T122838Z-84ae95f3 \
   --expected-sha256 493c24c4f8853230c0b7557b905ce2027138522ee6da06d5d2e71d0cade94753 \
-  --output-root /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/evaluation/data/toolathlon_gym/imports/snapshots/493c24c4
+  --output-root /home/sukhorukov/decomposer_artifacts/evaluation/data/toolathlon_gym/imports/snapshots/493c24c4
 ```
 
 Build the immutable mixed release after committing the preparation code and
@@ -68,8 +68,8 @@ specification:
 ```bash
 HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 .venv/bin/python -m data.sft.prepare \
   --spec data/sft/specs/decomposer_mixed_deepseek_qwen35_4b_nonthinking_v1_32k.yaml \
-  --output-root /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/datasets/sft \
-  --source toolathlon-deepseek-v4-flash-0731-qwen35-4b-nonthinking-n1=/mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/evaluation/data/toolathlon_gym/imports/snapshots/493c24c4/20260826T122838Z-84ae95f3
+  --output-root /home/sukhorukov/decomposer_artifacts/datasets/sft \
+  --source toolathlon-deepseek-v4-flash-0731-qwen35-4b-nonthinking-n1=/home/sukhorukov/decomposer_artifacts/evaluation/data/toolathlon_gym/imports/snapshots/493c24c4/20260826T122838Z-84ae95f3
 ```
 
 Preparation starts from 1,659 candidates: 404 completed Toolathlon episodes
@@ -89,7 +89,7 @@ Submit the final run from the base Qwen3.5-4B checkpoint on four GPUs with
 high priority:
 
 ```bash
-/mnt/shared_ru.ml.SZ-5_000264/sukhorukov/.venv-mls/bin/python \
+/home/sukhorukov/.venv-mls/bin/python \
   -m training.sft.run_train_jobs \
   --filter qwen35-4b-nonthinking-mixed-v1-final-493c24c4-404-32k-full-4gpu \
   --priority high
@@ -112,8 +112,8 @@ Build the separate immutable release from a clean committed checkout:
 ```bash
 HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 .venv/bin/python -m data.sft.prepare \
   --spec data/sft/specs/decomposer_mixed_deepseek_qwen35_4b_nonthinking_v1_filtered_pass_quality_32k.yaml \
-  --output-root /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/datasets/sft \
-  --source toolathlon-deepseek-v4-flash-0731-qwen35-4b-nonthinking-n1=/mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/evaluation/data/toolathlon_gym/imports/snapshots/493c24c4/20260826T122838Z-84ae95f3
+  --output-root /home/sukhorukov/decomposer_artifacts/datasets/sft \
+  --source toolathlon-deepseek-v4-flash-0731-qwen35-4b-nonthinking-n1=/home/sukhorukov/decomposer_artifacts/evaluation/data/toolathlon_gym/imports/snapshots/493c24c4/20260826T122838Z-84ae95f3
 ```
 
 The expected 32K release has 1,239 records: 953 Workplace traces and 286
@@ -129,7 +129,7 @@ Submit a separate run from the base Qwen3.5-4B checkpoint on four GPUs with
 high priority:
 
 ```bash
-/mnt/shared_ru.ml.SZ-5_000264/sukhorukov/.venv-mls/bin/python \
+/home/sukhorukov/.venv-mls/bin/python \
   -m training.sft.run_train_jobs \
   --filter qwen35-4b-nonthinking-mixed-v1-final-493c24c4-404-filtered-pass-qgt90-32k-full-4gpu \
   --priority high
@@ -155,7 +155,7 @@ Build the release from a clean committed checkout:
 ```bash
 HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 .venv/bin/python -m data.sft.prepare \
   --spec data/sft/specs/decomposer_mixed_deepseek_qwen35_4b_nonthinking_v2_gaia2_execution_110_n3_filtered_32k.yaml \
-  --output-root /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/datasets/sft
+  --output-root /home/sukhorukov/decomposer_artifacts/datasets/sft
 ```
 
 The expected source grid has 1,989 candidates. Filtering retains 1,347
@@ -168,7 +168,7 @@ as binary `0` or `1`.
 Submit the base Qwen3.5-4B run on four GPUs at high priority:
 
 ```bash
-/mnt/shared_ru.ml.SZ-5_000264/sukhorukov/.venv-mls/bin/python \
+/home/sukhorukov/.venv-mls/bin/python \
   -m training.sft.run_train_jobs \
   --filter qwen35-4b-nonthinking-mixed-v2-493c24c4-gaia2-110-n3-filtered-32k-full-4gpu \
   --priority high
@@ -198,13 +198,13 @@ Build the release with the explicit teacher prompt from a clean checkout:
 ```bash
 HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 .venv/bin/python -m data.sft.prepare \
   --spec data/sft/specs/decomposer_mixed_deepseek_qwen35_4b_nonthinking_v3_gaia2_execution_110_n7_teacher_prompt_filtered_32k.yaml \
-  --output-root /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/datasets/sft
+  --output-root /home/sukhorukov/decomposer_artifacts/datasets/sft
 ```
 
 Submit the stable SDPA, global-batch-4 run from the base Qwen3.5-4B checkpoint:
 
 ```bash
-/mnt/shared_ru.ml.SZ-5_000264/sukhorukov/.venv-mls/bin/python \
+/home/sukhorukov/.venv-mls/bin/python \
   -m training.sft.run_train_jobs \
   --filter qwen35-4b-nonthinking-mixed-v3-493c24c4-gaia2-110-n7-teacher-prompt-filtered-32k-full-4gpu \
   --priority high
@@ -225,7 +225,7 @@ Submit the four-H100 run with the pinned HF FlashAttention-2 and FLA/causal
 runtime at high priority:
 
 ```bash
-/mnt/shared_ru.ml.SZ-5_000264/sukhorukov/.venv-mls/bin/python \
+/home/sukhorukov/.venv-mls/bin/python \
   -m training.sft.run_train_jobs \
   --filter qwen35-4b-nonthinking-toolathlon-only-v1-493c24c4-teacher-prompt-filtered-32k-hf-fa2-fla-b8-e8-full-4gpu \
   --priority high
@@ -246,13 +246,13 @@ Build the immutable teacher-prompt release from a clean checkout:
 ```bash
 HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 .venv/bin/python -m data.sft.prepare \
   --spec data/sft/specs/decomposer_gaia2_execution_deepseek_qwen35_4b_nonthinking_v1_110_n10_teacher_prompt_r1_balanced_32k.yaml \
-  --output-root /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/datasets/sft
+  --output-root /home/sukhorukov/decomposer_artifacts/datasets/sft
 ```
 
 Submit the four-H100 accelerated run at high priority:
 
 ```bash
-/mnt/shared_ru.ml.SZ-5_000264/sukhorukov/.venv-mls/bin/python \
+/home/sukhorukov/.venv-mls/bin/python \
   -m training.sft.run_train_jobs \
   --filter qwen35-4b-nonthinking-gaia2-execution-only-v1-110-n10-teacher-prompt-r1-balanced-32k-hf-fa2-fla-b8-e24-full-4gpu \
   --priority high
@@ -276,11 +276,11 @@ archive for the same run ID cannot collide with it:
 
 ```bash
 .venv/bin/python -m data.sft.import_toolathlon \
-  --archive /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/traces.tar.gz \
+  --archive /home/sukhorukov/traces.tar.gz \
   --archive-prefix matrosov/decomposer-qwen/artifacts/gyms/toolathlon_gym \
   --run-id 20260826T122838Z-84ae95f3 \
   --expected-sha256 3983f60540f1887befbc2654db8a8d7b169c397a88d62d1017625cd480386f5f \
-  --output-root /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/evaluation/data/toolathlon_gym/imports/snapshots/3983f605
+  --output-root /home/sukhorukov/decomposer_artifacts/evaluation/data/toolathlon_gym/imports/snapshots/3983f605
 ```
 
 After committing the preparation implementation, build the release:
@@ -288,8 +288,8 @@ After committing the preparation implementation, build the release:
 ```bash
 HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 .venv/bin/python -m data.sft.prepare \
   --spec data/sft/specs/decomposer_mixed_deepseek_qwen35_4b_nonthinking_v1_partial_3983f605_327_32k.yaml \
-  --output-root /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/datasets/sft \
-  --source toolathlon-deepseek-v4-flash-0731-qwen35-4b-nonthinking-n1=/mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/evaluation/data/toolathlon_gym/imports/snapshots/3983f605/20260826T122838Z-84ae95f3
+  --output-root /home/sukhorukov/decomposer_artifacts/datasets/sft \
+  --source toolathlon-deepseek-v4-flash-0731-qwen35-4b-nonthinking-n1=/home/sukhorukov/decomposer_artifacts/evaluation/data/toolathlon_gym/imports/snapshots/3983f605/20260826T122838Z-84ae95f3
 ```
 
 This build has 1,532 retained traces: 1,379 train and 153 validation. The
@@ -301,7 +301,7 @@ retained train trace has 32,394 Qwen tokens.
 Run the longest-trace, one-step smoke at high priority before the full job:
 
 ```bash
-/mnt/shared_ru.ml.SZ-5_000264/sukhorukov/.venv-mls/bin/python \
+/home/sukhorukov/.venv-mls/bin/python \
   -m training.sft.run_train_jobs \
   --sanity-check \
   --filter qwen35-4b-nonthinking-mixed-v1-partial-3983f605-327-32k-smoke-4gpu \
@@ -311,7 +311,7 @@ Run the longest-trace, one-step smoke at high priority before the full job:
 Submit the full five-epoch run only after that smoke succeeds:
 
 ```bash
-/mnt/shared_ru.ml.SZ-5_000264/sukhorukov/.venv-mls/bin/python \
+/home/sukhorukov/.venv-mls/bin/python \
   -m training.sft.run_train_jobs \
   --filter qwen35-4b-nonthinking-mixed-v1-partial-3983f605-327-32k-full-4gpu \
   --priority high
@@ -495,7 +495,7 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 uv run --group train \
   --config training/sft/configs/gemma4_e2b_nonthinking_4gpu_liger_workplace_26b_v3.yaml \
   --include-reasoning \
   --max-length 65536 \
-  --output-dir /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/training/sft/checkpoints/gemma4-e2b-thinking
+  --output-dir /home/sukhorukov/decomposer_artifacts/training/sft/checkpoints/gemma4-e2b-thinking
 ```
 
 Internal epoch checkpoints use FSDP's sharded state-dict format so saving does
@@ -545,7 +545,7 @@ Then add `--clearml` to a direct training command. MLSpace SFT launchers enable
 it automatically and pass only this private config-file path:
 
 ```bash
-export CLEARML_CONFIG_FILE=/mnt/shared_ru.ml.SZ-5_000264/sukhorukov/.secrets/clearml.conf
+export CLEARML_CONFIG_FILE=/home/sukhorukov/.secrets/clearml.conf
 chmod 600 "$CLEARML_CONFIG_FILE"
 ```
 
@@ -581,7 +581,7 @@ The stable artifact path is a symlink into shared NFS:
 
 ```text
 /home/jovyan/decomposer-artifacts
-  -> /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts
+  -> /home/sukhorukov/decomposer_artifacts
 ```
 
 Training outputs live under `training/sft/jobs/`, sanity outputs under

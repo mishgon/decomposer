@@ -16,10 +16,10 @@ from gyms.qwen_sampling import (
     qwen36_thinking_sampling,
 )
 
-ARTIFACTS_ROOT = Path("/mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts")
-PROJECT_VENV = Path("/mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_sft/.venv")
-HF_HUB_ROOT = Path("/mnt/shared_ru.ml.SZ-5_000264/.cache/huggingface/hub")
-CHECKPOINTS_ROOT = Path("/mnt/shared_ru.ml.SZ-5_000264/sukhorukov/checkpoints")
+ARTIFACTS_ROOT = Path("/home/sukhorukov/decomposer_artifacts")
+PROJECT_VENV = Path("/home/sukhorukov/decomposer_sft/.venv")
+HF_HUB_ROOT = Path("/home/sukhorukov/.cache/huggingface/hub")
+CHECKPOINTS_ROOT = Path("/home/sukhorukov/checkpoints")
 
 DATA_DIR = ARTIFACTS_ROOT / "evaluation" / "data" / "workplace_assistant"
 RESULTS_ROOT = ARTIFACTS_ROOT / "evaluation" / "results"
@@ -123,7 +123,7 @@ class DecomposerExperiment:
     evaluation_prompt_profile: DecomposerPromptProfile = "student"
     concurrency: int = 8
     max_model_len: int = 32768
-    max_num_seqs: int = 32
+    max_num_seqs: int = 64
     langgraph_jobs: int = 16
     num_gpus: int = 3
     model_ids: tuple[str, ...] | None = None
@@ -388,6 +388,17 @@ MODELS = (
         0.88,
         0,
     ),
+    ModelServer(
+        "google/gemma-4-31B-it",
+        HF_HUB_ROOT
+        / "models--google--gemma-4-31B-it"
+        / "snapshots"
+        / "842da3794eaa0b77d5f08bae87a17459d91ff475",
+        8027,
+        3,
+        0.88,
+        0,
+    ),
 )
 
 QWEN35_08B_BASE = (
@@ -531,7 +542,7 @@ DECOMPOSER_EXPERIMENTS = (
         manager_backend="local_vllm",
         num_gpus=2,
         max_model_len=131072,
-        max_num_seqs=16,
+        # max_num_seqs=16,
         subagent_graph="repository",
         model_servers=(
             replace(
@@ -552,6 +563,24 @@ DECOMPOSER_EXPERIMENTS = (
     ),
     DecomposerExperiment(
         name=(
+            "gemma4-31b-thinking-teacher-"
+            "gemma4-31b-non-thinking-text-defaults"
+        ),
+        gym_config_filename=(
+            "workplace_assistant_gemma4_31b_thinking_teacher_"
+            "gemma4_31b_non_thinking_text_defaults.yaml"
+        ),
+        manager_backend="local_vllm",
+        evaluation_prompt_profile="teacher",
+        concurrency=16,
+        num_gpus=1,
+        max_model_len=131072,
+        max_num_seqs=64,
+        subagent_graph="repository",
+        model_ids=("google/gemma-4-31B-it",),
+    ),
+    DecomposerExperiment(
+        name=(
             "gemma4-26b-a4b-thinking-teacher-"
             "gemma4-26b-a4b-non-thinking-text-defaults"
         ),
@@ -563,7 +592,7 @@ DECOMPOSER_EXPERIMENTS = (
         evaluation_prompt_profile="teacher",
         num_gpus=1,
         max_model_len=131072,
-        max_num_seqs=16,
+        # max_num_seqs=16,
         subagent_graph="repository",
         model_ids=("google/gemma-4-26B-A4B-it",),
     ),
@@ -591,7 +620,7 @@ DECOMPOSER_EXPERIMENTS = (
         concurrency=16,
         num_gpus=1,
         max_model_len=131072,
-        max_num_seqs=16,
+        # max_num_seqs=16,
         subagent_graph="repository",
         model_servers=(
             ModelServer(
@@ -632,7 +661,7 @@ DECOMPOSER_EXPERIMENTS = (
         concurrency=16,
         num_gpus=1,
         max_model_len=131072,
-        max_num_seqs=16,
+        # max_num_seqs=16,
         subagent_graph="repository",
         model_servers=(
             ModelServer(
@@ -1092,6 +1121,32 @@ DECOMPOSER_EXPERIMENTS = (
         model_ids=("google/gemma-4-26B-A4B-it",),
     ),
     DecomposerExperiment(
+        name="deepseek-v4-flash-0731-teacher-gemma4-e2b-non-thinking",
+        gym_config_filename=(
+            "workplace_assistant_deepseek_v4_flash_0731_teacher_"
+            "gemma4_e2b_non_thinking.yaml"
+        ),
+        evaluation_prompt_profile="teacher",
+        num_gpus=1,
+        max_model_len=131072,
+        max_num_seqs=64,
+        subagent_graph="repository",
+        model_ids=("google/gemma-4-E2B-it",),
+    ),
+    DecomposerExperiment(
+        name="deepseek-v4-flash-0731-teacher-gemma4-e4b-non-thinking",
+        gym_config_filename=(
+            "workplace_assistant_deepseek_v4_flash_0731_teacher_"
+            "gemma4_e4b_non_thinking.yaml"
+        ),
+        evaluation_prompt_profile="teacher",
+        num_gpus=1,
+        max_model_len=131072,
+        max_num_seqs=64,
+        subagent_graph="repository",
+        model_ids=("google/gemma-4-E4B-it",),
+    ),
+    DecomposerExperiment(
         name="deepseek-v4-flash-0731-teacher-gemma4-26b-a4b-non-thinking",
         gym_config_filename=(
             "workplace_assistant_deepseek_v4_flash_0731_teacher_"
@@ -1100,7 +1155,7 @@ DECOMPOSER_EXPERIMENTS = (
         evaluation_prompt_profile="teacher",
         num_gpus=1,
         max_model_len=131072,
-        max_num_seqs=16,
+        # max_num_seqs=16,
         subagent_graph="repository",
         model_ids=("google/gemma-4-26B-A4B-it",),
     ),
@@ -1225,7 +1280,7 @@ def _simple_experiments() -> tuple[SimpleExperiment, ...]:
                 model_id="deepseek/deepseek-v4-flash-0731",
                 base_url="https://openrouter.ai/api/v1",
                 api_key_env="OPENROUTER_API_KEY_DECOMPOSER",
-                reasoning_effort="high",
+                reasoning_effort="max",
                 temperature=1.0,
                 top_p=1.0,
                 concurrency=8,

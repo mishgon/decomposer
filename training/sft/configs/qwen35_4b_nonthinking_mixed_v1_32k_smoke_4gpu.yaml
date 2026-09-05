@@ -8,9 +8,9 @@ model:
 data:
   # Mechanical smoke only: reuse canonical traces that predate the mixed Qwen
   # release. This output is not a research checkpoint.
-  train_file: /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/datasets/sft/decomposer-workplace-deepseek-e4b-thinking/v1/train.jsonl
-  validation_file: /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/datasets/sft/decomposer-workplace-deepseek-e4b-thinking/v1/validation.jsonl
-  manifest_file: /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/datasets/sft/decomposer-workplace-deepseek-e4b-thinking/v1/manifest.json
+  train_file: /home/sukhorukov/decomposer_artifacts/datasets/sft/decomposer-workplace-deepseek-e4b-thinking/v1/train.jsonl
+  validation_file: /home/sukhorukov/decomposer_artifacts/datasets/sft/decomposer-workplace-deepseek-e4b-thinking/v1/validation.jsonl
+  manifest_file: /home/sukhorukov/decomposer_artifacts/datasets/sft/decomposer-workplace-deepseek-e4b-thinking/v1/manifest.json
   include_reasoning: false
   require_prepared_tokenization: false
   error_on_truncation: true
@@ -21,7 +21,7 @@ data:
   longest_train_samples: 4
 
 training:
-  output_dir: /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/training/sft/smoke/qwen35-4b-nonthinking-mixed-v1-32k-4gpu
+  output_dir: /home/sukhorukov/decomposer_artifacts/training/sft/smoke/qwen35-4b-nonthinking-mixed-v1-32k-4gpu
   run_name: qwen35-4b-decomposer-sft-nonthinking-smoke-4gpu
   max_length: 32768
   max_steps: 1

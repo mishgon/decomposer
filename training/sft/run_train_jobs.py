@@ -41,9 +41,9 @@ ARTIFACTS_ROOT_SANITY = Path(
 STAGING_ROOT = Path("/home/jovyan/decomposer-artifacts/code")
 VENV_ROOT = Path("/home/jovyan/decomposer-artifacts/venvs/sft")
 TRITON_CACHE_ROOT = Path("/home/jovyan/decomposer-artifacts/cache/triton/sft")
-HF_HOME = Path("/mnt/shared_ru.ml.SZ-5_000264/.cache/huggingface")
+HF_HOME = Path("/home/sukhorukov/.cache/huggingface")
 CLEARML_CONFIG_FILE = Path(
-    "/mnt/shared_ru.ml.SZ-5_000264/sukhorukov/.secrets/clearml.conf"
+    "/home/sukhorukov/.secrets/clearml.conf"
 )
 BASE_IMAGE = "cr.ai.cloud.ru/aicloud-base-images/py3.12-torch2.7.0:0.0.41"
 _CHECKPOINT_NAME = re.compile(r"^checkpoint-(\d+)$")

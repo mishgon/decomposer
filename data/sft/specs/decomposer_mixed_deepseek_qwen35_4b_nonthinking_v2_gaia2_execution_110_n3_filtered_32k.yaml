@@ -14,7 +14,7 @@ policy:
 sources:
   - id: workplace-deepseek-v4-flash-0731-qwen35-4b-nonthinking-n3
     adapter: nemo_gym
-    path: /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/evaluation/results/train/deepseek-v4-flash-0731-qwen35-4b-non-thinking-n3
+    path: /home/sukhorukov/decomposer_artifacts/evaluation/results/train/deepseek-v4-flash-0731-qwen35-4b-non-thinking-n3
     benchmark: workplace_assistant
     environment: workplace_assistant
     partition: train
@@ -32,7 +32,7 @@ sources:
       success_reward: 1.0
   - id: toolathlon-deepseek-v4-flash-0731-qwen35-4b-nonthinking-n1
     adapter: toolathlon_gym
-    path: /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/evaluation/data/toolathlon_gym/imports/snapshots/493c24c4/20260826T122838Z-84ae95f3
+    path: /home/sukhorukov/decomposer_artifacts/evaluation/data/toolathlon_gym/imports/snapshots/493c24c4/20260826T122838Z-84ae95f3
     benchmark: toolathlon_gym
     environment: toolathlon_gym
     partition: train
@@ -49,7 +49,7 @@ sources:
       minimum_check_ratio_exclusive: 0.9
   - id: gaia2-execution-deepseek-v4-flash-0731-qwen35-4b-nonthinking-n3
     adapter: gaia2
-    path: /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/evaluation/gaia2/results/validation/execution/deepseek-v4-flash-0731-teacher-qwen35-4b-non-thinking-n3
+    path: /home/sukhorukov/decomposer_artifacts/evaluation/gaia2/results/validation/execution/deepseek-v4-flash-0731-teacher-qwen35-4b-non-thinking-n3
     benchmark: gaia2
     environment: gaia2_execution
     partition: train

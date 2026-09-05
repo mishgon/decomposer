@@ -53,7 +53,7 @@ The candidate is an exact, split-preserving view of the Toolathlon-Gym source
 already present in the mixed v3 release:
 
 - path:
-  `/mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/datasets/sft/decomposer-toolathlon-gym-deepseek-qwen35-4b-nonthinking/candidate-v1-493c24c4-teacher-prompt-pass-or-qgt90-32k`;
+  `/home/sukhorukov/decomposer_artifacts/datasets/sft/decomposer-toolathlon-gym-deepseek-qwen35-4b-nonthinking/candidate-v1-493c24c4-teacher-prompt-pass-or-qgt90-32k`;
 - candidate fingerprint:
   `8ec9a80182206640567c9b1b3762b331fab62881ccec13889d8249fc0cf02204`;
 - parent fingerprint:
@@ -186,7 +186,7 @@ gain to remain positive.
 - Driver SHA-256:
   `75e427d1c7e4884f555b89c37c5ba00f6f48c5a5121872e3598eb77c9b0dc82d`.
 - Raw logs, per-run summaries, capacity status, driver, and aggregate:
-  `/mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/training/sft/benchmarks/qwen35-4b-h100-grouped-batch-toolathlon-only-20260831`.
+  `/home/sukhorukov/decomposer_artifacts/training/sft/benchmarks/qwen35-4b-h100-grouped-batch-toolathlon-only-20260831`.
 
 The representative command shape was:
 

@@ -11,7 +11,7 @@ policy:
 sources:
   - id: deepseek-v4-flash-0731-gemma4-e4b-thinking-n3-local-424e6c4
     adapter: nemo_gym
-    path: /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/evaluation/results/train/deepseek-v4-flash-0731-gemma4-e4b-thinking-n3-local-424e6c4
+    path: /home/sukhorukov/decomposer_artifacts/evaluation/results/train/deepseek-v4-flash-0731-gemma4-e4b-thinking-n3-local-424e6c4
     benchmark: workplace_assistant
     environment: workplace_assistant
     partition: train

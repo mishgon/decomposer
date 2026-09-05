@@ -175,3 +175,15 @@ def gemma_4_26b_a4b_non_thinking() -> CompiledStateGraph:
     return _gemma_subagent(
         model_id="google/gemma-4-26B-A4B-it", default_port=8023, thinking=False
     )
+
+
+def gemma_4_31b_thinking() -> CompiledStateGraph:
+    return _gemma_subagent(
+        model_id="google/gemma-4-31B-it", default_port=8027, thinking=True
+    )
+
+
+def gemma_4_31b_non_thinking() -> CompiledStateGraph:
+    return _gemma_subagent(
+        model_id="google/gemma-4-31B-it", default_port=8027, thinking=False
+    )

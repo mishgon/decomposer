@@ -1374,7 +1374,7 @@ def _runtime_configs(
             "temperature": 1.0,
             "top_p": 1.0,
             "use_responses_api": True,
-            "reasoning": {"effort": "high"},
+            "reasoning": {"effort": "max"},
             "timeout": 3300,
             "max_retries": 2,
         }
@@ -1558,7 +1558,7 @@ def _base_environment(
         ),
         "PYTHONDONTWRITEBYTECODE": "1",
         "HF_HOME": os.environ.get(
-            "HF_HOME", "/mnt/shared_ru.ml.SZ-5_000264/.cache/huggingface"
+            "HF_HOME", "/home/sukhorukov/.cache/huggingface"
         ),
         "DEMO_FS_PATH": str(filesystem_dir()),
         "NO_PROXY": no_proxy,

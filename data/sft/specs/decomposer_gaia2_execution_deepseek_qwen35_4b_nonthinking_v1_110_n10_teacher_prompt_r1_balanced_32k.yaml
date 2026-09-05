@@ -14,7 +14,7 @@ policy:
 sources:
   - id: gaia2-execution-deepseek-v4-flash-0731-qwen35-4b-nonthinking-r01-r03
     adapter: gaia2
-    path: /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/evaluation/gaia2/results/validation/execution/deepseek-v4-flash-0731-teacher-qwen35-4b-non-thinking-n3
+    path: /home/sukhorukov/decomposer_artifacts/evaluation/gaia2/results/validation/execution/deepseek-v4-flash-0731-teacher-qwen35-4b-non-thinking-n3
     benchmark: gaia2
     environment: gaia2_execution
     partition: train
@@ -32,7 +32,7 @@ sources:
       logical_rollout_numbers: [1, 2, 3]
   - id: gaia2-execution-deepseek-v4-flash-0731-qwen35-4b-nonthinking-r04-r10
     adapter: gaia2
-    path: /mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts/evaluation/gaia2/traces/sft_snapshots/execution-110-50-v1/train/deepseek-v4-flash-0731-teacher-qwen35-4b-non-thinking-r04-r10
+    path: /home/sukhorukov/decomposer_artifacts/evaluation/gaia2/traces/sft_snapshots/execution-110-50-v1/train/deepseek-v4-flash-0731-teacher-qwen35-4b-non-thinking-r04-r10
     benchmark: gaia2
     environment: gaia2_execution
     partition: train

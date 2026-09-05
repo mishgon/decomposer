@@ -118,7 +118,7 @@ staged code, service logs, and dedicated tunnel
 credentials live outside the checkout at:
 
 ```text
-/mnt/shared_ru.ml.SZ-5_000264/matrosov/decomposer-toolathlon-artifacts/
+/home/matrosov/decomposer-toolathlon-artifacts/
   code/<git-commit>/
   inference/<experiment>/
   secrets/

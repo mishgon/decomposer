@@ -1,6 +1,6 @@
 responses_create_params:
   temperature: 1.0
-  top_p: 1.0
+  top_p: 0.95
 
 workplace_assistant:
   resources_servers:
@@ -13,14 +13,19 @@ workplace_assistant:
 
 policy_model:
   responses_api_models:
-    openai_model:
+    vllm_model:
       entrypoint: app.py
-      openai_base_url: https://openrouter.ai/api/v1
-      openai_api_key: ${policy_api_key}
-      openai_model: deepseek/deepseek-v4-flash-0731
+      base_url: http://127.0.0.1:8027/v1
+      api_key: EMPTY
+      model: google/gemma-4-31B-it
+      return_token_id_information: false
+      uses_reasoning_parser: true
+      chat_template_kwargs:
+        enable_thinking: true
+        preserve_thinking: true
       extra_body:
-        reasoning:
-          effort: max
+        top_k: 64
+        include_reasoning: true
 
 decomposer:
   responses_api_agents:
@@ -36,7 +41,7 @@ decomposer:
       decomposer_system_prompt_profile: teacher
       response_for_verifier_factory: responses_api_agents.decomposer_agent.app:_subagent_tool_calls_and_final_message
       subagent_types:
-        - subagent_type_id: gemma_4_26b_a4b_non_thinking
-          assistant_id: gemma_4_26b_a4b_non_thinking
+        - subagent_type_id: gemma_4_31b_non_thinking
+          assistant_id: gemma_4_31b_non_thinking
           url: http://127.0.0.1:2024
-          description: Gemma-4-26B-A4B workplace agent with thinking disabled.
+          description: Gemma-4-31B workplace agent with thinking disabled.

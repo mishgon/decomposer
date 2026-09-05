@@ -21,7 +21,7 @@ if __package__ in (None, ""):
 ARTIFACTS_ROOT = Path(
     os.environ.get(
         "DECOMPOSER_ARTIFACTS_ROOT",
-        "/mnt/shared_ru.ml.SZ-5_000264/sukhorukov/decomposer_artifacts",
+        "/home/sukhorukov/decomposer_artifacts",
     )
 )
 IMPORT_ROOT = ARTIFACTS_ROOT / "evaluation" / "data" / "toolathlon_gym" / "imports"
