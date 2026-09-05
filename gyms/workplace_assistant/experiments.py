@@ -437,6 +437,13 @@ WORKPLACE_E4B_SFT_FINAL = (
 )
 WORKPLACE_E4B_SFT_VLLM = WORKPLACE_E4B_SFT_FINAL.with_name("final-vllm")
 
+WORKPLACE_E2B_SFT_MIXED_V3_MODEL_ID = "decomposer/gemma4-e2b-sft-mixed-v3"
+# The 14T volume holds the checkpoints; ARTIFACTS_ROOT is a separate filesystem.
+WORKPLACE_E2B_SFT_MIXED_V3_VLLM = Path(
+    "/mnt/share14T-2/sukhorukov/decomposer_artifacts/training/sft/checkpoints"
+    "/gemma4-e2b-nonthinking-4gpu-mixed-v3/final-vllm"
+)
+
 WORKPLACE_QWEN35_4B_SFT_MODEL_ID = "decomposer/qwen35-4b-sft-workplace-v1-3765-32k"
 WORKPLACE_QWEN35_4B_BASE_MANAGER_MODEL_ID = "decomposer/qwen35-4b-base-manager"
 WORKPLACE_QWEN35_4B_SFT_FINAL = (
@@ -1091,6 +1098,40 @@ DECOMPOSER_EXPERIMENTS = (
                 gpu=1,
                 gpu_memory_utilization=0.90,
                 startup_wave=0,
+            ),
+        ),
+    ),
+    DecomposerExperiment(
+        name=(
+            "gemma4-e2b-sft-mixed-v3-non-thinking-gemma4-26b-a4b-non-thinking"
+        ),
+        gym_config_filename=(
+            "workplace_assistant_gemma4_e2b_sft_mixed_v3_"
+            "non_thinking_gemma4_26b_a4b_non_thinking.yaml"
+        ),
+        manager_backend="local_vllm",
+        # The checkpoint was trained on the teacher prompt, so it must be
+        # evaluated under the same one.
+        evaluation_prompt_profile="teacher",
+        num_gpus=2,
+        subagent_graph="repository",
+        model_servers=(
+            ModelServer(
+                WORKPLACE_E2B_SFT_MIXED_V3_MODEL_ID,
+                WORKPLACE_E2B_SFT_MIXED_V3_VLLM,
+                8028,
+                0,
+                0.90,
+                0,
+                thinking=False,
+            ),
+            # MODELS[3] ships gpu=2; a two-GPU experiment must remap it.
+            replace(
+                MODELS[3],
+                gpu=1,
+                gpu_memory_utilization=0.90,
+                startup_wave=0,
+                thinking=False,
             ),
         ),
     ),

@@ -1008,6 +1008,32 @@ GEMMA4_31B_SHARED_DECOMPOSER_EXPERIMENT = DecomposerExperiment(
     manager_recursion_limit=1000,
     subagent_recursion_limit=1000,
 )
+# The 14T volume holds the SFT checkpoints; ARTIFACTS_ROOT is a separate filesystem.
+GEMMA4_E2B_SFT_MIXED_V3_VLLM = Path(
+    "/mnt/share14T-2/sukhorukov/decomposer_artifacts/training/sft/checkpoints"
+    "/gemma4-e2b-nonthinking-4gpu-mixed-v3/final-vllm"
+)
+GEMMA4_E2B_SFT_MIXED_V3_DECOMPOSER_EXPERIMENT = DecomposerExperiment(
+    name=("gemma4-e2b-sft-mixed-v3-non-thinking-gemma4-26b-a4b-non-thinking"),
+    worker_checkpoint=GEMMA4_26B_A4B_BASE,
+    manager_checkpoint=GEMMA4_E2B_SFT_MIXED_V3_VLLM,
+    # The SFT release was built with the teacher prompt, so evaluate under it.
+    prompt_profile="teacher",
+    num_gpus=2,
+    manager_served_name="decomposer/gemma4-e2b-sft-mixed-v3",
+    worker_served_name="google/gemma-4-26B-A4B-it",
+    manager_port=8036,
+    worker_port=8037,
+    service_port=8139,
+    subagent_port=2039,
+    max_model_len=131072,
+    manager_thinking=False,
+    worker_thinking=False,
+    manager_max_model_calls=80,
+    subagent_max_model_calls=80,
+    manager_recursion_limit=1000,
+    subagent_recursion_limit=1000,
+)
 DEEPSEEK_PRO_GEMMA4_26B_NON_THINKING_EXPERIMENT = DecomposerExperiment(
     name="deepseek-v4-pro-0813-teacher-gemma4-26b-a4b-non-thinking",
     worker_checkpoint=GEMMA4_26B_A4B_BASE,
@@ -1200,6 +1226,7 @@ ALL_EXPERIMENTS: tuple[Experiment, ...] = (
     QWEN35_4B_TEXT_DEFAULTS_SIMPLE_EXPERIMENT,
     SIMPLE_DEEPSEEK_EXPERIMENT,
     DEEPSEEK_PRO_GEMMA4_26B_NON_THINKING_EXPERIMENT,
+    GEMMA4_E2B_SFT_MIXED_V3_DECOMPOSER_EXPERIMENT,
 )
 EXPERIMENTS = {experiment.name: experiment for experiment in ALL_EXPERIMENTS}
 if len(EXPERIMENTS) != len(ALL_EXPERIMENTS):
