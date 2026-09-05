@@ -36,9 +36,17 @@ def _source_key_for_layer(
 ) -> str:
     needle = f".layers.{layer_index}.self_attn.{suffix}"
     matches = [key for key in keys if key.endswith(needle)]
+    if len(matches) > 1:
+        # Multimodal Gemma-4 checkpoints number the vision tower's encoder layers
+        # from zero as well, so the suffix alone is ambiguous wherever the towers
+        # overlap. ``text_config`` describes the language model, so prefer it.
+        language_matches = [key for key in matches if ".language_model." in key]
+        if len(language_matches) == 1:
+            return language_matches[0]
+        matches = language_matches or matches
     if len(matches) != 1:
         raise ValueError(
-            f"Expected one source key ending in {needle!r}, found {matches}"
+            f"Expected one source key ending in {needle!r}, found {sorted(matches)}"
         )
     return matches[0]
 
