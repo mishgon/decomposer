@@ -19,6 +19,7 @@ SelectionPolicy = Literal[
     "exact_reward",
     "all_rewards",
     "toolathlon_pass_or_quality",
+    "toolathlon_pass_or_quality_inclusive",
 ]
 
 CANONICAL_SCHEMA_VERSION = 1
@@ -146,6 +147,7 @@ class SourceSelectionSpec(StrictModel):
     policy: SelectionPolicy = "exact_reward"
     success_reward: float = 1.0
     minimum_check_ratio_exclusive: float | None = None
+    minimum_check_ratio_inclusive: float | None = None
 
     @field_validator("success_reward")
     @classmethod
@@ -171,6 +173,23 @@ class SourceSelectionSpec(StrictModel):
             raise ValueError(
                 "minimum_check_ratio_exclusive is only valid for "
                 "toolathlon_pass_or_quality"
+            )
+        if self.policy == "toolathlon_pass_or_quality_inclusive":
+            threshold = self.minimum_check_ratio_inclusive
+            if threshold is None or not math.isfinite(threshold):
+                raise ValueError(
+                    "toolathlon_pass_or_quality_inclusive requires a finite "
+                    "minimum_check_ratio_inclusive"
+                )
+            if not 0.0 < threshold <= 1.0:
+                raise ValueError(
+                    "minimum_check_ratio_inclusive must be greater than 0 "
+                    "and at most 1"
+                )
+        elif self.minimum_check_ratio_inclusive is not None:
+            raise ValueError(
+                "minimum_check_ratio_inclusive is only valid for "
+                "toolathlon_pass_or_quality_inclusive"
             )
         return self
 
@@ -302,7 +321,11 @@ class SourceSpec(StrictModel):
             raise ValueError("GAIA2 SFT sources must require a completed run")
         if (
             self.selection is not None
-            and self.selection.policy == "toolathlon_pass_or_quality"
+            and self.selection.policy
+            in {
+                "toolathlon_pass_or_quality",
+                "toolathlon_pass_or_quality_inclusive",
+            }
             and self.adapter != "toolathlon_gym"
         ):
             raise ValueError(
@@ -456,7 +479,11 @@ class BuildSpec(StrictModel):
                         "expected_candidates"
                     )
         if self.spec_version < 3 and (
-            self.selection.policy == "toolathlon_pass_or_quality"
+            self.selection.policy
+            in {
+                "toolathlon_pass_or_quality",
+                "toolathlon_pass_or_quality_inclusive",
+            }
             or any(source.selection is not None for source in self.sources)
         ):
             raise ValueError("source-specific selection requires spec_version 3")
@@ -467,7 +494,11 @@ class BuildSpec(StrictModel):
                 else self.selection.policy
             )
             if (
-                effective_policy == "toolathlon_pass_or_quality"
+                effective_policy
+                in {
+                    "toolathlon_pass_or_quality",
+                    "toolathlon_pass_or_quality_inclusive",
+                }
                 and source.adapter != "toolathlon_gym"
             ):
                 raise ValueError(

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
@@ -105,6 +106,52 @@ def _extract_check_quality(native_result: Any, episode_id: str) -> CheckQuality 
         )
 
     return None
+
+
+_STDOUT_CHECK_PATTERNS: tuple[tuple[str, "re.Pattern[str]"], ...] = (
+    ("passed_n_of_m_checks", re.compile(r"Passed\s+(\d+)\s*/\s*(\d+)\s+checks", re.I)),
+    ("n_slash_m_passed", re.compile(r"(\d+)\s*/\s*(\d+)\s+passed", re.I)),
+    ("n_of_m_passed", re.compile(r"(\d+)\s+of\s+(\d+)\s+passed", re.I)),
+    ("results_n_slash_m", re.compile(r"Results?:\s*(\d+)\s*/\s*(\d+)", re.I)),
+)
+
+
+def _extract_check_quality_from_text(text: Any) -> CheckQuality | None:
+    """Recover check counts printed by evaluators that emit no native_result."""
+
+    if not isinstance(text, str) or not text:
+        return None
+    for name, pattern in _STDOUT_CHECK_PATTERNS:
+        match = pattern.search(text)
+        if match is None:
+            continue
+        passed = int(match.group(1))
+        total = int(match.group(2))
+        if total <= 0 or passed > total:
+            continue
+        return CheckQuality(
+            passed=passed,
+            total=total,
+            ratio=passed / total,
+            schema=f"stdout:{name}",
+        )
+    return None
+
+
+def _extract_check_quality_with_fallback(
+    result: Mapping[str, Any], episode_id: str
+) -> CheckQuality | None:
+    """native_result first, then the evaluator's printed output."""
+
+    quality = _extract_check_quality(result.get("native_result"), episode_id)
+    if quality is not None:
+        return quality
+    combined = "\n".join(
+        part
+        for part in (result.get("stdout"), result.get("stderr"))
+        if isinstance(part, str) and part
+    )
+    return _extract_check_quality_from_text(combined)
 
 
 def _manifest_relative_path(value: str, manifest_path: Path) -> Path:
@@ -419,6 +466,9 @@ def read_toolathlon_gym_source(
     quality_threshold = selection.minimum_check_ratio_exclusive
     if selection.policy == "toolathlon_pass_or_quality":
         assert quality_threshold is not None
+    quality_threshold_inclusive = selection.minimum_check_ratio_inclusive
+    if selection.policy == "toolathlon_pass_or_quality_inclusive":
+        assert quality_threshold_inclusive is not None
 
     for trace_path in trace_paths:
         counts["rollouts"] += 1
@@ -486,6 +536,32 @@ def read_toolathlon_gym_source(
                     quality_counts["retained_binary_fail_missing_counts"] += 1
                 else:
                     quality_counts["retained_binary_fail_high_ratio"] += 1
+            elif selection.policy == "toolathlon_pass_or_quality_inclusive":
+                check_quality = _extract_check_quality_with_fallback(
+                    result, episode_from_path
+                )
+                quality_counts["binary_pass" if reward else "binary_fail"] += 1
+                if check_quality is None:
+                    quality_counts["missing_check_counts"] += 1
+                else:
+                    quality_counts["with_check_counts"] += 1
+                    quality_schema_counts[check_quality.schema] += 1
+                    if check_quality.ratio >= quality_threshold_inclusive:
+                        quality_counts["ratio_at_or_above_threshold"] += 1
+                    else:
+                        quality_counts["ratio_below_threshold"] += 1
+                if not reward:
+                    if check_quality is None:
+                        quality_counts["excluded_binary_fail_missing_counts"] += 1
+                        counts["excluded_quality"] += 1
+                        continue
+                    if check_quality.ratio < quality_threshold_inclusive:
+                        quality_counts["excluded_binary_fail_low_ratio"] += 1
+                        counts["excluded_quality"] += 1
+                        continue
+                    quality_counts["retained_binary_fail_high_ratio"] += 1
+                else:
+                    quality_counts["retained_binary_pass"] += 1
             elif (
                 selection.policy == "exact_reward"
                 and numeric_reward != selection.success_reward
