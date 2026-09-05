@@ -45,6 +45,8 @@ from .clearml_logging import (
     SeparatePlotsClearMLCallback,
     validate_weight_norm_interval,
 )
+from .gemma4_mixed_attention import ATTENTION_IMPLEMENTATION as GEMMA4_MIXED_ATTENTION
+from .gemma4_mixed_attention import register as register_gemma4_mixed_attention
 from .liger import configure_liger_for_model, liger_compatible_loss_type
 from .model_support import (
     build_training_template,
@@ -1623,6 +1625,11 @@ def main(argv: Sequence[str] | None = None) -> None:
         "attn_implementation", model_config.get("attn_implementation", "sdpa")
     )
     model_init_kwargs.setdefault("revision", model_config.get("revision", "main"))
+    # Gemma-4 mixes 256-wide sliding heads with 512-wide global heads, so no single
+    # backend covers the model; register the splitting implementation before the model
+    # is built so the attention interface can resolve it.
+    if model_init_kwargs.get("attn_implementation") == GEMMA4_MIXED_ATTENTION:
+        register_gemma4_mixed_attention()
     training_config["model_init_kwargs"] = model_init_kwargs
 
     output_dir = Path(training_config["output_dir"]).resolve()
