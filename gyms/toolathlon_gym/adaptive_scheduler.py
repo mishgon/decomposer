@@ -303,15 +303,52 @@ def new_scheduler_state(
         raise ValueError("target successes must be positive")
     return {
         "schema_version": SCHEDULER_SCHEMA_VERSION,
-        "phase": "initial_three",
+        "policy": "coverage_first",
+        "phase": "coverage_first",
         "success_threshold": threshold,
         "cull_fraction": cull_fraction,
         "target_successes": target_successes,
+        "max_zero_success_launches": 6,
         "original_tasks": list(tasks),
         "active_tasks": list(tasks),
         "culled_tasks": [],
         "rounds": [],
     }
+
+
+def migrate_to_coverage_first(manifest: dict[str, Any]) -> int:
+    """Discard only unstarted legacy queue entries and enable water-filling."""
+    state = manifest["adaptive_scheduler"]
+    if state.get("policy") == "coverage_first":
+        return 0
+
+    removed_keys = {
+        episode["key"]
+        for episode in manifest["episodes"]
+        if episode["status"] == "pending" and not episode.get("attempts")
+    }
+    manifest["episodes"] = [
+        episode
+        for episode in manifest["episodes"]
+        if episode["key"] not in removed_keys
+    ]
+    retained_keys = {episode["key"] for episode in manifest["episodes"]}
+    for round_ in state.get("rounds", []):
+        round_["episode_keys"] = [
+            key for key in round_.get("episode_keys", []) if key in retained_keys
+        ]
+    state.update(
+        policy="coverage_first",
+        phase="coverage_first",
+        max_zero_success_launches=6,
+    )
+    state.setdefault("migrations", []).append(
+        {
+            "from_policy": "three_plus_three",
+            "removed_unstarted_episodes": len(removed_keys),
+        }
+    )
+    return len(removed_keys)
 
 
 def phase_is_terminal(manifest: dict[str, Any], keys: Sequence[str]) -> bool:
@@ -323,7 +360,7 @@ def phase_is_terminal(manifest: dict[str, Any], keys: Sequence[str]) -> bool:
 
 
 def plan_next_wave(manifest: dict[str, Any]) -> list[str]:
-    """Advance the persisted 1+2+3 scheduler by at most one state transition."""
+    """Prioritize breadth, then water-fill retained tasks to the target count."""
     state = manifest["adaptive_scheduler"]
     threshold = state["success_threshold"]
     active = state["active_tasks"]
@@ -335,6 +372,45 @@ def plan_next_wave(manifest: dict[str, Any]) -> list[str]:
         return []
 
     phase = state["phase"]
+    if phase == "coverage_first":
+        exhausted = [
+            task
+            for task in active
+            if task_rank(manifest, task, threshold)[0] == 0
+            and task_rank(manifest, task, threshold)[2]
+            >= state["max_zero_success_launches"]
+            and not has_unscored_evaluation(manifest, task)
+        ]
+        if exhausted:
+            state["culled_tasks"].extend(
+                {
+                    **task_summary(manifest, task, threshold),
+                    "after_launches": state["max_zero_success_launches"],
+                    "reason": "zero_success_after_launch_limit",
+                }
+                for task in exhausted
+            )
+            state["active_tasks"] = [
+                task for task in active if task not in exhausted
+            ]
+            active = state["active_tasks"]
+
+        uncovered = [
+            task for task in active if task_rank(manifest, task, threshold)[0] == 0
+        ]
+        if uncovered:
+            added = append_one_episode_per_task(manifest, uncovered)
+            rounds.append(
+                {
+                    "phase": phase,
+                    "target_successes": 1,
+                    "episode_keys": added,
+                }
+            )
+            return added
+        state["phase"] = "balance_successes"
+        return plan_next_wave(manifest)
+
     if phase == "initial_three":
         added = append_episodes_to_target(manifest, active, 3)
         if added:
@@ -392,19 +468,19 @@ def plan_next_wave(manifest: dict[str, Any]) -> list[str]:
         return plan_next_wave(manifest)
 
     if phase == "balance_successes":
-        deficient = [
-            task
-            for task in active
-            if task_rank(manifest, task, threshold)[0] < state["target_successes"]
-        ]
-        if not deficient:
+        successes = {
+            task: task_rank(manifest, task, threshold)[0] for task in active
+        }
+        if not successes or min(successes.values()) >= state["target_successes"]:
             state["phase"] = "complete"
             return []
+        next_target = min(successes.values()) + 1
+        deficient = [task for task in active if successes[task] < next_target]
         added = append_one_episode_per_task(manifest, deficient)
         rounds.append(
             {
                 "phase": phase,
-                "target_successes": state["target_successes"],
+                "target_successes": next_target,
                 "episode_keys": added,
             }
         )
