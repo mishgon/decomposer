@@ -206,6 +206,43 @@ def test_coverage_first_drops_known_zero_after_six_launches(tmp_path: Path) -> N
     assert manifest["adaptive_scheduler"]["phase"] == "complete"
 
 
+def test_coverage_first_honors_per_task_limits_and_can_cap_unparseable(
+    tmp_path: Path,
+) -> None:
+    known = evaluation(
+        tmp_path,
+        "known",
+        {"pass": False, "native_result": {"passed": 0, "failed": 10}},
+    )
+    unknown = evaluation(
+        tmp_path,
+        "unknown",
+        {"pass": False, "native_result": {"errors": ["unparsed"]}},
+    )
+    manifest = {
+        "episodes": [
+            episode("known", 1, attempt(known)),
+            episode("known", 2, attempt(known)),
+            episode("unknown", 1, attempt(unknown)),
+            episode("unknown", 2, attempt(unknown)),
+            episode("unknown", 3, attempt(unknown)),
+        ]
+    }
+    state = scheduler.new_scheduler_state(
+        ["known", "unknown"], threshold=0.9, cull_fraction=0.1, target_successes=4
+    )
+    state["zero_success_launch_limits"] = {"known": 2, "unknown": 3}
+    state["protect_unscored_evaluations"] = False
+    manifest["adaptive_scheduler"] = state
+
+    assert scheduler.plan_next_wave(manifest) == []
+    assert state["active_tasks"] == []
+    assert {item["task"]: item["after_launches"] for item in state["culled_tasks"]} == {
+        "known": 2,
+        "unknown": 3,
+    }
+
+
 def test_migration_removes_only_unstarted_legacy_queue(tmp_path: Path) -> None:
     done = evaluation(tmp_path, "done", {"pass": True, "native_result": None})
     manifest = {

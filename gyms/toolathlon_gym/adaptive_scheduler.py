@@ -189,6 +189,12 @@ def task_summary(
     }
 
 
+def zero_success_launch_limit(state: dict[str, Any], task: str) -> int:
+    """Return a task-specific retry ceiling, falling back to the policy default."""
+    limits = state.get("zero_success_launch_limits", {})
+    return int(limits.get(task, state["max_zero_success_launches"]))
+
+
 def choose_bottom_tasks(
     manifest: dict[str, Any],
     tasks: Sequence[str],
@@ -378,14 +384,17 @@ def plan_next_wave(manifest: dict[str, Any]) -> list[str]:
             for task in active
             if task_rank(manifest, task, threshold)[0] == 0
             and task_rank(manifest, task, threshold)[2]
-            >= state["max_zero_success_launches"]
-            and not has_unscored_evaluation(manifest, task)
+            >= zero_success_launch_limit(state, task)
+            and (
+                not state.get("protect_unscored_evaluations", True)
+                or not has_unscored_evaluation(manifest, task)
+            )
         ]
         if exhausted:
             state["culled_tasks"].extend(
                 {
                     **task_summary(manifest, task, threshold),
-                    "after_launches": state["max_zero_success_launches"],
+                    "after_launches": zero_success_launch_limit(state, task),
                     "reason": "zero_success_after_launch_limit",
                 }
                 for task in exhausted
