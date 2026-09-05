@@ -31,7 +31,7 @@ from ..schema import (
 )
 from .base import AdapterReadResult
 
-ADAPTER_VERSION = 4
+ADAPTER_VERSION = 5
 TRACE_SCHEMA_VERSION = 2
 IMPORT_SCHEMA_VERSION = 1
 TERMINAL_RUN_STATUSES = frozenset({"completed", "completed_with_errors"})
@@ -108,50 +108,118 @@ def _extract_check_quality(native_result: Any, episode_id: str) -> CheckQuality 
     return None
 
 
-_STDOUT_CHECK_PATTERNS: tuple[tuple[str, "re.Pattern[str]"], ...] = (
+def _extract_native_check_quality(native_result: Any) -> CheckQuality | None:
+    """The wider native cascade used by the inclusive policy.
+
+    Unlike ``_extract_check_quality`` this never raises: a shape it cannot read is
+    simply not a measurement, and the caller falls through to the printed output.
+    """
+
+    if not isinstance(native_result, Mapping):
+        return None
+    passed = native_result.get("total_passed")
+    total = native_result.get("total_checks")
+    if (
+        _valid_nonnegative_count(passed)
+        and _valid_nonnegative_count(total)
+        and total > 0
+        and passed <= total
+    ):
+        return CheckQuality(passed, total, passed / total, "native_total")
+    passed = native_result.get("passed")
+    total = native_result.get("total")
+    if (
+        _valid_nonnegative_count(passed)
+        and _valid_nonnegative_count(total)
+        and total > 0
+        and passed <= total
+    ):
+        return CheckQuality(passed, total, passed / total, "native_total")
+    for passed_key, failed_key in (("passed", "failed"), ("pass", "fail")):
+        passed = native_result.get(passed_key)
+        failed = native_result.get(failed_key)
+        if (
+            _valid_nonnegative_count(passed)
+            and _valid_nonnegative_count(failed)
+            and passed + failed > 0
+        ):
+            total = passed + failed
+            return CheckQuality(passed, total, passed / total, "native_pass_fail")
+    return None
+
+
+_STDOUT_FRACTION_PATTERNS: tuple[tuple[str, "re.Pattern[str]"], ...] = (
+    ("n_slash_m_passed", re.compile(r"(?:Results:\s*)?(\d+)\s*/\s*(\d+)\s+passed", re.I)),
     ("passed_n_of_m_checks", re.compile(r"Passed\s+(\d+)\s*/\s*(\d+)\s+checks", re.I)),
-    ("n_slash_m_passed", re.compile(r"(\d+)\s*/\s*(\d+)\s+passed", re.I)),
-    ("n_of_m_passed", re.compile(r"(\d+)\s+of\s+(\d+)\s+passed", re.I)),
-    ("results_n_slash_m", re.compile(r"Results?:\s*(\d+)\s*/\s*(\d+)", re.I)),
+)
+_STDOUT_PASS_FAIL_PATTERNS: tuple[tuple[str, "re.Pattern[str]"], ...] = (
+    ("passed_failed", re.compile(r"Passed\s*:?\s*(\d+)\s*(?:,|\n)\s*Failed\s*:?\s*(\d+)", re.I)),
+    ("n_passed_m_failed", re.compile(r"(\d+)\s+passed\s*,\s*(\d+)\s+failed", re.I)),
+)
+# Line-anchored markers only. Bracketed markers and standalone status lines are
+# unambiguous; a bare "error" anywhere in a log is not.
+_MARKER_PATTERNS: tuple[tuple[str, "re.Pattern[str]", "re.Pattern[str]"], ...] = (
+    (
+        "check_markers",
+        re.compile(r"^\s*\[(?:PASS|OK)\]", re.MULTILINE),
+        re.compile(r"^\s*\[(?:FAIL|ERROR)\]", re.MULTILINE),
+    ),
+    (
+        "status_lines",
+        re.compile(r"^\s*PASS\s*$", re.MULTILINE),
+        re.compile(r"^\s*FAIL\s*$", re.MULTILINE),
+    ),
 )
 
 
 def _extract_check_quality_from_text(text: Any) -> CheckQuality | None:
-    """Recover check counts printed by evaluators that emit no native_result."""
+    """Recover check counts printed by evaluators that emit no usable native_result.
+
+    Ordered from strongest evidence to weakest: explicit fractions, then explicit
+    passed/failed pairs, then counts of line-anchored per-check markers. Where a
+    pattern matches repeatedly the last match wins, since evaluators print running
+    progress before their final summary.
+    """
 
     if not isinstance(text, str) or not text:
         return None
-    for name, pattern in _STDOUT_CHECK_PATTERNS:
-        match = pattern.search(text)
-        if match is None:
-            continue
-        passed = int(match.group(1))
-        total = int(match.group(2))
-        if total <= 0 or passed > total:
-            continue
-        return CheckQuality(
-            passed=passed,
-            total=total,
-            ratio=passed / total,
-            schema=f"stdout:{name}",
-        )
+    for name, pattern in _STDOUT_FRACTION_PATTERNS:
+        matches = pattern.findall(text)
+        if matches:
+            passed, total = (int(value) for value in matches[-1])
+            if total > 0 and passed <= total:
+                return CheckQuality(
+                    passed, total, passed / total, f"stdout_fraction:{name}"
+                )
+    for name, pattern in _STDOUT_PASS_FAIL_PATTERNS:
+        matches = pattern.findall(text)
+        if matches:
+            passed, failed = (int(value) for value in matches[-1])
+            if passed + failed > 0:
+                total = passed + failed
+                return CheckQuality(
+                    passed, total, passed / total, f"stdout_pass_fail:{name}"
+                )
+    for name, passed_pattern, failed_pattern in _MARKER_PATTERNS:
+        passed = len(passed_pattern.findall(text))
+        failed = len(failed_pattern.findall(text))
+        if passed + failed > 0:
+            total = passed + failed
+            return CheckQuality(
+                passed, total, passed / total, f"stdout_markers:{name}"
+            )
     return None
 
 
 def _extract_check_quality_with_fallback(
     result: Mapping[str, Any], episode_id: str
 ) -> CheckQuality | None:
-    """native_result first, then the evaluator's printed output."""
+    """Native counts first, then the evaluator's printed output."""
 
-    quality = _extract_check_quality(result.get("native_result"), episode_id)
+    quality = _extract_native_check_quality(result.get("native_result"))
     if quality is not None:
         return quality
-    combined = "\n".join(
-        part
-        for part in (result.get("stdout"), result.get("stderr"))
-        if isinstance(part, str) and part
-    )
-    return _extract_check_quality_from_text(combined)
+    return _extract_check_quality_from_text(result.get("stdout"))
 
 
 def _manifest_relative_path(value: str, manifest_path: Path) -> Path:

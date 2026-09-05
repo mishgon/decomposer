@@ -21,7 +21,7 @@ data:
   max_eval_samples: null
 
 training:
-  output_dir: /home/sukhorukov/decomposer_artifacts/training/sft/checkpoints/gemma4-e2b-nonthinking-4gpu-mixed-v1
+  output_dir: /mnt/share14T-2/sukhorukov/decomposer_artifacts/training/sft/checkpoints/gemma4-e2b-nonthinking-4gpu-mixed-v1
   run_name: gemma4-e2b-nonthinking-4gpu-mixed-v1
   max_length: 32768
   per_device_train_batch_size: 1
