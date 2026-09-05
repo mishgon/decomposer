@@ -2,7 +2,9 @@ model:
   name_or_path: google/gemma-4-E4B-it
   revision: ee0ef6023621cff504d758262d4e04895a5af4a2
   dtype: bfloat16
-  attn_implementation: sdpa
+  # Sliding-window layers (head_dim 256) run on FlashAttention; the global layers
+  # (global_head_dim 512) exceed FlashAttention's limit and stay on SDPA.
+  attn_implementation: gemma4_mixed
   trust_remote_code: false
 
 data:
@@ -19,7 +21,7 @@ data:
   max_eval_samples: null
 
 training:
-  output_dir: /home/sukhorukov/decomposer_artifacts/training/sft/checkpoints/gemma4-e4b-nonthinking-4gpu-mixed-v1
+  output_dir: /mnt/share14T-2/sukhorukov/decomposer_artifacts/training/sft/checkpoints/gemma4-e4b-nonthinking-4gpu-mixed-v1
   run_name: gemma4-e4b-nonthinking-4gpu-mixed-v1
   max_length: 32768
   per_device_train_batch_size: 1
@@ -76,7 +78,7 @@ training:
     sync_module_states: true
 
 clearml:
-  enabled: false
+  enabled: true
   weight_norm_interval_steps: 10
   project: decomposer
   task: google/gemma-4-E4B-it Decomposer SFT non-thinking mixed v1

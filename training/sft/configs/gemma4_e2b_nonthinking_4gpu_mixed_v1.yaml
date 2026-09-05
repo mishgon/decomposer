@@ -2,7 +2,9 @@ model:
   name_or_path: google/gemma-4-E2B-it
   revision: 3e22461f65e89153144f8adb70e3b8c2cc9845a7
   dtype: bfloat16
-  attn_implementation: sdpa
+  # Sliding-window layers (head_dim 256) run on FlashAttention; the global layers
+  # (global_head_dim 512) exceed FlashAttention's limit and stay on SDPA.
+  attn_implementation: gemma4_mixed
   trust_remote_code: false
 
 data:
@@ -76,7 +78,7 @@ training:
     sync_module_states: true
 
 clearml:
-  enabled: false
+  enabled: true
   weight_norm_interval_steps: 10
   project: decomposer
   task: google/gemma-4-E2B-it Decomposer SFT non-thinking mixed v1
