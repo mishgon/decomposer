@@ -870,8 +870,11 @@ def sequentialize_parallel_spawn_calls(
                 split_message.pop("teacher_reasoning", None)
             normalized.extend((split_message, results_by_id[call_id]))
 
-        normalized_messages += 1
-        normalized_calls += len(calls)
+        if len(calls) > 1:
+            # Only a batch that stayed parallel counts as sequentialized; once the
+            # waits are gone a lone spawn is an ordinary single-call turn.
+            normalized_messages += 1
+            normalized_calls += len(calls)
         index = result_end
 
     return (
