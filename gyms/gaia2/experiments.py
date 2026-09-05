@@ -1013,6 +1013,29 @@ GEMMA4_E2B_SFT_MIXED_V3_VLLM = Path(
     "/mnt/share14T-2/sukhorukov/decomposer_artifacts/training/sft/checkpoints"
     "/gemma4-e2b-nonthinking-4gpu-mixed-v3/final-vllm"
 )
+GEMMA4_E4B_SFT_MIXED_V3_VLLM = Path(
+    "/mnt/share14T-2/sukhorukov/decomposer_artifacts/training/sft/checkpoints/gemma4-e4b-nonthinking-4gpu-mixed-v3/final-vllm"
+)
+GEMMA4_E4B_SFT_MIXED_V3_DECOMPOSER_EXPERIMENT = DecomposerExperiment(
+    name=("gemma4-e4b-sft-mixed-v3-non-thinking-gemma4-26b-a4b-non-thinking"),
+    worker_checkpoint=GEMMA4_26B_A4B_BASE,
+    manager_checkpoint=GEMMA4_E4B_SFT_MIXED_V3_VLLM,
+    prompt_profile="teacher",
+    num_gpus=2,
+    manager_served_name="decomposer/gemma4-e4b-sft-mixed-v3",
+    worker_served_name="google/gemma-4-26B-A4B-it",
+    manager_port=8038,
+    worker_port=8039,
+    service_port=8140,
+    subagent_port=2040,
+    max_model_len=131072,
+    manager_thinking=False,
+    worker_thinking=False,
+    manager_max_model_calls=80,
+    subagent_max_model_calls=80,
+    manager_recursion_limit=1000,
+    subagent_recursion_limit=1000,
+)
 GEMMA4_E2B_SFT_MIXED_V3_DECOMPOSER_EXPERIMENT = DecomposerExperiment(
     name=("gemma4-e2b-sft-mixed-v3-non-thinking-gemma4-26b-a4b-non-thinking"),
     worker_checkpoint=GEMMA4_26B_A4B_BASE,
@@ -1227,6 +1250,7 @@ ALL_EXPERIMENTS: tuple[Experiment, ...] = (
     SIMPLE_DEEPSEEK_EXPERIMENT,
     DEEPSEEK_PRO_GEMMA4_26B_NON_THINKING_EXPERIMENT,
     GEMMA4_E2B_SFT_MIXED_V3_DECOMPOSER_EXPERIMENT,
+    GEMMA4_E4B_SFT_MIXED_V3_DECOMPOSER_EXPERIMENT,
 )
 EXPERIMENTS = {experiment.name: experiment for experiment in ALL_EXPERIMENTS}
 if len(EXPERIMENTS) != len(ALL_EXPERIMENTS):
