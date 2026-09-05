@@ -30,7 +30,7 @@ from ..schema import (
     validate_decomposer_messages,
 )
 
-ADAPTER_VERSION = 3
+ADAPTER_VERSION = 4
 
 
 def _canonical_prompt_input(value: Any) -> str:
@@ -210,11 +210,21 @@ def _convert_messages(
         {"role": "system", "content": system_prompt},
         *[_convert_message(message, index) for index, message in enumerate(messages)],
     ]
-    normalized, normalized_messages, normalized_calls = (
-        sequentialize_parallel_spawn_calls(converted)
-    )
+    (
+        normalized,
+        normalized_messages,
+        normalized_calls,
+        dropped_wait_calls,
+        dropped_wait_turns,
+    ) = sequentialize_parallel_spawn_calls(converted)
     validate_decomposer_messages(normalized)
-    return normalized, normalized_messages, normalized_calls
+    return (
+        normalized,
+        normalized_messages,
+        normalized_calls,
+        dropped_wait_calls,
+        dropped_wait_turns,
+    )
 
 
 def _materialized_inputs(path: Path) -> dict[tuple[int, int], JsonObject]:
@@ -383,6 +393,8 @@ def read_nemo_gym_source(
             f"candidate rollouts, found {candidate_rollouts}."
         )
     normalized_subagent_calls = 0
+    total_dropped_wait_calls = 0
+    total_dropped_wait_turns = 0
 
     with rollouts_path.open(encoding="utf-8") as file:
         for line_number, line in enumerate(file, start=1):
@@ -475,9 +487,15 @@ def read_nemo_gym_source(
                 response = require_mapping(
                     rollout.get("response"), "response", "excluded_invalid_tool_schema"
                 )
-                messages, normalized_messages, normalized_calls = _convert_messages(
-                    final_state.get("messages"), system_prompt
-                )
+                (
+                    messages,
+                    normalized_messages,
+                    normalized_calls,
+                    dropped_wait_calls,
+                    dropped_wait_turns,
+                ) = _convert_messages(final_state.get("messages"), system_prompt)
+                total_dropped_wait_calls += dropped_wait_calls
+                total_dropped_wait_turns += dropped_wait_turns
                 native_tools = normalize_response_tools(response.get("tools"))
                 normalized_type_calls = normalize_subagent_type_ids(
                     messages,
@@ -607,6 +625,10 @@ def read_nemo_gym_source(
             "subagent_type_normalization": {
                 "aliases": dict(sorted(source.subagent_type_aliases.items())),
                 "tool_calls": normalized_subagent_calls,
+            },
+            "dropped_wait_calls": {
+                "tool_calls": total_dropped_wait_calls,
+                "assistant_turns": total_dropped_wait_turns,
             },
         },
         counts=counts,

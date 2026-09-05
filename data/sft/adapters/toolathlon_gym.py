@@ -31,7 +31,7 @@ from ..schema import (
 )
 from .base import AdapterReadResult
 
-ADAPTER_VERSION = 5
+ADAPTER_VERSION = 6
 TRACE_SCHEMA_VERSION = 2
 IMPORT_SCHEMA_VERSION = 1
 TERMINAL_RUN_STATUSES = frozenset({"completed", "completed_with_errors"})
@@ -383,11 +383,21 @@ def _convert_messages(
         {"role": "system", "content": system_prompt},
         *[_convert_message(message, index) for index, message in enumerate(messages)],
     ]
-    normalized, normalized_messages, normalized_calls = (
-        sequentialize_parallel_spawn_calls(converted)
-    )
+    (
+        normalized,
+        normalized_messages,
+        normalized_calls,
+        dropped_wait_calls,
+        dropped_wait_turns,
+    ) = sequentialize_parallel_spawn_calls(converted)
     validate_decomposer_messages(normalized)
-    return normalized, normalized_messages, normalized_calls
+    return (
+        normalized,
+        normalized_messages,
+        normalized_calls,
+        dropped_wait_calls,
+        dropped_wait_turns,
+    )
 
 
 def _failed_attempts(run_manifest: Mapping[str, Any]) -> int:
@@ -528,6 +538,8 @@ def read_toolathlon_gym_source(
     paired_records = 0
     tool_schema_hashes: set[str] = set()
     normalized_subagent_calls = 0
+    total_dropped_wait_calls = 0
+    total_dropped_wait_turns = 0
     legacy_schema_traces = 0
     quality_counts: Counter[str] = Counter()
     quality_schema_counts: Counter[str] = Counter()
@@ -696,9 +708,15 @@ def read_toolathlon_gym_source(
                     f"Invalid runtime task metadata for {episode_from_path}.",
                 )
 
-            messages, normalized_messages, normalized_calls = _convert_messages(
-                trace.get("messages"), system_prompt
-            )
+            (
+                messages,
+                normalized_messages,
+                normalized_calls,
+                dropped_wait_calls,
+                dropped_wait_turns,
+            ) = _convert_messages(trace.get("messages"), system_prompt)
+            total_dropped_wait_calls += dropped_wait_calls
+            total_dropped_wait_turns += dropped_wait_turns
             normalized_type_calls = normalize_subagent_type_ids(
                 messages,
                 allowed_ids=canonical_subagent_type_ids,
@@ -870,6 +888,10 @@ def read_toolathlon_gym_source(
             "subagent_type_normalization": {
                 "aliases": dict(sorted(source.subagent_type_aliases.items())),
                 "tool_calls": normalized_subagent_calls,
+            },
+            "dropped_wait_calls": {
+                "tool_calls": total_dropped_wait_calls,
+                "assistant_turns": total_dropped_wait_turns,
             },
             "eligible_tool_schema_sha256s": sorted(tool_schema_hashes),
             "selection": selection.model_dump(

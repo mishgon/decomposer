@@ -27,7 +27,7 @@ from ..schema import (
     validate_decomposer_messages,
 )
 
-ADAPTER_VERSION = 1
+ADAPTER_VERSION = 2
 
 
 def _load_json(path: Path) -> JsonObject:
@@ -536,11 +536,21 @@ def _messages_from_sidecar(
         {"role": "system", "content": system_prompt},
         *[_convert_message(message, index) for index, message in enumerate(messages)],
     ]
-    normalized, normalized_messages, normalized_calls = (
-        sequentialize_parallel_spawn_calls(converted)
-    )
+    (
+        normalized,
+        normalized_messages,
+        normalized_calls,
+        dropped_wait_calls,
+        dropped_wait_turns,
+    ) = sequentialize_parallel_spawn_calls(converted)
     validate_decomposer_messages(normalized)
-    return normalized, normalized_messages, normalized_calls
+    return (
+        normalized,
+        normalized_messages,
+        normalized_calls,
+        dropped_wait_calls,
+        dropped_wait_turns,
+    )
 
 
 def _validate_sidecar_identity(
@@ -690,6 +700,8 @@ def read_gaia2_source(
     normalized_spawn_messages = 0
     normalized_spawn_calls = 0
     normalized_subagent_calls = 0
+    total_dropped_wait_calls = 0
+    total_dropped_wait_turns = 0
     revisions: set[tuple[Any, Any]] = set()
     reward_counts: Counter[str] = Counter()
     sidecar_failure_records = 0
@@ -740,9 +752,15 @@ def read_gaia2_source(
                 )
             sidecar = _load_sidecar(sidecar_path)
             identity = _validate_sidecar_identity(sidecar, row, marker, source)
-            messages, normalized_messages, normalized_calls = _messages_from_sidecar(
-                sidecar, system_prompt
-            )
+            (
+                messages,
+                normalized_messages,
+                normalized_calls,
+                dropped_wait_calls,
+                dropped_wait_turns,
+            ) = _messages_from_sidecar(sidecar, system_prompt)
+            total_dropped_wait_calls += dropped_wait_calls
+            total_dropped_wait_turns += dropped_wait_turns
             normalized_type_calls = normalize_subagent_type_ids(
                 messages,
                 allowed_ids=canonical_subagent_type_ids,
@@ -867,6 +885,10 @@ def read_gaia2_source(
             "subagent_type_normalization": {
                 "aliases": dict(sorted(source.subagent_type_aliases.items())),
                 "tool_calls": normalized_subagent_calls,
+            },
+            "dropped_wait_calls": {
+                "tool_calls": total_dropped_wait_calls,
+                "assistant_turns": total_dropped_wait_turns,
             },
         },
         counts=counts,

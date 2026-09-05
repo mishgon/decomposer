@@ -752,7 +752,7 @@ def normalize_subagent_type_ids(
 
 def sequentialize_parallel_spawn_calls(
     messages: list[JsonObject],
-) -> tuple[list[JsonObject], int, int]:
+) -> tuple[list[JsonObject], int, int, int, int]:
     """Convert parallel spawn batches into single-call assistant/tool turns.
 
     Decomposer may emit several asynchronous ``spawn_subagent`` calls in one
@@ -762,10 +762,28 @@ def sequentialize_parallel_spawn_calls(
 
     Shared assistant content and teacher reasoning belong to the original
     completion and are retained only on the first sequentialized turn.
+
+    A ``wait`` inside such a batch is dropped along with the tool message
+    answering it. The harness refuses to run those calls -- it replies "A `wait`
+    call must be the only tool call in the message. This `wait` call was not
+    executed." -- so removing them reproduces the trajectory the environment
+    actually saw rather than editing away a real action. When a batch holds
+    nothing but waits the whole turn goes, text and all, because what remains is
+    usually a summary truncated mid-sentence by the token limit that produced the
+    stray calls in the first place.
+
+    A lone ``wait`` is a valid, executed call and passes through untouched: only
+    multi-call messages are rewritten, matching the harness's own rule.
+
+    Returns the rewritten messages, the number of batches sequentialized, the
+    number of spawn calls they contained, and the number of dropped wait calls
+    and dropped turns.
     """
     normalized: list[JsonObject] = []
     normalized_messages = 0
     normalized_calls = 0
+    dropped_wait_calls = 0
+    dropped_turns = 0
     index = 0
     while index < len(messages):
         message = messages[index]
@@ -781,6 +799,7 @@ def sequentialize_parallel_spawn_calls(
 
         calls: list[Mapping[str, Any]] = []
         call_ids: list[str] = []
+        wait_ids: list[str] = []
         for raw_call in raw_calls:
             call = require_mapping(
                 raw_call,
@@ -793,17 +812,20 @@ def sequentialize_parallel_spawn_calls(
                 "excluded_invalid_tool_calls",
             )
             call_id = call.get("id")
+            name = function.get("name")
             if (
                 call.get("type") != "function"
-                or function.get("name") != "spawn_subagent"
+                or name not in {"spawn_subagent", "wait"}
                 or not isinstance(call_id, str)
                 or not call_id
             ):
                 raise TraceValidationError(
                     "excluded_invalid_tool_calls",
-                    "Only valid spawn_subagent calls may share an assistant message; "
-                    "wait must be emitted alone.",
+                    f"Assistant message {index} shares an invalid tool call.",
                 )
+            if name == "wait":
+                wait_ids.append(call_id)
+                continue
             calls.append(call)
             call_ids.append(call_id)
         if len(call_ids) != len(set(call_ids)):
@@ -816,19 +838,29 @@ def sequentialize_parallel_spawn_calls(
         while result_end < len(messages) and messages[result_end].get("role") == "tool":
             result_end += 1
         results = messages[index + 1 : result_end]
-        result_ids = [result.get("tool_call_id") for result in results]
-        if (
-            len(results) != len(calls)
-            or not all(isinstance(result_id, str) for result_id in result_ids)
-            or len(result_ids) != len(set(result_ids))
-            or set(result_ids) != set(call_ids)
-        ):
+        results_by_id: dict[str, JsonObject] = {}
+        for result in results:
+            result_id = result.get("tool_call_id")
+            if not isinstance(result_id, str) or result_id in results_by_id:
+                raise TraceValidationError(
+                    "excluded_invalid_tool_calls",
+                    f"Parallel assistant message {index} has malformed tool results.",
+                )
+            results_by_id[result_id] = result
+        if not all(call_id in results_by_id for call_id in call_ids):
             raise TraceValidationError(
                 "excluded_invalid_tool_calls",
                 f"Parallel assistant message {index} must be followed by exactly one "
-                "matching tool result for every call.",
+                "matching tool result for every spawn call.",
             )
-        results_by_id = {str(result["tool_call_id"]): result for result in results}
+
+        dropped_wait_calls += len(wait_ids)
+        if not calls:
+            # Nothing the environment executed survives, so the turn carries no
+            # supervision worth keeping.
+            dropped_turns += 1
+            index = result_end
+            continue
 
         for call_index, (call, call_id) in enumerate(zip(calls, call_ids)):
             split_message = dict(message)
@@ -842,7 +874,13 @@ def sequentialize_parallel_spawn_calls(
         normalized_calls += len(calls)
         index = result_end
 
-    return normalized, normalized_messages, normalized_calls
+    return (
+        normalized,
+        normalized_messages,
+        normalized_calls,
+        dropped_wait_calls,
+        dropped_turns,
+    )
 
 
 def validate_decomposer_messages(messages: list[JsonObject]) -> None:
