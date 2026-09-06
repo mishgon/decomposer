@@ -126,6 +126,30 @@ def gemma_4_e4b_thinking(
     )
 
 
+def gemma_4_e2b_non_thinking(
+    system_prompt: object | None = None,
+) -> CompiledStateGraph:
+    return _create_subagent(
+        "google/gemma-4-E2B-it",
+        "GEMMA_4_E2B_BASE_URL",
+        8030,
+        thinking=False,
+        system_prompt=_explicit_system_prompt(system_prompt),
+    )
+
+
+def gemma_4_e4b_non_thinking(
+    system_prompt: object | None = None,
+) -> CompiledStateGraph:
+    return _create_subagent(
+        "google/gemma-4-E4B-it",
+        "GEMMA_4_E4B_BASE_URL",
+        8030,
+        thinking=False,
+        system_prompt=_explicit_system_prompt(system_prompt),
+    )
+
+
 def gemma_4_31b_thinking(
     system_prompt: object | None = None,
 ) -> CompiledStateGraph:

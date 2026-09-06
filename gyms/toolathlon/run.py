@@ -75,6 +75,16 @@ TASK_PATH_RE = re.compile(r"^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$")
 SUBAGENT_TYPES = (
     # subagent_type_id, assistant_id, model_description
     ("qwen_3_5_4b_non_thinking", "qwen_3_5_4b_non_thinking", "Qwen-3.5-4B non-thinking"),
+    (
+        "gemma_4_e2b_non_thinking",
+        "gemma_4_e2b_non_thinking",
+        "Gemma-4-E2B non-thinking",
+    ),
+    (
+        "gemma_4_e4b_non_thinking",
+        "gemma_4_e4b_non_thinking",
+        "Gemma-4-E4B non-thinking",
+    ),
     ("gemma_4_e4b_thinking", "gemma_4_e4b_thinking", "Gemma-4-E4B thinking"),
     (
         "gemma_4_26b_a4b_non_thinking",
@@ -406,6 +416,8 @@ def _exec_in_container(
 
 def served_subagent_model_name(model: str) -> str:
     model_lower = model.lower()
+    if "gemma-4-e2b" in model_lower:
+        return "google/gemma-4-E2B-it"
     if "gemma-4-31b" in model_lower:
         return "google/gemma-4-31B-it"
     if "gemma-4-26b-a4b" in model_lower:
@@ -415,18 +427,34 @@ def served_subagent_model_name(model: str) -> str:
     return DEFAULT_SUBAGENT_MODEL
 
 
+def subagent_uses_thinking(model: str, configured: bool | None) -> bool:
+    if configured is not None:
+        return configured
+    model_lower = model.lower()
+    return "gemma-4-e4b" in model_lower or "gemma-4-31b" in model_lower
+
+
 def selected_subagent_specs(
-    provider: str, model: str
+    provider: str, model: str, thinking: bool | None = None
 ) -> tuple[tuple[str, str, str], ...]:
     """Advertise only subagents backed by the model that is actually served."""
     if provider == "openrouter":
         return (("deepseek_openrouter", "deepseek_openrouter", model),)
 
     model_lower = model.lower()
+    resolved_thinking = subagent_uses_thinking(model, thinking)
     if "qwen3.5-4b" in model_lower:
         selected_id = "qwen_3_5_4b_non_thinking"
+    elif "gemma-4-e2b" in model_lower:
+        if resolved_thinking:
+            raise ValueError("Gemma-4-E2B thinking is not registered")
+        selected_id = "gemma_4_e2b_non_thinking"
     elif "gemma-4-e4b" in model_lower:
-        selected_id = "gemma_4_e4b_thinking"
+        selected_id = (
+            "gemma_4_e4b_thinking"
+            if resolved_thinking
+            else "gemma_4_e4b_non_thinking"
+        )
     elif "gemma-4-26b-a4b" in model_lower:
         selected_id = "gemma_4_26b_a4b_non_thinking"
     else:
@@ -439,6 +467,7 @@ def local_vllm_base_url_environment(base_url: str) -> dict[str, str]:
     """Route every registered local graph to the one actually served model."""
     return {
         "QWEN_3_5_4B_BASE_URL": base_url,
+        "GEMMA_4_E2B_BASE_URL": base_url,
         "GEMMA_4_E4B_BASE_URL": base_url,
         "GEMMA_4_31B_BASE_URL": base_url,
         "GEMMA_4_26B_A4B_BASE_URL": base_url,
@@ -613,6 +642,7 @@ def vllm_command(
     max_model_len: int,
     gpu_memory_utilization: float,
     data_parallel_size: int = 1,
+    thinking: bool | None = None,
 ) -> list[str]:
     model_lower = model.lower()
     is_gemma = "gemma-4" in model_lower
@@ -639,7 +669,7 @@ def vllm_command(
     ]
     if is_gemma:
         command.extend(["--reasoning-parser", "gemma4"])
-    thinking = is_gemma and "gemma-4-26b-a4b" not in model_lower
+    thinking = subagent_uses_thinking(model, thinking)
     command.extend(
         [
             "--default-chat-template-kwargs",
@@ -768,6 +798,7 @@ def start_vllm(
     log_path: Path,
     reuse: bool,
     data_parallel_size: int = 1,
+    thinking: bool | None = None,
 ) -> subprocess.Popen[bytes] | None:
     no_proxy = {
         item
@@ -814,6 +845,7 @@ def start_vllm(
         max_model_len=max_model_len,
         gpu_memory_utilization=gpu_memory_utilization,
         data_parallel_size=data_parallel_size,
+        thinking=thinking,
     )
     environment = {
         **os.environ,
@@ -1473,6 +1505,7 @@ async def _run_simple_agent(
     *,
     provider: str,
     model: str,
+    thinking: bool | None = None,
     gateway_port: int,
     subagent_port: int,
     recursion_limit: int,
@@ -1507,8 +1540,14 @@ async def _run_simple_agent(
                 agent = graph.gemma_4_26b_a4b_non_thinking(
                     system_prompt=system_prompt
                 )
+            elif "gemma-4-e2b" in model_lower:
+                agent = graph.gemma_4_e2b_non_thinking(system_prompt=system_prompt)
             elif "gemma-4-e4b" in model_lower:
-                agent = graph.gemma_4_e4b_thinking(system_prompt=system_prompt)
+                agent = (
+                    graph.gemma_4_e4b_thinking(system_prompt=system_prompt)
+                    if subagent_uses_thinking(model, thinking)
+                    else graph.gemma_4_e4b_non_thinking(system_prompt=system_prompt)
+                )
             else:
                 agent = graph.qwen_3_5_4b_non_thinking(
                     system_prompt=system_prompt
@@ -1581,9 +1620,19 @@ def main() -> None:
         help="System prompt used by the decomposer model (default: teacher).",
     )
     parser.add_argument(
+        "--decomposer-thinking",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+    )
+    parser.add_argument(
         "--subagent-provider", choices=SUBAGENT_PROVIDERS, default="vllm"
     )
     parser.add_argument("--subagent-model", default=DEFAULT_SUBAGENT_MODEL)
+    parser.add_argument(
+        "--subagent-thinking",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+    )
     parser.add_argument("--subagent-port", type=int, default=DEFAULT_SUBAGENT_PORT)
     parser.add_argument(
         "--subagent-base-url",
@@ -1739,6 +1788,7 @@ def main() -> None:
             log_path=vllm_log,
             reuse=args.reuse_vllm,
             data_parallel_size=args.vllm_data_parallel_size,
+            thinking=args.subagent_thinking,
         )
 
     runner_log_dir = vllm_log.parent
@@ -2192,6 +2242,7 @@ def main() -> None:
                                 bundle["task_str"],
                                 provider=args.subagent_provider,
                                 model=args.subagent_model,
+                                thinking=args.subagent_thinking,
                                 gateway_port=gateway_port,
                                 subagent_port=args.subagent_port,
                                 recursion_limit=args.subagent_recursion_limit,
@@ -2213,6 +2264,7 @@ def main() -> None:
                             base_url=args.decomposer_base_url,
                             timeout=180,
                             max_retries=5,
+                            thinking=args.decomposer_thinking,
                         )
                         if args.decomposer_provider == "vllm"
                         else create_lmrouter_teacher(
@@ -2245,7 +2297,9 @@ def main() -> None:
                         }
                         for subagent_type_id, assistant_id, model_description in (
                             selected_subagent_specs(
-                                args.subagent_provider, args.subagent_model
+                                args.subagent_provider,
+                                args.subagent_model,
+                                args.subagent_thinking,
                             )
                         )
                     ],

@@ -318,6 +318,8 @@ def test_configured_subagents_are_registered() -> None:
     assert "deepseek_openrouter" in registered
     assert [item[0] for item in run.SUBAGENT_TYPES] == [
         "qwen_3_5_4b_non_thinking",
+        "gemma_4_e2b_non_thinking",
+        "gemma_4_e4b_non_thinking",
         "gemma_4_e4b_thinking",
         "gemma_4_26b_a4b_non_thinking",
     ]
@@ -365,6 +367,7 @@ def test_direct_subagent_factory_preserves_explicit_system_prompt(
     ("model", "expected_id"),
     [
         ("/models/Qwen3.5-4B", "qwen_3_5_4b_non_thinking"),
+        ("/models/gemma-4-E2B-it", "gemma_4_e2b_non_thinking"),
         ("/models/gemma-4-E4B-it", "gemma_4_e4b_thinking"),
         (
             "/models/gemma-4-26B-A4B-it",
@@ -392,11 +395,20 @@ def test_openrouter_decomposer_advertises_one_configured_model() -> None:
     )
 
 
+def test_e4b_can_be_selected_as_non_thinking() -> None:
+    specs = run.selected_subagent_specs(
+        "vllm", "/models/gemma-4-E4B-it", thinking=False
+    )
+
+    assert [spec[0] for spec in specs] == ["gemma_4_e4b_non_thinking"]
+
+
 def test_all_local_subagent_graphs_receive_configured_vllm_url() -> None:
     base_url = "http://host.docker.internal:19030/v1"
 
     assert run.local_vllm_base_url_environment(base_url) == {
         "QWEN_3_5_4B_BASE_URL": base_url,
+        "GEMMA_4_E2B_BASE_URL": base_url,
         "GEMMA_4_E4B_BASE_URL": base_url,
         "GEMMA_4_31B_BASE_URL": base_url,
         "GEMMA_4_26B_A4B_BASE_URL": base_url,
@@ -667,6 +679,24 @@ def test_local_vllm_teacher_uses_thinking_model_card_sampling(
         assert model.extra_body["repetition_penalty"] == 1.0
 
 
+def test_local_qwen_decomposer_can_run_non_thinking() -> None:
+    model = teacher_models.create_vllm_teacher(
+        model="decomposer/qwen35-4b-sft-mixed-v3",
+        base_url="http://127.0.0.1:8040/v1",
+        timeout=180,
+        max_retries=5,
+        thinking=False,
+    )
+
+    assert model.temperature == 0.7
+    assert model.top_p == 0.8
+    assert model.presence_penalty == 1.5
+    assert model.preserve_reasoning is False
+    assert model.extra_body["top_k"] == 20
+    assert model.extra_body["include_reasoning"] is False
+    assert model.extra_body["chat_template_kwargs"] == {"enable_thinking": False}
+
+
 def test_usage_summary_separates_decomposer_and_subagents() -> None:
     def message(input_tokens, output_tokens, *, cache=0, reasoning=0, cost=None):
         return {
@@ -909,6 +939,9 @@ def test_served_subagent_model_names_cover_supported_local_models() -> None:
     assert run.served_subagent_model_name("/models/Qwen3.5-4B") == (
         "Qwen/Qwen3.5-4B"
     )
+    assert run.served_subagent_model_name("/models/gemma-4-E2B-it") == (
+        "google/gemma-4-E2B-it"
+    )
     assert run.served_subagent_model_name("/models/gemma-4-E4B-it") == (
         "google/gemma-4-E4B-it"
     )
@@ -1128,6 +1161,20 @@ def test_vllm_command_uses_gemma_thinking_parsers() -> None:
     assert "--enable-prefix-caching" in command
     assert command[command.index("--default-chat-template-kwargs") + 1] == (
         '{"enable_thinking":true}'
+    )
+
+
+def test_vllm_command_can_disable_gemma_e4b_thinking() -> None:
+    command = run.vllm_command(
+        "/models/gemma-4-E4B-it",
+        8030,
+        max_model_len=256000,
+        gpu_memory_utilization=0.9,
+        thinking=False,
+    )
+
+    assert command[command.index("--default-chat-template-kwargs") + 1] == (
+        '{"enable_thinking":false}'
     )
 
 
