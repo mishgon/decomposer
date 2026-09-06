@@ -8,9 +8,14 @@ from decomposer.chat_vllm import ChatVLLM
 
 
 def create_vllm_teacher(
-    *, model: str, base_url: str, timeout: float, max_retries: int
+    *,
+    model: str,
+    base_url: str,
+    timeout: float,
+    max_retries: int,
+    thinking: bool = True,
 ) -> ChatVLLM:
-    """Create a thinking teacher with the model family's recommended sampling."""
+    """Create a local Decomposer model with model-card sampling."""
     model_lower = model.lower()
     if "gemma-4" in model_lower:
         top_k = 64
@@ -21,23 +26,30 @@ def create_vllm_teacher(
 
     extra_body: dict[str, object] = {
         "top_k": top_k,
-        "include_reasoning": True,
-        "chat_template_kwargs": {"enable_thinking": True},
+        "include_reasoning": thinking,
+        "chat_template_kwargs": {"enable_thinking": thinking},
     }
     if "qwen" in model_lower:
         extra_body.update({"min_p": 0.0, "repetition_penalty": 1.0})
+
+    temperature = 1.0 if thinking or "gemma-4" in model_lower else 0.7
+    top_p = 0.95 if thinking or "gemma-4" in model_lower else 0.8
+    model_kwargs: dict[str, object] = {}
+    if not thinking and "qwen" in model_lower:
+        model_kwargs["presence_penalty"] = 1.5
 
     return ChatVLLM(
         model=model,
         api_key="EMPTY",
         base_url=base_url,
-        temperature=1.0,
-        top_p=0.95,
+        temperature=temperature,
+        top_p=top_p,
         timeout=timeout,
         max_retries=max_retries,
         use_responses_api=False,
-        preserve_reasoning=True,
+        preserve_reasoning=thinking,
         extra_body=extra_body,
+        **model_kwargs,
     )
 
 

@@ -100,11 +100,13 @@ RESUME_CONFIG_FIELDS = (
     "decomposer_provider",
     "decomposer_base_url",
     "decomposer_prompt",
+    "decomposer_thinking",
     "subagent_provider",
     "subagent_model",
     "subagent_port",
     "subagent_ports",
     "subagent_base_url",
+    "subagent_thinking",
     "subagent_gpu",
     "image",
     "docker_socket",
@@ -274,6 +276,11 @@ def parse_args(argv: Sequence[str], defaults: dict[str, Any]) -> argparse.Namesp
         ),
     )
     selection.add_argument("--tasks", nargs="+", metavar="TASK")
+    parser.add_argument(
+        "--score-against-all",
+        action="store_true",
+        help="Score a --tasks subset with every unselected benchmark task failed.",
+    )
     parser.add_argument("--resume", metavar="RUN_ID")
     parser.add_argument("-n", "--repetitions", type=int, default=1)
     parser.add_argument(
@@ -319,11 +326,21 @@ def parse_args(argv: Sequence[str], defaults: dict[str, Any]) -> argparse.Namesp
         help="System prompt used by the decomposer model (default: teacher).",
     )
     parser.add_argument(
+        "--decomposer-thinking",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+    )
+    parser.add_argument(
         "--subagent-provider",
         choices=("vllm", "openrouter"),
         default="vllm",
     )
     parser.add_argument("--subagent-model", default=defaults["subagent_model"])
+    parser.add_argument(
+        "--subagent-thinking",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+    )
     parser.add_argument("--subagent-port", type=int, default=defaults["subagent_port"])
     parser.add_argument("--subagent-base-url")
     parser.add_argument(
@@ -387,6 +404,8 @@ def parse_args(argv: Sequence[str], defaults: dict[str, Any]) -> argparse.Namesp
         parser.error("--resume cannot be combined with task selection")
     if not args.resume and not (args.all or args.all_valid or args.tasks):
         parser.error("choose --all, --all-valid, --tasks, or --resume")
+    if args.score_against_all and not args.tasks:
+        parser.error("--score-against-all requires --tasks")
     if args.repetitions < 1:
         parser.error("--repetitions must be at least 1")
     if args.resume and args.repetitions != 1:
@@ -778,6 +797,11 @@ def episode_command(
         "--decomposer-base-url",
         getattr(args, "decomposer_base_url", "http://127.0.0.1:8040/v1"),
         "--decomposer-prompt", getattr(args, "decomposer_prompt", "teacher"),
+        (
+            "--decomposer-thinking"
+            if getattr(args, "decomposer_thinking", True)
+            else "--no-decomposer-thinking"
+        ),
         "--subagent-provider", getattr(args, "subagent_provider", "vllm"),
         "--subagent-model", args.subagent_model,
         "--subagent-port", str(port),
@@ -814,6 +838,11 @@ def episode_command(
     ]
     if getattr(args, "publish_service_ports", False):
         command.append("--publish-service-ports")
+    subagent_thinking = getattr(args, "subagent_thinking", None)
+    if subagent_thinking is not None:
+        command.append(
+            "--subagent-thinking" if subagent_thinking else "--no-subagent-thinking"
+        )
     if getattr(args, "subagent_base_url", None) is not None:
         command.extend(["--subagent-base-url", args.subagent_base_url])
     if args.docker_socket is not None:
@@ -1066,9 +1095,13 @@ def main(
                 setattr(args, name, "http://127.0.0.1:8040/v1")
             elif name == "decomposer_prompt" and name not in manifest["config"]:
                 setattr(args, name, "teacher")
+            elif name == "decomposer_thinking" and name not in manifest["config"]:
+                setattr(args, name, True)
             elif name == "subagent_ports" and name not in manifest["config"]:
                 setattr(args, name, [manifest["config"]["subagent_port"]])
             elif name == "subagent_base_url" and name not in manifest["config"]:
+                setattr(args, name, None)
+            elif name == "subagent_thinking" and name not in manifest["config"]:
                 setattr(args, name, None)
             elif name == "publish_service_ports" and name not in manifest["config"]:
                 setattr(args, name, False)
@@ -1130,11 +1163,12 @@ def main(
         # phantom pending manifest even though no episode was ever attempted.
         run_dir.mkdir(parents=True, exist_ok=False)
         manifest = create_manifest(run_dir.name, tasks, args.repetitions, args)
+        score_against_all = args.all_valid or args.score_against_all
         manifest["config"].update(
-            benchmark_task_count=len(all_tasks) if args.all_valid else len(tasks),
-            unrun_tasks_are_failures=args.all_valid,
+            benchmark_task_count=len(all_tasks) if score_against_all else len(tasks),
+            unrun_tasks_are_failures=score_against_all,
             assumed_failed_tasks=(
-                sorted(set(all_tasks) - set(tasks)) if args.all_valid else []
+                sorted(set(all_tasks) - set(tasks)) if score_against_all else []
             ),
         )
         save_manifest(run_dir, manifest)
@@ -1171,6 +1205,7 @@ def main(
                         log_path=run_dir / f"vllm-{port}.log",
                         reuse=args.reuse_vllm,
                         data_parallel_size=args.vllm_data_parallel_size,
+                        thinking=args.subagent_thinking,
                     )
                 )
         append_event(
