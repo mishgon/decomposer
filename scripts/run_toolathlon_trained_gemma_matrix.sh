@@ -60,6 +60,7 @@ run_bench() {
 }
 
 export PATH=/home/matrosov/.local/bin:$PATH
+export VLLM_ALLOW_LONG_MAX_MODEL_LEN=1
 cd "$repo"
 run_bench /home/matrosov/models/gemma-4-E2B-it
 run_bench /home/matrosov/models/gemma-4-E4B-it
