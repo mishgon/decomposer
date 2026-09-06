@@ -7,10 +7,8 @@ decomposer_model=decomposer/qwen35-4b-sft-mixed-v3
 tasks=(
   finalpool/find-alita-paper
   finalpool/canvas-art-quiz
-  finalpool/identify-all-songs
   finalpool/git-bug-hunt
   finalpool/sales-accounting
-  finalpool/train-ticket-plan
   finalpool/imagenet
   finalpool/canvas-new-students-notification
   finalpool/canvas-homework-grader-python
@@ -24,7 +22,9 @@ tasks=(
   finalpool/woocommerce-update-cover
   finalpool/woocommerce-new-product
   finalpool/excel-data-transformation
-  finalpool/meeting-assign
+  finalpool/stock-build-position
+  finalpool/academic-pdf-report
+  finalpool/dietary-health
 )
 
 run_bench() {
