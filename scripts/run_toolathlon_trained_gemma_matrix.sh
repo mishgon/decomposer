@@ -23,7 +23,7 @@ tasks=(
   finalpool/woocommerce-new-product
   finalpool/excel-data-transformation
   finalpool/stock-build-position
-  finalpool/academic-pdf-report
+  finalpool/interview-report
   finalpool/dietary-health
 )
 
