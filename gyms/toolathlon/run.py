@@ -1650,6 +1650,14 @@ def main() -> None:
     parser.add_argument("--vllm-startup-timeout", type=float, default=1800)
     parser.add_argument("--reuse-vllm", action="store_true")
     parser.add_argument(
+        "--allow-missing-task-credentials",
+        action="store_true",
+        help=(
+            "Run even when optional external task credentials are placeholders; "
+            "credential-dependent attempts may fail."
+        ),
+    )
+    parser.add_argument(
         "--publish-service-ports",
         action="store_true",
         help="Publish container services to host loopback (required by Colima).",
@@ -1725,7 +1733,8 @@ def main() -> None:
     task_dir = (tasks_root / args.task).resolve()
     if task_dir.parent.parent != tasks_root or not task_dir.is_dir():
         raise ValueError(f"Unknown Toolathlon task: {args.task!r}")
-    validate_task_credentials(task_dir)
+    if not args.allow_missing_task_credentials:
+        validate_task_credentials(task_dir)
     needs_openrouter = args.subagent_provider == "openrouter" or (
         args.agent_mode == "decomposer" and args.decomposer_provider == "openrouter"
     )

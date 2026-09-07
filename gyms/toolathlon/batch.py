@@ -112,6 +112,7 @@ RESUME_CONFIG_FIELDS = (
     "docker_socket",
     "reuse_vllm",
     "publish_service_ports",
+    "allow_missing_task_credentials",
     "vllm_max_model_len",
     "subagent_recursion_limit",
     "vllm_gpu_memory_utilization",
@@ -280,6 +281,14 @@ def parse_args(argv: Sequence[str], defaults: dict[str, Any]) -> argparse.Namesp
         "--score-against-all",
         action="store_true",
         help="Score a --tasks subset with every unselected benchmark task failed.",
+    )
+    parser.add_argument(
+        "--allow-missing-task-credentials",
+        action="store_true",
+        help=(
+            "Run tasks even when optional external credentials are placeholders; "
+            "credential-dependent attempts may fail."
+        ),
     )
     parser.add_argument("--resume", metavar="RUN_ID")
     parser.add_argument("-n", "--repetitions", type=int, default=1)
@@ -838,6 +847,8 @@ def episode_command(
     ]
     if getattr(args, "publish_service_ports", False):
         command.append("--publish-service-ports")
+    if getattr(args, "allow_missing_task_credentials", False):
+        command.append("--allow-missing-task-credentials")
     subagent_thinking = getattr(args, "subagent_thinking", None)
     if subagent_thinking is not None:
         command.append(
@@ -1153,7 +1164,8 @@ def main(
             if episode["status"] != "completed"
         ]
     )
-    preflight_task_credentials(tasks_needing_services, toolathlon_root)
+    if not args.allow_missing_task_credentials:
+        preflight_task_credentials(tasks_needing_services, toolathlon_root)
     preflight_external_tcp_dependencies(
         tasks_needing_services, toolathlon_root / "tasks"
     )
