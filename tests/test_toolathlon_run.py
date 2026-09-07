@@ -996,7 +996,28 @@ def test_official_simple_agent_bundle_uses_local_vllm_and_native_paths() -> None
         },
     }
     assert agent["tool"]["parallel_tool_calls"] is True
-    assert agent["tool"]["max_inner_turns"] == 2000
+    assert agent["tool"]["max_inner_turns"] == 200
+
+
+def test_official_simple_agent_bundle_preserves_configured_inner_turns() -> None:
+    source = {
+        "container_paths": {},
+        "host_paths": {},
+        "eval_config": {
+            "global_task_config": {"max_steps_under_single_turn_mode": 200},
+            "agent": {"tool": {"max_inner_turns": 2000}},
+        },
+    }
+    args = SimpleNamespace(
+        subagent_model="/models/gemma-4-31B-it",
+        vllm_max_model_len=262_144,
+        max_steps=200,
+        native_generation_profile="toolathlon-verified-128k",
+    )
+
+    result = run.official_simple_agent_bundle(source, args)
+
+    assert result["eval_config"]["agent"]["tool"]["max_inner_turns"] == 2000
 
 
 def test_official_simple_agent_bundle_can_match_verified_generation_defaults() -> None:
