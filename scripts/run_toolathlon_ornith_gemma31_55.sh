@@ -25,7 +25,7 @@ cd "$repo"
 exec "$repo/.venv/bin/python" "$repo/gyms/toolathlon/run.py" \
   --all-valid \
   --allow-missing-task-credentials \
-  -n 1 \
+  -n 3 \
   --purpose evaluation \
   --agent-mode simple \
   --simple-agent-implementation toolathlon \
