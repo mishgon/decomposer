@@ -996,7 +996,7 @@ def test_official_simple_agent_bundle_uses_local_vllm_and_native_paths() -> None
         },
     }
     assert agent["tool"]["parallel_tool_calls"] is True
-    assert agent["tool"]["max_inner_turns"] == 200
+    assert agent["tool"]["max_inner_turns"] == 2000
 
 
 def test_official_simple_agent_bundle_can_match_verified_generation_defaults() -> None:
