@@ -479,6 +479,9 @@ def official_simple_agent_bundle(bundle: dict, args: argparse.Namespace) -> dict
     runtime_bundle = copy.deepcopy(bundle)
     runtime_bundle["host_paths"] = copy.deepcopy(bundle["container_paths"])
     eval_config = runtime_bundle["eval_config"]
+    configured_max_inner_turns = (
+        eval_config.get("agent", {}).get("tool", {}).get("max_inner_turns")
+    )
     model_name = served_subagent_model_name(args.subagent_model)
     model_lower = model_name.lower()
     is_qwen_non_thinking = "qwen3.5" in model_lower
@@ -557,7 +560,7 @@ def official_simple_agent_bundle(bundle: dict, args: argparse.Namespace) -> dict
         "tool": {
             "tool_choice": "auto",
             "parallel_tool_calls": True,
-            "max_inner_turns": args.max_steps,
+            "max_inner_turns": configured_max_inner_turns or args.max_steps,
         },
     }
     eval_config["global_task_config"][
