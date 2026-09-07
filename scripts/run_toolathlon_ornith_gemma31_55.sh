@@ -8,7 +8,7 @@ set -euo pipefail
 repo=${REPO:-/home/matrosov/decomposer-ta-ornith-repro}
 artifacts=${ARTIFACTS_DIR:-/home/matrosov/decomposer-ta/artifacts/gyms/toolathlon/ornith-gemma31-official-profile-local}
 model=${MODEL:-/home/matrosov/models/gemma-4-31B-it}
-gpu=${GPU:-4}
+gpu=${GPU:-3}
 port=${PORT:-8050}
 wait_pid=${WAIT_PID:-}
 
