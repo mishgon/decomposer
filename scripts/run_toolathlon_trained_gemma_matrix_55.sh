@@ -9,6 +9,7 @@ run_bench() {
   local subagent_model=$1
   "$repo/.venv/bin/python" "$repo/gyms/toolathlon/run.py" \
     --all-valid \
+    --allow-missing-task-credentials \
     -n 3 \
     --purpose evaluation \
     --agent-mode decomposer \
