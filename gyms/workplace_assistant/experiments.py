@@ -449,6 +449,13 @@ WORKPLACE_E2B_SFT_MIXED_V3_VLLM = Path(
     "/gemma4-e2b-nonthinking-4gpu-mixed-v3/final-vllm"
 )
 
+WORKPLACE_QWEN35_SFT_MIXED_V3_MODEL_ID = "decomposer/qwen35-4b-sft-mixed-v3"
+# Qwen needs no final-vllm re-export; that pass rebuilds Gemma-4's k_norm tensors.
+WORKPLACE_QWEN35_SFT_MIXED_V3_FINAL = Path(
+    "/mnt/share14T-2/sukhorukov/decomposer_artifacts/training/sft/checkpoints"
+    "/qwen35-4b-nonthinking-mixed-v3-8gpu/final"
+)
+
 WORKPLACE_QWEN35_4B_SFT_MODEL_ID = "decomposer/qwen35-4b-sft-workplace-v1-3765-32k"
 WORKPLACE_QWEN35_4B_BASE_MANAGER_MODEL_ID = "decomposer/qwen35-4b-base-manager"
 WORKPLACE_QWEN35_4B_SFT_FINAL = (
@@ -1161,6 +1168,293 @@ DECOMPOSER_EXPERIMENTS = (
                 0.90,
                 0,
                 thinking=False,
+            ),
+            replace(
+                MODELS[3],
+                gpu=1,
+                gpu_memory_utilization=0.90,
+                startup_wave=0,
+                thinking=False,
+            ),
+        ),
+    ),
+    DecomposerExperiment(
+        name=(
+            "qwen35-4b-sft-mixed-v3-non-thinking-gemma4-26b-a4b-non-thinking"
+        ),
+        gym_config_filename=(
+            "workplace_assistant_qwen35_4b_sft_mixed_v3_"
+            "non_thinking_gemma4_26b_a4b_non_thinking.yaml"
+        ),
+        manager_backend="local_vllm",
+        # The checkpoint was trained on the teacher prompt, so evaluate under it.
+        evaluation_prompt_profile="teacher",
+        num_gpus=2,
+        subagent_graph="repository",
+        model_servers=(
+            ModelServer(
+                WORKPLACE_QWEN35_SFT_MIXED_V3_MODEL_ID,
+                WORKPLACE_QWEN35_SFT_MIXED_V3_FINAL,
+                8030,
+                0,
+                0.90,
+                0,
+                thinking=False,
+                tool_call_parser="qwen3_xml",
+                # Non-thinking Qwen3.5 closes the think block inside the prompt,
+                # so the completion carries no tags for a reasoning parser.
+                reasoning_parser=None,
+                gdn_prefill_backend="triton",
+                dtype="bfloat16",
+            ),
+            replace(
+                MODELS[3],
+                gpu=1,
+                gpu_memory_utilization=0.90,
+                startup_wave=0,
+                thinking=False,
+            ),
+        ),
+    ),
+    DecomposerExperiment(
+        name="qwen35-4b-sft-mixed-v3-non-thinking-gemma4-e4b-non-thinking",
+        gym_config_filename=(
+            "workplace_assistant_qwen35_4b_sft_mixed_v3_"
+            "non_thinking_gemma4_e4b_non_thinking.yaml"
+        ),
+        manager_backend="local_vllm",
+        # The checkpoint was trained on the teacher prompt, so evaluate under it.
+        evaluation_prompt_profile="teacher",
+        # Sixty-four saturated the single-worker langgraph event loop: every
+        # waiting manager polls threads.get_history every five seconds, and the
+        # polls started exceeding the httpx read timeout. Sixteen matches the
+        # 26B-A4B baselines.
+        concurrency=16,
+        num_gpus=2,
+        subagent_graph="repository",
+        model_servers=(
+            ModelServer(
+                WORKPLACE_QWEN35_SFT_MIXED_V3_MODEL_ID,
+                WORKPLACE_QWEN35_SFT_MIXED_V3_FINAL,
+                8031,
+                0,
+                0.90,
+                0,
+                thinking=False,
+                tool_call_parser="qwen3_xml",
+                # Non-thinking Qwen3.5 closes the think block inside the prompt,
+                # so the completion carries no tags for a reasoning parser.
+                reasoning_parser=None,
+                gdn_prefill_backend="triton",
+                dtype="bfloat16",
+            ),
+            # MODELS[1] ships gpu 0, utilization 0.60, wave 1 and thinking on;
+            # a two-GPU non-thinking pairing overrides all four.
+            replace(
+                MODELS[1],
+                gpu=1,
+                gpu_memory_utilization=0.90,
+                startup_wave=0,
+                thinking=False,
+            ),
+        ),
+    ),
+    # Untuned-manager baselines: the raw Qwen3.5-4B snapshot orchestrating each
+    # frozen Gemma worker, under both prompt profiles.
+    DecomposerExperiment(
+        name="qwen35-4b-base-non-thinking-gemma4-e2b-non-thinking",
+        gym_config_filename=(
+            "workplace_assistant_qwen35_4b_base_non_thinking_gemma4_e2b_non_thinking.yaml"
+        ),
+        manager_backend="local_vllm",
+        evaluation_prompt_profile="student",
+        concurrency=16,
+        num_gpus=2,
+        max_model_len=131072,
+        subagent_graph="repository",
+        model_servers=(
+            ModelServer(
+                WORKPLACE_QWEN35_4B_BASE_MANAGER_MODEL_ID,
+                QWEN35_4B_BASE,
+                8060,
+                0,
+                0.90,
+                0,
+                thinking=False,
+                tool_call_parser="qwen3_xml",
+                reasoning_parser=None,
+                gdn_prefill_backend="triton",
+                dtype="bfloat16",
+            ),
+            replace(
+                MODELS[0],
+                gpu=1,
+                gpu_memory_utilization=0.90,
+                startup_wave=0,
+                thinking=False,
+            ),
+        ),
+    ),
+    DecomposerExperiment(
+        name="qwen35-4b-base-non-thinking-teacher-gemma4-e2b-non-thinking",
+        gym_config_filename=(
+            "workplace_assistant_qwen35_4b_base_non_thinking_teacher_gemma4_e2b_non_thinking.yaml"
+        ),
+        manager_backend="local_vllm",
+        evaluation_prompt_profile="teacher",
+        concurrency=16,
+        num_gpus=2,
+        max_model_len=131072,
+        subagent_graph="repository",
+        model_servers=(
+            ModelServer(
+                WORKPLACE_QWEN35_4B_BASE_MANAGER_MODEL_ID,
+                QWEN35_4B_BASE,
+                8061,
+                0,
+                0.90,
+                0,
+                thinking=False,
+                tool_call_parser="qwen3_xml",
+                reasoning_parser=None,
+                gdn_prefill_backend="triton",
+                dtype="bfloat16",
+            ),
+            replace(
+                MODELS[0],
+                gpu=1,
+                gpu_memory_utilization=0.90,
+                startup_wave=0,
+                thinking=False,
+            ),
+        ),
+    ),
+    DecomposerExperiment(
+        name="qwen35-4b-base-non-thinking-gemma4-e4b-non-thinking",
+        gym_config_filename=(
+            "workplace_assistant_qwen35_4b_base_non_thinking_gemma4_e4b_non_thinking.yaml"
+        ),
+        manager_backend="local_vllm",
+        evaluation_prompt_profile="student",
+        concurrency=16,
+        num_gpus=2,
+        max_model_len=131072,
+        subagent_graph="repository",
+        model_servers=(
+            ModelServer(
+                WORKPLACE_QWEN35_4B_BASE_MANAGER_MODEL_ID,
+                QWEN35_4B_BASE,
+                8062,
+                0,
+                0.90,
+                0,
+                thinking=False,
+                tool_call_parser="qwen3_xml",
+                reasoning_parser=None,
+                gdn_prefill_backend="triton",
+                dtype="bfloat16",
+            ),
+            replace(
+                MODELS[1],
+                gpu=1,
+                gpu_memory_utilization=0.90,
+                startup_wave=0,
+                thinking=False,
+            ),
+        ),
+    ),
+    DecomposerExperiment(
+        name="qwen35-4b-base-non-thinking-teacher-gemma4-e4b-non-thinking",
+        gym_config_filename=(
+            "workplace_assistant_qwen35_4b_base_non_thinking_teacher_gemma4_e4b_non_thinking.yaml"
+        ),
+        manager_backend="local_vllm",
+        evaluation_prompt_profile="teacher",
+        concurrency=16,
+        num_gpus=2,
+        max_model_len=131072,
+        subagent_graph="repository",
+        model_servers=(
+            ModelServer(
+                WORKPLACE_QWEN35_4B_BASE_MANAGER_MODEL_ID,
+                QWEN35_4B_BASE,
+                8063,
+                0,
+                0.90,
+                0,
+                thinking=False,
+                tool_call_parser="qwen3_xml",
+                reasoning_parser=None,
+                gdn_prefill_backend="triton",
+                dtype="bfloat16",
+            ),
+            replace(
+                MODELS[1],
+                gpu=1,
+                gpu_memory_utilization=0.90,
+                startup_wave=0,
+                thinking=False,
+            ),
+        ),
+    ),
+    DecomposerExperiment(
+        name="qwen35-4b-base-non-thinking-gemma4-26b-a4b-non-thinking",
+        gym_config_filename=(
+            "workplace_assistant_qwen35_4b_base_non_thinking_gemma4_26b_a4b_non_thinking.yaml"
+        ),
+        manager_backend="local_vllm",
+        evaluation_prompt_profile="student",
+        concurrency=16,
+        num_gpus=2,
+        max_model_len=131072,
+        subagent_graph="repository",
+        model_servers=(
+            ModelServer(
+                WORKPLACE_QWEN35_4B_BASE_MANAGER_MODEL_ID,
+                QWEN35_4B_BASE,
+                8064,
+                0,
+                0.90,
+                0,
+                thinking=False,
+                tool_call_parser="qwen3_xml",
+                reasoning_parser=None,
+                gdn_prefill_backend="triton",
+                dtype="bfloat16",
+            ),
+            replace(
+                MODELS[3],
+                gpu=1,
+                gpu_memory_utilization=0.90,
+                startup_wave=0,
+                thinking=False,
+            ),
+        ),
+    ),
+    DecomposerExperiment(
+        name="qwen35-4b-base-non-thinking-teacher-gemma4-26b-a4b-non-thinking",
+        gym_config_filename=(
+            "workplace_assistant_qwen35_4b_base_non_thinking_teacher_gemma4_26b_a4b_non_thinking.yaml"
+        ),
+        manager_backend="local_vllm",
+        evaluation_prompt_profile="teacher",
+        concurrency=16,
+        num_gpus=2,
+        max_model_len=131072,
+        subagent_graph="repository",
+        model_servers=(
+            ModelServer(
+                WORKPLACE_QWEN35_4B_BASE_MANAGER_MODEL_ID,
+                QWEN35_4B_BASE,
+                8065,
+                0,
+                0.90,
+                0,
+                thinking=False,
+                tool_call_parser="qwen3_xml",
+                reasoning_parser=None,
+                gdn_prefill_backend="triton",
+                dtype="bfloat16",
             ),
             replace(
                 MODELS[3],

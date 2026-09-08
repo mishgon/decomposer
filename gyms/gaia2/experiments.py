@@ -346,6 +346,23 @@ def filesystem_manifest() -> Path:
 
 
 @dataclass(frozen=True)
+class WorkerSampling:
+    """Subagent sampling for a worker from a different family than the manager.
+
+    GAIA2 otherwise shares one sampling block between the two actors, which only
+    holds while both are the same model family. The penalty fields stay optional
+    so an override can leave them unset exactly as the shared fields do.
+    """
+
+    temperature: float
+    top_p: float
+    top_k: int
+    min_p: float | None = None
+    presence_penalty: float | None = None
+    repetition_penalty: float | None = None
+
+
+@dataclass(frozen=True)
 class DecomposerExperiment:
     name: str
     worker_checkpoint: Path
@@ -376,6 +393,8 @@ class DecomposerExperiment:
     min_p: float | None = None
     presence_penalty: float | None = None
     repetition_penalty: float | None = None
+    # Overrides the sampling block above for the subagent alone; None inherits it.
+    worker_sampling: WorkerSampling | None = None
     gpu_memory_utilization: float = 0.90
     concurrency: int = 4
     manager_parallel_tool_calls: bool = False
@@ -1016,6 +1035,13 @@ GEMMA4_E2B_SFT_MIXED_V3_VLLM = Path(
 GEMMA4_E4B_SFT_MIXED_V3_VLLM = Path(
     "/mnt/share14T-2/sukhorukov/decomposer_artifacts/training/sft/checkpoints/gemma4-e4b-nonthinking-4gpu-mixed-v3/final-vllm"
 )
+
+# Qwen exports need no vllm_compat pass: that rebuilds Gemma-4's KV-shared
+# k_norm tensors and rejects a config without num_kv_shared_layers.
+QWEN35_4B_SFT_MIXED_V3 = Path(
+    "/mnt/share14T-2/sukhorukov/decomposer_artifacts/training/sft/checkpoints"
+    "/qwen35-4b-nonthinking-mixed-v3-8gpu/final"
+)
 GEMMA4_E4B_SFT_MIXED_V3_DECOMPOSER_EXPERIMENT = DecomposerExperiment(
     name=("gemma4-e4b-sft-mixed-v3-non-thinking-gemma4-26b-a4b-non-thinking"),
     worker_checkpoint=GEMMA4_26B_A4B_BASE,
@@ -1056,6 +1082,191 @@ GEMMA4_E2B_SFT_MIXED_V3_DECOMPOSER_EXPERIMENT = DecomposerExperiment(
     subagent_max_model_calls=80,
     manager_recursion_limit=1000,
     subagent_recursion_limit=1000,
+)
+
+_QWEN35_SFT_MIXED_V3_SAMPLING = qwen35_general_sampling(thinking=False)
+QWEN35_SFT_MIXED_V3_DECOMPOSER_EXPERIMENT = DecomposerExperiment(
+    name="qwen35-4b-sft-mixed-v3-non-thinking-gemma4-26b-a4b-non-thinking",
+    worker_checkpoint=GEMMA4_26B_A4B_BASE,
+    manager_checkpoint=QWEN35_4B_SFT_MIXED_V3,
+    # The SFT release was built with the teacher prompt, so evaluate under it.
+    prompt_profile="teacher",
+    num_gpus=2,
+    manager_served_name="decomposer/qwen35-4b-sft-mixed-v3",
+    worker_served_name="google/gemma-4-26B-A4B-it",
+    manager_port=8040,
+    worker_port=8041,
+    service_port=8141,
+    subagent_port=2041,
+    max_model_len=131072,
+    # The manager runs Qwen3.5's official non-thinking preset; the Gemma worker
+    # keeps the preset every other 26B-A4B profile uses.
+    temperature=_QWEN35_SFT_MIXED_V3_SAMPLING.temperature,
+    top_p=_QWEN35_SFT_MIXED_V3_SAMPLING.top_p,
+    top_k=_QWEN35_SFT_MIXED_V3_SAMPLING.top_k,
+    min_p=_QWEN35_SFT_MIXED_V3_SAMPLING.min_p,
+    presence_penalty=_QWEN35_SFT_MIXED_V3_SAMPLING.presence_penalty,
+    repetition_penalty=_QWEN35_SFT_MIXED_V3_SAMPLING.repetition_penalty,
+    worker_sampling=WorkerSampling(temperature=1.0, top_p=0.95, top_k=64),
+    manager_thinking=False,
+    manager_tool_call_parser="qwen3_xml",
+    manager_reasoning_parser=None,
+    manager_gdn_prefill_backend="triton",
+    worker_thinking=False,
+    manager_max_model_calls=80,
+    subagent_max_model_calls=80,
+    manager_recursion_limit=1000,
+    subagent_recursion_limit=1000,
+)
+
+QWEN35_SFT_MIXED_V3_E4B_DECOMPOSER_EXPERIMENT = replace(
+    QWEN35_SFT_MIXED_V3_DECOMPOSER_EXPERIMENT,
+    name="qwen35-4b-sft-mixed-v3-non-thinking-gemma4-e4b-non-thinking",
+    worker_checkpoint=GEMMA4_E4B_BASE,
+    worker_served_name="google/gemma-4-E4B-it",
+    manager_port=8042,
+    worker_port=8043,
+    service_port=8143,
+    subagent_port=2042,
+)
+QWEN35_SFT_MIXED_V3_E2B_DECOMPOSER_EXPERIMENT = replace(
+    QWEN35_SFT_MIXED_V3_DECOMPOSER_EXPERIMENT,
+    name="qwen35-4b-sft-mixed-v3-non-thinking-gemma4-e2b-non-thinking",
+    worker_checkpoint=GEMMA4_E2B_BASE,
+    worker_served_name="google/gemma-4-E2B-it",
+    manager_port=8044,
+    worker_port=8045,
+    service_port=8144,
+    subagent_port=2043,
+)
+
+# Untuned-manager baselines. The manager is the raw Qwen3.5-4B snapshot rather
+# than an SFT export, so unlike the tuned entries it needs the multimodal loader
+# and remote code; the Gemma workers keep their own parsers and sampling. Each
+# pairing is registered twice, once per prompt profile, with its own ports so the
+# two can run concurrently.
+
+QWEN35_BASE_E2B_DECOMPOSER_EXPERIMENT = DecomposerExperiment(
+    name="qwen35-4b-base-non-thinking-gemma4-e2b-non-thinking",
+    worker_checkpoint=GEMMA4_E2B_BASE,
+    manager_checkpoint=QWEN35_4B_BASE,
+    manager_served_name=QWEN35_4B_BASE_MANAGER_SERVED_NAME,
+    worker_served_name="google/gemma-4-E2B-it",
+    num_gpus=2,
+    manager_port=8046,
+    worker_port=8047,
+    service_port=8146,
+    subagent_port=2044,
+    max_model_len=131072,
+    temperature=_QWEN35_NON_THINKING_SAMPLING.temperature,
+    top_p=_QWEN35_NON_THINKING_SAMPLING.top_p,
+    top_k=_QWEN35_NON_THINKING_SAMPLING.top_k,
+    min_p=_QWEN35_NON_THINKING_SAMPLING.min_p,
+    presence_penalty=_QWEN35_NON_THINKING_SAMPLING.presence_penalty,
+    repetition_penalty=_QWEN35_NON_THINKING_SAMPLING.repetition_penalty,
+    worker_sampling=WorkerSampling(temperature=1.0, top_p=0.95, top_k=64),
+    manager_thinking=False,
+    manager_tool_call_parser="qwen3_xml",
+    manager_reasoning_parser=None,
+    manager_language_model_only=False,
+    manager_trust_remote_code=True,
+    manager_gdn_prefill_backend="triton",
+    worker_thinking=False,
+    manager_max_model_calls=80,
+    subagent_max_model_calls=80,
+    manager_recursion_limit=1000,
+    subagent_recursion_limit=1000,
+)
+QWEN35_BASE_TEACHER_E2B_DECOMPOSER_EXPERIMENT = replace(
+    QWEN35_BASE_E2B_DECOMPOSER_EXPERIMENT,
+    name="qwen35-4b-base-non-thinking-teacher-gemma4-e2b-non-thinking",
+    prompt_profile="teacher",
+    manager_port=8048,
+    worker_port=8049,
+    service_port=8147,
+    subagent_port=2045,
+)
+
+QWEN35_BASE_E4B_DECOMPOSER_EXPERIMENT = DecomposerExperiment(
+    name="qwen35-4b-base-non-thinking-gemma4-e4b-non-thinking",
+    worker_checkpoint=GEMMA4_E4B_BASE,
+    manager_checkpoint=QWEN35_4B_BASE,
+    manager_served_name=QWEN35_4B_BASE_MANAGER_SERVED_NAME,
+    worker_served_name="google/gemma-4-E4B-it",
+    num_gpus=2,
+    manager_port=8050,
+    worker_port=8051,
+    service_port=8148,
+    subagent_port=2046,
+    max_model_len=131072,
+    temperature=_QWEN35_NON_THINKING_SAMPLING.temperature,
+    top_p=_QWEN35_NON_THINKING_SAMPLING.top_p,
+    top_k=_QWEN35_NON_THINKING_SAMPLING.top_k,
+    min_p=_QWEN35_NON_THINKING_SAMPLING.min_p,
+    presence_penalty=_QWEN35_NON_THINKING_SAMPLING.presence_penalty,
+    repetition_penalty=_QWEN35_NON_THINKING_SAMPLING.repetition_penalty,
+    worker_sampling=WorkerSampling(temperature=1.0, top_p=0.95, top_k=64),
+    manager_thinking=False,
+    manager_tool_call_parser="qwen3_xml",
+    manager_reasoning_parser=None,
+    manager_language_model_only=False,
+    manager_trust_remote_code=True,
+    manager_gdn_prefill_backend="triton",
+    worker_thinking=False,
+    manager_max_model_calls=80,
+    subagent_max_model_calls=80,
+    manager_recursion_limit=1000,
+    subagent_recursion_limit=1000,
+)
+QWEN35_BASE_TEACHER_E4B_DECOMPOSER_EXPERIMENT = replace(
+    QWEN35_BASE_E4B_DECOMPOSER_EXPERIMENT,
+    name="qwen35-4b-base-non-thinking-teacher-gemma4-e4b-non-thinking",
+    prompt_profile="teacher",
+    manager_port=8052,
+    worker_port=8053,
+    service_port=8149,
+    subagent_port=2047,
+)
+
+QWEN35_BASE_26B_A4B_DECOMPOSER_EXPERIMENT = DecomposerExperiment(
+    name="qwen35-4b-base-non-thinking-gemma4-26b-a4b-non-thinking",
+    worker_checkpoint=GEMMA4_26B_A4B_BASE,
+    manager_checkpoint=QWEN35_4B_BASE,
+    manager_served_name=QWEN35_4B_BASE_MANAGER_SERVED_NAME,
+    worker_served_name="google/gemma-4-26B-A4B-it",
+    num_gpus=2,
+    manager_port=8054,
+    worker_port=8055,
+    service_port=8150,
+    subagent_port=2048,
+    max_model_len=131072,
+    temperature=_QWEN35_NON_THINKING_SAMPLING.temperature,
+    top_p=_QWEN35_NON_THINKING_SAMPLING.top_p,
+    top_k=_QWEN35_NON_THINKING_SAMPLING.top_k,
+    min_p=_QWEN35_NON_THINKING_SAMPLING.min_p,
+    presence_penalty=_QWEN35_NON_THINKING_SAMPLING.presence_penalty,
+    repetition_penalty=_QWEN35_NON_THINKING_SAMPLING.repetition_penalty,
+    worker_sampling=WorkerSampling(temperature=1.0, top_p=0.95, top_k=64),
+    manager_thinking=False,
+    manager_tool_call_parser="qwen3_xml",
+    manager_reasoning_parser=None,
+    manager_language_model_only=False,
+    manager_trust_remote_code=True,
+    manager_gdn_prefill_backend="triton",
+    worker_thinking=False,
+    manager_max_model_calls=80,
+    subagent_max_model_calls=80,
+    manager_recursion_limit=1000,
+    subagent_recursion_limit=1000,
+)
+QWEN35_BASE_TEACHER_26B_A4B_DECOMPOSER_EXPERIMENT = replace(
+    QWEN35_BASE_26B_A4B_DECOMPOSER_EXPERIMENT,
+    name="qwen35-4b-base-non-thinking-teacher-gemma4-26b-a4b-non-thinking",
+    prompt_profile="teacher",
+    manager_port=8056,
+    worker_port=8057,
+    service_port=8151,
+    subagent_port=2049,
 )
 DEEPSEEK_PRO_GEMMA4_26B_NON_THINKING_EXPERIMENT = DecomposerExperiment(
     name="deepseek-v4-pro-0813-teacher-gemma4-26b-a4b-non-thinking",
@@ -1251,6 +1462,15 @@ ALL_EXPERIMENTS: tuple[Experiment, ...] = (
     DEEPSEEK_PRO_GEMMA4_26B_NON_THINKING_EXPERIMENT,
     GEMMA4_E2B_SFT_MIXED_V3_DECOMPOSER_EXPERIMENT,
     GEMMA4_E4B_SFT_MIXED_V3_DECOMPOSER_EXPERIMENT,
+    QWEN35_SFT_MIXED_V3_DECOMPOSER_EXPERIMENT,
+    QWEN35_SFT_MIXED_V3_E4B_DECOMPOSER_EXPERIMENT,
+    QWEN35_SFT_MIXED_V3_E2B_DECOMPOSER_EXPERIMENT,
+    QWEN35_BASE_E2B_DECOMPOSER_EXPERIMENT,
+    QWEN35_BASE_TEACHER_E2B_DECOMPOSER_EXPERIMENT,
+    QWEN35_BASE_E4B_DECOMPOSER_EXPERIMENT,
+    QWEN35_BASE_TEACHER_E4B_DECOMPOSER_EXPERIMENT,
+    QWEN35_BASE_26B_A4B_DECOMPOSER_EXPERIMENT,
+    QWEN35_BASE_TEACHER_26B_A4B_DECOMPOSER_EXPERIMENT,
 )
 EXPERIMENTS = {experiment.name: experiment for experiment in ALL_EXPERIMENTS}
 if len(EXPERIMENTS) != len(ALL_EXPERIMENTS):

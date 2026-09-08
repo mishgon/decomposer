@@ -763,15 +763,18 @@ def subagent_environment(
     experiment: DecomposerExperiment,
     ports: Gaia2PortLayout = DEFAULT_PORT_LAYOUT,
 ) -> dict[str, str]:
+    # A mixed-family pair overrides the shared block for the worker alone; without
+    # an override the worker keeps reading the experiment's own sampling fields.
+    sampling = experiment.worker_sampling or experiment
     environment = {
         "GAIA2_SUBAGENT_MODEL": experiment.worker_served_name,
         "GAIA2_SUBAGENT_ENDPOINT": (
             f"http://127.0.0.1:{ports.worker_port(experiment)}/v1"
         ),
         "GAIA2_SUBAGENT_API_KEY": "EMPTY",
-        "GAIA2_SUBAGENT_TEMPERATURE": str(experiment.temperature),
-        "GAIA2_SUBAGENT_TOP_P": str(experiment.top_p),
-        "GAIA2_SUBAGENT_TOP_K": str(experiment.top_k),
+        "GAIA2_SUBAGENT_TEMPERATURE": str(sampling.temperature),
+        "GAIA2_SUBAGENT_TOP_P": str(sampling.top_p),
+        "GAIA2_SUBAGENT_TOP_K": str(sampling.top_k),
         "GAIA2_SUBAGENT_MAX_MODEL_LEN": str(experiment.max_model_len),
         "GAIA2_SUBAGENT_THINKING": "1" if experiment.worker_thinking else "0",
     }
@@ -779,15 +782,15 @@ def subagent_environment(
         environment["GAIA2_SUBAGENT_MAX_COMPLETION_TOKENS"] = str(
             experiment.max_completion_tokens
         )
-    if experiment.min_p is not None:
-        environment["GAIA2_SUBAGENT_MIN_P"] = str(experiment.min_p)
-    if experiment.presence_penalty is not None:
+    if sampling.min_p is not None:
+        environment["GAIA2_SUBAGENT_MIN_P"] = str(sampling.min_p)
+    if sampling.presence_penalty is not None:
         environment["GAIA2_SUBAGENT_PRESENCE_PENALTY"] = str(
-            experiment.presence_penalty
+            sampling.presence_penalty
         )
-    if experiment.repetition_penalty is not None:
+    if sampling.repetition_penalty is not None:
         environment["GAIA2_SUBAGENT_REPETITION_PENALTY"] = str(
-            experiment.repetition_penalty
+            sampling.repetition_penalty
         )
     if experiment.subagent_max_model_calls is not None:
         environment["GAIA2_SUBAGENT_MAX_MODEL_CALLS"] = str(
