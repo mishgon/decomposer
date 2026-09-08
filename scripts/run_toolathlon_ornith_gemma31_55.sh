@@ -44,6 +44,6 @@ exec "$repo/.venv/bin/python" "$repo/gyms/toolathlon/run.py" \
   --n-jobs-per-worker 1000 \
   --agent-timeout 5400 \
   --episode-timeout 6000 \
-  --image decomposer-toolathlon-ornith-repro:eff2ea0 \
+  --image decomposer-toolathlon-ornith-repro:latest \
   --max-tool-output-chars 100000 \
   --bench-artifacts-dir "$artifacts"
