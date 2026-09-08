@@ -456,6 +456,13 @@ WORKPLACE_QWEN35_SFT_MIXED_V3_FINAL = Path(
     "/qwen35-4b-nonthinking-mixed-v3-8gpu/final"
 )
 
+WORKPLACE_QWEN35_SFT_STUDENT_MODEL_ID = "decomposer/qwen35-4b-sft-student"
+# Same distillation data as the release above, stamped with the student prompt.
+WORKPLACE_QWEN35_SFT_STUDENT_FINAL = Path(
+    "/mnt/share14T-2/sukhorukov/decomposer_artifacts/training/sft/checkpoints"
+    "/qwen35-4b-nonthinking-mixed-v3-student-4gpu/final"
+)
+
 WORKPLACE_QWEN35_4B_SFT_MODEL_ID = "decomposer/qwen35-4b-sft-workplace-v1-3765-32k"
 WORKPLACE_QWEN35_4B_BASE_MANAGER_MODEL_ID = "decomposer/qwen35-4b-base-manager"
 WORKPLACE_QWEN35_4B_SFT_FINAL = (
@@ -1252,6 +1259,128 @@ DECOMPOSER_EXPERIMENTS = (
             # a two-GPU non-thinking pairing overrides all four.
             replace(
                 MODELS[1],
+                gpu=1,
+                gpu_memory_utilization=0.90,
+                startup_wave=0,
+                thinking=False,
+            ),
+        ),
+    ),
+    # The student-prompt SFT release, on the same nine-run grid as the
+    # teacher-prompt one so the two are directly comparable.
+    DecomposerExperiment(
+        name="qwen35-4b-sft-student-non-thinking-gemma4-26b-a4b-non-thinking",
+        gym_config_filename=(
+            "workplace_assistant_qwen35_4b_sft_student_"
+            "non_thinking_gemma4_26b_a4b_non_thinking.yaml"
+        ),
+        manager_backend="local_vllm",
+        # The checkpoint was trained on the student prompt, so evaluate under it.
+        evaluation_prompt_profile="student",
+        # Sixty-four saturated the single-worker langgraph event loop; sixteen is
+        # what every comparable pairing uses.
+        concurrency=16,
+        num_gpus=2,
+        subagent_graph="repository",
+        model_servers=(
+            ModelServer(
+                WORKPLACE_QWEN35_SFT_STUDENT_MODEL_ID,
+                WORKPLACE_QWEN35_SFT_STUDENT_FINAL,
+                8066,
+                0,
+                0.90,
+                0,
+                thinking=False,
+                tool_call_parser="qwen3_xml",
+                # Non-thinking Qwen3.5 closes the think block inside the prompt,
+                # so the completion carries no tags for a reasoning parser.
+                reasoning_parser=None,
+                gdn_prefill_backend="triton",
+                dtype="bfloat16",
+            ),
+            replace(
+                MODELS[3],
+                gpu=1,
+                gpu_memory_utilization=0.90,
+                startup_wave=0,
+                thinking=False,
+            ),
+        ),
+    ),
+    DecomposerExperiment(
+        name="qwen35-4b-sft-student-non-thinking-gemma4-e4b-non-thinking",
+        gym_config_filename=(
+            "workplace_assistant_qwen35_4b_sft_student_"
+            "non_thinking_gemma4_e4b_non_thinking.yaml"
+        ),
+        manager_backend="local_vllm",
+        # The checkpoint was trained on the student prompt, so evaluate under it.
+        evaluation_prompt_profile="student",
+        # Sixty-four saturated the single-worker langgraph event loop; sixteen is
+        # what every comparable pairing uses.
+        concurrency=16,
+        num_gpus=2,
+        subagent_graph="repository",
+        model_servers=(
+            ModelServer(
+                WORKPLACE_QWEN35_SFT_STUDENT_MODEL_ID,
+                WORKPLACE_QWEN35_SFT_STUDENT_FINAL,
+                8067,
+                0,
+                0.90,
+                0,
+                thinking=False,
+                tool_call_parser="qwen3_xml",
+                # Non-thinking Qwen3.5 closes the think block inside the prompt,
+                # so the completion carries no tags for a reasoning parser.
+                reasoning_parser=None,
+                gdn_prefill_backend="triton",
+                dtype="bfloat16",
+            ),
+            # MODELS[1] ships gpu 0, utilization 0.60, wave 1 and thinking on;
+            # a two-GPU non-thinking pairing overrides all four.
+            replace(
+                MODELS[1],
+                gpu=1,
+                gpu_memory_utilization=0.90,
+                startup_wave=0,
+                thinking=False,
+            ),
+        ),
+    ),
+    DecomposerExperiment(
+        name="qwen35-4b-sft-student-non-thinking-gemma4-e2b-non-thinking",
+        gym_config_filename=(
+            "workplace_assistant_qwen35_4b_sft_student_"
+            "non_thinking_gemma4_e2b_non_thinking.yaml"
+        ),
+        manager_backend="local_vllm",
+        # The checkpoint was trained on the student prompt, so evaluate under it.
+        evaluation_prompt_profile="student",
+        # Sixty-four saturated the single-worker langgraph event loop; sixteen is
+        # what every comparable pairing uses.
+        concurrency=16,
+        num_gpus=2,
+        subagent_graph="repository",
+        model_servers=(
+            ModelServer(
+                WORKPLACE_QWEN35_SFT_STUDENT_MODEL_ID,
+                WORKPLACE_QWEN35_SFT_STUDENT_FINAL,
+                8068,
+                0,
+                0.90,
+                0,
+                thinking=False,
+                tool_call_parser="qwen3_xml",
+                # Non-thinking Qwen3.5 closes the think block inside the prompt,
+                # so the completion carries no tags for a reasoning parser.
+                reasoning_parser=None,
+                gdn_prefill_backend="triton",
+                dtype="bfloat16",
+            ),
+            # MODELS[0] ships utilization 0.30; a dedicated card wants 0.90.
+            replace(
+                MODELS[0],
                 gpu=1,
                 gpu_memory_utilization=0.90,
                 startup_wave=0,

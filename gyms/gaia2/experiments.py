@@ -1042,6 +1042,13 @@ QWEN35_4B_SFT_MIXED_V3 = Path(
     "/mnt/share14T-2/sukhorukov/decomposer_artifacts/training/sft/checkpoints"
     "/qwen35-4b-nonthinking-mixed-v3-8gpu/final"
 )
+# Same distillation data as the release above, stamped with the 111-character
+# student prompt instead of the 7,842-character teacher prompt, to test whether
+# the policy is carried by the demonstrations rather than by the prompt.
+QWEN35_4B_SFT_MIXED_V3_STUDENT = Path(
+    "/mnt/share14T-2/sukhorukov/decomposer_artifacts/training/sft/checkpoints"
+    "/qwen35-4b-nonthinking-mixed-v3-student-4gpu/final"
+)
 GEMMA4_E4B_SFT_MIXED_V3_DECOMPOSER_EXPERIMENT = DecomposerExperiment(
     name=("gemma4-e4b-sft-mixed-v3-non-thinking-gemma4-26b-a4b-non-thinking"),
     worker_checkpoint=GEMMA4_26B_A4B_BASE,
@@ -1138,6 +1145,41 @@ QWEN35_SFT_MIXED_V3_E2B_DECOMPOSER_EXPERIMENT = replace(
     worker_port=8045,
     service_port=8144,
     subagent_port=2043,
+)
+
+# The student-prompt release. Identical to the trio above except for the
+# checkpoint and prompt_profile: same worker sampling, same budgets, so a
+# difference in results is attributable to what the manager was trained under.
+QWEN35_SFT_STUDENT_DECOMPOSER_EXPERIMENT = replace(
+    QWEN35_SFT_MIXED_V3_DECOMPOSER_EXPERIMENT,
+    name="qwen35-4b-sft-student-non-thinking-gemma4-26b-a4b-non-thinking",
+    manager_checkpoint=QWEN35_4B_SFT_MIXED_V3_STUDENT,
+    manager_served_name="decomposer/qwen35-4b-sft-student",
+    prompt_profile="student",
+    manager_port=8070,
+    worker_port=8071,
+    service_port=8152,
+    subagent_port=2050,
+)
+QWEN35_SFT_STUDENT_E4B_DECOMPOSER_EXPERIMENT = replace(
+    QWEN35_SFT_STUDENT_DECOMPOSER_EXPERIMENT,
+    name="qwen35-4b-sft-student-non-thinking-gemma4-e4b-non-thinking",
+    worker_checkpoint=GEMMA4_E4B_BASE,
+    worker_served_name="google/gemma-4-E4B-it",
+    manager_port=8072,
+    worker_port=8073,
+    service_port=8153,
+    subagent_port=2051,
+)
+QWEN35_SFT_STUDENT_E2B_DECOMPOSER_EXPERIMENT = replace(
+    QWEN35_SFT_STUDENT_DECOMPOSER_EXPERIMENT,
+    name="qwen35-4b-sft-student-non-thinking-gemma4-e2b-non-thinking",
+    worker_checkpoint=GEMMA4_E2B_BASE,
+    worker_served_name="google/gemma-4-E2B-it",
+    manager_port=8074,
+    worker_port=8075,
+    service_port=8154,
+    subagent_port=2052,
 )
 
 # Untuned-manager baselines. The manager is the raw Qwen3.5-4B snapshot rather
@@ -1465,6 +1507,9 @@ ALL_EXPERIMENTS: tuple[Experiment, ...] = (
     QWEN35_SFT_MIXED_V3_DECOMPOSER_EXPERIMENT,
     QWEN35_SFT_MIXED_V3_E4B_DECOMPOSER_EXPERIMENT,
     QWEN35_SFT_MIXED_V3_E2B_DECOMPOSER_EXPERIMENT,
+    QWEN35_SFT_STUDENT_DECOMPOSER_EXPERIMENT,
+    QWEN35_SFT_STUDENT_E4B_DECOMPOSER_EXPERIMENT,
+    QWEN35_SFT_STUDENT_E2B_DECOMPOSER_EXPERIMENT,
     QWEN35_BASE_E2B_DECOMPOSER_EXPERIMENT,
     QWEN35_BASE_TEACHER_E2B_DECOMPOSER_EXPERIMENT,
     QWEN35_BASE_E4B_DECOMPOSER_EXPERIMENT,

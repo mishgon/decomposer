@@ -49,9 +49,9 @@ from gyms.qwen_sampling import qwen35_general_sampling
 
 
 def test_registry_is_global_and_unique() -> None:
-    assert len(DECOMPOSER_EXPERIMENTS) == 35
+    assert len(DECOMPOSER_EXPERIMENTS) == 38
     assert len(SIMPLE_EXPERIMENTS) == 32
-    assert len(experiments.EXPERIMENTS) == 67
+    assert len(experiments.EXPERIMENTS) == 70
     assert experiments.BASE_IMAGE.endswith("py3.12-torch2.7.0:0.0.42")
     assert {experiment.kind for experiment in experiments.ALL_EXPERIMENTS} == {
         "decomposer",

@@ -1,0 +1,107 @@
+model:
+  name_or_path: Qwen/Qwen3.5-4B
+  revision: 851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a
+  dtype: bfloat16
+  attn_implementation: kernels-community/flash-attn2@c269cc539ad0c1fc0899abd4b05ecc1303d6c4b1
+  trust_remote_code: false
+
+data:
+  train_file: /home/sukhorukov/decomposer_artifacts/datasets/sft/decomposer-mixed-deepseek-qwen35-4b-nonthinking/v5-wp-effort-max-pooled-1152-tool-b97bced8-newest-pass-or-qge90-32k-student/train.jsonl
+  validation_file: /home/sukhorukov/decomposer_artifacts/datasets/sft/decomposer-mixed-deepseek-qwen35-4b-nonthinking/v5-wp-effort-max-pooled-1152-tool-b97bced8-newest-pass-or-qge90-32k-student/validation.jsonl
+  manifest_file: /home/sukhorukov/decomposer_artifacts/datasets/sft/decomposer-mixed-deepseek-qwen35-4b-nonthinking/v5-wp-effort-max-pooled-1152-tool-b97bced8-newest-pass-or-qge90-32k-student/manifest.json
+  expected_system_prompt_profile: student
+  include_reasoning: false
+  require_prepared_tokenization: true
+  error_on_truncation: true
+  exclude_overlength: true
+  num_proc: 8
+  max_train_samples: null
+  max_eval_samples: null
+
+training:
+  output_dir: /mnt/share14T-2/sukhorukov/decomposer_artifacts/training/sft/checkpoints/qwen35-4b-nonthinking-mixed-v3-student-4gpu
+  run_name: qwen35-4b-nonthinking-mixed-v3-student-4gpu
+  max_length: 32768
+  per_device_train_batch_size: 2
+  per_device_eval_batch_size: 1
+  # Four ranks at per-device two derive accumulation two. The global batch is
+  # unchanged from the eight-GPU teacher run, so the optimizer math -- and with
+  # it the learning rate below -- stays identical and the two checkpoints remain
+  # comparable. Four rather than eight because GPU 3 belongs to another user.
+  global_batch_size: 16
+  train_sampling_strategy: group_by_length
+  length_column_name: _token_length
+  num_train_epochs: 5
+  # Square-root scaling from 1.0e-5 as the global batch doubles from eight.
+  learning_rate: 1.4e-5
+  lr_scheduler_type: cosine
+  warmup_ratio: 0.03
+  weight_decay: 0.1
+  max_grad_norm: 1.0
+  optim: adamw_torch_fused
+  loss_type: chunked_nll
+  use_liger_kernel: true
+  liger_kernel_config:
+    fused_linear_cross_entropy: true
+    cross_entropy: false
+    rms_norm: false
+    swiglu: false
+    rope: false
+  bf16: true
+  tf32: true
+  use_cache: false
+  gradient_checkpointing: false
+  packing: false
+  eval_strategy: epoch
+  save_strategy: epoch
+  save_total_limit: 2
+  load_best_model_at_end: true
+  metric_for_best_model: eval_loss
+  greater_is_better: false
+  logging_strategy: steps
+  logging_steps: 1
+  logging_first_step: true
+  include_num_input_tokens_seen: true
+  prediction_loss_only: true
+  seed: 42
+  data_seed: 42
+  dataloader_num_workers: 4
+  dataloader_pin_memory: true
+  fsdp: true
+  fsdp_config:
+    auto_wrap_policy: TRANSFORMER_BASED_WRAP
+    reshard_after_forward: true
+    cpu_offload: false
+    activation_checkpointing: true
+    state_dict_type: SHARDED_STATE_DICT
+    cpu_ram_efficient_loading: false
+    sync_module_states: true
+
+clearml:
+  enabled: true
+  weight_norm_interval_steps: 10
+  project: decomposer
+  task: Qwen3.5-4B Decomposer SFT non-thinking mixed v3 student prompt 4 GPU
+  tags:
+    - sft
+    - qwen3.5-4b
+    - workplace-assistant
+    - toolathlon-gym
+    - hf-fa2
+    - fla
+    - global-batch-16
+    - student-prompt
+  log_model: false
+  output_uri: null
+
+run:
+  expected_world_size: 4
+  # The qwen35-hf-fa2-fla-v1 bundle was built on the MLSpace cluster and does
+  # not exist on this host, where triton is 3.6.0 and causal-conv1d is absent.
+  # The kernels-hub FlashAttention-2 build above is cached and still used.
+  disable_cudnn_sdpa: true
+  resume_from_checkpoint: null
+  overwrite_output_dir: false
+  early_stopping:
+    patience: 1
+    threshold: 0.0
