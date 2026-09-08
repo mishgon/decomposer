@@ -1,0 +1,80 @@
+spec_version: 3
+
+dataset:
+  id: decomposer-mixed-deepseek-qwen35-4b-nonthinking
+  version: v5-wp-effort-max-pooled-1152-tool-b97bced8-newest-pass-or-qge90-32k-student
+
+# Identical to the v4 release except for the system prompt the traces are stamped
+# with. v4 trains the manager under the 7,842-character teacher prompt; this one
+# uses the 111-character student prompt, to test whether the policy is carried by
+# the demonstrations rather than by the prompt describing the harness. The
+# assistant turns are byte-identical, and the prompt-fixed split is computed
+# before tokenization, so the two releases stay directly comparable.
+policy:
+  id: decomposer-default
+  system_prompt_profile: student
+  subagent_types:
+    - id: subagent_non_thinking
+      description: General-purpose tool-calling agent with access to the environment tools.
+
+sources:
+  # Pooled Workplace release: one successful trace per task, worker varied across
+  # gemma-4-26B-A4B / E4B / E2B (384 / 384 / 384), built from the effort=max runs.
+  - id: workplace-deepseek-v4-flash-0731-gemma4-nonthinking-effort-max-pooled
+    adapter: nemo_gym
+    path: /home/sukhorukov/decomposer_artifacts/evaluation/data/sft_sources/workplace-effort-max-pooled
+    benchmark: workplace_assistant
+    environment: workplace_assistant
+    partition: train
+    teacher: deepseek-v4-flash-0731
+    subagent_type_aliases:
+      gemma_4_26b_a4b_non_thinking: subagent_non_thinking
+      gemma_4_4b_non_thinking: subagent_non_thinking
+      gemma_4_2b_non_thinking: subagent_non_thinking
+    expected_native_rollouts: 1152
+    expected_candidates: 1152
+    selection:
+      policy: exact_reward
+      success_reward: 1.0
+  # Toolathlon run b97bced8, fuller export (2212 traces vs 1912 in the first
+  # snapshot). The run was interrupted (status "running"), so completed traces are
+  # read directly. Check ratios come from native counts where present and from the
+  # evaluator's printed output otherwise.
+  - id: toolathlon-deepseek-v4-flash-0731-gemma4-26b-a4b-nonthinking-b97bced8
+    adapter: toolathlon_gym
+    path: /home/sukhorukov/decomposer_artifacts/evaluation/data/toolathlon_gym/imports/snapshots/b97bced8-newest/20260904T142912Z-b97bced8
+    benchmark: toolathlon_gym
+    environment: toolathlon_gym
+    partition: train
+    teacher: deepseek-v4-flash-0731
+    trace_format: toolathlon_legacy_unversioned
+    subagent_type_aliases:
+      configured_non_thinking: subagent_non_thinking
+    expected_native_rollouts: 2212
+    expected_candidates: 2212
+    require_completed_run: false
+    selection:
+      policy: toolathlon_pass_or_quality_inclusive
+      success_reward: 1.0
+      minimum_check_ratio_inclusive: 0.9
+
+selection:
+  policy: all_rewards
+  success_reward: 1.0
+  invalid_policy: exclude
+  max_traces_per_prompt_per_teacher: null
+
+split:
+  strategy: prompt_fixed
+  validation_fraction: 0.1
+  seed: 42
+
+# The Qwen3.5 student needs its own prepared tokenization: the 32K envelope and
+# the loss-masked template are both tokenizer-specific, so the gemma-4 release of
+# the same sources cannot be reused.
+tokenization:
+  profile: qwen35_sft_non_thinking
+  tokenizer: Qwen/Qwen3.5-4B
+  revision: 851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a
+  max_tokens: 32768
+  trust_remote_code: false
