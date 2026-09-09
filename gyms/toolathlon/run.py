@@ -1725,8 +1725,6 @@ def main() -> None:
         parser.error(
             "--subagent-gpu must list exactly --vllm-data-parallel-size GPU IDs"
         )
-    if args.subagent_provider == "vllm" and args.vllm_data_parallel_size != 1:
-        parser.error("Toolathlon evaluation permits exactly one GPU per model")
     ensure_benchmark_checkout(TOOLATHLON_ROOT)
     if not TASK_PATH_RE.fullmatch(args.task):
         raise ValueError(

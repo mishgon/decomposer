@@ -461,8 +461,6 @@ def parse_args(argv: Sequence[str], defaults: dict[str, Any]) -> argparse.Namesp
         parser.error(
             "--subagent-gpu must list exactly --vllm-data-parallel-size GPU IDs"
         )
-    if args.subagent_provider == "vllm" and args.vllm_data_parallel_size != 1:
-        parser.error("Toolathlon evaluation permits exactly one GPU per model")
     if args.subagent_ports:
         if len(set(args.subagent_ports)) != len(args.subagent_ports):
             parser.error("--subagent-ports must not contain duplicates")
