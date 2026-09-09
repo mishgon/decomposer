@@ -195,7 +195,7 @@ def test_default_episode_watchdog_covers_all_bounded_phases(tmp_path) -> None:
     assert args.episode_timeout >= args.agent_timeout + 600 + 180 + 1800
 
 
-def test_batch_rejects_more_than_one_gpu_per_model() -> None:
+def test_batch_accepts_matching_data_parallel_gpu_list() -> None:
     defaults = {
         "model": "teacher",
         "subagent_model": "subagent",
@@ -203,20 +203,22 @@ def test_batch_rejects_more_than_one_gpu_per_model() -> None:
         "image": "image",
         "artifacts_dir": Path("artifacts/gyms/toolathlon"),
     }
-    with pytest.raises(SystemExit):
-        batch.parse_args(
-            [
-                "--tasks",
-                "finalpool/example",
-                "--purpose",
-                "evaluation",
-                "--subagent-gpu",
-                "0,1",
-                "--vllm-data-parallel-size",
-                "2",
-            ],
-            defaults,
-        )
+    args = batch.parse_args(
+        [
+            "--tasks",
+            "finalpool/example",
+            "--purpose",
+            "evaluation",
+            "--subagent-gpu",
+            "0,1",
+            "--vllm-data-parallel-size",
+            "2",
+        ],
+        defaults,
+    )
+
+    assert args.subagent_gpu == "0,1"
+    assert args.vllm_data_parallel_size == 2
 
 
 def test_evaluation_metrics_report_pass_at_and_pass_power_three() -> None:
