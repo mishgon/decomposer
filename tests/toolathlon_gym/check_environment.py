@@ -1,4 +1,4 @@
-"""Check real MCP fixture access and two-episode isolation without using a GPU."""
+"""Integration check: real MCP fixture access and isolation without model calls."""
 
 import argparse
 import json
