@@ -26,6 +26,12 @@ COPY gyms/toolathlon_gym/patches/mcp-canvas-lms-postgres.patch /tmp/
 RUN cd /opt/local_servers/mcp-canvas-lms \
     && git apply --no-index /tmp/mcp-canvas-lms-postgres.patch
 
+COPY gyms/toolathlon_gym/patches/emails-mcp-fixtures.patch /tmp/
+RUN cd /opt \
+    && git apply --no-index --check /tmp/emails-mcp-fixtures.patch \
+    && git apply --no-index /tmp/emails-mcp-fixtures.patch \
+    && uv sync --directory /opt/local_servers/emails-mcp --frozen
+
 RUN set -e; for server in \
         12306-mcp \
         Calendar-Autoauth-MCP-Server \
