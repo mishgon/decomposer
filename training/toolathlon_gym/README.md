@@ -1,7 +1,8 @@
 # Toolathlon-Gym RL
 
 Working branch: `we_rl_toolathlon_gym`. Remote checkout: `/home/matrosov/decomposer-rl`.
-This is the integration in progress, **not yet a runnable veRL trainer**.
+This is the integration in progress. GPU rollout/update smoke tests are underway;
+**reward improvement and checkpoint resume have not yet been verified**.
 Existing collection and benchmark checkouts remain separate.
 
 ## First piece: reproducible task selection
@@ -20,7 +21,45 @@ explicit, deterministic task-level holdout; the default reserves none. Repeated
 rollouts must inherit their task's split. This is a task manifest, not veRL's final
 prompt/parquet dataset. It does not assert that every task's infrastructure works.
 
-## Next integration steps
+## Setup and pilot
+
+```bash
+bash training/toolathlon_gym/setup.sh
+.venv-rl/bin/python -m training.toolathlon_gym.prepare_pilot \
+  --output artifacts/training/toolathlon_gym/pilot-data
+SUBAGENT_GPU=1 bash training/toolathlon_gym/serve_subagents.sh
+# In another shell, after the endpoint on port 8025 is ready:
+POLICY_GPU=0 bash training/toolathlon_gym/train.sh
+```
+
+The pilot starts from the original `Qwen3.5-4B`, not the previous SFT checkpoint.
+Only its rank-16 LoRA parameters train. Subagents use separately served, unchanged
+Qwen3.5-4B weights. The default is one policy GPU plus one frozen-subagent GPU.
+The 16 training / 8 validation tasks are hash-selected from local-fixture tasks,
+without consulting historical rewards. Each validation uses three rollouts per
+task; its tasks are never included in gradient updates. This is a small Gym pilot,
+not a whole-Gym performance claim.
+
+Smoke training budgets are 4K initial prompt plus 12K response/observation tokens;
+the frozen subagent server supports 256K context. The Decomposer and subagent
+recursion limits are 410. The episode wall-clock cap is 30 minutes. Budget-limited
+episodes are scored on partial state; unknown evaluator formats and infrastructure
+errors fail explicitly instead of receiving fabricated zero rewards.
+
+Generation uses Qwen's [non-thinking general-task recommendations](https://huggingface.co/Qwen/Qwen3.5-4B):
+temperature 0.7, top-p 0.8, top-k 20, presence penalty 1.5. Frozen-subagent prefix
+caching is enabled; trainable-policy caching is disabled across weight updates.
+Raw token IDs/logprobs are retained. Tool and middleware observations have zero
+loss mask. On new user feedback Qwen's full template would remove the previous
+empty thinking scaffold; the RL sequence retains its actual generation prefix
+instead of rewriting past policy tokens. No thinking text is generated in this mode.
+
+`~/watch-rl.sh` on Hertz-2 shows trainer liveness, episode counts and TensorBoard
+reward metrics. `--once` prints a single snapshot. No ETA is fabricated before
+training steps complete. Logs, native evaluations, model outputs and checkpoints
+live under `artifacts/training/toolathlon_gym/`.
+
+## Remaining verification
 
 1. Extract isolated episode start/score/stop from the Gym runner; test cancellation
    and scoring partial state without silently rewarding infrastructure failures.
