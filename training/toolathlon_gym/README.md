@@ -1,7 +1,7 @@
 # Toolathlon-Gym RL
 
 Working branch: `we_rl_toolathlon_gym`. Keep a separate checkout for RL.
-This is the integration in progress. GPU rollout/update smoke tests are underway;
+This is the integration in progress. A real GRPO update and checkpoint save passed;
 **reward improvement and checkpoint resume have not yet been verified**.
 Existing collection and benchmark checkouts remain separate.
 
@@ -43,6 +43,18 @@ without consulting historical rewards. Each validation uses three rollouts per
 task; its tasks are never included in gradient updates. This is a small Gym pilot,
 not a whole-Gym performance claim.
 
+`evaluation.parquet` additionally includes a fixed four-task training probe,
+reported separately from held-out validation. Both panels are measured before
+training and every four updates, with three rollouts per task. This avoids
+mistaking changes in training-batch difficulty for reward improvement. There are
+four environment workers sharing the same two GPUs.
+
+Known native-environment limitations: the email service defaults to
+`user@example.com`, although some tasks require another sender. Some native
+evaluators skip downstream checks after missing outputs, changing their partial
+score denominator. Preserve and inspect raw checks alongside scalar reward;
+neither limitation is evidence of a policy improvement.
+
 The small RL image extends an existing `decomposer-toolathlon:latest` Gym image.
 It connects the upstream WooCommerce/Notion PostgreSQL adapters; without those
 connections the clients attempt public HTTP endpoints despite a local database.
@@ -71,13 +83,9 @@ live under `artifacts/training/toolathlon_gym/`.
 
 ## Remaining verification
 
-1. Extract isolated episode start/score/stop from the Gym runner; test cancellation
-   and scoring partial state without silently rewarding infrastructure failures.
-2. Connect existing Decomposer delegation to veRL's generation interface, retaining
-   generated token IDs/logprobs and masking observations out of policy loss.
-3. Build a separate, pinned training environment aligned with the colleagues'
-   veRL 0.9 AgentLoop implementations. Do not install into the evaluation venv.
-4. Test two isolated episodes, one GRPO update, then checkpoint save/resume/export.
+1. Verify checkpoint resume/export (save and a nonzero-gradient update passed).
+2. Measure training-probe and held-out reward before and after training.
+3. Audit any improvement against raw evaluations, not only scalar rewards.
 
 No GPU allocation is made by task preparation. The model paths remain under
 `~/models` by default; override `MODEL_PATH` and `SUBAGENT_MODEL_PATH` as needed.
