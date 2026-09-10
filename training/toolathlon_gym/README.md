@@ -1,6 +1,6 @@
 # Toolathlon-Gym RL
 
-Working branch: `we_rl_toolathlon_gym`. Remote checkout: `/home/matrosov/decomposer-rl`.
+Working branch: `we_rl_toolathlon_gym`. Keep a separate checkout for RL.
 This is the integration in progress. GPU rollout/update smoke tests are underway;
 **reward improvement and checkpoint resume have not yet been verified**.
 Existing collection and benchmark checkouts remain separate.
@@ -70,7 +70,8 @@ live under `artifacts/training/toolathlon_gym/`.
 4. Test two isolated episodes, one GRPO update, then checkpoint save/resume/export.
 
 No GPU allocation is made by task preparation. The model paths remain under
-`/home/matrosov/models`; do not duplicate weights here. Put new training artifacts
+`~/models` by default; override `MODEL_PATH` and `SUBAGENT_MODEL_PATH` as needed.
+Do not duplicate weights here. Put new training artifacts
 under `artifacts/training/toolathlon_gym/<run_id>/`.
 See [the integration audit](../../docs/toolathlon_gym_verl_plan.md) for the design
 and reference revisions.

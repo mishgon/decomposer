@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/../.."
-uv_bin="${UV_BIN:-/home/matrosov/.local/bin/uv}"
+uv_bin="${UV_BIN:-uv}"
 verl_revision=483b8a009ba3a97563edee3a19887e4862b8094a
 if [ ! -d external/verl ]; then
     git clone https://github.com/volcengine/verl.git external/verl
