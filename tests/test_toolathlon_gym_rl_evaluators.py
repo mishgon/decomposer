@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from training.toolathlon_gym.check_evaluators import main
+from tests.toolathlon_gym.check_evaluators import main
 
 
 class EvaluatorPreflightTests(unittest.TestCase):
@@ -19,7 +19,7 @@ class EvaluatorPreflightTests(unittest.TestCase):
             argv = ["check", "--split", str(split), "--output", str(root / "out"),
                     "--workers", "1"]
             with patch("sys.argv", argv), patch(
-                "training.toolathlon_gym.check_evaluators.Episode", side_effect=[good, broken]
+                "tests.toolathlon_gym.check_evaluators.Episode", side_effect=[good, broken]
             ), self.assertRaises(SystemExit):
                 main()
             results = json.loads((root / "out/results.json").read_text())
