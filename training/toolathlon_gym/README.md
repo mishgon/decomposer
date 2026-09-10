@@ -104,8 +104,14 @@ instead of rewriting past policy tokens. No thinking text is generated in this m
 reward metrics. `--once` prints a single snapshot. The compact dashboard includes
 fixed-panel baseline/latest rewards, a batch-reward sparkline, gradient/clipping
 warnings and timeouts. “Cooking” means alive, not proven to be learning. Its ETA
-covers the whole scheduled pilot, including validation; until update timings
+covers the whole scheduled run, including validation; until update timings
 exist it is explicitly a low-confidence episode-throughput extrapolation.
+The same inspector handles smoke tests, subset runs and full training: task counts
+and train/evaluation overlap come from the configured datasets, while rollout
+counts come from the saved training schedule. It does not infer these from run names.
+By default it selects the newest recorded run. Use `--run /path/to/run` to inspect
+a specific run, or `--root /path/to/runs` to select another collection of runs.
+Missing historical dataset metadata is shown as unknown rather than guessed.
 Logs, native evaluations, model outputs and checkpoints
 live under `artifacts/training/toolathlon_gym/`.
 
