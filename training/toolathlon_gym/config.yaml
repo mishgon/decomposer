@@ -3,6 +3,10 @@ defaults:
   - _self_
 
 hydra:
+  run:
+    dir: ${oc.env:RL_ARTIFACTS}/hydra
+  job:
+    chdir: false
   searchpath:
     - pkg://verl.trainer.config
 
