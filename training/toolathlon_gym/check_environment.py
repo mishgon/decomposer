@@ -20,11 +20,12 @@ async def main():
                            "PGPASSWORD":"PG_PASSWORD"}.items():
         env[target] = env[source]
     env.update(WORDPRESS_SITE_URL="http://localhost:8081",
-               WOOCOMMERCE_CONSUMER_KEY="placeholder", WOOCOMMERCE_CONSUMER_SECRET="placeholder")
+               WOOCOMMERCE_CONSUMER_KEY="placeholder", WOOCOMMERCE_CONSUMER_SECRET="placeholder",
+               CANVAS_API_TOKEN="placeholder", CANVAS_DOMAIN="localhost:8080")
     async with stdio_client(StdioServerParameters(command="node", args=[sys.argv[1]], env=env)) as io:
         async with ClientSession(*io) as client:
             await client.initialize()
-            result = await client.call_tool(sys.argv[2], {})
+            result = await client.call_tool(sys.argv[2], json.loads(sys.argv[3]))
             if result.isError:
                 raise RuntimeError(str(result))
             print(json.dumps(result.model_dump()))
@@ -32,9 +33,10 @@ asyncio.run(main())
 '''
 
 
-def probe(episode, server, entry, tool):
+def probe(episode, server, entry, tool, arguments=None):
     result = episode.command("exec", episode.container, "/opt/subagents/bin/python", "-c",
-                             MCP_PROBE, f"/opt/local_servers/{server}/{entry}", tool)
+                             MCP_PROBE, f"/opt/local_servers/{server}/{entry}", tool,
+                             json.dumps(arguments or {}))
     response = json.loads(result.stdout.strip().splitlines()[-1])
     text = json.dumps(response)
     if any(error in text.lower() for error in ("econnrefused", "cloudflare", "connection refused")):
@@ -65,10 +67,17 @@ def main():
         body = json.loads(json.loads(notion)["content"][0]["text"])
         if body.get("object") != "list" or not isinstance(body.get("results"), list):
             raise RuntimeError("Notion did not return a valid search result")
+        episodes[0].command("exec", episodes[0].pg, "psql", "-U", "eigent", "-d", "toolathlon_gym", "-c",
+                            f"UPDATE canvas.users SET name = '{marker}' WHERE id = (SELECT min(id) FROM canvas.users);")
+        canvas = [probe(episode, "mcp-canvas-lms", "build/index.js", "canvas_list_account_users",
+                        {"account_id": 1}) for episode in episodes]
+        if marker not in canvas[0] or marker in canvas[1]:
+            raise RuntimeError("Canvas account users bypass local fixtures or are not isolated")
         report = {"woocommerce_reads_local_database": True, "duplicate_task_isolated": True,
+                  "canvas_account_users_reads_local_database": True,
                   "notion_response": json.loads(notion)}
         (args.output / "result.json").write_text(json.dumps(report, indent=2))
-        print("PASS: WooCommerce reads local fixtures; duplicate episodes are isolated; Notion MCP responded.")
+        print("PASS: WooCommerce and Canvas read isolated local fixtures; Notion MCP responded.")
     finally:
         for episode in started:
             episode.close()

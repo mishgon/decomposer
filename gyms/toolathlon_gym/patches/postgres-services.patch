@@ -65,3 +65,31 @@ index 7ecb218..6706551 100644
 -}
 \ No newline at end of file
 +}
+diff --git a/local_servers/mcp-canvas-lms/src/client.ts b/local_servers/mcp-canvas-lms/src/client.ts
+--- a/local_servers/mcp-canvas-lms/src/client.ts
++++ b/local_servers/mcp-canvas-lms/src/client.ts
+@@ -1016,6 +1016,6 @@ export class CanvasClient {
+     // Create a new axios instance without interceptors for this specific request
+     const { default: newAxios } = await import('axios');
+-    const simpleClient = newAxios.create({
++    const simpleClient = process.env.PG_HOST ? this.client : newAxios.create({
+       baseURL: this.baseURL,
+       headers: {
+         'Authorization': `Bearer ${this.token}`,
+diff --git a/local_servers/mcp-canvas-lms/src/index.ts b/local_servers/mcp-canvas-lms/src/index.ts
+--- a/local_servers/mcp-canvas-lms/src/index.ts
++++ b/local_servers/mcp-canvas-lms/src/index.ts
+@@ -1210,5 +1210,5 @@
+     process.on('SIGINT', async () => {
+-      console.log('\nReceived SIGINT, shutting down gracefully...');
++      console.error('\nReceived SIGINT, shutting down gracefully...');
+       await this.server.close();
+       process.exit(0);
+     });
+@@ -1216,5 +1216,5 @@
+     process.on('SIGTERM', async () => {
+-      console.log('\nReceived SIGTERM, shutting down gracefully...');
++      console.error('\nReceived SIGTERM, shutting down gracefully...');
+       await this.server.close();
+       process.exit(0);
+     });

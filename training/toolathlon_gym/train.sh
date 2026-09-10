@@ -7,6 +7,8 @@ export RL_DATA="${RL_DATA:-$PWD/artifacts/training/toolathlon_gym/pilot-data}"
 export RL_ARTIFACTS="${RL_ARTIFACTS:-$PWD/artifacts/training/toolathlon_gym/pilot}"
 export CUDA_VISIBLE_DEVICES="${POLICY_GPU:-0}"
 export SUBAGENT_PORT="${SUBAGENT_PORT:-8025}"
+RL_GYM_IMAGE=$(podman image inspect --format '{{.Id}}' "${RL_GYM_IMAGE:-decomposer-toolathlon-rl:latest}")
+export RL_GYM_IMAGE
 export PYTHONPATH="$PWD:$PWD/src:$PWD/external/verl${PYTHONPATH:+:$PYTHONPATH}"
 export TOKENIZERS_PARALLELISM=false
 export PATH="$PWD/.venv-rl/bin:/usr/local/cuda/bin:$PATH"

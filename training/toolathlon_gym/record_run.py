@@ -18,6 +18,8 @@ def main():
     age = float(Path("/proc/uptime").read_text().split()[0]) - int(ticks) / os.sysconf("SC_CLK_TCK")
     metadata = {"pid": args.pid, "started_at": time.time() - age,
                 "process_start_ticks": ticks,
+                "gym_image": os.environ.get("RL_GYM_IMAGE"),
+                "model_path": os.environ.get("MODEL_PATH"),
                 "revision": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
                 "policy_gpu": os.environ.get("CUDA_VISIBLE_DEVICES"), "overrides": overrides}
     (args.directory / "run.json").write_text(json.dumps(metadata, indent=2))
