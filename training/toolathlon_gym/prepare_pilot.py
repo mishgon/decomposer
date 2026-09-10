@@ -19,6 +19,8 @@ def main():
     parser.add_argument("--validation-tasks", type=int, default=8)
     parser.add_argument("--train-task", action="append")
     parser.add_argument("--validation-task", action="append")
+    parser.add_argument("--evaluate-training-tasks", action="store_true",
+                        help="Evaluate every training task; no held-out validation set")
     args = parser.parse_args()
     root = Path("external/toolathlon_gym")
     tasks = root / "tasks/finalpool"
@@ -27,7 +29,14 @@ def main():
     eligible = [p.parent.name for p in tasks.glob("*/task_config.json")
                 if set(json.loads(p.read_text())["needed_mcp_servers"]) <= local_servers]
     eligible.sort(key=lambda name: hashlib.sha256(f"{args.seed}:{name}".encode()).hexdigest())
-    if args.train_task is not None or args.validation_task is not None:
+    if args.evaluate_training_tasks:
+        if args.train_task or args.validation_task:
+            parser.error("Use split sizes with --evaluate-training-tasks")
+        if not 1 <= args.train_tasks <= len(eligible):
+            parser.error("Invalid training task count")
+        selected = {"train": sorted(eligible[:args.train_tasks])}
+        selection = "Hash-selected training tasks; evaluation reuses all training tasks, no held-out validation"
+    elif args.train_task is not None or args.validation_task is not None:
         if not args.train_task or not args.validation_task:
             parser.error("Explicit selection requires both training and validation tasks")
         selected = {"train": sorted(set(args.train_task)), "validation": sorted(set(args.validation_task))}
@@ -45,6 +54,8 @@ def main():
         selection = "Hash-ranked tasks using local fixture servers; no reward-based selection"
     manifest = make_split(tasks, 0, args.seed)
     manifest.update(selected)
+    if args.evaluate_training_tasks:
+        manifest["validation"] = selected["train"]
     manifest["gym_revision"] = subprocess.check_output(
         ["git", "-C", str(root), "rev-parse", "HEAD"], text=True).strip()
     manifest["selection"] = selection
@@ -61,9 +72,9 @@ def main():
         frames[split].to_parquet(args.output / f"{split}.parquet")
     # A fixed training probe separates actual improvement from batch difficulty.
     # Held-out rows never enter the optimizer's train.parquet.
-    probe = frames["train"].head(4).copy()
+    probe = (frames["train"] if args.evaluate_training_tasks else frames["train"].head(4)).copy()
     probe["data_source"] = "toolathlon_gym/train_probe"
-    pd.concat([probe, frames["validation"]], ignore_index=True).to_parquet(
+    pd.concat([probe] if args.evaluate_training_tasks else [probe, frames["validation"]], ignore_index=True).to_parquet(
         args.output / "evaluation.parquet")
     print(json.dumps({"eligible": len(eligible), **selected}, indent=2))
 

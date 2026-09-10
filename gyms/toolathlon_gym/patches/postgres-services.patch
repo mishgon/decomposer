@@ -110,6 +110,17 @@ diff --git a/local_servers/woocommerce-mcp/src/services/pg-rest-router.ts b/loca
 +  }
 +
    async post(url: string, data?: any, config?: any): Promise<any> {
+@@ -317,7 +339,9 @@
+       if (params[field] !== undefined && params[field] !== null && params[field] !== '') {
+-        conditions.push(`${this.quoteIdent(field)} = $${paramIndex}`);
++        conditions.push(Array.isArray(params[field])
++          ? `${this.quoteIdent(field)} = ANY($${paramIndex})`
++          : `${this.quoteIdent(field)} = $${paramIndex}`);
+         values.push(params[field]);
+         paramIndex++;
+       }
+     }
+ 
 diff --git a/local_servers/mcp-canvas-lms/src/client.ts b/local_servers/mcp-canvas-lms/src/client.ts
 --- a/local_servers/mcp-canvas-lms/src/client.ts
 +++ b/local_servers/mcp-canvas-lms/src/client.ts
