@@ -39,7 +39,8 @@ async def main():
     args.output.mkdir(parents=True, exist_ok=False)
     os.environ["RL_ARTIFACTS"] = str(args.output.resolve())
     loop = object.__new__(ToolathlonAgentLoop)
-    loop.tokenizer = AutoTokenizer.from_pretrained("/home/matrosov/models/Qwen3.5-4B")
+    loop.tokenizer = AutoTokenizer.from_pretrained(
+        os.environ.get("MODEL_PATH", str(Path.home() / "models/Qwen3.5-4B")))
     loop.server_manager = FrozenServer("http://127.0.0.1:8025/v1")
     loop.rollout_config = SimpleNamespace(prompt_length=4096, response_length=12288)
     result = await loop.run({"temperature": 0.7, "top_p": 0.8, "top_k": 20,
