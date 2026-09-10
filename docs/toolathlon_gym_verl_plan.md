@@ -25,9 +25,9 @@ fresh environments. Additional storage planning is still needed for RL.
 
 - New branch: `we_rl_toolathlon_gym`, based on GitLab `toolathlon-gym` at `1bda75a`.
 - Local `toolathlon-gym` has five additional commits ending at `d443ce5`: adaptive collection, outage backoff, database volume cleanup, coverage-first scheduling, and bounded retries. These were not silently merged into the RL branch.
-- Hertz-2 `/home/matrosov/decomposer-qwen` is at `f391d2f` with uncommitted scheduler, runner, test, and submodule changes. Some overlap the local commits; complete equivalence is not established. Reconcile before reusing production lifecycle code.
+- Hertz-2 `~/decomposer-qwen` is at `f391d2f` with uncommitted scheduler, runner, test, and submodule changes. Some overlap the local commits; complete equivalence is not established. Reconcile before reusing production lifecycle code.
 - Existing untracked `gyms/toolathlon_gym/toolathlon.prompt.txt` and leftover `external/toolathlon/` were preserved.
-- Candidate SFT model: `/home/matrosov/models/qwen35-4b-nonthinking-mixed-v3-8gpu` on Hertz-2 (20 GB). Its config declares `Qwen3_5ForConditionalGeneration`. Model provenance, prompt, tokenizer and export contents need checking before training.
+- Candidate SFT model: `~/models/qwen35-4b-nonthinking-mixed-v3-8gpu` on Hertz-2 (20 GB). Its config declares `Qwen3_5ForConditionalGeneration`. Model provenance, prompt, tokenizer and export contents need checking before training.
 - Root disk on Hertz-2: 99% occupied, 26 GB available at inspection. Resolve storage before installing the training stack or saving checkpoints.
 
 ## References inspected
