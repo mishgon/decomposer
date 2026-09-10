@@ -61,6 +61,7 @@ actor_rollout_ref:
     load_format: safetensors
     engine_kwargs:
       vllm:
+        language_model_only: true
         additional_config:
           gdn_prefill_backend: triton
     agent:
