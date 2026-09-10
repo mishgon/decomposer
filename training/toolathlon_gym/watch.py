@@ -162,6 +162,8 @@ def show(root):
             health = "WATCH: >50% of policy updates clipped"
     baseline = 0 in rounds and 0 not in complete
     phase = f"baseline ({scored}/{validation_size} scored)" if baseline else "training / periodic validation"
+    if "overfit" in trainer.get("experiment_name", ""):
+        phase = "single-task overfit (NO holdout)"
     if done:
         phase = "complete"
     print(f"TOOLATHLON RL  {run.parent.name} | {health}")
