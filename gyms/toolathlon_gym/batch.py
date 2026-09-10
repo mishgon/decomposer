@@ -17,8 +17,34 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
+try:
+    from . import adaptive_scheduler
+except ImportError:  # Executed through gyms/toolathlon_gym/run.py.
+    import adaptive_scheduler
+
 
 SCHEMA_VERSION = 1
+OPENROUTER_TRANSIENT_MARKERS = (
+    "httpx.writetimeout",
+    "writetimeout",
+    "httpx.readtimeout",
+    "readtimeout",
+    "httpx.connecttimeout",
+    "connecttimeout",
+    "httpx.pooltimeout",
+    "pooltimeout",
+    "httpx.remoteprotocolerror",
+    "remoteprotocolerror",
+    "httpx.connecterror",
+    "connecterror",
+    "apiconnectionerror",
+    "ratelimiterror",
+    "the run is no longer active",
+    "status code: 429",
+    "status code: 502",
+    "status code: 503",
+    "status code: 504",
+)
 RESUME_CONFIG_FIELDS = (
     "model",
     "subagent_model",
@@ -68,6 +94,100 @@ def append_event(run_dir: Path, event: str, **fields: Any) -> None:
         os.fsync(output.fileno())
 
 
+class ProviderBackoffBarrier:
+    """Shared launch barrier for a provider outage observed by many episodes."""
+
+    def __init__(
+        self,
+        *,
+        initial_seconds: float = 30.0,
+        maximum_seconds: float = 300.0,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self.initial_seconds = initial_seconds
+        self.maximum_seconds = maximum_seconds
+        self._clock = clock
+        self._condition = threading.Condition()
+        self._generation = 0
+        self._consecutive_failures = 0
+        self._blocked_until = 0.0
+
+    def generation(self) -> int:
+        with self._condition:
+            return self._generation
+
+    def register_failure(self, generation: int) -> float | None:
+        """Close the barrier once per outage generation and return its delay."""
+        with self._condition:
+            if generation != self._generation:
+                return None
+            self._consecutive_failures += 1
+            delay = min(
+                self.maximum_seconds,
+                self.initial_seconds * (2 ** (self._consecutive_failures - 1)),
+            )
+            self._generation += 1
+            self._blocked_until = self._clock() + delay
+            self._condition.notify_all()
+            return delay
+
+    def register_success(self, generation: int) -> bool:
+        """Reset escalation only after work from the current generation succeeds."""
+        with self._condition:
+            if generation != self._generation or not self._consecutive_failures:
+                return False
+            self._consecutive_failures = 0
+            self._blocked_until = 0.0
+            self._condition.notify_all()
+            return True
+
+    def wait(self, stop_event: threading.Event | None = None) -> int:
+        with self._condition:
+            while True:
+                if stop_event is not None and stop_event.is_set():
+                    raise KeyboardInterrupt("batch interrupted during provider backoff")
+                remaining = self._blocked_until - self._clock()
+                if remaining <= 0:
+                    return self._generation
+                self._condition.wait(timeout=min(remaining, 1.0))
+
+
+def openrouter_transient_failure(result: dict[str, Any]) -> str | None:
+    """Return evidence only for transient failures in the Decomposer provider path."""
+    if result.get("status") == "completed":
+        return None
+    evidence: list[str] = []
+    error = result.get("error")
+    if isinstance(error, dict):
+        for key in ("message", "stderr_tail", "traceback"):
+            value = error.get(key)
+            if isinstance(value, str):
+                evidence.append(value)
+    artifact = result.get("artifact_path")
+    if artifact:
+        trace_path = Path(artifact) / "trace.json"
+        try:
+            trace = json.loads(trace_path.read_text(encoding="utf-8"))
+            agent_error = trace.get("agent_error")
+            if isinstance(agent_error, str):
+                evidence.insert(0, agent_error)
+        except (OSError, json.JSONDecodeError):
+            pass
+    combined = "\n".join(evidence)
+    lowered = combined.lower()
+    teacher_path = (
+        "decomposer agent loop failed" in lowered
+        or "agent_error" in lowered
+        or bool(artifact and (Path(artifact) / "trace.json").is_file())
+    )
+    if not teacher_path:
+        return None
+    for marker in OPENROUTER_TRANSIENT_MARKERS:
+        if marker in lowered:
+            return marker
+    return None
+
+
 def validate_teacher_credentials() -> None:
     if os.environ.get("DECOMPOSER_VLLM_BASE_URL"):
         return
@@ -85,7 +205,7 @@ def validate_teacher_credentials() -> None:
 
 
 def wants_batch(argv: Sequence[str]) -> bool:
-    flags = {"--all", "--tasks", "--resume", "--repetitions", "-n"}
+    flags = {"--all", "--tasks", "--resume", "--repetitions", "-n", "--adaptive"}
     prefixes = ("--tasks=", "--resume=", "--repetitions=", "-n")
     return any(
         argument in flags or argument.startswith(prefixes) for argument in argv
@@ -133,6 +253,35 @@ def parse_args(argv: Sequence[str], defaults: dict[str, Any]) -> argparse.Namesp
     parser.add_argument("--concurrency", type=int, default=1)
     parser.add_argument("--container-slots", type=int, default=1)
     parser.add_argument(
+        "--adaptive",
+        action="store_true",
+        help=(
+            "Use coverage-first trace scheduling and task culling. Model and "
+            "infrastructure settings retain their normal batch semantics."
+        ),
+    )
+    parser.add_argument(
+        "--adaptive-success-threshold",
+        type=float,
+        default=None,
+        metavar="FRACTION",
+        help="Qualify partial scores strictly above this fraction (default: 0.90).",
+    )
+    parser.add_argument(
+        "--adaptive-cull-fraction",
+        type=float,
+        default=None,
+        metavar="FRACTION",
+        help="Bottom zero-success fraction culled after three launches (default: 0.10).",
+    )
+    parser.add_argument(
+        "--adaptive-target-successes",
+        type=int,
+        default=None,
+        metavar="COUNT",
+        help="Balanced qualifying traces requested per retained task (default: 4).",
+    )
+    parser.add_argument(
         "--agent-timeout",
         type=float,
         default=2700,
@@ -153,6 +302,21 @@ def parse_args(argv: Sequence[str], defaults: dict[str, Any]) -> argparse.Namesp
         parser.error("--repetitions must be at least 1")
     if args.resume and args.repetitions != 1:
         parser.error("--repetitions cannot be changed on resume")
+    if args.adaptive and not args.resume and args.repetitions != 1:
+        parser.error("a new --adaptive run must start with one repetition")
+    if args.adaptive_success_threshold is not None and not (
+        0 <= args.adaptive_success_threshold <= 1
+    ):
+        parser.error("--adaptive-success-threshold must be in [0, 1]")
+    if args.adaptive_cull_fraction is not None and not (
+        0 <= args.adaptive_cull_fraction < 1
+    ):
+        parser.error("--adaptive-cull-fraction must be in [0, 1)")
+    if (
+        args.adaptive_target_successes is not None
+        and args.adaptive_target_successes < 1
+    ):
+        parser.error("--adaptive-target-successes must be positive")
     if args.n_jobs_per_worker < 1:
         parser.error("--n-jobs-per-worker must be at least 1")
     if args.concurrency < 1:
@@ -254,6 +418,55 @@ def create_manifest(
     }
     manifest["counts"] = count_statuses(manifest)
     return manifest
+
+
+def configure_adaptive_scheduler(
+    manifest: dict[str, Any], args: argparse.Namespace
+) -> dict[str, Any]:
+    requested = {
+        "success_threshold": (
+            0.90
+            if args.adaptive_success_threshold is None
+            else args.adaptive_success_threshold
+        ),
+        "cull_fraction": (
+            0.10
+            if args.adaptive_cull_fraction is None
+            else args.adaptive_cull_fraction
+        ),
+        "target_successes": (
+            4
+            if args.adaptive_target_successes is None
+            else args.adaptive_target_successes
+        ),
+    }
+    state = manifest.get("adaptive_scheduler")
+    if state is None:
+        state = adaptive_scheduler.new_scheduler_state(
+            manifest["config"]["tasks"],
+            threshold=requested["success_threshold"],
+            cull_fraction=requested["cull_fraction"],
+            target_successes=requested["target_successes"],
+        )
+        manifest["adaptive_scheduler"] = state
+        return state
+
+    if state.get("schema_version") != adaptive_scheduler.SCHEDULER_SCHEMA_VERSION:
+        raise ValueError(
+            "Unsupported adaptive scheduler schema: "
+            f"{state.get('schema_version')!r}"
+        )
+    for name, default_value in requested.items():
+        if name not in state:
+            state[name] = default_value
+        cli_value = getattr(args, f"adaptive_{name}")
+        if cli_value is not None and cli_value != state[name]:
+            raise ValueError(
+                f"Cannot change adaptive {name.replace('_', ' ')} after the "
+                f"scheduler starts ({state[name]!r} != {cli_value!r})"
+            )
+    adaptive_scheduler.migrate_to_coverage_first(manifest)
+    return state
 
 
 def validate_run_id(run_id: str) -> None:
@@ -383,9 +596,19 @@ def execute_episode(
     artifact_dir = root / "traces" / task / episode_id
     evaluation_path = root / "evals" / task / episode_id / "result.json"
     score = None
+    partial_score = None
     if evaluation_path.is_file():
         try:
-            score = json.loads(evaluation_path.read_text(encoding="utf-8")).get("pass")
+            evaluation = json.loads(evaluation_path.read_text(encoding="utf-8"))
+            score = evaluation.get("pass")
+            parsed = adaptive_scheduler.extract_partial_score(evaluation)
+            if parsed is not None:
+                partial_score = {
+                    "passed_checks": parsed.passed_checks,
+                    "total_checks": parsed.total_checks,
+                    "fraction": parsed.fraction,
+                    "source": parsed.source,
+                }
         except (json.JSONDecodeError, OSError):
             pass
     completed = not timed_out and returncode == 0 and evaluation_path.is_file()
@@ -408,6 +631,7 @@ def execute_episode(
         "attempt": attempt,
         "status": "completed" if completed else "failed",
         "score": score,
+        "partial_score": partial_score,
         "artifact_path": str(artifact_dir if artifact_dir.is_dir() else attempt_dir),
         "attempt_log_path": str(attempt_dir),
         "evaluation_path": str(evaluation_path) if evaluation_path.is_file() else None,
@@ -534,6 +758,18 @@ def main(
         save_manifest(run_dir, manifest)
         append_event(run_dir, "run_created", tasks=tasks, repetitions=args.repetitions)
 
+    if args.adaptive:
+        state = configure_adaptive_scheduler(manifest, args)
+        save_manifest(run_dir, manifest)
+        append_event(
+            run_dir,
+            "adaptive_scheduler_enabled",
+            phase=state["phase"],
+            success_threshold=state["success_threshold"],
+            cull_fraction=state["cull_fraction"],
+            target_successes=state["target_successes"],
+        )
+
     validate_teacher_credentials()
     docker("image", "inspect", args.image)
     manifest.update(status="running", finished_at=None)
@@ -573,115 +809,186 @@ def main(
             externally_managed=args.reuse_vllm,
             ports=args.subagent_ports,
         )
-        work: list[tuple[int, dict[str, Any], int]] = []
-        for index, episode in enumerate(manifest["episodes"], start=1):
-            attempt, reconciled = next_attempt(run_dir, episode)
-            if reconciled:
-                save_manifest(run_dir, manifest)
-                append_event(run_dir, "episode_reconciled", key=episode["key"])
-            if episode["status"] == "completed":
-                append_event(run_dir, "episode_skipped", key=episode["key"])
-                continue
-            work.append((index, episode, attempt))
-
-        stop_event = threading.Event()
-        executor = concurrent.futures.ThreadPoolExecutor(
-            max_workers=args.concurrency,
-            thread_name_prefix="toolathlon-episode",
-        )
-        active: dict[
-            concurrent.futures.Future[dict[str, Any]],
-            tuple[int, dict[str, Any], int],
-        ] = {}
-        remaining = iter(work)
+        provider_backoff = ProviderBackoffBarrier()
         next_endpoint = 0
-
-        def record_result(
-            episode: dict[str, Any], result: dict[str, Any], *, interrupted_run: bool = False
-        ) -> None:
-            if interrupted_run:
-                result["error"] = result.get("error") or {}
-                result["error"]["interrupted"] = True
-            episode["attempts"].append(result)
-            episode.update(result)
-            save_manifest(run_dir, manifest)
-            append_event(
-                run_dir,
-                "episode_interrupted"
-                if interrupted_run
-                else f"episode_{result['status']}",
-                key=episode["key"],
-                attempt=result["attempt"],
-                score=result.get("score"),
-            )
-
-        def submit_next() -> bool:
-            nonlocal next_endpoint
-            try:
-                index, episode, attempt = next(remaining)
-            except StopIteration:
-                return False
-            print(
-                f"[{index}/{manifest['counts']['total']}] {episode['key']} "
-                f"attempt {attempt}",
-                flush=True,
-            )
-            episode.update(status="running", started_at=utc_now(), finished_at=None, error=None)
-            save_manifest(run_dir, manifest)
-            append_event(run_dir, "episode_started", key=episode["key"], attempt=attempt)
-            future = executor.submit(
-                execute_episode,
-                args,
-                runner_path=repo_root / "gyms" / "toolathlon_gym" / "run.py",
-                root=root,
-                run_dir=run_dir,
-                episode=episode,
-                attempt=attempt,
-                stop_event=stop_event,
-                subagent_port=args.subagent_ports[next_endpoint],
-                container_slot=(index - 1) % args.container_slots,
-            )
-            next_endpoint = (next_endpoint + 1) % len(args.subagent_ports)
-            active[future] = (index, episode, attempt)
-            return True
-
-        try:
-            for _ in range(min(args.concurrency, len(work))):
-                submit_next()
-            while active:
-                done, _ = concurrent.futures.wait(
-                    active,
-                    return_when=concurrent.futures.FIRST_COMPLETED,
+        while True:
+            work: list[tuple[int, dict[str, Any], int]] = []
+            for index, episode in enumerate(manifest["episodes"], start=1):
+                attempt, reconciled = next_attempt(run_dir, episode)
+                if reconciled:
+                    save_manifest(run_dir, manifest)
+                    append_event(run_dir, "episode_reconciled", key=episode["key"])
+                terminal = episode["status"] in (
+                    adaptive_scheduler.TERMINAL_EPISODE_STATUSES
+                    if args.adaptive
+                    else {"completed"}
                 )
-                for future in done:
-                    _index, episode, attempt = active.pop(future)
+                if terminal:
+                    continue
+                work.append((index, episode, attempt))
+
+            if not work:
+                if not args.adaptive:
+                    break
+                added = adaptive_scheduler.plan_next_wave(manifest)
+                save_manifest(run_dir, manifest)
+                append_event(
+                    run_dir,
+                    "adaptive_wave_planned",
+                    phase=manifest["adaptive_scheduler"]["phase"],
+                    episode_keys=added,
+                    active_tasks=len(manifest["adaptive_scheduler"]["active_tasks"]),
+                    culled_tasks=len(manifest["adaptive_scheduler"]["culled_tasks"]),
+                )
+                if added:
+                    continue
+                break
+
+            stop_event = threading.Event()
+            executor = concurrent.futures.ThreadPoolExecutor(
+                max_workers=args.concurrency,
+                thread_name_prefix="toolathlon-episode",
+            )
+            active: dict[
+                concurrent.futures.Future[dict[str, Any]],
+                tuple[int, dict[str, Any], int, int],
+            ] = {}
+            remaining = iter(work)
+
+            def record_result(
+                episode: dict[str, Any],
+                result: dict[str, Any],
+                *,
+                interrupted_run: bool = False,
+            ) -> None:
+                if interrupted_run:
+                    result["error"] = result.get("error") or {}
+                    result["error"]["interrupted"] = True
+                episode["attempts"].append(result)
+                episode.update(result)
+                save_manifest(run_dir, manifest)
+                append_event(
+                    run_dir,
+                    "episode_interrupted"
+                    if interrupted_run
+                    else f"episode_{result['status']}",
+                    key=episode["key"],
+                    attempt=result["attempt"],
+                    score=result.get("score"),
+                )
+
+            def submit_next() -> bool:
+                nonlocal next_endpoint
+                try:
+                    index, episode, attempt = next(remaining)
+                except StopIteration:
+                    return False
+                provider_generation = provider_backoff.wait(stop_event)
+                print(
+                    f"[{index}/{manifest['counts']['total']}] {episode['key']} "
+                    f"attempt {attempt}",
+                    flush=True,
+                )
+                episode.update(
+                    status="running",
+                    started_at=utc_now(),
+                    finished_at=None,
+                    error=None,
+                )
+                save_manifest(run_dir, manifest)
+                append_event(
+                    run_dir, "episode_started", key=episode["key"], attempt=attempt
+                )
+                future = executor.submit(
+                    execute_episode,
+                    args,
+                    runner_path=repo_root / "gyms" / "toolathlon_gym" / "run.py",
+                    root=root,
+                    run_dir=run_dir,
+                    episode=episode,
+                    attempt=attempt,
+                    stop_event=stop_event,
+                    subagent_port=args.subagent_ports[next_endpoint],
+                    container_slot=(index - 1) % args.container_slots,
+                )
+                next_endpoint = (next_endpoint + 1) % len(args.subagent_ports)
+                active[future] = (index, episode, attempt, provider_generation)
+                return True
+
+            def update_provider_backoff(
+                result: dict[str, Any], provider_generation: int
+            ) -> None:
+                marker = openrouter_transient_failure(result)
+                if marker is not None:
+                    delay = provider_backoff.register_failure(provider_generation)
+                    if delay is not None:
+                        print(
+                            "OpenRouter transient failure; pausing new episodes "
+                            f"for {delay:g}s ({marker})",
+                            flush=True,
+                        )
+                        append_event(
+                            run_dir,
+                            "provider_backoff_started",
+                            provider="openrouter",
+                            delay_seconds=delay,
+                            marker=marker,
+                        )
+                    return
+                if result.get("status") == "completed" and (
+                    provider_backoff.register_success(provider_generation)
+                ):
+                    append_event(
+                        run_dir,
+                        "provider_backoff_reset",
+                        provider="openrouter",
+                    )
+
+            try:
+                for _ in range(min(args.concurrency, len(work))):
+                    submit_next()
+                while active:
+                    done, _ = concurrent.futures.wait(
+                        active,
+                        return_when=concurrent.futures.FIRST_COMPLETED,
+                    )
+                    for future in done:
+                        _index, episode, attempt, provider_generation = active.pop(future)
+                        try:
+                            result = future.result()
+                        except Exception as error:
+                            result = failure(attempt, error, episode["started_at"])
+                        except BaseException as error:
+                            result = failure(attempt, error, episode["started_at"])
+                            record_result(episode, result, interrupted_run=True)
+                            raise
+                        record_result(episode, result)
+                        update_provider_backoff(result, provider_generation)
+                        submit_next()
+            except BaseException:
+                stop_event.set()
+                for future, (
+                    _index,
+                    episode,
+                    attempt,
+                    _provider_generation,
+                ) in list(active.items()):
                     try:
                         result = future.result()
-                    except Exception as error:
-                        result = failure(attempt, error, episode["started_at"])
                     except BaseException as error:
                         result = failure(attempt, error, episode["started_at"])
-                        record_result(episode, result, interrupted_run=True)
-                        raise
-                    record_result(episode, result)
-                    submit_next()
-        except BaseException:
-            stop_event.set()
-            for future, (_index, episode, attempt) in list(active.items()):
-                try:
-                    result = future.result()
-                except BaseException as error:
-                    result = failure(attempt, error, episode["started_at"])
-                record_result(
-                    episode,
-                    result,
-                    interrupted_run=result["status"] != "completed",
-                )
-            active.clear()
-            raise
-        finally:
-            stop_event.set()
-            executor.shutdown(wait=True, cancel_futures=True)
+                    record_result(
+                        episode,
+                        result,
+                        interrupted_run=result["status"] != "completed",
+                    )
+                active.clear()
+                raise
+            finally:
+                stop_event.set()
+                executor.shutdown(wait=True, cancel_futures=True)
+            if not args.adaptive:
+                break
     except BaseException as error:
         interrupted = True
         manifest["error"] = {
