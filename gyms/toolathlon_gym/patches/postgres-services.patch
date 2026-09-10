@@ -1,0 +1,67 @@
+diff --git a/local_servers/notion-mcp-server/src/openapi-mcp-server/client/http-client.ts b/local_servers/notion-mcp-server/src/openapi-mcp-server/client/http-client.ts
+index 3d19f08..fbf2fff 100644
+--- a/local_servers/notion-mcp-server/src/openapi-mcp-server/client/http-client.ts
++++ b/local_servers/notion-mcp-server/src/openapi-mcp-server/client/http-client.ts
+@@ -5,6 +5,7 @@ import FormData from 'form-data'
+ import fs from 'fs'
+ import { Headers } from './polyfill-headers.js'
+ import { isFileUploadParameter } from '../openapi/file-upload.js'
++import { PgHttpClient } from './pg-client.js'
+ 
+ export type HttpClientConfig = {
+   baseUrl: string
+@@ -30,10 +31,15 @@ export class HttpClientError extends Error {
+ }
+ 
+ export class HttpClient {
+-  private api: Promise<AxiosInstance>
+-  private client: OpenAPIClientAxios
++  private api!: Promise<AxiosInstance>
++  private client!: OpenAPIClientAxios
++  private pgClient?: PgHttpClient
+ 
+   constructor(config: HttpClientConfig, openApiSpec: OpenAPIV3.Document | OpenAPIV3_1.Document) {
++    if (process.env.PG_HOST) {
++      this.pgClient = new PgHttpClient(config, openApiSpec)
++      return
++    }
+     // @ts-expect-error
+     this.client = new (OpenAPIClientAxios.default ?? OpenAPIClientAxios)({
+       definition: openApiSpec,
+@@ -105,6 +111,7 @@ export class HttpClient {
+     operation: OpenAPIV3.OperationObject & { method: string; path: string },
+     params: Record<string, any> = {},
+   ): Promise<HttpClientResponse<T>> {
++    if (this.pgClient) return this.pgClient.executeOperation<T>(operation, params)
+     const api = await this.api
+     const operationId = operation.operationId
+     if (!operationId) {
+diff --git a/local_servers/woocommerce-mcp/src/services/base.ts b/local_servers/woocommerce-mcp/src/services/base.ts
+index 7ecb218..6706551 100644
+--- a/local_servers/woocommerce-mcp/src/services/base.ts
++++ b/local_servers/woocommerce-mcp/src/services/base.ts
+@@ -1,4 +1,5 @@
+ import axios, { AxiosInstance } from 'axios';
++import { PgRestRouter } from './pg-rest-router.js';
+ 
+ export class BaseService {
+     protected client: AxiosInstance;
+@@ -14,6 +15,11 @@ export class BaseService {
+         // 移除末尾的斜杠
+         this.siteUrl = this.siteUrl.replace(/\/$/, '');
+ 
++        if (process.env.PG_HOST) {
++            this.client = new PgRestRouter() as unknown as AxiosInstance;
++            return;
++        }
++
+         const baseURL = `${this.siteUrl}/wp-json/wc/v3`;
+         
+         console.error(`[WooCommerce] Initializing with base URL: ${baseURL}`);
+@@ -100,4 +106,4 @@ export class BaseService {
+             throw error;
+         }
+     }
+-}
+\ No newline at end of file
++}

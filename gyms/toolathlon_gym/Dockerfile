@@ -32,6 +32,9 @@ RUN cd /opt \
     && git apply --no-index /tmp/emails-mcp-fixtures.patch \
     && uv sync --directory /opt/local_servers/emails-mcp --frozen
 
+COPY gyms/toolathlon_gym/patches/postgres-services.patch /tmp/
+RUN cd /opt && git apply --no-index /tmp/postgres-services.patch
+
 RUN set -e; for server in \
         12306-mcp \
         Calendar-Autoauth-MCP-Server \

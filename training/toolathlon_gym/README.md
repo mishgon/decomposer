@@ -25,6 +25,9 @@ prompt/parquet dataset. It does not assert that every task's infrastructure work
 
 ```bash
 bash training/toolathlon_gym/setup.sh
+podman build -f training/toolathlon_gym/Dockerfile -t decomposer-toolathlon-rl:latest .
+.venv-rl/bin/python -m training.toolathlon_gym.check_environment \
+  --output artifacts/training/toolathlon_gym/environment-check
 .venv-rl/bin/python -m training.toolathlon_gym.prepare_pilot \
   --output artifacts/training/toolathlon_gym/pilot-data
 SUBAGENT_GPU=1 bash training/toolathlon_gym/serve_subagents.sh
@@ -39,6 +42,13 @@ The 16 training / 8 validation tasks are hash-selected from local-fixture tasks,
 without consulting historical rewards. Each validation uses three rollouts per
 task; its tasks are never included in gradient updates. This is a small Gym pilot,
 not a whole-Gym performance claim.
+
+The small RL image extends an existing `decomposer-toolathlon:latest` Gym image.
+It connects the upstream WooCommerce/Notion PostgreSQL adapters; without those
+connections the clients attempt public HTTP endpoints despite a local database.
+The environment check exercises real MCP calls and verifies isolation between two
+copies of the same task. It allocates no GPU. Build the base Gym image with
+`gyms/toolathlon_gym/build.sh` if it is not already available.
 
 Smoke training budgets are 4K initial prompt plus 12K response/observation tokens;
 the frozen subagent server supports 256K context. The Decomposer and subagent
