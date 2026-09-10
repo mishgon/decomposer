@@ -84,6 +84,8 @@ class ToolathlonAgentLoop(AgentLoopBase):
                               "elapsed_seconds": time.time() - started})
         finally:
             trace = {"task_id": task, "episode_id": episode_id,
+                     "split": kwargs["extra_info"].get("split"),
+                     "data_source": kwargs.get("data_source"),
                      "elapsed_seconds": time.time() - started, "stop_reason": stop_reason,
                      "messages": [message_to_dict(m) for m in state.get("messages", [])],
                      "subagent_runs": state.get("subagent_runs", {}),

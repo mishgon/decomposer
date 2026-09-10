@@ -38,12 +38,20 @@ def main():
     manifest["eligible_tasks"] = len(eligible)
     args.output.mkdir(parents=True, exist_ok=False)
     (args.output / "split.json").write_text(json.dumps(manifest, indent=2))
+    frames = {}
     for split, names in selected.items():
-        pd.DataFrame([{"data_source": "toolathlon_gym", "agent_name": "toolathlon_decomposer",
+        frames[split] = pd.DataFrame([{"data_source": f"toolathlon_gym/{split}", "agent_name": "toolathlon_decomposer",
                        "prompt": [{"role": "user", "content": f"Complete Gym task {name}."}],
                        "reward_model": {"style": "rule", "ground_truth": ""},
                        "extra_info": {"task_id": name, "split": split}, "index": i}
-                      for i, name in enumerate(names)]).to_parquet(args.output / f"{split}.parquet")
+                      for i, name in enumerate(names)])
+        frames[split].to_parquet(args.output / f"{split}.parquet")
+    # A fixed training probe separates actual improvement from batch difficulty.
+    # Held-out rows never enter the optimizer's train.parquet.
+    probe = frames["train"].head(4).copy()
+    probe["data_source"] = "toolathlon_gym/train_probe"
+    pd.concat([probe, frames["validation"]], ignore_index=True).to_parquet(
+        args.output / "evaluation.parquet")
     print(json.dumps({"eligible": len(eligible), **selected}, indent=2))
 
 
