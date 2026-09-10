@@ -47,9 +47,10 @@ def probe(episode, server, entry, tool, arguments=None):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--image", default="decomposer-toolathlon-rl:latest")
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=False)
-    episodes = [Episode("wc-refund-analysis-notion", args.output / str(i), subagent_port=8025)
+    episodes = [Episode("wc-refund-analysis-notion", args.output / str(i), subagent_port=8025, image=args.image)
                 for i in range(2)]
     started = []
     try:
