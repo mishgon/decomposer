@@ -81,8 +81,12 @@ empty thinking scaffold; the RL sequence retains its actual generation prefix
 instead of rewriting past policy tokens. No thinking text is generated in this mode.
 
 `~/watch-rl.sh` on Hertz-2 shows trainer liveness, episode counts and TensorBoard
-reward metrics. `--once` prints a single snapshot. No ETA is fabricated before
-training steps complete. Logs, native evaluations, model outputs and checkpoints
+reward metrics. `--once` prints a single snapshot. The compact dashboard includes
+fixed-panel baseline/latest rewards, a batch-reward sparkline, gradient/clipping
+warnings and timeouts. “Cooking” means alive, not proven to be learning. Its ETA
+covers the whole scheduled pilot, including validation; until update timings
+exist it is explicitly a low-confidence episode-throughput extrapolation.
+Logs, native evaluations, model outputs and checkpoints
 live under `artifacts/training/toolathlon_gym/`.
 
 Compare complete panels and retain per-task rewards:
