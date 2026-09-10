@@ -85,6 +85,19 @@ reward metrics. `--once` prints a single snapshot. No ETA is fabricated before
 training steps complete. Logs, native evaluations, model outputs and checkpoints
 live under `artifacts/training/toolathlon_gym/`.
 
+Compare complete panels and retain per-task rewards:
+
+```bash
+.venv-rl/bin/python -m training.toolathlon_gym.report \
+  --run artifacts/training/toolathlon_gym/pilot \
+  --data artifacts/training/toolathlon_gym/pilot-data
+```
+
+This writes `reward_report.json` in the run directory. Incomplete or duplicate
+panels have no aggregate reward or delta; optimizer rollouts are not mixed into
+the fixed training probe. A positive delta is an observed estimate, not by itself
+proof of statistical significance or freedom from native-evaluator artifacts.
+
 ## Remaining verification
 
 1. Verify checkpoint resume/export (save and a nonzero-gradient update passed).
