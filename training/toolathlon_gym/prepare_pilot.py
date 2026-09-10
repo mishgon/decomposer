@@ -21,6 +21,7 @@ def main():
     parser.add_argument("--validation-task", action="append")
     parser.add_argument("--evaluate-training-tasks", action="store_true",
                         help="Evaluate every training task; no held-out validation set")
+    parser.add_argument("--exclude-task", action="append", default=[])
     args = parser.parse_args()
     root = Path("external/toolathlon_gym")
     tasks = root / "tasks/finalpool"
@@ -29,6 +30,7 @@ def main():
     eligible = [p.parent.name for p in tasks.glob("*/task_config.json")
                 if set(json.loads(p.read_text())["needed_mcp_servers"]) <= local_servers]
     eligible.sort(key=lambda name: hashlib.sha256(f"{args.seed}:{name}".encode()).hexdigest())
+    eligible = [name for name in eligible if name not in args.exclude_task]
     if args.evaluate_training_tasks:
         if args.train_task or args.validation_task:
             parser.error("Use split sizes with --evaluate-training-tasks")
@@ -59,6 +61,7 @@ def main():
     manifest["gym_revision"] = subprocess.check_output(
         ["git", "-C", str(root), "rev-parse", "HEAD"], text=True).strip()
     manifest["selection"] = selection
+    manifest["excluded_tasks"] = args.exclude_task
     manifest["eligible_tasks"] = len(eligible)
     args.output.mkdir(parents=True, exist_ok=False)
     (args.output / "split.json").write_text(json.dumps(manifest, indent=2))
