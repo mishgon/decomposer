@@ -1,0 +1,2 @@
+- name: toolathlon_decomposer
+  _target_: training.toolathlon_gym.agent_loop.ToolathlonAgentLoop

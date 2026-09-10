@@ -1,0 +1,3 @@
+# vLLM 0.19 metadata requires transformers<5. Colleagues use this explicit
+# override for Qwen3.5; runtime compatibility still needs the GPU smoke test.
+transformers==5.5.4
