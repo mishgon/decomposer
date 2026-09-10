@@ -2,6 +2,25 @@
 
 Inspected 2026-09-10. This is a design and repository audit, not a runnable trainer.
 
+## Synchronization update (2026-09-10)
+
+The audit findings below describe the original state. Subsequently, the five local
+Gym commits were merged into the RL branch. Their combined diff exactly matched
+the uncommitted `gyms/` and `tests/` changes on Hertz-2. Both `toolathlon-gym` and
+`we_rl_toolathlon_gym` were synchronized locally, on Hertz-2, and on GitLab/GitHub.
+The remote email fixture and lockfile edits are now preserved in
+`gyms/toolathlon_gym/patches/emails-mcp-fixtures.patch` and applied by the Gym
+Dockerfile. Original remote changes are retained in named Git stashes; the
+submodule working tree is clean. Patch application against the clean submodule
+was checked and 47 focused Gym tests passed on Hertz-2. A full image build has
+not yet been performed after this change.
+
+Removed 31 dangling PostgreSQL/Kubernetes volumes and dangling image layers,
+recovering approximately 27 GiB (free root disk: 26 -> 53 GiB). Models,
+checkpoints, traces, active service containers and their attached volumes were
+preserved. Deleted scratch databases are not recoverable; fixtures can recreate
+fresh environments. Additional storage planning is still needed for RL.
+
 ## Repository state
 
 - New branch: `we_rl_toolathlon_gym`, based on GitLab `toolathlon-gym` at `1bda75a`.
