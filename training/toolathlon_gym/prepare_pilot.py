@@ -1,4 +1,4 @@
-"""Fixed, reward-blind pilot split drawn from tasks using local service fixtures."""
+"""Prepare a fixed RL split, hash-selected or explicitly supplied by the caller."""
 
 import argparse
 import hashlib
@@ -17,6 +17,8 @@ def main():
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--train-tasks", type=int, default=16)
     parser.add_argument("--validation-tasks", type=int, default=8)
+    parser.add_argument("--train-task", action="append")
+    parser.add_argument("--validation-task", action="append")
     args = parser.parse_args()
     root = Path("external/toolathlon_gym")
     tasks = root / "tasks/finalpool"
@@ -25,16 +27,27 @@ def main():
     eligible = [p.parent.name for p in tasks.glob("*/task_config.json")
                 if set(json.loads(p.read_text())["needed_mcp_servers"]) <= local_servers]
     eligible.sort(key=lambda name: hashlib.sha256(f"{args.seed}:{name}".encode()).hexdigest())
-    count = args.train_tasks + args.validation_tasks
-    if min(args.train_tasks, args.validation_tasks) < 1 or count > len(eligible):
-        raise ValueError("Invalid pilot split sizes")
-    selected = {"train": sorted(eligible[:args.train_tasks]),
-                "validation": sorted(eligible[args.train_tasks:count])}
+    if args.train_task is not None or args.validation_task is not None:
+        if not args.train_task or not args.validation_task:
+            parser.error("Explicit selection requires both training and validation tasks")
+        selected = {"train": sorted(set(args.train_task)), "validation": sorted(set(args.validation_task))}
+        if set(selected["train"]) & set(selected["validation"]):
+            parser.error("Training and validation tasks must be disjoint")
+        if not set(selected["train"] + selected["validation"]) <= set(eligible):
+            parser.error("Selected tasks must be available in the local-fixture pool")
+        selection = "Explicit caller selection; not a reward-blind or representative benchmark sample"
+    else:
+        count = args.train_tasks + args.validation_tasks
+        if min(args.train_tasks, args.validation_tasks) < 1 or count > len(eligible):
+            raise ValueError("Invalid pilot split sizes")
+        selected = {"train": sorted(eligible[:args.train_tasks]),
+                    "validation": sorted(eligible[args.train_tasks:count])}
+        selection = "Hash-ranked tasks using local fixture servers; no reward-based selection"
     manifest = make_split(tasks, 0, args.seed)
     manifest.update(selected)
     manifest["gym_revision"] = subprocess.check_output(
         ["git", "-C", str(root), "rev-parse", "HEAD"], text=True).strip()
-    manifest["selection"] = "Hash-ranked tasks using local fixture servers; no reward-based selection"
+    manifest["selection"] = selection
     manifest["eligible_tasks"] = len(eligible)
     args.output.mkdir(parents=True, exist_ok=False)
     (args.output / "split.json").write_text(json.dumps(manifest, indent=2))
