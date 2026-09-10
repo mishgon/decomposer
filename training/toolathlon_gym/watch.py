@@ -171,6 +171,12 @@ def show(root, selected=None):
     def latest(tag):
         return scalars[tag][-1].value if scalars.get(tag) else None
     step = int(latest("training/global_step") or 0)
+    checkpoint_marker = run.parent / "checkpoints/latest_checkpointed_iteration.txt"
+    if checkpoint_marker.exists():
+        try:
+            step = max(step, int(checkpoint_marker.read_text().strip()))
+        except ValueError:
+            pass
     panels = summarize([(r[0], r[1]) for r in records], expected, samples) if expected else []
     complete = {p["step"] for p in panels if all(
         any(q["step"] == p["step"] and q["panel"] == source and q["complete"] for q in panels)
@@ -228,7 +234,8 @@ def show(root, selected=None):
     if rewards:
         print(f"Batch reward: {trend(rewards)} {rewards[-1]:.3f} (varying tasks; not proof of learning)")
     if grad is None:
-        print("Training health: awaiting first optimizer update; learning not established")
+        print("Training health: checkpoint saved; awaiting logged gradient metrics" if step else
+              "Training health: awaiting first optimizer update; learning not established")
     else:
         print(f"Training health: grad {grad:.3g} | clip {clip:.1%}" if clip is not None else f"Training health: grad {grad:.3g}")
     stops = Counter(r[2] for r in records)
