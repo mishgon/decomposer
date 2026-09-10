@@ -1,0 +1,5 @@
+**
+!gyms/
+!gyms/toolathlon_gym/
+!gyms/toolathlon_gym/patches/
+!gyms/toolathlon_gym/patches/postgres-services.patch
