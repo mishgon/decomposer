@@ -30,6 +30,9 @@ podman build -f training/toolathlon_gym/Dockerfile -t decomposer-toolathlon-rl:l
   --output artifacts/training/toolathlon_gym/environment-check
 .venv-rl/bin/python -m training.toolathlon_gym.prepare_pilot \
   --output artifacts/training/toolathlon_gym/pilot-data
+.venv-rl/bin/python -m training.toolathlon_gym.check_evaluators \
+  --split artifacts/training/toolathlon_gym/pilot-data/split.json \
+  --output artifacts/training/toolathlon_gym/evaluator-check
 SUBAGENT_GPU=1 bash training/toolathlon_gym/serve_subagents.sh
 # In another shell, after the endpoint on port 8025 is ready:
 POLICY_GPU=0 bash training/toolathlon_gym/train.sh
