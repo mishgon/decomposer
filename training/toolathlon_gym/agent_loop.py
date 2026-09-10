@@ -58,7 +58,7 @@ class ToolathlonAgentLoop(AgentLoopBase):
             try:
                 state = await asyncio.wait_for(agent.ainvoke(
                     {"messages": [{"role": "user", "content": episode.runtime["task_config"]["task_str"]}]},
-                    config=config), timeout=float(os.environ.get("RL_EPISODE_TIMEOUT", "1800")))
+                    config=config), timeout=float(os.environ.get("RL_EPISODE_TIMEOUT", "2700")))
             except (RolloutBudgetExceeded, GraphRecursionError, TimeoutError) as error:
                 stop_reason = type(error).__name__
                 state = dict((await agent.aget_state(config)).values)

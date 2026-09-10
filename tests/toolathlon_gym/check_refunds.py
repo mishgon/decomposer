@@ -23,6 +23,9 @@ def main():
 
     try:
         episode.start()
+        for statuses in (["completed"], ["completed", "refunded"]):
+            rows = call("woo_orders_list", {"perPage": 1, "status": statuses})
+            assert rows and rows[0]["status"] in statuses, "Order status array filter loses matching orders"
         sql = """SELECT json_agg(r ORDER BY id) FROM
                  (SELECT order_id, id, COALESCE(reason, '') AS reason,
                   (-abs(amount))::text AS total FROM wc.refunds) r"""
