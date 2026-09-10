@@ -36,12 +36,43 @@ def episode_record(path, modified):
             trace["stop_reason"], trace["elapsed_seconds"], modified)
 
 
-@lru_cache(maxsize=8)
-def expected_panels(directory):
+@lru_cache(maxsize=16)
+def dataset_manifest(paths, modified):
     import pandas as pd
-    frame = pd.read_parquet(Path(directory) / "evaluation.parquet")
-    return {source: {row["task_id"] for row in group.extra_info}
-            for source, group in frame.groupby("data_source")}
+    frame = pd.concat([pd.read_parquet(path) for path in paths], ignore_index=True)
+    panels = {source: {row["task_id"] for row in group.extra_info}
+              for source, group in frame.groupby("data_source")}
+    return len(frame), panels
+
+
+def manifest_files(value, data_dir):
+    values = [value] if isinstance(value, str) else (value or [])
+    if not data_dir and any("${oc.env:RL_DATA}" in v for v in values):
+        raise ValueError("launch did not record RL_DATA; dataset size unknown")
+    paths = [Path(v.replace("${oc.env:RL_DATA}", str(data_dir))) for v in values]
+    if any("${" in str(p) for p in paths):
+        raise ValueError("unresolved dataset path in saved configuration")
+    return tuple(str(p) for p in paths)
+
+
+def run_plan(config, train_rows, validation_rows):
+    trainer, data = config["trainer"], config["data"]
+    rollout = config["actor_rollout_ref"]["rollout"]
+    total = trainer.get("total_training_steps")
+    if total is None:
+        total = (train_rows // data["train_batch_size"]) * trainer["total_epochs"]
+    rounds = planned_evaluations(total, trainer["test_freq"], trainer["val_before_train"])
+    validation_size = validation_rows * rollout["val_kwargs"]["n"]
+    episodes = total * data["train_batch_size"] * rollout["n"] + len(rounds) * validation_size
+    return total, rounds, validation_size, episodes
+
+
+def task_coverage(train, evaluation):
+    train_tasks = set().union(*train.values())
+    eval_tasks = set().union(*evaluation.values())
+    overlap = len(train_tasks & eval_tasks)
+    return (f"Tasks: {len(train_tasks)} train | {len(eval_tasks)} evaluation "
+            f"({overlap} overlap, {len(eval_tasks - train_tasks)} held-out)")
 
 
 def planned_evaluations(total, frequency, before):
@@ -62,8 +93,8 @@ def estimate_eta(elapsed, scored, total_episodes, steps_left, update_times, vali
     return None, "warming up; not enough completed episodes"
 
 
-def show(root):
-    runs = list(root.glob("*/run.json"))
+def show(root, selected=None):
+    runs = [selected / "run.json"] if selected else list(root.glob("*/run.json"))
     if not runs:
         print("RL setup in progress: no recorded trainer launch yet.")
         return
@@ -83,7 +114,6 @@ def show(root):
     config = yaml.safe_load(config_path.read_text())
     trainer = config["trainer"]
     rollout = config["actor_rollout_ref"]["rollout"]
-    total = trainer["total_training_steps"]
     samples = rollout["val_kwargs"]["n"]
     data_dir = metadata.get("data_dir")
     if not data_dir and active:
@@ -98,8 +128,21 @@ def show(root):
                 break
     if not data_dir:
         # Older launches did not record this field; the final report remains readable.
-        data_dir = config["data"]["train_files"].rsplit("/", 1)[0]
-    expected = expected_panels(data_dir) if Path(data_dir).is_dir() else {}
+        data_dir = ""
+    manifests, missing = [], []
+    for key in ("train_files", "val_files"):
+        try:
+            paths = manifest_files(config["data"][key], data_dir)
+            manifests.append(dataset_manifest(paths, tuple(Path(p).stat().st_mtime_ns for p in paths))
+                             if paths else (0, {}))
+        except (OSError, ValueError):
+            missing.append(key)
+            manifests.append((0, {}))
+    (train_rows, train_tasks), (validation_rows, expected) = manifests
+    if trainer.get("total_training_steps") is None and "train_files" in missing:
+        raise ValueError("cannot derive epoch schedule: training manifest unavailable")
+    total, rounds, validation_size, total_episodes = run_plan(config, train_rows, validation_rows)
+    schedule_known = not (rounds and "val_files" in missing)
     episodes = list((run.parent / "episodes").glob("*"))
     scored, records = 0, []
     for directory in episodes:
@@ -133,9 +176,6 @@ def show(root):
         any(q["step"] == p["step"] and q["panel"] == source and q["complete"] for q in panels)
         for source in expected)}
     step = max([step, *complete])
-    rounds = planned_evaluations(total, trainer["test_freq"], trainer["val_before_train"])
-    validation_size = sum(map(len, expected.values())) * samples
-    total_episodes = total * config["data"]["train_batch_size"] * rollout["n"] + len(rounds) * validation_size
     update_times = []
     for point in scalars.get("timing_s/gen", []):
         value = point.value
@@ -143,14 +183,14 @@ def show(root):
             value += sum(p.value for p in scalars.get(f"timing_s/{tag}", []) if p.step == point.step)
         update_times.append(value)
     validation_times = []
-    for version in complete:
+    for version in complete & rounds:
         rows = [r for r in records if r[0]["data_source"] in expected
                 and r[0]["weight_versions"]["min_global_steps"] == version]
         validation_times.append(max(r[4] for r in rows) - min(r[4] - r[3] for r in rows))
     eta, basis = estimate_eta(elapsed, scored, total_episodes, max(0, total - step), update_times,
                               len(rounds - complete), validation_times)
     grad, clip = latest("actor/grad_norm"), latest("actor/pg_clipfrac")
-    done = step >= total and rounds <= complete
+    done = schedule_known and step >= total and rounds <= complete
     nonfinite = any(v is not None and not math.isfinite(v) for v in
                     (grad, clip, latest("actor/loss")))
     health = "COOKED: non-finite training metric" if nonfinite else (
@@ -162,17 +202,16 @@ def show(root):
             health = "WATCH: >50% of policy updates clipped"
     baseline = 0 in rounds and 0 not in complete
     phase = f"baseline ({scored}/{validation_size} scored)" if baseline else "training / periodic validation"
-    if "overfit" in trainer.get("experiment_name", ""):
-        phase = "single-task overfit (NO holdout)"
     if done:
         phase = "complete"
     print(f"TOOLATHLON RL  {run.parent.name} | {health}")
     print(f"Elapsed {duration(elapsed)} | phase: {phase} | updates {step}/{total}")
-    print(f"Episodes {scored}/{total_episodes or '?'} scored | {len(episodes) - scored} unfinished")
+    print("Tasks: unknown (saved dataset manifest unavailable)" if missing else task_coverage(train_tasks, expected))
+    print(f"Episodes {scored}/{total_episodes if schedule_known else '?'} scored | {len(episodes) - scored} unfinished")
     if done:
         print("ETA: finished")
-    elif active and expected:
-        print(f"ETA whole scheduled pilot: {duration(eta) if eta is not None else '--'} | {basis}")
+    elif active and schedule_known:
+        print(f"ETA whole scheduled run: {duration(eta) if eta is not None else '--'} | {basis}")
     else:
         print("ETA: -- (trainer stopped or task manifest unavailable)")
     print("Reward (native partial score, NOT pass rate):")
@@ -205,12 +244,17 @@ def show(root):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--once", action="store_true")
+    parser.add_argument("--run", type=Path, help="Inspect a specific run directory instead of the newest run")
+    parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[2] /
+                        "artifacts/training/toolathlon_gym", help="Directory containing RL runs")
     args = parser.parse_args()
-    root = Path(__file__).resolve().parents[2] / "artifacts/training/toolathlon_gym"
     while True:
         if not args.once:
             print("\033[2J\033[H", end="")
-        show(root)
+        try:
+            show(args.root, args.run)
+        except (OSError, ValueError, KeyError) as exc:
+            print(f"RL status unavailable: {exc}")
         if args.once:
             return
         time.sleep(10)
