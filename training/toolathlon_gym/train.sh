@@ -2,7 +2,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 export RL_ROOT="$PWD"
-export MODEL_PATH="${MODEL_PATH:-$HOME/models/Qwen3.5-4B}"
+export MODEL_PATH="${MODEL_PATH:-$HOME/models/qwen35-4b-nonthinking-mixed-v3-8gpu}"
 export RL_DATA="${RL_DATA:-$PWD/artifacts/training/toolathlon_gym/pilot-data}"
 export RL_ARTIFACTS="${RL_ARTIFACTS:-$PWD/artifacts/training/toolathlon_gym/pilot}"
 export CUDA_VISIBLE_DEVICES="${POLICY_GPU:-0}"

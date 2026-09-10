@@ -64,7 +64,9 @@ SUBAGENT_GPU=1 bash training/toolathlon_gym/serve_subagents.sh
 POLICY_GPU=0 bash training/toolathlon_gym/train.sh
 ```
 
-The pilot starts from the original `Qwen3.5-4B`, not the previous SFT checkpoint.
+The pilot starts from the `qwen35-4b-nonthinking-mixed-v3-8gpu` SFT Decomposer
+checkpoint. Override `MODEL_PATH` to test a different initialization. Compare
+SFT-before-RL against SFT-after-RL; original-base smoke results are separate.
 Only its rank-16 LoRA parameters train. Subagents use separately served, unchanged
 Qwen3.5-4B weights. The default is one policy GPU plus one frozen-subagent GPU.
 The 16 training / 8 validation tasks are hash-selected from local-fixture tasks,
