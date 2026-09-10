@@ -59,10 +59,11 @@ score denominator. Preserve and inspect raw checks alongside scalar reward;
 neither limitation is evidence of a policy improvement.
 
 The small RL image extends an existing `decomposer-toolathlon:latest` Gym image.
-It connects the upstream WooCommerce/Notion PostgreSQL adapters; without those
-connections the clients attempt public HTTP endpoints despite a local database.
+It connects the upstream WooCommerce/Notion PostgreSQL adapters and keeps Canvas
+account-user queries on its PostgreSQL client; otherwise those requests attempt
+HTTP endpoints despite a local database.
 The environment check exercises real MCP calls and verifies isolation between two
-copies of the same task. It allocates no GPU. Build the base Gym image with
+copies of the same task, including Canvas account-user reads. It allocates no GPU. Build the base Gym image with
 `gyms/toolathlon_gym/build.sh` if it is not already available.
 
 Smoke training budgets are 4K initial prompt plus 12K response/observation tokens;
