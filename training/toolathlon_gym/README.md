@@ -52,11 +52,11 @@ The larger pilot below is a separate experiment, not a smoke test.
 ```bash
 bash training/toolathlon_gym/setup.sh
 podman build -f training/toolathlon_gym/Dockerfile -t decomposer-toolathlon-rl:latest .
-.venv-rl/bin/python -m training.toolathlon_gym.check_environment \
+.venv-rl/bin/python -m tests.toolathlon_gym.check_environment \
   --output artifacts/training/toolathlon_gym/environment-check
 .venv-rl/bin/python -m training.toolathlon_gym.prepare_pilot \
   --output artifacts/training/toolathlon_gym/pilot-data
-.venv-rl/bin/python -m training.toolathlon_gym.check_evaluators \
+.venv-rl/bin/python -m tests.toolathlon_gym.check_evaluators \
   --split artifacts/training/toolathlon_gym/pilot-data/split.json \
   --output artifacts/training/toolathlon_gym/evaluator-check
 SUBAGENT_GPU=1 bash training/toolathlon_gym/serve_subagents.sh

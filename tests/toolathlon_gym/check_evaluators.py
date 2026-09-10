@@ -1,4 +1,4 @@
-"""Preflight every pilot evaluator on empty agent output, without model calls."""
+"""Integration check: native evaluators on empty output, without model calls."""
 
 import argparse
 import json
