@@ -65,6 +65,51 @@ index 7ecb218..6706551 100644
 -}
 \ No newline at end of file
 +}
+diff --git a/local_servers/woocommerce-mcp/src/services/pg-rest-router.ts b/local_servers/woocommerce-mcp/src/services/pg-rest-router.ts
+--- a/local_servers/woocommerce-mcp/src/services/pg-rest-router.ts
++++ b/local_servers/woocommerce-mcp/src/services/pg-rest-router.ts
+@@ -129,17 +129,39 @@
+       if (resourceId !== undefined) {
+         const res = await this.pool.query(
+           `SELECT * FROM ${resource.table} WHERE ${this.quoteIdent(idCol)} = $1`,
+           [resourceId]
+         );
+-        return makeResponse(res.rows[0] || null);
++        const rows = resourceKey === 'orders' ? await this.withOrderRefunds(res.rows) : res.rows;
++        return makeResponse(rows[0] || null);
+       }
+ 
+       const { query, values } = this.buildListQuery(resource.table, params);
+       const res = await this.pool.query(query, values);
+-      return makeResponse(res.rows);
++      return makeResponse(resourceKey === 'orders' ? await this.withOrderRefunds(res.rows) : res.rows);
+     }
+ 
+     return makeResponse([]);
+   }
+ 
++  private async withOrderRefunds(orders: any[]): Promise<any[]> {
++    if (!orders.length) return orders;
++    // Fixtures store refunds separately; expose the standard order refund summary.
++    const result = await this.pool.query(
++      `SELECT order_id, id, COALESCE(reason, '') AS reason, (-abs(amount))::text AS total
++       FROM wc.refunds WHERE order_id = ANY($1::bigint[]) ORDER BY id`,
++      [orders.map(order => order.id)]
++    );
++    const refunds = new Map<string, any[]>();
++    for (const { order_id, ...refund } of result.rows) {
++      const key = String(order_id);
++      const list = refunds.get(key) || [];
++      list.push(refund);
++      refunds.set(key, list);
++    }
++    return orders.map(order => ({
++      ...order,
++      refunds: refunds.get(String(order.id)) ?? order.refunds ?? [],
++    }));
++  }
++
+   async post(url: string, data?: any, config?: any): Promise<any> {
 diff --git a/local_servers/mcp-canvas-lms/src/client.ts b/local_servers/mcp-canvas-lms/src/client.ts
 --- a/local_servers/mcp-canvas-lms/src/client.ts
 +++ b/local_servers/mcp-canvas-lms/src/client.ts
