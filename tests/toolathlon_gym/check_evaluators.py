@@ -13,13 +13,14 @@ def main():
     parser.add_argument("--split", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--workers", type=int, default=2)
+    parser.add_argument("--image", default="decomposer-toolathlon-rl:latest")
     args = parser.parse_args()
     manifest = json.loads(args.split.read_text())
     tasks = sorted(set(manifest["train"] + manifest["validation"]))
     args.output.mkdir(parents=True, exist_ok=False)
 
     def check(task):
-        episode = Episode(task, args.output / task, subagent_port=8025)
+        episode = Episode(task, args.output / task, subagent_port=8025, image=args.image)
         started = False
         try:
             episode.start()
