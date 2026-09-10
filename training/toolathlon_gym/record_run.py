@@ -20,6 +20,7 @@ def main():
                 "process_start_ticks": ticks,
                 "gym_image": os.environ.get("RL_GYM_IMAGE"),
                 "model_path": os.environ.get("MODEL_PATH"),
+                "model_requested_path": os.environ.get("MODEL_CHECKPOINT_LINK"),
                 "data_dir": os.environ.get("RL_DATA"),
                 "episode_timeout_seconds": float(os.environ.get("RL_EPISODE_TIMEOUT", "1800")),
                 "revision": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
