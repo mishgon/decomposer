@@ -138,6 +138,8 @@ celerybeat.pid
 .env
 .envrc
 .venv
+.venv-rl/
+external/verl/
 env/
 venv/
 ENV/
@@ -211,4 +213,3 @@ artifacts/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
-

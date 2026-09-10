@@ -32,6 +32,9 @@ def _create_subagent(
     thinking: bool,
 ) -> CompiledStateGraph:
     extra_body = {"top_k": 64}
+    qwen = "qwen3.5" in model_id.lower()
+    if qwen:
+        extra_body.update({"top_k": 20, "min_p": 0.0, "repetition_penalty": 1.0})
     if not thinking:
         extra_body.update(
             {
@@ -48,8 +51,9 @@ def _create_subagent(
         model=model_id,
         base_url=base_url,
         api_key=os.environ.get("VLLM_API_KEY", "EMPTY"),
-        temperature=1.0,
-        top_p=0.95,
+        temperature=0.7 if qwen and not thinking else 1.0,
+        top_p=0.8 if qwen and not thinking else 0.95,
+        presence_penalty=1.5 if qwen else 0.0,
         timeout=REQUEST_TIMEOUT_SECONDS,
         max_retries=REQUEST_MAX_RETRIES,
         http_async_client=httpx.AsyncClient(
