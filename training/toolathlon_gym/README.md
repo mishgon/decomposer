@@ -40,6 +40,12 @@ can verify the update and inspect reward change, not establish generalization
 or statistically prove overfitting. The task was chosen using observed runtime
 and reward variation; do not treat this checkpoint as unseen-task validation
 on a panel containing that task. Use `report --samples 2` for this run.
+The smoke launcher defaults to `RL_EPISODE_TIMEOUT=300` seconds per episode,
+on both sides of the update. Startup, cleanup, scoring and training add overhead;
+this is not a five-minute whole-run promise. Timed-out episodes receive native
+partial rewards. The general training launcher retains its 1800-second default.
+The effective episode timeout is recorded in `run.json`; compare runs with the
+same budget. This shorter default does not change already-running jobs.
 
 The larger pilot below is a separate experiment, not a smoke test.
 

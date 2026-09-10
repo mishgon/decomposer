@@ -21,6 +21,7 @@ def main():
                 "gym_image": os.environ.get("RL_GYM_IMAGE"),
                 "model_path": os.environ.get("MODEL_PATH"),
                 "data_dir": os.environ.get("RL_DATA"),
+                "episode_timeout_seconds": float(os.environ.get("RL_EPISODE_TIMEOUT", "1800")),
                 "revision": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
                 "policy_gpu": os.environ.get("CUDA_VISIBLE_DEVICES"), "overrides": overrides}
     (args.directory / "run.json").write_text(json.dumps(metadata, indent=2))
