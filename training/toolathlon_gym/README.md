@@ -23,6 +23,26 @@ prompt/parquet dataset. It does not assert that every task's infrastructure work
 
 ## Setup and pilot
 
+For the cheap **four-rollout overfitting smoke**, after setup and starting frozen
+subagents, use:
+
+```bash
+.venv-rl/bin/python -m training.toolathlon_gym.prepare_overfit \
+  --task wc-customer-order-gsheet-email \
+  --output artifacts/training/toolathlon_gym/overfit-data
+bash training/toolathlon_gym/overfit.sh
+```
+
+Two pre-update rollouts supply the GRPO group, followed by two post-update
+rollouts on the same task. This deliberately uses a diagnostic learning rate of
+`1e-4`. There is no separate baseline pass or held-out evaluation. Four rollouts
+can verify the update and inspect reward change, not establish generalization
+or statistically prove overfitting. The task was chosen using observed runtime
+and reward variation; do not treat this checkpoint as unseen-task validation
+on a panel containing that task. Use `report --samples 2` for this run.
+
+The larger pilot below is a separate experiment, not a smoke test.
+
 ```bash
 bash training/toolathlon_gym/setup.sh
 podman build -f training/toolathlon_gym/Dockerfile -t decomposer-toolathlon-rl:latest .
