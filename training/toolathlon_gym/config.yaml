@@ -16,7 +16,7 @@ algorithm:
 
 data:
   train_files: ${oc.env:RL_DATA}/train.parquet
-  val_files: ${oc.env:RL_DATA}/validation.parquet
+  val_files: ${oc.env:RL_DATA}/evaluation.parquet
   return_raw_chat: true
   train_batch_size: 2
   val_batch_size: 8
@@ -66,7 +66,7 @@ actor_rollout_ref:
     agent:
       agent_loop_config_path: ${oc.env:RL_ROOT}/training/toolathlon_gym/agent_loop.yaml
       default_agent_loop: toolathlon_decomposer
-      num_workers: 2
+      num_workers: 4
     val_kwargs:
       n: 3
       do_sample: true
@@ -80,7 +80,7 @@ trainer:
   nnodes: 1
   total_training_steps: 8
   save_freq: 2
-  test_freq: 2
+  test_freq: 4
   val_before_train: true
   default_local_dir: ${oc.env:RL_ARTIFACTS}/checkpoints
   project_name: decomposer-toolathlon-gym
