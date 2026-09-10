@@ -46,7 +46,7 @@ def native_reward(evaluation):
 class Episode:
     def __init__(self, task: str, directory: Path, *, subagent_port: int,
                  subagent_model: str = "Qwen/Qwen3.5-4B",
-                 image: str = "decomposer-toolathlon:latest", engine: str = "podman",
+                 image: str = "decomposer-toolathlon-rl:latest", engine: str = "podman",
                  startup_timeout: float = 240):
         self.root = Path(__file__).resolve().parents[2]
         tasks = self.root / "external/toolathlon_gym/tasks/finalpool"
