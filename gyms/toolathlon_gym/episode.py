@@ -92,6 +92,11 @@ class Episode:
                          "ALTER TABLE email.sent_log DROP CONSTRAINT IF EXISTS sent_log_message_id_fkey; "
                          "ALTER TABLE email.sent_log ADD CONSTRAINT sent_log_message_id_fkey "
                          "FOREIGN KEY (message_id) REFERENCES email.messages(id) ON DELETE CASCADE;")
+            self.command("exec", self.pg, "psql", "-U", "eigent", "-d", "toolathlon_gym", "-c",
+                         "CREATE OR REPLACE VIEW gform.question_options AS "
+                         "SELECT q.id AS question_id, option->>'value' AS value "
+                         "FROM gform.questions q CROSS JOIN LATERAL "
+                         "jsonb_array_elements(COALESCE(q.config->'options', '[]'::jsonb)) option;")
             address = self.command("inspect", "--format",
                                    "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}", self.pg).stdout.strip()
             if not address:
@@ -103,7 +108,7 @@ class Episode:
                    "DECOMPOSER_SUBAGENT_MODEL": self.subagent_model,
                    "DECOMPOSER_SUBAGENT_BASE_URL": f"http://host.docker.internal:{self.subagent_port}/v1",
                    "PYTHONPATH": "/rl-source/src"}
-            self.command("run", "--http-proxy=false", "-d", "--name", self.container,
+            self.start_task_container("run", "--http-proxy=false", "-d", "--name", self.container,
                          "--network", self.network, "--add-host", "host.docker.internal:host-gateway",
                          "-p", "127.0.0.1::2024",
                          *[arg for key, value in env.items() for arg in ("-e", f"{key}={value}")],
@@ -131,7 +136,17 @@ class Episode:
             self.close()
             raise
 
-    def score(self, timeout=180):
+    def start_task_container(self, *args):
+        for attempt in range(5):
+            result = self.command(*args, check=False)
+            if result.returncode == 0:
+                return result
+            if "address already in use" not in result.stderr or attempt == 4:
+                raise RuntimeError(result.stderr or result.stdout)
+            self.command("rm", "-f", self.container, check=False)
+        raise RuntimeError("Could not allocate task port")
+
+    def score(self, timeout=180, *, require_partial=True):
         config = self.runtime["task_config"]
         command = config["evaluation"]["evaluation_command"]
         if not command:
@@ -153,7 +168,12 @@ class Episode:
         evaluation = {"pass": result.returncode == 0, "returncode": result.returncode,
                       "native_result": native, "stdout": result.stdout, "stderr": result.stderr}
         (self.directory / "evaluation.json").write_text(json.dumps(evaluation, indent=2))
-        evaluation["reward"] = native_reward(evaluation)
+        try:
+            evaluation["reward"] = native_reward(evaluation)
+        except RuntimeError as error:
+            if require_partial or str(error) != "Unscorable native evaluator output":
+                raise
+            evaluation["reward"] = None
         (self.directory / "evaluation.json").write_text(json.dumps(evaluation, indent=2))
         return evaluation
 
