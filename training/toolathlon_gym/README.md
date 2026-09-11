@@ -124,6 +124,14 @@ counts come from the saved training schedule. It does not infer these from run n
 By default it selects the newest recorded run. Use `--run /path/to/run` to inspect
 a specific run, or `--root /path/to/runs` to select another collection of runs.
 Missing historical dataset metadata is shown as unknown rather than guessed.
+Checkpoint storage can be redirected with `RL_CHECKPOINT_ROOT` pointing to an
+existing directory. Alternatively, create the machine-local symlink
+`~/.local/share/decomposer/rl-checkpoints` pointing to a large mounted volume.
+New runs keep `RUN/checkpoints` as a symlink to `ROOT/RUN_NAME/checkpoints`;
+the watcher, resume paths, and best/last links keep their usual paths.
+Run metadata records the resolved storage location. Existing checkpoint
+directories are never automatically moved or overwritten by the launcher.
+
 Logs, native evaluations, model outputs and checkpoints
 live under `artifacts/training/toolathlon_gym/`.
 
