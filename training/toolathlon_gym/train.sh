@@ -17,6 +17,16 @@ export TOKENIZERS_PARALLELISM=false
 export PATH="$PWD/.venv-rl/bin:/usr/local/cuda/bin:$PATH"
 export TENSORBOARD_DIR="$RL_ARTIFACTS/tensorboard"
 mkdir -p "$RL_ARTIFACTS"
+checkpoint_root="${RL_CHECKPOINT_ROOT:-$HOME/.local/share/decomposer/rl-checkpoints}"
+if [ -n "${RL_CHECKPOINT_ROOT:-}" ] || [ -e "$checkpoint_root" ] || [ -L "$checkpoint_root" ]; then
+    test -d "$checkpoint_root" || { echo "Checkpoint storage unavailable: $checkpoint_root" >&2; exit 1; }
+    if [ ! -e "$RL_ARTIFACTS/checkpoints" ] && [ ! -L "$RL_ARTIFACTS/checkpoints" ]; then
+        checkpoint_dir="$checkpoint_root/$(basename "$RL_ARTIFACTS")/checkpoints"
+        test ! -e "$checkpoint_dir" || { echo "Checkpoint destination already exists: $checkpoint_dir" >&2; exit 1; }
+        mkdir -p "$checkpoint_dir"
+        ln -s "$(readlink -f "$checkpoint_dir")" "$RL_ARTIFACTS/checkpoints"
+    fi
+fi
 .venv-rl/bin/python -m training.toolathlon_gym.record_run --pid "$$" --directory "$RL_ARTIFACTS" "$@"
 exec > >(tee -a "$RL_ARTIFACTS/trainer.log") 2>&1
 exec .venv-rl/bin/python -m verl.trainer.main_ppo \
