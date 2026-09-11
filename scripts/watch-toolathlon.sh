@@ -70,7 +70,7 @@ new_format = isinstance(episodes, dict)
 if new_format:
     episodes = [{**e, "task": key.split("/rep-")[0],
                  "score": e.get("passed"), "duration_seconds": e.get("elapsed_seconds"),
-                 "status": "failed" if e["status"] == "infrastructure_error" else e["status"]}
+                 "status": {"infrastructure_error": "failed", "interrupted": "pending"}.get(e["status"], e["status"])}
                 for key, e in episodes.items()]
     total = len(manifest["tasks"]) * manifest["config"]["repetitions"]
     episodes += [{"status": "pending"}] * (total - len(episodes))
