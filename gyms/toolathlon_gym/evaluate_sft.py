@@ -2,6 +2,9 @@
 import argparse
 import asyncio
 import json
+import os
+import shutil
+import signal
 import subprocess
 import time
 from pathlib import Path
@@ -43,7 +46,9 @@ def metrics(manifest):
 
 
 async def episode(args, task, repetition, directory):
-    env = Episode(task, directory, subagent_port=args.subagent_port, image=args.image)
+    env = Episode(task, directory, subagent_port=args.subagent_port, image=args.image,
+                  subagent_model=args.subagent_model, subagent_url=args.subagent_url,
+                  subagent_host=args.subagent_host)
     started = time.time()
     state, result = {}, {"task": task, "repetition": repetition, "started_at": started}
     startup = asyncio.create_task(asyncio.to_thread(env.start))
@@ -93,9 +98,22 @@ async def run(args):
     manifest_path = args.output / "manifest.json"
     if args.resume:
         manifest = json.loads(manifest_path.read_text())
+        overrides = {key: getattr(args, key) for key in
+                     ("repetitions", "concurrency", "subagent_url", "subagent_model", "subagent_host")
+                     if getattr(args, key) is not None}
+        if overrides.get("repetitions", manifest["config"]["repetitions"]) < manifest["config"]["repetitions"]:
+            raise ValueError("Cannot reduce repetitions of an existing run")
         for key, value in manifest["config"].items():
             if key != "output": setattr(args, key, value)
+        manifest.setdefault("resume_history", []).append({"at": time.time(), "previous_config": dict(manifest["config"]),
+            "overrides": overrides, "revision": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()})
+        for key, value in overrides.items():
+            setattr(args, key, value)
+            manifest["config"][key] = value
+        manifest.pop("finished_at", None)
     else:
+        args.repetitions = args.repetitions or 3
+        args.concurrency = args.concurrency or 32
         if manifest_path.exists(): raise ValueError("Run exists; use --resume")
         pool = Path(__file__).resolve().parents[2] / "external/toolathlon_gym/tasks/finalpool"
         tasks = sorted(p.name for p in pool.iterdir() if (p / "task_config.json").exists())
@@ -106,25 +124,50 @@ async def run(args):
         manifest = {"config": {k: v for k, v in vars(args).items() if k != "resume"},
                     "revision": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
                     "started_at": time.time(), "tasks": tasks, "episodes": {}}
+    args.subagent_model = args.subagent_model or "Qwen/Qwen3.5-4B"
+    if args.subagent_url and not os.environ.get("VLLM_API_KEY"):
+        raise ValueError("Hosted subagents require VLLM_API_KEY in the environment")
     manifest["status"] = "running"
     save(manifest_path, manifest)
     save(args.output / "metrics.json", metrics(manifest))
     semaphore = asyncio.Semaphore(args.concurrency)
+    storage = subprocess.check_output(["podman", "info", "--format", "{{.Store.GraphRoot}}"], text=True).strip()
+    stopping = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        loop.add_signal_handler(sig, stopping.set)
 
     async def work(task, repetition):
         key = f"{task}/rep-{repetition:03d}"
         if manifest["episodes"].get(key, {}).get("status") == "completed": return
         async with semaphore:
+            if stopping.is_set(): return
+            while min(shutil.disk_usage(args.output).free, shutil.disk_usage(storage).free) < args.min_free_gb * 1024**3:
+                manifest["status"] = "waiting_for_disk"
+                save(manifest_path, manifest)
+                try:
+                    await asyncio.wait_for(stopping.wait(), 15)
+                except TimeoutError:
+                    pass
+                if stopping.is_set(): return
+            manifest["status"] = "running"
             parent = args.output / "episodes" / key
             parent.mkdir(parents=True, exist_ok=True)
             directory = parent / f"attempt-{len(list(parent.glob('attempt-*'))) + 1:03d}"
-            manifest["episodes"][key] = {"status": "running", "artifact_path": str(directory)}
+            manifest["episodes"][key] = {"status": "running", "artifact_path": str(directory),
+                                        "started_at": time.time(), "subagent_url": args.subagent_url}
             save(manifest_path, manifest)
             try:
                 result = await asyncio.wait_for(episode(args, task, repetition, directory), args.episode_timeout)
             except TimeoutError:
                 result = {"status": "infrastructure_error", "error": "total episode deadline", "passed": None}
             result["artifact_path"] = str(directory)
+            result["subagent_url"] = args.subagent_url
+            result["subagent_model"] = args.subagent_model
+            cleanup_path = directory / "cleanup.json"
+            if cleanup_path.exists() and json.loads(cleanup_path.read_text()).get("errors"):
+                manifest["cleanup_warning"] = str(cleanup_path)
+                stopping.set()
             if directory.exists(): save(directory / "result.json", result)
             save(parent / "result.json", result)
             manifest["episodes"][key] = result
@@ -132,7 +175,7 @@ async def run(args):
             save(args.output / "metrics.json", metrics(manifest))
             print(json.dumps({"episode": key, **result}), flush=True)
     await asyncio.gather(*(work(task, rep) for rep in range(1, args.repetitions + 1) for task in manifest["tasks"]))
-    manifest["status"] = "completed" if all(e["status"] == "completed" for e in manifest["episodes"].values()) else "completed_with_infrastructure_errors"
+    manifest["status"] = "paused" if stopping.is_set() else ("completed" if all(e["status"] == "completed" for e in manifest["episodes"].values()) else "completed_with_infrastructure_errors")
     manifest["finished_at"] = time.time()
     save(manifest_path, manifest)
 
@@ -144,14 +187,19 @@ def main():
     parser.add_argument("--model", default="decomposer-4b-sft")
     parser.add_argument("--url", default="http://127.0.0.1:8026/v1")
     parser.add_argument("--subagent-port", type=int, default=8025)
-    parser.add_argument("--concurrency", type=int, default=32)
-    parser.add_argument("--repetitions", "-n", type=int, default=3)
+    parser.add_argument("--subagent-url")
+    parser.add_argument("--subagent-model")
+    parser.add_argument("--subagent-host", help="Optional container DNS override, hostname:IP (TLS remains verified)")
+    parser.add_argument("--min-free-gb", type=float, default=30)
+    parser.add_argument("--concurrency", type=int)
+    parser.add_argument("--repetitions", "-n", type=int)
     parser.add_argument("--agent-timeout", type=float, default=2700)
     parser.add_argument("--episode-timeout", type=float, default=3300)
     parser.add_argument("--tasks", nargs="+")
     parser.add_argument("--resume", action="store_true")
     args = parser.parse_args()
-    if args.concurrency < 1 or args.repetitions < 1: parser.error("Counts must be positive")
+    if (args.concurrency is not None and args.concurrency < 1) or (args.repetitions is not None and args.repetitions < 1):
+        parser.error("Counts must be positive")
     asyncio.run(run(args))
 
 
