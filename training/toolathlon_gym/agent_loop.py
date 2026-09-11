@@ -14,6 +14,7 @@ from verl.experimental.agent_loop.agent_loop import AgentLoopBase, AgentLoopOutp
 
 from decomposer.core import create_decomposer_agent
 from gyms.toolathlon_gym.episode import Episode
+from gyms.toolathlon_gym.cancel import cancel_subagents
 from training.toolathlon_gym.policy import PolicyTokens, RolloutBudgetExceeded, VerlChatModel
 
 
@@ -69,9 +70,7 @@ class ToolathlonAgentLoop(AgentLoopBase):
             # Freeze unfinished subagents before native scoring of partial state.
             from langgraph_sdk import get_client
             client = get_client(url=episode.url)
-            for run in state.get("subagent_runs", {}).values():
-                if run.get("report") is None:
-                    await asyncio.wait_for(client.runs.cancel(run["thread_id"], run["run_id"], wait=True), 60)
+            await cancel_subagents(client, state.get("subagent_runs", {}))
             evaluation = await asyncio.to_thread(episode.score)
             if failure is not None:
                 raise failure
