@@ -36,12 +36,9 @@ def _create_subagent(
     if qwen:
         extra_body.update({"top_k": 20, "min_p": 0.0, "repetition_penalty": 1.0})
     if not thinking:
-        extra_body.update(
-            {
-                "reasoning_effort": "none",
-                "chat_template_kwargs": {"enable_thinking": False},
-            }
-        )
+        extra_body["chat_template_kwargs"] = {"enable_thinking": False}
+        if not qwen:
+            extra_body["reasoning_effort"] = "none"
 
     base_url = os.environ.get(
         base_url_env,
