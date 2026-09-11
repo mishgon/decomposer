@@ -59,8 +59,6 @@ podman build -f training/toolathlon_gym/Dockerfile -t decomposer-toolathlon-rl:l
 .venv-rl/bin/python -m tests.toolathlon_gym.check_evaluators \
   --split artifacts/training/toolathlon_gym/pilot-data/split.json \
   --output artifacts/training/toolathlon_gym/evaluator-check
-SUBAGENT_GPU=1 bash training/toolathlon_gym/serve_subagents.sh
-# In another shell, after the endpoint on port 8025 is ready:
 POLICY_GPU=0 bash training/toolathlon_gym/train.sh
 ```
 
@@ -72,7 +70,15 @@ the link does not switch a running job's model. Override `MODEL_PATH` to test
 a different initialization. Compare
 SFT-before-RL against SFT-after-RL; original-base smoke results are separate.
 Only its rank-16 LoRA parameters train. Subagents use separately served, unchanged
-Qwen3.5-4B weights. The default is one policy GPU plus one frozen-subagent GPU.
+Qwen3.5-4B weights through lmrouter. Only the policy/training GPU is local;
+the launcher does not start a subagent vLLM server.
+`train.sh` sources `~/.local/share/environment/lmrouter.env` (override with
+`LMROUTER_ENV`). Set `LLM_PROXY_URL` and `LLM_PROXY_MASTER_KEY` there.
+Optional `SUBAGENT_URL` overrides the base URL, and `SUBAGENT_HOST=hostname:IP`
+adds a container DNS mapping when needed, keeping hostname TLS verification.
+Credentials are inherited by Ray workers and passed to containers by environment
+name, not stored in Hydra configuration or `run.json`. Endpoint/model provenance
+is recorded in `run.json`. Missing router configuration fails before training.
 The 16 training / 8 validation tasks are hash-selected from local-fixture tasks,
 without consulting historical rewards. Each validation uses three rollouts per
 task; its tasks are never included in gradient updates. This is a small Gym pilot,
@@ -82,7 +88,7 @@ not a whole-Gym performance claim.
 reported separately from held-out validation. Both panels are measured before
 training and every four updates, with three rollouts per task. This avoids
 mistaking changes in training-batch difficulty for reward improvement. There are
-four environment workers sharing the same two GPUs.
+four environment workers sharing the policy GPU and hosted subagent endpoint.
 
 Known native-environment limitations: the email service defaults to
 `user@example.com`, although some tasks require another sender. Some native
@@ -99,14 +105,14 @@ copies of the same task, including Canvas account-user reads. It allocates no GP
 `gyms/toolathlon_gym/build.sh` if it is not already available.
 
 Smoke training budgets are 4K initial prompt plus 12K response/observation tokens;
-the frozen subagent server supports 256K context. The Decomposer and subagent
-recursion limits are 410. The episode wall-clock cap is 30 minutes. Budget-limited
+the hosted subagent deployment should support 256K context. The Decomposer and subagent
+recursion limits are 410. The episode wall-clock cap is 45 minutes. Budget-limited
 episodes are scored on partial state; unknown evaluator formats and infrastructure
 errors fail explicitly instead of receiving fabricated zero rewards.
 
 Generation uses Qwen's [non-thinking general-task recommendations](https://huggingface.co/Qwen/Qwen3.5-4B):
 temperature 0.7, top-p 0.8, top-k 20, presence penalty 1.5. Frozen-subagent prefix
-caching is enabled; trainable-policy caching is disabled across weight updates.
+caching is controlled by the hosted deployment; trainable-policy caching is disabled across weight updates.
 Raw token IDs/logprobs are retained. Tool and middleware observations have zero
 loss mask. On new user feedback Qwen's full template would remove the previous
 empty thinking scaffold; the RL sequence retains its actual generation prefix

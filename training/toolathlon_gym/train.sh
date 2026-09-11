@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/../.."
+source training/toolathlon_gym/router.sh
 export RL_ROOT="$PWD"
 export MODEL_CHECKPOINT_LINK="${MODEL_PATH:-$HOME/models/decomposer-4b-sft}"
 export MODEL_PATH
@@ -9,7 +10,6 @@ test -f "$MODEL_PATH/config.json" || { echo "Missing model config: $MODEL_PATH" 
 export RL_DATA="${RL_DATA:-$PWD/artifacts/training/toolathlon_gym/pilot-data}"
 export RL_ARTIFACTS="${RL_ARTIFACTS:-$PWD/artifacts/training/toolathlon_gym/pilot}"
 export CUDA_VISIBLE_DEVICES="${POLICY_GPU:-0}"
-export SUBAGENT_PORT="${SUBAGENT_PORT:-8025}"
 RL_GYM_IMAGE=$(podman image inspect --format '{{.Id}}' "${RL_GYM_IMAGE:-decomposer-toolathlon-rl:latest}")
 export RL_GYM_IMAGE
 export PYTHONPATH="$PWD:$PWD/src:$PWD/external/verl${PYTHONPATH:+:$PYTHONPATH}"

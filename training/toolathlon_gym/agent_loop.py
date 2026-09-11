@@ -24,7 +24,10 @@ class ToolathlonAgentLoop(AgentLoopBase):
         task = kwargs["extra_info"]["task_id"]
         episode_id = uuid4().hex
         directory = Path(os.environ["RL_ARTIFACTS"]) / "episodes" / episode_id
-        episode = Episode(task, directory, subagent_port=int(os.environ.get("SUBAGENT_PORT", "8025")),
+        episode = Episode(task, directory,
+                          subagent_url=os.environ["SUBAGENT_URL"],
+                          subagent_host=os.environ.get("SUBAGENT_HOST") or None,
+                          subagent_model=os.environ.get("SUBAGENT_MODEL", "Qwen/Qwen3.5-4B"),
                           image=os.environ.get("RL_GYM_IMAGE", "decomposer-toolathlon-rl:latest"))
         started = time.time()
         startup = asyncio.create_task(asyncio.to_thread(episode.start))

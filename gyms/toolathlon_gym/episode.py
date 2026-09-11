@@ -44,7 +44,7 @@ def native_reward(evaluation):
 
 
 class Episode:
-    def __init__(self, task: str, directory: Path, *, subagent_port: int,
+    def __init__(self, task: str, directory: Path, *, subagent_port: int = 8025,
                  subagent_model: str = "Qwen/Qwen3.5-4B",
                  subagent_url: str | None = None, subagent_host: str | None = None,
                  image: str = "decomposer-toolathlon-rl:latest", engine: str = "podman",
