@@ -200,7 +200,7 @@ print("hosted" if config.get("subagent_url") else config.get("subagent_gpu", "0"
 PY
 )"
   gpu_ids="${WATCH_GPUS:-0,2}"
-  if [[ "$subagent_gpu" == hosted ]]; then
+  if [[ "$_configured_gpu" == hosted ]]; then
     gpu_ids="${WATCH_GPUS:-2}"
     printf '\nSubagents: hosted router (no local subagent GPU)\n'
   fi
