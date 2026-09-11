@@ -1,4 +1,6 @@
 import unittest
+import json
+import tempfile
 from pathlib import Path
 from subprocess import CompletedProcess
 from unittest.mock import Mock, AsyncMock
@@ -8,6 +10,24 @@ from gyms.toolathlon_gym.cancel import cancel_subagents
 
 
 class Recovery(unittest.IsolatedAsyncioTestCase):
+    def test_cleanup_removes_only_owned_volumes_and_verifies(self):
+        with tempfile.TemporaryDirectory() as directory:
+            ep = object.__new__(Episode)
+            ep.directory = Path(directory)
+            ep.container, ep.pg, ep.network = "owned-task", "owned-pg", "owned-net"
+            def command(*args, **kwargs):
+                if args[0] == "inspect":
+                    return CompletedProcess([], 0, json.dumps([{"Mounts": [
+                        {"Type": "volume", "Name": "owned-db"},
+                        {"Type": "bind", "Source": "/keep/traces"}]}]), "")
+                if "exists" in args: return CompletedProcess([], 1, "", "")
+                return CompletedProcess([], 0, "", "")
+            ep.command = Mock(side_effect=command)
+            ep.close()
+            ep.command.assert_any_call("volume", "rm", "owned-db", check=False, timeout=30)
+            self.assertFalse(json.loads((ep.directory / "cleanup.json").read_text())["errors"])
+            self.assertFalse(any("prune" in c.args for c in ep.command.call_args_list))
+
     def test_port_collision_retry(self):
         ep = object.__new__(Episode)
         ep.container = "owned-task"

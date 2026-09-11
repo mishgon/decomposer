@@ -191,13 +191,19 @@ from urllib.parse import urlparse
 manifest = json.load(open(sys.argv[1]))
 config = manifest.get("config", {})
 ports = config.get("subagent_ports") or [config.get("subagent_port", "")]
+if config.get("subagent_url"):
+    ports = []
 teacher_port = urlparse(config.get("url", "")).port
 if teacher_port and teacher_port not in ports:
     ports.append(teacher_port)
-print(config.get("subagent_gpu", "0"), ",".join(map(str, ports)))
+print("hosted" if config.get("subagent_url") else config.get("subagent_gpu", "0"), ",".join(map(str, ports)))
 PY
 )"
   gpu_ids="${WATCH_GPUS:-0,2}"
+  if [[ "$subagent_gpu" == hosted ]]; then
+    gpu_ids="${WATCH_GPUS:-2}"
+    printf '\nSubagents: hosted router (no local subagent GPU)\n'
+  fi
   evaluator_state="stopped"
   if pgrep -f "(gyms/toolathlon_gym/run.py|gyms.toolathlon_gym.evaluate_sft).*${RUN_ID}" >/dev/null 2>&1; then
     evaluator_state="running"

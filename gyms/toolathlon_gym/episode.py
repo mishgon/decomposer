@@ -46,6 +46,7 @@ def native_reward(evaluation):
 class Episode:
     def __init__(self, task: str, directory: Path, *, subagent_port: int,
                  subagent_model: str = "Qwen/Qwen3.5-4B",
+                 subagent_url: str | None = None, subagent_host: str | None = None,
                  image: str = "decomposer-toolathlon-rl:latest", engine: str = "podman",
                  startup_timeout: float = 240):
         self.root = Path(__file__).resolve().parents[2]
@@ -54,6 +55,7 @@ class Episode:
             raise ValueError(f"Unknown task: {task}")
         self.task, self.directory = task, directory.resolve()
         self.subagent_port, self.subagent_model = subagent_port, subagent_model
+        self.subagent_url, self.subagent_host = subagent_url, subagent_host
         self.image, self.engine, self.startup_timeout = image, engine, startup_timeout
         self.network = "decomposer-rl-" + uuid.uuid4().hex[:16]
         self.pg, self.container = self.network + "-pg", self.network + "-task"
@@ -106,10 +108,14 @@ class Episode:
                    "TOOLATHLON_TASK": self.task, "N_JOBS_PER_WORKER": "1000",
                    "TOOLATHLON_SUBAGENT_CALL_LOG": "/artifacts/data/subagent_model_calls.jsonl",
                    "DECOMPOSER_SUBAGENT_MODEL": self.subagent_model,
-                   "DECOMPOSER_SUBAGENT_BASE_URL": f"http://host.docker.internal:{self.subagent_port}/v1",
+                   "DECOMPOSER_SUBAGENT_BASE_URL": self.subagent_url or f"http://host.docker.internal:{self.subagent_port}/v1",
                    "PYTHONPATH": "/rl-source/src"}
+            # Pass credentials by environment name, never in command arguments or artifacts.
+            credentials = ("-e", "VLLM_API_KEY") if self.subagent_url else ()
             self.start_task_container("run", "--http-proxy=false", "-d", "--name", self.container,
                          "--network", self.network, "--add-host", "host.docker.internal:host-gateway",
+                         *(("--add-host", self.subagent_host) if self.subagent_host else ()),
+                         *credentials,
                          "-p", "127.0.0.1::2024",
                          *[arg for key, value in env.items() for arg in ("-e", f"{key}={value}")],
                          "-v", f"{data}:/artifacts/data",
@@ -179,16 +185,40 @@ class Episode:
 
     def close(self):
         errors = []
+        volumes = set()
         for container in (self.container, self.pg):
+            try:
+                inspection = self.command("inspect", container, check=False)
+                if inspection.returncode == 0:
+                    for mount in json.loads(inspection.stdout)[0].get("Mounts", []):
+                        if mount.get("Type") == "volume":
+                            volumes.add(mount["Name"])
+                elif self.command("container", "exists", container, check=False).returncode != 1:
+                    errors.append(f"Could not inspect volumes: {container}")
+            except Exception as error:
+                errors.append(repr(error))
             try:
                 logs = self.command("logs", container, check=False, timeout=15)
                 (self.directory / f"{container}.log").write_text(logs.stdout + logs.stderr)
             except Exception as error:
                 errors.append(repr(error))
             try:
-                result = self.command("rm", "-f", "-v", container, check=False, timeout=30)
-                if result.returncode:
-                    errors.append(result.stderr)
+                for attempt in range(3):
+                    result = self.command("rm", "-f", "-v", container, check=False, timeout=30)
+                    exists = self.command("container", "exists", container, check=False)
+                    if exists.returncode == 1:
+                        break
+                    time.sleep(attempt + 1)
+                else:
+                    errors.append(f"Container cleanup not verified: {container}: {result.stderr}")
+            except Exception as error:
+                errors.append(repr(error))
+        # Only volumes belonging to these exact episode containers; never global prune.
+        for volume in volumes:
+            try:
+                result = self.command("volume", "rm", volume, check=False, timeout=30)
+                if self.command("volume", "exists", volume, check=False).returncode != 1:
+                    errors.append(f"Volume cleanup not verified: {volume}: {result.stderr}")
             except Exception as error:
                 errors.append(repr(error))
         try:
@@ -197,4 +227,5 @@ class Episode:
                 errors.append(result.stderr)
         except Exception as error:
             errors.append(repr(error))
-        (self.directory / "cleanup.json").write_text(json.dumps({"errors": errors}, indent=2))
+        (self.directory / "cleanup.json").write_text(json.dumps(
+            {"errors": errors, "volumes": sorted(volumes), "finished_at": time.time()}, indent=2))
