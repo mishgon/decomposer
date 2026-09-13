@@ -199,7 +199,8 @@ class Episode:
                 errors.append(repr(error))
             try:
                 logs = self.command("logs", container, check=False, timeout=15)
-                (self.directory / f"{container}.log").write_text(logs.stdout + logs.stderr)
+                if logs.returncode == 0:
+                    (self.directory / f"{container}.log").write_text(logs.stdout + logs.stderr)
             except Exception as error:
                 errors.append(repr(error))
             try:
@@ -223,8 +224,8 @@ class Episode:
                 errors.append(repr(error))
         try:
             result = self.command("network", "rm", self.network, check=False, timeout=30)
-            if result.returncode:
-                errors.append(result.stderr)
+            if self.command("network", "exists", self.network, check=False).returncode != 1:
+                errors.append(f"Network cleanup not verified: {self.network}: {result.stderr}")
         except Exception as error:
             errors.append(repr(error))
         (self.directory / "cleanup.json").write_text(json.dumps(
