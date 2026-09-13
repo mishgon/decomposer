@@ -111,6 +111,7 @@ async def run(args):
             setattr(args, key, value)
             manifest["config"][key] = value
         manifest.pop("finished_at", None)
+        manifest.pop("cleanup_warning", None)
     else:
         args.repetitions = args.repetitions or 3
         args.concurrency = args.concurrency or 32
