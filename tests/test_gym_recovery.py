@@ -10,6 +10,24 @@ from gyms.toolathlon_gym.cancel import cancel_subagents
 
 
 class Recovery(unittest.IsolatedAsyncioTestCase):
+    def test_repeated_cleanup_preserves_logs_and_accepts_absent_network(self):
+        with tempfile.TemporaryDirectory() as directory:
+            ep = object.__new__(Episode)
+            ep.directory = Path(directory)
+            ep.container, ep.pg, ep.network = "task", "pg", "network"
+            saved = ep.directory / "task.log"
+            saved.write_text("original failure evidence")
+            ep.command = Mock(return_value=CompletedProcess([], 1, "", "not found"))
+            ep.close()
+            ep.close()
+            self.assertEqual(saved.read_text(), "original failure evidence")
+            self.assertEqual(json.loads((ep.directory / "cleanup.json").read_text())["errors"], [])
+            def command(*args, **kwargs):
+                return CompletedProcess([], 0 if args[:2] == ("network", "exists") else 1, "", "still present")
+            ep.command = Mock(side_effect=command)
+            ep.close()
+            self.assertIn("Network cleanup not verified", (ep.directory / "cleanup.json").read_text())
+
     def test_cleanup_removes_only_owned_volumes_and_verifies(self):
         with tempfile.TemporaryDirectory() as directory:
             ep = object.__new__(Episode)
