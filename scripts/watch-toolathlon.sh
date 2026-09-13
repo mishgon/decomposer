@@ -134,8 +134,19 @@ if durations:
         f"mean {statistics.mean(durations) / 60:.1f}m | {len(durations)} samples"
     )
 
-if terminal and elapsed > 0 and remaining:
-    episodes_per_hour = len(terminal) * 3600 / elapsed
+eta_samples, eta_elapsed = len(terminal), elapsed
+resumes = manifest.get("resume_history", [])
+if resumes:
+    resumed = parse_time(resumes[-1]["at"])
+    eta_elapsed = (now - resumed).total_seconds()
+    eta_samples = sum(e.get("status") == "completed" and e.get("started_at") is not None
+                      and parse_time(e["started_at"]) >= resumed for e in episodes)
+if manifest["status"] in {"paused", "waiting_for_disk"}:
+    print("ETA:        paused; no active completion estimate")
+elif resumes and remaining and eta_samples < 8:
+    print(f"ETA:        warming up after resume ({eta_samples}/8 scored episodes); excludes downtime")
+elif eta_samples and eta_elapsed > 0 and remaining:
+    episodes_per_hour = eta_samples * 3600 / eta_elapsed
     eta_seconds = remaining / episodes_per_hour * 3600
     finish = now + timedelta(seconds=eta_seconds)
     print(
