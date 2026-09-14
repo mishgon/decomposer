@@ -28,6 +28,8 @@ Evaluation is a training probe, not held-out validation. The reward remains
 native partial score; the 0.9 cutoff selects tasks, not the training reward.
 Checkpoints are saved at updates 8 and 16; `best` uses complete probe reward and
 `last` uses the latest checkpoint. These do not establish held-out performance.
+When external checkpoint storage is configured, Ray temporary/spill storage also
+defaults to that volume (`ray-tmp`); override with `RAY_TMPDIR` if needed.
 
 Run from the repository root using ordinary Python; no CUDA dependencies:
 
