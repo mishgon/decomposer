@@ -1,0 +1,2337 @@
+{
+  "threshold": 0.9,
+  "attempts": 5,
+  "selection": "1 to 4 successes; infrastructure/missing scores count as failures",
+  "tasks": [
+    {
+      "task_id": "academic-literature-review",
+      "successes_ge90": 2,
+      "partial_scores": [
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        1.0
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "academic-presentation-builder",
+      "successes_ge90": 4,
+      "partial_scores": [
+        1.0,
+        0.9166666666666666,
+        1.0,
+        1.0,
+        0.8888888888888888
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "arxiv-fetch-terminal-pipeline",
+      "successes_ge90": 3,
+      "partial_scores": [
+        0.9047619047619048,
+        0.0,
+        0.9285714285714286,
+        0.9047619047619048,
+        0.8809523809523809
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "arxiv-latex-reasoning-gsheet",
+      "successes_ge90": 2,
+      "partial_scores": [
+        0.9019607843137255,
+        0.0,
+        0.9411764705882353,
+        0.0,
+        0.711864406779661
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "arxiv-lit-review-gsheet",
+      "successes_ge90": 2,
+      "partial_scores": [
+        0.9090909090909091,
+        0.8636363636363636,
+        0.875,
+        0.3333333333333333,
+        0.9047619047619048
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "arxiv-method-benchmark-tracker",
+      "successes_ge90": 3,
+      "partial_scores": [
+        1.0,
+        0.5,
+        1.0,
+        1.0,
+        0.5
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "arxiv-survey-presentation",
+      "successes_ge90": 1,
+      "partial_scores": [
+        0.7037037037037037,
+        0.0,
+        0.0,
+        0.0,
+        0.972972972972973
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "arxiv-team-reading-gform-gcal",
+      "successes_ge90": 2,
+      "partial_scores": [
+        1.0,
+        1.0,
+        0.875,
+        0.875,
+        0.875
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "canvas-assignment-deadline-gcal",
+      "successes_ge90": 1,
+      "partial_scores": [
+        0.9444444444444444,
+        0.32,
+        0.8679245283018868,
+        0.8490566037735849,
+        0.86
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "canvas-assignment-deadline-word-gcal",
+      "successes_ge90": 1,
+      "partial_scores": [
+        0.45714285714285713,
+        0.5714285714285714,
+        0.8723404255319149,
+        0.9523809523809523,
+        null
+      ],
+      "infrastructure_errors": 1
+    },
+    {
+      "task_id": "canvas-assignment-word-notion",
+      "successes_ge90": 2,
+      "partial_scores": [
+        0.9411764705882353,
+        0.7647058823529411,
+        0.6,
+        0.9411764705882353,
+        0.6
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "canvas-enrollment-overview",
+      "successes_ge90": 1,
+      "partial_scores": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "canvas-enrollment-ppt-gsheet",
+      "successes_ge90": 1,
+      "partial_scores": [
+        0.0,
+        0.9558823529411765,
+        0.0,
+        0.625,
+        0.0
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "canvas-late-submission-word-gcal",
+      "successes_ge90": 2,
+      "partial_scores": [
+        0.0,
+        0.38461538461538464,
+        0.3076923076923077,
+        1.0,
+        1.0
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "canvas-module-completion-notion-gcal",
+      "successes_ge90": 4,
+      "partial_scores": [
+        0.95,
+        0.95,
+        0.95,
+        0.7241379310344828,
+        0.95
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "canvas-quiz-analysis-email",
+      "successes_ge90": 1,
+      "partial_scores": [
+        0.7,
+        0.3333333333333333,
+        0.9393939393939394,
+        0.6,
+        0.3333333333333333
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "canvas-quiz-analysis-gsheet-email",
+      "successes_ge90": 1,
+      "partial_scores": [
+        1.0,
+        0.0,
+        0.8571428571428571,
+        0.0,
+        0.0
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "canvas-quiz-performance-gcal-gform",
+      "successes_ge90": 1,
+      "partial_scores": [
+        0.5689655172413793,
+        0.8,
+        0.8,
+        0.9482758620689655,
+        0.5517241379310345
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "canvas-quiz-remediation-gform-gcal",
+      "successes_ge90": 2,
+      "partial_scores": [
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        1.0
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "canvas-scholarly-curriculum-excel-notion",
+      "successes_ge90": 3,
+      "partial_scores": [
+        0.9230769230769231,
+        0.2857142857142857,
+        0.9230769230769231,
+        0.8717948717948718,
+        0.9230769230769231
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "event-catering-logistics-optimization",
+      "successes_ge90": 2,
+      "partial_scores": [
+        0.5833333333333334,
+        0.5833333333333334,
+        1.0,
+        1.0,
+        0.8333333333333334
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "fetch-canvas-syllabus-benchmark-excel-ppt",
+      "successes_ge90": 1,
+      "partial_scores": [
+        0.0,
+        0.0,
+        0.0,
+        0.9310344827586207,
+        0.0
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "fetch-howtocook-wellness-notion-email",
+      "successes_ge90": 1,
+      "partial_scores": [
+        0.0,
+        0.9655172413793104,
+        0.0,
+        0.0,
+        null
+      ],
+      "infrastructure_errors": 1
+    },
+    {
+      "task_id": "fetch-notion-monitoring",
+      "successes_ge90": 4,
+      "partial_scores": [
+        0.9230769230769231,
+        0.9230769230769231,
+        0.9230769230769231,
+        0.9230769230769231,
+        0.6666666666666666
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "fetch-sf-canvas-resource-excel-gcal",
+      "successes_ge90": 1,
+      "partial_scores": [
+        0.6923076923076923,
+        0.0,
+        0.7317073170731707,
+        0.0,
+        0.9384615384615385
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "fetch-sf-hr-benchmark-excel-word",
+      "successes_ge90": 4,
+      "partial_scores": [
+        0.9285714285714286,
+        0.9642857142857143,
+        0.8571428571428571,
+        0.9642857142857143,
+        0.9642857142857143
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "fetch-sf-hr-worklife-excel-word-gcal",
+      "successes_ge90": 1,
+      "partial_scores": [
+        0.0,
+        0.0,
+        0.8125,
+        0.0,
+        0.90625
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "fetch-sf-sales-competitor-excel-notion",
+      "successes_ge90": 1,
+      "partial_scores": [
+        0.0,
+        0.0,
+        0.9259259259259259,
+        0.8888888888888888,
+        0.0
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "fetch-sf-sales-forecast-excel-word-email",
+      "successes_ge90": 4,
+      "partial_scores": [
+        0.9130434782608695,
+        0.9130434782608695,
+        0.945054945054945,
+        0.8333333333333334,
+        1.0
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "fetch-sf-sales-forecast-ppt-gcal",
+      "successes_ge90": 1,
+      "partial_scores": [
+        0.9545454545454546,
+        0.0,
+        0.6666666666666666,
+        0.0,
+        0.0
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "fetch-sf-support-survey-gform-gcal-excel",
+      "successes_ge90": 3,
+      "partial_scores": [
+        0.9705882352941176,
+        0.0,
+        0.9666666666666667,
+        1.0,
+        0.7857142857142857
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "fetch-terminal-data-pipeline",
+      "successes_ge90": 3,
+      "partial_scores": [
+        0.9722222222222222,
+        1.0,
+        0.8717948717948718,
+        1.0,
+        0.8717948717948718
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "fetch-wc-inventory-forecast-excel-gcal-email",
+      "successes_ge90": 1,
+      "partial_scores": [
+        0.9444444444444444,
+        0.3333333333333333,
+        0.7586206896551724,
+        0.7758620689655172,
+        0.7586206896551724
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "fetch-yf-macro-portfolio-excel-gcal-email",
+      "successes_ge90": 4,
+      "partial_scores": [
+        1.0,
+        0.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "fetch-yf-market-sentiment-excel-notion",
+      "successes_ge90": 3,
+      "partial_scores": [
+        0.7547169811320755,
+        0.9811320754716981,
+        0.9423076923076923,
+        0.7924528301886793,
+        0.9811320754716981
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "gsheet-pdf-financial-report",
+      "successes_ge90": 2,
+      "partial_scores": [
+        1.0,
+        1.0,
+        0.8,
+        0.6,
+        0.75
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "howtocook-catering-gform-notion-excel",
+      "successes_ge90": 3,
+      "partial_scores": [
+        0.8,
+        0.9545454545454546,
+        0.8,
+        0.9090909090909091,
+        0.9545454545454546
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "howtocook-ecommerce-bundle",
+      "successes_ge90": 2,
+      "partial_scores": [
+        0.0,
+        0.95,
+        0.0,
+        0.0,
+        0.90625
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "howtocook-event-catering-excel-word",
+      "successes_ge90": 3,
+      "partial_scores": [
+        1.0,
+        1.0,
+        0.9,
+        0.6666666666666666,
+        0.6666666666666666
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "howtocook-event-menu-planner",
+      "successes_ge90": 4,
+      "partial_scores": [
+        0.918918918918919,
+        0.918918918918919,
+        0.9459459459459459,
+        0.0,
+        0.9459459459459459
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "howtocook-grocery-budget-planner",
+      "successes_ge90": 2,
+      "partial_scores": [
+        0.0,
+        0.9142857142857143,
+        0.9285714285714286,
+        0.0,
+        0.8
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "howtocook-meal-plan-calendar",
+      "successes_ge90": 4,
+      "partial_scores": [
+        0.9473684210526315,
+        0.9473684210526315,
+        0.8947368421052632,
+        0.9473684210526315,
+        0.9473684210526315
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "howtocook-meal-plan-gcal",
+      "successes_ge90": 4,
+      "partial_scores": [
+        0.3333333333333333,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "howtocook-notion-recipe-kb",
+      "successes_ge90": 3,
+      "partial_scores": [
+        0.7272727272727273,
+        0.9,
+        0.9,
+        0.8,
+        0.9090909090909091
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "howtocook-nutrition-benchmark",
+      "successes_ge90": 1,
+      "partial_scores": [
+        0.9655172413793104,
+        0.875,
+        0.875,
+        0.7391304347826086,
+        0.0
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "howtocook-nutrition-excel-email",
+      "successes_ge90": 1,
+      "partial_scores": [
+        0.8620689655172413,
+        0.9310344827586207,
+        0.8275862068965517,
+        0.7142857142857143,
+        0.7931034482758621
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "howtocook-nutrition-ppt",
+      "successes_ge90": 2,
+      "partial_scores": [
+        0.75,
+        0.6666666666666666,
+        0.75,
+        1.0,
+        1.0
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "howtocook-playwright-price",
+      "successes_ge90": 4,
+      "partial_scores": [
+        0.0,
+        1.0,
+        0.9565217391304348,
+        1.0,
+        1.0
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "howtocook-weekly-plan-gsheet-gcal",
+      "successes_ge90": 3,
+      "partial_scores": [
+        0.9411764705882353,
+        0.7058823529411765,
+        0.9411764705882353,
+        0.9411764705882353,
+        0.2727272727272727
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "howtocook-wellness-excel-gcal-email",
+      "successes_ge90": 4,
+      "partial_scores": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        0.875
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "howtocook-wellness-tracker",
+      "successes_ge90": 3,
+      "partial_scores": [
+        1.0,
+        0.9523809523809523,
+        0.8571428571428571,
+        0.8571428571428571,
+        0.9047619047619048
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "howtocook-workshop-materials",
+      "successes_ge90": 2,
+      "partial_scores": [
+        1.0,
+        0.6,
+        0.9285714285714286,
+        0.6,
+        0.4
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "hr-department-review",
+      "successes_ge90": 4,
+      "partial_scores": [
+        0.1,
+        0.9285714285714286,
+        0.9821428571428571,
+        0.9821428571428571,
+        0.9821428571428571
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "notion-fetch-competitor",
+      "successes_ge90": 3,
+      "partial_scores": [
+        0.9696969696969697,
+        0.9696969696969697,
+        0.8787878787878788,
+        0.9696969696969697,
+        0.25
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "notion-team-survey-report",
+      "successes_ge90": 1,
+      "partial_scores": [
+        0.9230769230769231,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "playwright-arxiv-review-criteria-word-gsheet",
+      "successes_ge90": 1,
+      "partial_scores": [
+        1.0,
+        null,
+        null,
+        null,
+        null
+      ],
+      "infrastructure_errors": 3
+    },
+    {
+      "task_id": "playwright-howtocook-nutrition-gsheet-email",
+      "successes_ge90": 3,
+      "partial_scores": [
+        0.8823529411764706,
+        1.0,
+        1.0,
+        0.8235294117647058,
+        1.0
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "playwright-wc-review-sentiment-excel-email",
+      "successes_ge90": 1,
+      "partial_scores": [
+        0.9818181818181818,
+        0.0,
+        0.4727272727272727,
+        0.0,
+        0.0
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "playwright-yf-market-dashboard-gsheet-word",
+      "successes_ge90": 4,
+      "partial_scores": [
+        0.8292682926829268,
+        0.9024390243902439,
+        0.9814814814814815,
+        0.9814814814814815,
+        0.9814814814814815
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "ppt-snowflake-executive",
+      "successes_ge90": 2,
+      "partial_scores": [
+        0.0,
+        0.0,
+        1.0,
+        0.8571428571428571,
+        1.0
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "pw-canvas-grading-audit-excel-word-email",
+      "successes_ge90": 3,
+      "partial_scores": [
+        0.9310344827586207,
+        0.9310344827586207,
+        0.8620689655172413,
+        0.8620689655172413,
+        0.9655172413793104
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "pw-notion-gform-survey-excel-word",
+      "successes_ge90": 4,
+      "partial_scores": [
+        0.9444444444444444,
+        0.7592592592592593,
+        0.9245283018867925,
+        0.9074074074074074,
+        0.9444444444444444
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "pw-sf-hr-dept-efficiency-excel-gcal",
+      "successes_ge90": 4,
+      "partial_scores": [
+        0.92,
+        0.0,
+        0.92,
+        0.96,
+        0.96
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "pw-sf-hr-skills-gap-excel-word",
+      "successes_ge90": 1,
+      "partial_scores": [
+        0.2,
+        0.2,
+        0.8762886597938144,
+        0.7938144329896907,
+        0.9375
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "pw-sf-support-sla-benchmark-excel-gcal",
+      "successes_ge90": 1,
+      "partial_scores": [
+        0.0,
+        0.8888888888888888,
+        1.0,
+        0.0,
+        0.7777777777777778
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "pw-sf-wc-reconciliation-excel-word",
+      "successes_ge90": 4,
+      "partial_scores": [
+        0.9629629629629629,
+        0.9629629629629629,
+        1.0,
+        0.0,
+        0.9629629629629629
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "pw-wc-review-analysis-excel-notion",
+      "successes_ge90": 4,
+      "partial_scores": [
+        0.9074074074074074,
+        0.9818181818181818,
+        0.9636363636363636,
+        1.0,
+        0.0
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "pw-yf-risk-assessment-excel-ppt",
+      "successes_ge90": 1,
+      "partial_scores": [
+        0.0,
+        0.0,
+        0.96,
+        0.0,
+        0.0
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "pw-yf-sector-analysis-excel-word",
+      "successes_ge90": 2,
+      "partial_scores": [
+        0.3333333333333333,
+        0.0,
+        0.8709677419354839,
+        0.9354838709677419,
+        0.9032258064516129
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "research-data-archival-compliance",
+      "successes_ge90": 2,
+      "partial_scores": [
+        0.42857142857142855,
+        0.0,
+        0.8,
+        0.9166666666666666,
+        0.9230769230769231
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "scholarly-arxiv-cross-reference",
+      "successes_ge90": 4,
+      "partial_scores": [
+        0.9411764705882353,
+        0.9615384615384616,
+        0.9615384615384616,
+        0.9615384615384616,
+        0.6923076923076923
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "scholarly-arxiv-ppt-gsheet",
+      "successes_ge90": 2,
+      "partial_scores": [
+        0.75,
+        0.75,
+        0.8260869565217391,
+        0.9565217391304348,
+        1.0
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "scholarly-arxiv-survey-word-notion-gcal",
+      "successes_ge90": 3,
+      "partial_scores": [
+        0.896551724137931,
+        0.32,
+        0.9310344827586207,
+        0.9310344827586207,
+        0.9310344827586207
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "scholarly-fetch-gsheet-citation",
+      "successes_ge90": 1,
+      "partial_scores": [
+        0.0,
+        1.0,
+        0.7916666666666666,
+        0.0,
+        0.875
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "scholarly-literature-review-gcal-word-email",
+      "successes_ge90": 4,
+      "partial_scores": [
+        0.75,
+        0.9444444444444444,
+        1.0,
+        0.9090909090909091,
+        0.9090909090909091
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "scholarly-reading-group-gcal-gsheet-word",
+      "successes_ge90": 4,
+      "partial_scores": [
+        0.96,
+        0.0,
+        0.96,
+        0.96,
+        0.96
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "sf-canvas-skills-gap-analysis",
+      "successes_ge90": 1,
+      "partial_scores": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "sf-canvas-training-impact-excel-ppt",
+      "successes_ge90": 1,
+      "partial_scores": [
+        0.0,
+        0.0,
+        0.75,
+        0.968421052631579,
+        0.0
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "sf-deal-pipeline-review",
+      "successes_ge90": 1,
+      "partial_scores": [
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        0.0
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "sf-department-budget-analysis",
+      "successes_ge90": 2,
+      "partial_scores": [
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        1.0
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "sf-department-budget-ppt",
+      "successes_ge90": 3,
+      "partial_scores": [
+        1.0,
+        0.0,
+        0.9523809523809523,
+        0.975,
+        0.6375
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "sf-hr-attrition-gcal",
+      "successes_ge90": 2,
+      "partial_scores": [
+        0.9444444444444444,
+        0.8787878787878788,
+        0.5319148936170213,
+        0.9444444444444444,
+        0.6808510638297872
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "sf-hr-compensation-pdf-notion",
+      "successes_ge90": 2,
+      "partial_scores": [
+        0.0,
+        1.0,
+        0.0,
+        1.0,
+        0.0
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "sf-hr-department-budget",
+      "successes_ge90": 3,
+      "partial_scores": [
+        0.0,
+        1.0,
+        0.7142857142857143,
+        1.0,
+        1.0
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "sf-hr-dept-budget-ppt-email",
+      "successes_ge90": 1,
+      "partial_scores": [
+        0.0,
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "sf-hr-education-notion",
+      "successes_ge90": 1,
+      "partial_scores": [
+        0.5166666666666667,
+        0.0,
+        0.0,
+        0.0,
+        0.9833333333333333
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "sf-hr-experience-notion",
+      "successes_ge90": 4,
+      "partial_scores": [
+        0.975,
+        0.975,
+        0.975,
+        0.3,
+        0.975
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "sf-hr-mentorship-excel-gcal-email",
+      "successes_ge90": 3,
+      "partial_scores": [
+        0.9473684210526315,
+        0.7894736842105263,
+        0.9473684210526315,
+        0.8947368421052632,
+        0.9473684210526315
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "sf-hr-performance-excel-gcal-email",
+      "successes_ge90": 4,
+      "partial_scores": [
+        0.9272727272727272,
+        0.9830508474576272,
+        0.0,
+        0.9830508474576272,
+        0.9830508474576272
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "sf-hr-performance-ppt",
+      "successes_ge90": 1,
+      "partial_scores": [
+        0.0,
+        1.0,
+        0.8,
+        0.8,
+        0.3333333333333333
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "sf-hr-rating-distribution",
+      "successes_ge90": 3,
+      "partial_scores": [
+        0.0,
+        1.0,
+        1.0,
+        1.0,
+        0.0
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "sf-hr-salary-benchmark-gform-excel-email",
+      "successes_ge90": 4,
+      "partial_scores": [
+        0.3541666666666667,
+        0.9666666666666667,
+        0.9666666666666667,
+        0.9666666666666667,
+        0.9666666666666667
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "sf-hr-salary-growth",
+      "successes_ge90": 2,
+      "partial_scores": [
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        1.0
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "sf-hr-salary-overview",
+      "successes_ge90": 2,
+      "partial_scores": [
+        0.0,
+        0.0,
+        1.0,
+        1.0,
+        0.0
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "sf-hr-satisfaction-analysis",
+      "successes_ge90": 1,
+      "partial_scores": [
+        0.0,
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "sf-hr-satisfaction-excel-gcal",
+      "successes_ge90": 4,
+      "partial_scores": [
+        0.9629629629629629,
+        0.8,
+        0.9814814814814815,
+        0.9814814814814815,
+        0.9814814814814815
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "sf-hr-worklife-notion-excel",
+      "successes_ge90": 3,
+      "partial_scores": [
+        0.0,
+        1.0,
+        1.0,
+        0.0,
+        1.0
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "sf-regional-sales-forecast",
+      "successes_ge90": 1,
+      "partial_scores": [
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "sf-sales-brand-performance",
+      "successes_ge90": 3,
+      "partial_scores": [
+        1.0,
+        1.0,
+        0.0,
+        1.0,
+        0.0
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "sf-sales-forecast-notion",
+      "successes_ge90": 3,
+      "partial_scores": [
+        0.0,
+        0.9693877551020408,
+        0.0,
+        0.9693877551020408,
+        0.9693877551020408
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "sf-sales-product-category",
+      "successes_ge90": 1,
+      "partial_scores": [
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        0.0
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "sf-sales-region-forecast-gcal-excel",
+      "successes_ge90": 3,
+      "partial_scores": [
+        0.0,
+        0.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "sf-sales-region-pdf-gsheet",
+      "successes_ge90": 2,
+      "partial_scores": [
+        0.0,
+        1.0,
+        0.0,
+        null,
+        1.0
+      ],
+      "infrastructure_errors": 1
+    },
+    {
+      "task_id": "sf-sales-regional-analysis-ppt-gcal-email",
+      "successes_ge90": 2,
+      "partial_scores": [
+        0.0,
+        0.0,
+        0.75,
+        0.9375,
+        0.9375
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "sf-sales-regional-summary",
+      "successes_ge90": 3,
+      "partial_scores": [
+        0.0,
+        1.0,
+        1.0,
+        0.0,
+        1.0
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "sf-sales-segment-word",
+      "successes_ge90": 2,
+      "partial_scores": [
+        0.8,
+        0.9583333333333334,
+        0.8,
+        1.0,
+        0.8
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "sf-sales-shipping-word",
+      "successes_ge90": 3,
+      "partial_scores": [
+        0.8461538461538461,
+        0.9545454545454546,
+        0.96875,
+        0.38095238095238093,
+        0.96875
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "sf-sales-territory-realign-ppt-gsheet-email",
+      "successes_ge90": 1,
+      "partial_scores": [
+        0.7534246575342466,
+        0.7777777777777778,
+        0.8837209302325582,
+        0.7051282051282052,
+        0.9866666666666667
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "sf-sales-trend-word-pdf",
+      "successes_ge90": 3,
+      "partial_scores": [
+        1.0,
+        0.4230769230769231,
+        1.0,
+        0.9615384615384616,
+        0.46153846153846156
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "sf-support-agent-performance-gsheet-gcal",
+      "successes_ge90": 2,
+      "partial_scores": [
+        0.5454545454545454,
+        0.0,
+        0.9791666666666666,
+        0.9583333333333334,
+        0.0
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "sf-support-agent-review",
+      "successes_ge90": 1,
+      "partial_scores": [
+        0.890625,
+        0.859375,
+        0.8571428571428571,
+        0.8571428571428571,
+        1.0
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "sf-support-coaching-plan-excel-notion-gcal",
+      "successes_ge90": 2,
+      "partial_scores": [
+        0.25,
+        0.25,
+        0.25,
+        0.9777777777777777,
+        1.0
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "sf-support-industry-fetch-excel-word",
+      "successes_ge90": 1,
+      "partial_scores": [
+        0.9142857142857143,
+        0.8676470588235294,
+        0.7205882352941176,
+        0.8888888888888888,
+        0.7058823529411765
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "sf-support-metrics-pdf-email",
+      "successes_ge90": 1,
+      "partial_scores": [
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "sf-support-priority-gcal-excel",
+      "successes_ge90": 2,
+      "partial_scores": [
+        0.0,
+        1.0,
+        1.0,
+        0.0,
+        0.0
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "sf-support-priority-review",
+      "successes_ge90": 3,
+      "partial_scores": [
+        1.0,
+        0.0,
+        1.0,
+        0.0,
+        1.0
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "sf-support-priority-review-word",
+      "successes_ge90": 4,
+      "partial_scores": [
+        0.9285714285714286,
+        0.9285714285714286,
+        0.8936170212765957,
+        0.9285714285714286,
+        0.9148936170212766
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "sf-support-resolution-gsheet",
+      "successes_ge90": 2,
+      "partial_scores": [
+        0.8596491228070176,
+        1.0,
+        0.9473684210526315,
+        0.8771929824561403,
+        0.8771929824561403
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "sf-support-resolution-word-gcal",
+      "successes_ge90": 2,
+      "partial_scores": [
+        0.0,
+        0.975,
+        0.775,
+        0.55,
+        0.975
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "sf-ticket-sla-compliance",
+      "successes_ge90": 3,
+      "partial_scores": [
+        1.0,
+        1.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "sf-workforce-compensation-sheet",
+      "successes_ge90": 4,
+      "partial_scores": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        0.0
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "support-sla-audit-form",
+      "successes_ge90": 2,
+      "partial_scores": [
+        1.0,
+        0.3333333333333333,
+        1.0,
+        0.3333333333333333,
+        0.8461538461538461
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "terminal-arxiv-canvas-gsheet-word-gcal",
+      "successes_ge90": 3,
+      "partial_scores": [
+        0.7692307692307693,
+        0.975609756097561,
+        0.9,
+        0.2727272727272727,
+        1.0
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "terminal-arxiv-latex-excel-word-notion",
+      "successes_ge90": 1,
+      "partial_scores": [
+        0.1935483870967742,
+        0.9464285714285714,
+        0.7608695652173914,
+        0.8214285714285714,
+        0.8571428571428571
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "terminal-arxiv-latex-pdf-gsheet-word",
+      "successes_ge90": 1,
+      "partial_scores": [
+        0.6521739130434783,
+        0.8717948717948718,
+        0.8461538461538461,
+        0.9302325581395349,
+        0.0
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "terminal-canvas-arxiv-word-excel-notion",
+      "successes_ge90": 1,
+      "partial_scores": [
+        0.5714285714285714,
+        0.0,
+        0.9428571428571428,
+        0.8857142857142857,
+        0.0
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "terminal-canvas-excel-word-notion-email",
+      "successes_ge90": 1,
+      "partial_scores": [
+        0.9,
+        0.8428571428571429,
+        0.16666666666666666,
+        0.16666666666666666,
+        0.5555555555555556
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "terminal-canvas-pdf-gsheet-email-word",
+      "successes_ge90": 1,
+      "partial_scores": [
+        0.9142857142857143,
+        0.8857142857142857,
+        0.5833333333333334,
+        0.8571428571428571,
+        0.8857142857142857
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "terminal-canvas-scholarly-gsheet-word-email",
+      "successes_ge90": 3,
+      "partial_scores": [
+        0.94,
+        0.9782608695652174,
+        0.3,
+        1.0,
+        0.45454545454545453
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "terminal-canvas-scholarly-pdf-excel-word",
+      "successes_ge90": 3,
+      "partial_scores": [
+        0.6666666666666666,
+        1.0,
+        0.16666666666666666,
+        1.0,
+        1.0
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "terminal-canvas-sf-excel-ppt-gcal",
+      "successes_ge90": 4,
+      "partial_scores": [
+        1.0,
+        1.0,
+        1.0,
+        0.875,
+        1.0
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "terminal-canvas-wc-excel-ppt-email",
+      "successes_ge90": 1,
+      "partial_scores": [
+        0.6666666666666666,
+        0.9069767441860465,
+        0.6666666666666666,
+        0.6666666666666666,
+        0.6666666666666666
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "terminal-fetch-sf-hr-gcal-excel-email",
+      "successes_ge90": 3,
+      "partial_scores": [
+        0.2222222222222222,
+        0.9642857142857143,
+        0.7142857142857143,
+        0.9642857142857143,
+        0.92
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "terminal-howtocook-pdf-excel-word-gcal",
+      "successes_ge90": 4,
+      "partial_scores": [
+        0.9142857142857143,
+        0.875,
+        1.0,
+        0.9428571428571428,
+        0.9354838709677419
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "terminal-howtocook-pw-nutrition-gsheet-word",
+      "successes_ge90": 4,
+      "partial_scores": [
+        0.9583333333333334,
+        0.9583333333333334,
+        0.9583333333333334,
+        0.8333333333333334,
+        0.9583333333333334
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "terminal-howtocook-scholarly-excel-word-gform",
+      "successes_ge90": 2,
+      "partial_scores": [
+        0.75,
+        0.9428571428571428,
+        0.7727272727272727,
+        0.9555555555555556,
+        0.8
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "terminal-pw-howtocook-excel-word-gcal",
+      "successes_ge90": 3,
+      "partial_scores": [
+        0.25,
+        1.0,
+        1.0,
+        1.0,
+        0.0
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "terminal-sf-fetch-excel-notion-gcal",
+      "successes_ge90": 1,
+      "partial_scores": [
+        0.9090909090909091,
+        0.14285714285714285,
+        0.78125,
+        0.4444444444444444,
+        0.6363636363636364
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "terminal-sf-fetch-support-ppt-email",
+      "successes_ge90": 2,
+      "partial_scores": [
+        0.3333333333333333,
+        0.95,
+        0.8076923076923077,
+        0.9615384615384616,
+        0.3333333333333333
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "terminal-sf-hr-excel-word-gcal-email",
+      "successes_ge90": 2,
+      "partial_scores": [
+        0.8235294117647058,
+        0.1875,
+        0.92,
+        0.85,
+        0.9310344827586207
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "terminal-sf-notion-gform-excel-email",
+      "successes_ge90": 1,
+      "partial_scores": [
+        0.375,
+        0.7804878048780488,
+        0.975609756097561,
+        0.7804878048780488,
+        0.375
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "terminal-sf-sales-pdf-excel-ppt-email",
+      "successes_ge90": 1,
+      "partial_scores": [
+        0.5,
+        0.4,
+        0.7692307692307693,
+        0.5384615384615384,
+        0.9807692307692307
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "terminal-sf-scholarly-excel-ppt-gcal",
+      "successes_ge90": 3,
+      "partial_scores": [
+        0.9814814814814815,
+        0.5,
+        0.6842105263157895,
+        0.9508196721311475,
+        0.9423076923076923
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "terminal-sf-wc-order-audit-excel-word",
+      "successes_ge90": 2,
+      "partial_scores": [
+        0.9180327868852459,
+        0.0,
+        0.0,
+        0.9016393442622951,
+        0.0
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "terminal-sf-wc-support-email-gcal-excel",
+      "successes_ge90": 4,
+      "partial_scores": [
+        0.125,
+        1.0,
+        0.9841269841269841,
+        1.0,
+        0.9841269841269841
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "terminal-sf-yf-excel-ppt-gcal",
+      "successes_ge90": 3,
+      "partial_scores": [
+        0.9743589743589743,
+        0.9047619047619048,
+        null,
+        0.9487179487179487,
+        0.0
+      ],
+      "infrastructure_errors": 1
+    },
+    {
+      "task_id": "terminal-wc-excel-gsheet-gcal-email",
+      "successes_ge90": 1,
+      "partial_scores": [
+        0.0,
+        0.0,
+        0.3333333333333333,
+        0.9215686274509803,
+        0.0
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "terminal-yf-canvas-excel-gcal-email",
+      "successes_ge90": 1,
+      "partial_scores": [
+        0.7924528301886793,
+        0.9615384615384616,
+        0.6981132075471698,
+        0.4,
+        0.3
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "terminal-yf-fetch-gsheet-excel-notion",
+      "successes_ge90": 1,
+      "partial_scores": [
+        0.9074074074074074,
+        0.25,
+        0.8703703703703703,
+        0.8703703703703703,
+        0.25
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "terminal-yf-scholarly-excel-word-email",
+      "successes_ge90": 2,
+      "partial_scores": [
+        1.0,
+        0.7,
+        0.9354838709677419,
+        0.2,
+        0.7
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "terminal-yf-sf-market-correlation-ppt-email",
+      "successes_ge90": 2,
+      "partial_scores": [
+        0.07142857142857142,
+        0.9444444444444444,
+        0.14285714285714285,
+        1.0,
+        0.07142857142857142
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "train-conference-travel-excel-gcal-email",
+      "successes_ge90": 4,
+      "partial_scores": [
+        1.0,
+        0.6666666666666666,
+        0.9047619047619048,
+        1.0,
+        0.9047619047619048
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "train-route-analysis-excel-word-email",
+      "successes_ge90": 2,
+      "partial_scores": [
+        0.5769230769230769,
+        0.0,
+        0.19230769230769232,
+        0.9615384615384616,
+        1.0
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "train-sf-sales-trip-excel-word-email",
+      "successes_ge90": 1,
+      "partial_scores": [
+        0.9736842105263158,
+        0.7142857142857143,
+        0.7142857142857143,
+        0.7142857142857143,
+        0.7142857142857143
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "train-yf-roadshow-excel-ppt-email",
+      "successes_ge90": 1,
+      "partial_scores": [
+        0.65,
+        0.8387096774193549,
+        1.0,
+        0.4827586206896552,
+        0.13793103448275862
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "wc-bestsellers-word-email",
+      "successes_ge90": 1,
+      "partial_scores": [
+        0.9393939393939394,
+        0.0,
+        0.8,
+        0.0,
+        0.4
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "wc-category-performance-ppt",
+      "successes_ge90": 1,
+      "partial_scores": [
+        0.3157894736842105,
+        0.9555555555555556,
+        0.5166666666666667,
+        0.5,
+        0.0
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "wc-coupon-analysis",
+      "successes_ge90": 1,
+      "partial_scores": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "wc-coupon-marketing-roi",
+      "successes_ge90": 4,
+      "partial_scores": [
+        1.0,
+        1.0,
+        null,
+        1.0,
+        1.0
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "wc-howtocook-meal-kit-excel-word-email",
+      "successes_ge90": 3,
+      "partial_scores": [
+        0.9036144578313253,
+        0.7272727272727273,
+        1.0,
+        1.0,
+        0.7272727272727273
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "wc-inventory-alert-gcal",
+      "successes_ge90": 1,
+      "partial_scores": [
+        0.0,
+        0.10526315789473684,
+        0.6774193548387096,
+        0.96875,
+        0.0
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "wc-order-status-report",
+      "successes_ge90": 1,
+      "partial_scores": [
+        0.94,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "wc-product-catalog-word",
+      "successes_ge90": 1,
+      "partial_scores": [
+        null,
+        null,
+        1.0,
+        0.0,
+        0.0
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "wc-sales-tax-summary",
+      "successes_ge90": 1,
+      "partial_scores": [
+        0.958904109589041,
+        0.20833333333333334,
+        0.2,
+        0.17391304347826086,
+        0.18461538461538463
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "wc-tax-compliance-review",
+      "successes_ge90": 4,
+      "partial_scores": [
+        0.9743589743589743,
+        0.9787234042553191,
+        0.9148936170212766,
+        0.0,
+        0.9743589743589743
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "yf-dividend-analysis-pdf-email",
+      "successes_ge90": 2,
+      "partial_scores": [
+        0.9411764705882353,
+        0.8823529411764706,
+        0.9411764705882353,
+        0.8823529411764706,
+        0.8823529411764706
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "yf-dividend-tracker-gcal",
+      "successes_ge90": 4,
+      "partial_scores": [
+        1.0,
+        0.9333333333333333,
+        0.9333333333333333,
+        0.7291666666666666,
+        0.9333333333333333
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "yf-dividend-tracker-gsheet",
+      "successes_ge90": 3,
+      "partial_scores": [
+        0.4666666666666667,
+        0.9333333333333333,
+        0.9333333333333333,
+        0.9333333333333333,
+        0.4666666666666667
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "yf-earnings-calendar-alert",
+      "successes_ge90": 1,
+      "partial_scores": [
+        0.7313432835820896,
+        0.9402985074626866,
+        0.6417910447761194,
+        null,
+        0.7164179104477612
+      ],
+      "infrastructure_errors": 1
+    },
+    {
+      "task_id": "yf-earnings-calendar-report",
+      "successes_ge90": 1,
+      "partial_scores": [
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "yf-earnings-report-word-notion",
+      "successes_ge90": 3,
+      "partial_scores": [
+        0.8333333333333334,
+        1.0,
+        1.0,
+        1.0,
+        0.8333333333333334
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "yf-financial-health-gsheet",
+      "successes_ge90": 3,
+      "partial_scores": [
+        1.0,
+        1.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "yf-financial-metrics-notion-email",
+      "successes_ge90": 2,
+      "partial_scores": [
+        0.8181818181818182,
+        0.8,
+        0.967741935483871,
+        0.7741935483870968,
+        0.9354838709677419
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "yf-market-overview-pdf",
+      "successes_ge90": 3,
+      "partial_scores": [
+        1.0,
+        0.8846153846153846,
+        0.625,
+        1.0,
+        0.9883720930232558
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "yf-peer-benchmark-analysis",
+      "successes_ge90": 4,
+      "partial_scores": [
+        0.96,
+        0.9746835443037974,
+        1.0,
+        1.0,
+        null
+      ],
+      "infrastructure_errors": 1
+    },
+    {
+      "task_id": "yf-portfolio-analysis-excel-word-email",
+      "successes_ge90": 1,
+      "partial_scores": [
+        0.5,
+        0.5,
+        0.95,
+        0.5,
+        0.5
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "yf-portfolio-gsheet-pdf-gcal-email",
+      "successes_ge90": 1,
+      "partial_scores": [
+        0.5546218487394958,
+        0.6949152542372882,
+        0.6302521008403361,
+        0.9090909090909091,
+        0.6554621848739496
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "yf-portfolio-gsheet-tracker",
+      "successes_ge90": 3,
+      "partial_scores": [
+        0.0,
+        1.0,
+        0.0,
+        1.0,
+        1.0
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "yf-portfolio-stress-test",
+      "successes_ge90": 3,
+      "partial_scores": [
+        0.0,
+        1.0,
+        1.0,
+        1.0,
+        0.0
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "yf-sector-analysis-word",
+      "successes_ge90": 4,
+      "partial_scores": [
+        1.0,
+        0.9285714285714286,
+        0.8928571428571429,
+        0.9767441860465116,
+        0.9411764705882353
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "yf-sector-comparison",
+      "successes_ge90": 1,
+      "partial_scores": [
+        0.0,
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "yf-sector-comparison-pdf",
+      "successes_ge90": 4,
+      "partial_scores": [
+        1.0,
+        1.0,
+        0.0,
+        1.0,
+        1.0
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "yf-sector-rotation-dashboard",
+      "successes_ge90": 1,
+      "partial_scores": [
+        null,
+        null,
+        1.0,
+        null,
+        null
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "yf-sf-market-sales-excel-ppt-gcal",
+      "successes_ge90": 1,
+      "partial_scores": [
+        0.967032967032967,
+        0.8241758241758241,
+        0.7872340425531915,
+        0.8809523809523809,
+        0.5
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "yf-stock-comparison-excel-gcal",
+      "successes_ge90": 1,
+      "partial_scores": [
+        0.5,
+        0.9230769230769231,
+        0.8,
+        0.5,
+        0.5
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "yf-stock-comparison-word-gcal",
+      "successes_ge90": 2,
+      "partial_scores": [
+        0.0,
+        1.0,
+        1.0,
+        0.375,
+        0.375
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "yf-stock-performance-email",
+      "successes_ge90": 2,
+      "partial_scores": [
+        1.0,
+        null,
+        1.0,
+        null,
+        null
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "yt-12306-tech-conference-travel-notion-excel",
+      "successes_ge90": 2,
+      "partial_scores": [
+        0.9512195121951219,
+        0.8536585365853658,
+        0.7804878048780488,
+        0.9285714285714286,
+        0.6363636363636364
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "yt-channel-comparison-gsheet-word",
+      "successes_ge90": 1,
+      "partial_scores": [
+        1.0,
+        0.5319148936170213,
+        0.0,
+        0.0,
+        0.6808510638297872
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "yt-fireship-scholarly-ppt-gsheet-email",
+      "successes_ge90": 2,
+      "partial_scores": [
+        0.0,
+        1.0,
+        0.9333333333333333,
+        0.6363636363636364,
+        0.7272727272727273
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "yt-top-videos-excel-gcal",
+      "successes_ge90": 2,
+      "partial_scores": [
+        0.7012987012987013,
+        0.7142857142857143,
+        0.7142857142857143,
+        1.0,
+        1.0
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "yt-train-conference-planning-notion-gcal-excel",
+      "successes_ge90": 3,
+      "partial_scores": [
+        1.0,
+        0.8484848484848485,
+        0.75,
+        1.0,
+        1.0
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "yt-veritasium-scholarly-notion-excel",
+      "successes_ge90": 2,
+      "partial_scores": [
+        0.0,
+        0.925,
+        0.875,
+        0.0,
+        0.95
+      ],
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "yt-veritasium-science-quiz-word-gcal",
+      "successes_ge90": 4,
+      "partial_scores": [
+        0.9629629629629629,
+        0.0,
+        0.9259259259259259,
+        0.9629629629629629,
+        0.9
+      ],
+      "infrastructure_errors": 0
+    }
+  ],
+  "source_run": "sft-qwen4b-full-n3",
+  "source_manifest_sha256": "c54759ec11b59ad17344f4318d6cb8381dbb7afb52d3f82126b3e04c4c258134"
+}
