@@ -27,6 +27,10 @@ if [ -n "${RL_CHECKPOINT_ROOT:-}" ] || [ -e "$checkpoint_root" ] || [ -L "$check
         ln -s "$(readlink -f "$checkpoint_dir")" "$RL_ARTIFACTS/checkpoints"
     fi
 fi
+if [ -d "$checkpoint_root" ]; then
+    export RAY_TMPDIR="${RAY_TMPDIR:-$(readlink -f "$checkpoint_root")/ray-tmp}"
+    mkdir -p "$RAY_TMPDIR"
+fi
 .venv-rl/bin/python -m training.toolathlon_gym.record_run --pid "$$" --directory "$RL_ARTIFACTS" "$@"
 exec > >(tee -a "$RL_ARTIFACTS/trainer.log") 2>&1
 exec .venv-rl/bin/python -m verl.trainer.main_ppo \
