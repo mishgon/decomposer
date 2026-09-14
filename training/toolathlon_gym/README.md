@@ -7,6 +7,28 @@ Existing collection and benchmark checkouts remain separate.
 
 ## First piece: reproducible task selection
 
+`rl_task_pool.json` freezes 194 tasks from `sft-qwen4b-full-n3`: each has 1–4
+attempts with partial score >= 0.9 out of five. Infrastructure failures and
+missing scores count as failures. Tasks with zero successes or five successes
+are excluded. The file preserves per-attempt scores and the source manifest hash.
+
+```bash
+.venv-rl/bin/python -m training.toolathlon_gym.prepare_pilot \
+  --task-pool training/toolathlon_gym/rl_task_pool.json \
+  --train-tasks 8 --evaluate-training-tasks --seed 42 \
+  --output artifacts/training/toolathlon_gym/reward-pool8-data
+RL_DATA="$PWD/artifacts/training/toolathlon_gym/reward-pool8-data" \
+RL_ARTIFACTS="$PWD/artifacts/training/toolathlon_gym/reward-pool8-n5-16steps" \
+POLICY_GPU=2 bash training/toolathlon_gym/train8.sh
+```
+
+This trains on the same eight tasks for 16 updates (40 rollouts/update), with
+40 evaluation rollouts before training and at updates 8 and 16: 760 total.
+Evaluation is a training probe, not held-out validation. The reward remains
+native partial score; the 0.9 cutoff selects tasks, not the training reward.
+Checkpoints are saved at updates 8 and 16; `best` uses complete probe reward and
+`last` uses the latest checkpoint. These do not establish held-out performance.
+
 Run from the repository root using ordinary Python; no CUDA dependencies:
 
 ```bash
