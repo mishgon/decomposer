@@ -22,6 +22,7 @@ def main():
     parser.add_argument("--evaluate-training-tasks", action="store_true",
                         help="Evaluate every training task; no held-out validation set")
     parser.add_argument("--exclude-task", action="append", default=[])
+    parser.add_argument("--task-pool", type=Path, help="JSON task pool; replaces the local-server-only filter")
     args = parser.parse_args()
     root = Path("external/toolathlon_gym")
     tasks = root / "tasks/finalpool"
@@ -29,6 +30,11 @@ def main():
                      "emails", "google_calendar", "woocommerce", "google_forms", "pptx"}
     eligible = [p.parent.name for p in tasks.glob("*/task_config.json")
                 if set(json.loads(p.read_text())["needed_mcp_servers"]) <= local_servers]
+    if args.task_pool:
+        pool = json.loads(args.task_pool.read_text())
+        eligible = [row["task_id"] for row in pool["tasks"]]
+        if len(eligible) != len(set(eligible)) or any(not (tasks / name / "task_config.json").exists() for name in eligible):
+            parser.error("Task pool contains duplicate or unavailable tasks")
     eligible.sort(key=lambda name: hashlib.sha256(f"{args.seed}:{name}".encode()).hexdigest())
     eligible = [name for name in eligible if name not in args.exclude_task]
     if args.evaluate_training_tasks:
@@ -61,6 +67,10 @@ def main():
     manifest["gym_revision"] = subprocess.check_output(
         ["git", "-C", str(root), "rev-parse", "HEAD"], text=True).strip()
     manifest["selection"] = selection
+    if args.task_pool:
+        manifest["selection"] += "; sampled from reward-selected task pool"
+        manifest["task_pool"] = str(args.task_pool)
+        manifest["task_pool_sha256"] = hashlib.sha256(args.task_pool.read_bytes()).hexdigest()
     manifest["excluded_tasks"] = args.exclude_task
     manifest["eligible_tasks"] = len(eligible)
     args.output.mkdir(parents=True, exist_ok=False)
