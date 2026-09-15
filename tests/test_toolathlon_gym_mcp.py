@@ -65,6 +65,24 @@ client_session_timeout_seconds: 42
     }
 
 
+@pytest.mark.parametrize("args,command,expected", [
+    (["--directory", "/opt/tools/excel", "run", "excel-mcp-server", "stdio"], "uv",
+     ["--directory", "/opt/tools/excel", "run", "--no-sync", "--offline", "excel-mcp-server", "stdio"]),
+    (["run", "/opt/tools/yahoo/server.py"], "/opt/tools/yahoo/.venv/bin/python",
+     ["/opt/tools/yahoo/server.py"]),
+])
+def test_tool_startup_uses_installed_dependencies(tmp_path, args, command, expected):
+    import yaml
+    config_dir = tmp_path / "configs/mcp_servers"
+    config_dir.mkdir(parents=True)
+    (config_dir / "test.yaml").write_text(yaml.safe_dump({
+        "name": "test", "params": {"command": "uv", "args": args}}))
+    connection = webapp.load_connections({"task_dir": "test", "needed_mcp_servers": ["test"],
+        "agent_workspace": str(tmp_path / "workspace")}, tmp_path)["test"]
+    assert connection["command"] == command
+    assert connection["args"] == expected
+
+
 def test_webapp_keeps_sessions_open(tmp_path: Path, monkeypatch) -> None:
     events: list[str] = []
     connections = {
