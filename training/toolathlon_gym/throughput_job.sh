@@ -52,7 +52,8 @@ wait "$phase_pid"
 phase_pid=""
 .venv-rl/bin/python -c 'import json,sys; s=json.load(open(sys.argv[1])); assert s["scored"]==1 and not s["infrastructure_errors"], s' "$TEST_ROOT/preflight/summary.json"
 start=$SECONDS
-for phase in 40 60 80 40-repeat; do
+read -r -a phases <<< "${THROUGHPUT_PHASES:-40 60 80 40-repeat}"
+for phase in "${phases[@]}"; do
     if [[ "$phase" == 40-repeat && $((SECONDS-start)) -gt 9900 ]]; then break; fi
     conc="${phase%%-*}"
     echo "Starting c$phase at $(date -u +%FT%TZ)"
