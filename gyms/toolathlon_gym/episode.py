@@ -69,6 +69,8 @@ class Episode:
 
     def start(self):
         self.directory.mkdir(parents=True, exist_ok=False)
+        (self.directory / "resources.json").write_text(json.dumps({
+            "engine": self.engine, "container": self.container, "pg": self.pg, "network": self.network}))
         data = self.directory / "data"
         data.mkdir()
         try:
