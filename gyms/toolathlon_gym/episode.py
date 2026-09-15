@@ -48,7 +48,7 @@ class Episode:
                  subagent_model: str = "Qwen/Qwen3.5-4B",
                  subagent_url: str | None = None, subagent_host: str | None = None,
                  image: str = "decomposer-toolathlon-rl:latest", engine: str = "podman",
-                 startup_timeout: float = 240):
+                 startup_timeout: float = 300):
         self.root = Path(__file__).resolve().parents[2]
         tasks = self.root / "external/toolathlon_gym/tasks/finalpool"
         if (tasks / task).resolve().parent != tasks.resolve() or not (tasks / task).is_dir():
@@ -60,7 +60,7 @@ class Episode:
         self.network = "decomposer-rl-" + uuid.uuid4().hex[:16]
         self.pg, self.container = self.network + "-pg", self.network + "-task"
 
-    def command(self, *args, check=True, timeout=120):
+    def command(self, *args, check=True, timeout=300):
         result = subprocess.run([self.engine, *map(str, args)], capture_output=True,
                                 text=True, timeout=timeout)
         if check and result.returncode:
