@@ -53,7 +53,7 @@ phase_pid=""
 .venv-rl/bin/python -c 'import json,sys; s=json.load(open(sys.argv[1])); assert s["scored"]==1 and not s["infrastructure_errors"], s' "$TEST_ROOT/preflight/summary.json"
 start=$SECONDS
 read -r -a phases <<< "${THROUGHPUT_PHASES:-40 60 80 40-repeat}"
-task_args=()
+task_args=(--repetitions "${THROUGHPUT_REPETITIONS:-5}")
 if [[ "${THROUGHPUT_ALL_TASKS:-0}" == 1 ]]; then task_args+=(--all-tasks); fi
 for phase in "${phases[@]}"; do
     if [[ "$phase" == 40-repeat && $((SECONDS-start)) -gt 9900 ]]; then break; fi
