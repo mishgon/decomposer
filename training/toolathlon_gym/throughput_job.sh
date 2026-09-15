@@ -53,12 +53,14 @@ phase_pid=""
 .venv-rl/bin/python -c 'import json,sys; s=json.load(open(sys.argv[1])); assert s["scored"]==1 and not s["infrastructure_errors"], s' "$TEST_ROOT/preflight/summary.json"
 start=$SECONDS
 read -r -a phases <<< "${THROUGHPUT_PHASES:-40 60 80 40-repeat}"
+task_args=()
+if [[ "${THROUGHPUT_ALL_TASKS:-0}" == 1 ]]; then task_args+=(--all-tasks); fi
 for phase in "${phases[@]}"; do
     if [[ "$phase" == 40-repeat && $((SECONDS-start)) -gt 9900 ]]; then break; fi
     conc="${phase%%-*}"
     echo "Starting c$phase at $(date -u +%FT%TZ)"
     setsid .venv-rl/bin/python -m training.toolathlon_gym.throughput \
-        --output "$TEST_ROOT/c$phase" --concurrency "$conc" --gpu "$CUDA_VISIBLE_DEVICES" \
+        --output "$TEST_ROOT/c$phase" --concurrency "$conc" --gpu "$CUDA_VISIBLE_DEVICES" "${task_args[@]}" \
         > "$TEST_ROOT/c$phase.log" 2>&1 &
     phase_pid=$!
     wait "$phase_pid"
