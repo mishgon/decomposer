@@ -3,13 +3,20 @@ import json
 import tempfile
 from pathlib import Path
 from subprocess import CompletedProcess
-from unittest.mock import Mock, AsyncMock
+from unittest.mock import Mock, AsyncMock, patch
 import httpx
 from gyms.toolathlon_gym.episode import Episode
 from gyms.toolathlon_gym.cancel import cancel_subagents
 
 
 class Recovery(unittest.IsolatedAsyncioTestCase):
+    def test_podman_command_waits_five_minutes(self):
+        ep = object.__new__(Episode)
+        ep.engine = "podman"
+        with patch("gyms.toolathlon_gym.episode.subprocess.run", return_value=CompletedProcess([], 0)) as run:
+            ep.command("ps")
+            self.assertEqual(run.call_args.kwargs["timeout"], 300)
+
     def test_repeated_cleanup_preserves_logs_and_accepts_absent_network(self):
         with tempfile.TemporaryDirectory() as directory:
             ep = object.__new__(Episode)
