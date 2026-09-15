@@ -1,0 +1,9 @@
+# Same recipe; one eight-task batch repeated for 16 updates.
+defaults:
+  - full
+  - _self_
+
+trainer:
+  experiment_name: overfit
+  total_training_steps: 16
+  total_epochs: 16

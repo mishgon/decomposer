@@ -1,192 +1,110 @@
-# Toolathlon-Gym RL
+# Toolathlon Gym RL
 
-Working branch: `we_rl_toolathlon_gym`. Keep a separate checkout for RL.
-This is the integration in progress. A real GRPO update and checkpoint save passed;
-**reward improvement and checkpoint resume have not yet been verified**.
-Existing collection and benchmark checkouts remain separate.
+Two experiment configs, one launcher:
 
-## First piece: reproducible task selection
+| Config | Task pool | Schedule |
+|---|---|---|
+| `full.yaml` | `rl_task_pool.json`: 194 tasks | One epoch, 24 updates |
+| `overfit.yaml` | `overfit_partial8_pool.json`: eight selected graded-reward tasks | 16 updates |
 
-`rl_task_pool.json` freezes 194 tasks from `sft-qwen4b-full-n3`: each has 1–4
-attempts with partial score >= 0.9 out of five. Infrastructure failures and
-missing scores count as failures. Tasks with zero successes or five successes
-are excluded. The file preserves per-attempt scores and the source manifest hash.
+`overfit.yaml` inherits `full.yaml`; only the name and training duration change.
+`agent_loop.yaml` registers our environment adapter, not another experiment.
+Both evaluate their training tasks, **not a holdout**. Rewards stay native partial
+scores; the >=0.9 threshold selects tasks, not training rewards.
+
+## Prepare and run
+
+From the repository root on Hertz-2, prepare either dataset (no GPU needed):
 
 ```bash
 .venv-rl/bin/python -m training.toolathlon_gym.prepare_pilot \
   --task-pool training/toolathlon_gym/rl_task_pool.json \
-  --train-tasks 8 --evaluate-training-tasks --seed 42 \
-  --output artifacts/training/toolathlon_gym/reward-pool8-data
-RL_DATA="$PWD/artifacts/training/toolathlon_gym/reward-pool8-data" \
-RL_ARTIFACTS="$PWD/artifacts/training/toolathlon_gym/reward-pool8-n5-16steps" \
-POLICY_GPU=2 bash training/toolathlon_gym/train8.sh
-```
+  --train-tasks 194 --evaluate-training-tasks \
+  --output artifacts/training/toolathlon_gym/full-data
 
-This trains on the same eight tasks for 16 updates (40 rollouts/update), with
-40 evaluation rollouts before training and at updates 8 and 16: 760 total.
-Evaluation is a training probe, not held-out validation. The reward remains
-native partial score; the 0.9 cutoff selects tasks, not the training reward.
-Checkpoints are saved at updates 8 and 16; `best` uses complete probe reward and
-`last` uses the latest checkpoint. These do not establish held-out performance.
-When external checkpoint storage is configured, Ray temporary/spill storage also
-defaults to that volume (`ray-tmp`); override with `RAY_TMPDIR` if needed.
-
-Run from the repository root using ordinary Python; no CUDA dependencies:
-
-```bash
-python3 -m unittest discover -s tests -p test_toolathlon_gym_rl_data.py
-python3 training/toolathlon_gym/prepare_data.py \
-  --output artifacts/training/toolathlon_gym/task-split.json
-```
-
-The manifest includes every Gym task, its config hash and the Gym source revision.
-It refuses to overwrite an existing manifest. `--validation-tasks N` reserves an
-explicit, deterministic task-level holdout; the default reserves none. Repeated
-rollouts must inherit their task's split. This is a task manifest, not veRL's final
-prompt/parquet dataset. It does not assert that every task's infrastructure works.
-
-## Setup and pilot
-
-For the cheap **four-rollout overfitting smoke**, after setup and starting frozen
-subagents, use:
-
-```bash
-.venv-rl/bin/python -m training.toolathlon_gym.prepare_overfit \
-  --task wc-customer-order-gsheet-email \
-  --output artifacts/training/toolathlon_gym/overfit-data
-bash training/toolathlon_gym/overfit.sh
-```
-
-Two pre-update rollouts supply the GRPO group, followed by two post-update
-rollouts on the same task. This deliberately uses a diagnostic learning rate of
-`1e-4`. There is no separate baseline pass or held-out evaluation. Four rollouts
-can verify the update and inspect reward change, not establish generalization
-or statistically prove overfitting. The task was chosen using observed runtime
-and reward variation; do not treat this checkpoint as unseen-task validation
-on a panel containing that task. Use `report --samples 2` for this run.
-The smoke launcher defaults to `RL_EPISODE_TIMEOUT=300` seconds per episode,
-on both sides of the update. Startup, cleanup, scoring and training add overhead;
-this is not a five-minute whole-run promise. Timed-out episodes receive native
-partial rewards. The general training launcher retains its 1800-second default.
-The effective episode timeout is recorded in `run.json`; compare runs with the
-same budget. This shorter default does not change already-running jobs.
-
-The larger pilot below is a separate experiment, not a smoke test.
-
-```bash
-bash training/toolathlon_gym/setup.sh
-podman build -f training/toolathlon_gym/Dockerfile -t decomposer-toolathlon-rl:latest .
-.venv-rl/bin/python -m tests.toolathlon_gym.check_environment \
-  --output artifacts/training/toolathlon_gym/environment-check
 .venv-rl/bin/python -m training.toolathlon_gym.prepare_pilot \
-  --output artifacts/training/toolathlon_gym/pilot-data
-.venv-rl/bin/python -m tests.toolathlon_gym.check_evaluators \
-  --split artifacts/training/toolathlon_gym/pilot-data/split.json \
-  --output artifacts/training/toolathlon_gym/evaluator-check
-POLICY_GPU=0 bash training/toolathlon_gym/train.sh
+  --task-pool training/toolathlon_gym/overfit_partial8_pool.json \
+  --train-tasks 8 --evaluate-training-tasks \
+  --output artifacts/training/toolathlon_gym/overfit-data
 ```
 
-The pilot starts from `~/models/decomposer-4b-sft`, a symlink to the latest SFT
-Decomposer checkpoint. Update this link when a new checkpoint is ready; new
-runs pick it up automatically. The launcher resolves the link once at startup
-and records both the requested and resolved paths in `run.json`, so changing
-the link does not switch a running job's model. Override `MODEL_PATH` to test
-a different initialization. Compare
-SFT-before-RL against SFT-after-RL; original-base smoke results are separate.
-Only its rank-16 LoRA parameters train. Subagents use separately served, unchanged
-Qwen3.5-4B weights through lmrouter. Only the policy/training GPU is local;
-the launcher does not start a subagent vLLM server.
-`train.sh` sources `~/.local/share/environment/lmrouter.env` (override with
-`LMROUTER_ENV`). Set `LLM_PROXY_URL` and `LLM_PROXY_MASTER_KEY` there.
-Optional `SUBAGENT_URL` overrides the base URL, and `SUBAGENT_HOST=hostname:IP`
-adds a container DNS mapping when needed, keeping hostname TLS verification.
-Credentials are inherited by Ray workers and passed to containers by environment
-name, not stored in Hydra configuration or `run.json`. Endpoint/model provenance
-is recorded in `run.json`. Missing router configuration fails before training.
-The 16 training / 8 validation tasks are hash-selected from local-fixture tasks,
-without consulting historical rewards. Each validation uses three rollouts per
-task; its tasks are never included in gradient updates. This is a small Gym pilot,
-not a whole-Gym performance claim.
+Preparation refuses to overwrite datasets and records task IDs, pool hash, and
+Gym revision. The full pool contains tasks with 1–4 successes out of five historical
+SFT attempts. The overfit pool freezes the user's eight selected graded tasks.
 
-`evaluation.parquet` additionally includes a fixed four-task training probe,
-reported separately from held-out validation. Both panels are measured before
-training and every four updates, with three rollouts per task. This avoids
-mistaking changes in training-batch difficulty for reward improvement. There are
-four environment workers sharing the policy GPU and hosted subagent endpoint.
-
-Known native-environment limitations: the email service defaults to
-`user@example.com`, although some tasks require another sender. Some native
-evaluators skip downstream checks after missing outputs, changing their partial
-score denominator. Preserve and inspect raw checks alongside scalar reward;
-neither limitation is evidence of a policy improvement.
-
-The small RL image extends an existing `decomposer-toolathlon:latest` Gym image.
-It connects the upstream WooCommerce/Notion PostgreSQL adapters and keeps Canvas
-account-user queries on its PostgreSQL client; otherwise those requests attempt
-HTTP endpoints despite a local database.
-The environment check exercises real MCP calls and verifies isolation between two
-copies of the same task, including Canvas account-user reads. It allocates no GPU. Build the base Gym image with
-`gyms/toolathlon_gym/build.sh` if it is not already available.
-
-Smoke training budgets are 4K initial prompt plus 12K response/observation tokens;
-the hosted subagent deployment should support 256K context. The Decomposer and subagent
-recursion limits are 410. The episode wall-clock cap is 45 minutes. Budget-limited
-episodes are scored on partial state; unknown evaluator formats and infrastructure
-errors fail explicitly instead of receiving fabricated zero rewards.
-
-Generation uses Qwen's [non-thinking general-task recommendations](https://huggingface.co/Qwen/Qwen3.5-4B):
-temperature 0.7, top-p 0.8, top-k 20, presence penalty 1.5. Frozen-subagent prefix
-caching is controlled by the hosted deployment; trainable-policy caching is disabled across weight updates.
-Raw token IDs/logprobs are retained. Tool and middleware observations have zero
-loss mask. On new user feedback Qwen's full template would remove the previous
-empty thinking scaffold; the RL sequence retains its actual generation prefix
-instead of rewriting past policy tokens. No thinking text is generated in this mode.
-
-`~/watch-rl.sh` on Hertz-2 shows trainer liveness, episode counts and TensorBoard
-reward metrics. `--once` prints a single snapshot. The compact dashboard includes
-fixed-panel baseline/latest rewards, a batch-reward sparkline, gradient/clipping
-warnings and timeouts. “Cooking” means alive, not proven to be learning. Its ETA
-covers the whole scheduled run, including validation; until update timings
-exist it is explicitly a low-confidence episode-throughput extrapolation.
-The same inspector handles smoke tests, subset runs and full training: task counts
-and train/evaluation overlap come from the configured datasets, while rollout
-counts come from the saved training schedule. It does not infer these from run names.
-By default it selects the newest recorded run. Use `--run /path/to/run` to inspect
-a specific run, or `--root /path/to/runs` to select another collection of runs.
-Missing historical dataset metadata is shown as unknown rather than guessed.
-Checkpoint storage can be redirected with `RL_CHECKPOINT_ROOT` pointing to an
-existing directory. Alternatively, create the machine-local symlink
-`~/.local/share/decomposer/rl-checkpoints` pointing to a large mounted volume.
-New runs keep `RUN/checkpoints` as a symlink to `ROOT/RUN_NAME/checkpoints`;
-the watcher, resume paths, and best/last links keep their usual paths.
-Run metadata records the resolved storage location. Existing checkpoint
-directories are never automatically moved or overwritten by the launcher.
-
-Logs, native evaluations, model outputs and checkpoints
-live under `artifacts/training/toolathlon_gym/`.
-
-Compare complete panels and retain per-task rewards:
+Choose a free policy GPU and a fresh run directory:
 
 ```bash
-.venv-rl/bin/python -m training.toolathlon_gym.report \
-  --run artifacts/training/toolathlon_gym/pilot \
-  --data artifacts/training/toolathlon_gym/pilot-data
+RL_DATA="$PWD/artifacts/training/toolathlon_gym/overfit-data" \
+RL_ARTIFACTS="$PWD/artifacts/training/toolathlon_gym/overfit-01" \
+POLICY_GPU=0 bash training/toolathlon_gym/train.sh overfit
 ```
 
-This writes `reward_report.json` in the run directory. Incomplete or duplicate
-panels have no aggregate reward or delta; optimizer rollouts are not mixed into
-the fixed training probe. A positive delta is an observed estimate, not by itself
-proof of statistical significance or freedom from native-evaluator artifacts.
+For full training use `full-data`, a new run directory, and `train.sh full`.
+Hydra overrides follow the config name. Use tmux for unattended training.
 
-## Remaining verification
+## Shared recipe and provenance
 
-1. Verify checkpoint resume/export (save and a nonzero-gradient update passed).
-2. Measure training-probe and held-out reward before and after training.
-3. Audit any improvement against raw evaluations, not only scalar rewards.
+Seeds:
+- Timur's `tau2-gym/training/configs/grpo/champion.yaml` at
+  `08cc4f6ab2ff34abbf50fdc87b62df6313eecb4b`.
+- Agentic-rag's `occ-train/experiments/templates/colocate.sh`, branch
+  `ic/feat/train-verl09-agentloop`, at `89d1812bcac1313319f66354fb37efbf7f8326da`.
+  Its old `configs/rl.yaml` is not the current recipe.
 
-No GPU allocation is made by task preparation. The model paths remain under
-`~/models` by default; override `MODEL_PATH` and `SUBAGENT_MODEL_PATH` as needed.
-Do not duplicate weights here. Put new training artifacts
-under `artifacts/training/toolathlon_gym/<run_id>/`.
-See [the integration audit](../../docs/toolathlon_gym_verl_plan.md) for the design
-and reference revisions.
+Shared reference settings: all-linear LoRA rank 32/alpha 64, LR 1.5e-5,
+`seq-mean-token-mean` loss averaging. GRPO without standard-deviation normalization
+follows Timur; RAG exposes this as an experiment choice. Task batch and optimizer
+minibatch are eight (Timur), not RAG's 64/32.
+
+Intentional Gym differences: keep five attempts/task, rather than eight/sixteen;
+keep tested single-GPU synchronous updates with async AgentLoop generation,
+4096 prompt + 12288 response/observation budget, eager vLLM, SDPA, and disabled
+policy prefix caching. Do not copy RAG's multi-GPU pipeline or adapter-only saves:
+we retain optimizer state. The old run used LoRA 16/32 and LR 1e-5; this is a
+changed recipe, not an identical rerun.
+
+Qwen non-thinking sampling remains temperature 0.7, top-p 0.8, top-k 20; the adapter
+also applies presence penalty 1.5. Subagents remain hosted Qwen3.5-4B.
+Episode timeout is 2700 seconds and recursion limit is 410. Infrastructure errors
+stay explicit; retain raw evaluations because native check denominators can vary.
+
+Training generates 40 episodes/update. Evaluation uses five attempts/task before
+training and every eight updates. Checkpoint cadence is also eight updates.
+Overfit: 640 training + 120 evaluation = 760 episodes.
+Full: 960 training + 3,880 evaluation = 4,840 episodes.
+Full is a larger schedule, not a smoke run; choose epochs and evaluation cadence
+explicitly before launching if that budget is unsuitable.
+veRL drops the last incomplete training batch: 194 tasks yield 24 batches/epoch,
+with two shuffled tasks omitted that epoch. All 194 are evaluated each time.
+
+## Infrastructure and outputs
+
+One-time setup: `bash training/toolathlon_gym/setup.sh`, then:
+
+```bash
+podman build -f training/toolathlon_gym/Dockerfile -t decomposer-toolathlon-rl:latest .
+```
+
+The launcher resolves `~/models/decomposer-4b-sft` once and records model, config,
+source revision/diff, image, endpoint, dataset and process identity. Override
+`MODEL_PATH` for another checkpoint. `router.sh` sources
+`~/.local/share/environment/lmrouter.env` (override with `LMROUTER_ENV`).
+Credentials travel by environment, not logs. No local subagent service is launched.
+Existing episode startup caching and owned-container cleanup stay intact.
+
+All outputs live under `RL_ARTIFACTS`: traces, evaluations, model calls,
+TensorBoard, resolved Hydra config, logs and checkpoints.
+`RL_CHECKPOINT_ROOT` or `~/.local/share/decomposer/rl-checkpoints` can point to the
+large volume. Checkpoints are linked, not copied; Ray temp storage defaults there.
+Existing storage is never automatically moved or overwritten.
+
+`~/watch-rl.sh` remains the general watcher; `--run /path/to/run --once` selects
+a snapshot. ETA includes evaluation. Batch rewards alone do not prove learning.
+On exit the launcher writes `reward_report.json` and labels `best` (highest
+complete training-probe reward) and `last`. Incomplete panels have no aggregate.
+The report reads the actual evaluation repetition count from the saved config.
+
+The old one-task smoke, train8 and train32 launchers are retired. Saved runs,
+checkpoints, analysis tools and throughput measurements are untouched.
+This consolidation is config validation, not a GPU training/resume test.

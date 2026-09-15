@@ -1,3 +1,4 @@
+# Shared optimizer recipe: tau2 champion + agentic-rag (see README).
 defaults:
   - ppo_trainer
   - _self_
@@ -7,8 +8,6 @@ hydra:
     dir: ${oc.env:RL_ARTIFACTS}/hydra
   job:
     chdir: false
-  searchpath:
-    - pkg://verl.trainer.config
 
 algorithm:
   adv_estimator: grpo
@@ -18,7 +17,7 @@ data:
   train_files: ${oc.env:RL_DATA}/train.parquet
   val_files: ${oc.env:RL_DATA}/evaluation.parquet
   return_raw_chat: true
-  train_batch_size: 2
+  train_batch_size: 8
   val_batch_size: 8
   max_prompt_length: 4096
   max_response_length: 12288
@@ -28,16 +27,16 @@ data:
 actor_rollout_ref:
   model:
     path: ${oc.env:MODEL_PATH}
-    lora_rank: 16
-    lora_alpha: 32
+    lora_rank: 32
+    lora_alpha: 64
     target_modules: all-linear
     override_config:
       attn_implementation: sdpa
     use_remove_padding: false
   actor:
     optim:
-      lr: 1.0e-5
-    ppo_mini_batch_size: 2
+      lr: 1.5e-5
+    ppo_mini_batch_size: 8
     ppo_micro_batch_size_per_gpu: 1
     use_dynamic_bsz: false
     loss_agg_mode: seq-mean-token-mean
@@ -50,7 +49,7 @@ actor_rollout_ref:
     mode: async
     tensor_model_parallel_size: 1
     gpu_memory_utilization: 0.45
-    n: 4
+    n: 5
     temperature: 0.7
     top_p: 0.8
     top_k: 20
@@ -67,9 +66,9 @@ actor_rollout_ref:
     agent:
       agent_loop_config_path: ${oc.env:RL_ROOT}/training/toolathlon_gym/agent_loop.yaml
       default_agent_loop: toolathlon_decomposer
-      num_workers: 4
+      num_workers: 8
     val_kwargs:
-      n: 3
+      n: 5
       do_sample: true
       temperature: 0.7
       top_p: 0.8
@@ -79,11 +78,12 @@ trainer:
   use_v1: true
   n_gpus_per_node: 1
   nnodes: 1
-  total_training_steps: 8
-  save_freq: 2
-  test_freq: 4
+  total_training_steps: null
+  total_epochs: 1
+  save_freq: 8
+  test_freq: 8
   val_before_train: true
   default_local_dir: ${oc.env:RL_ARTIFACTS}/checkpoints
   project_name: decomposer-toolathlon-gym
-  experiment_name: pilot
+  experiment_name: full
   logger: [console, tensorboard]
