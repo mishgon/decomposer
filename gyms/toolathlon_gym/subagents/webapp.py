@@ -85,6 +85,16 @@ def load_connections(
             raise ValueError(f"Unsupported MCP transport for {name!r}")
 
         params = _resolve(config.get("params", {}), replacements)
+        if params.get("command") == "uv":
+            args = list(params["args"])
+            if args[:1] == ["run"] and args[1].endswith(".py"):
+                # Script-style servers must use their own preinstalled environment.
+                params["command"] = str(Path(args[1]).parent / ".venv/bin/python")
+                params["args"] = args[1:]
+            else:
+                run_index = args.index("run")
+                args[run_index + 1:run_index + 1] = ["--no-sync", "--offline"]
+                params["args"] = args
         env = {**params.get("env", {}), **os.environ}
         pg_env = {
             "PGHOST": "PG_HOST",

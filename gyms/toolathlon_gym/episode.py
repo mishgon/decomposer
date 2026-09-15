@@ -126,6 +126,7 @@ class Episode:
                          "-v", f"{data}:/artifacts/data",
                          "-v", f"{self.root}/src:/rl-source/src:ro",
                          "-v", f"{self.root}/gyms/toolathlon_gym/subagents/graph.py:/opt/decomposer/gyms/toolathlon_gym/subagents/graph.py:ro",
+                         "-v", f"{self.root}/gyms/toolathlon_gym/subagents/webapp.py:/opt/decomposer/gyms/toolathlon_gym/subagents/webapp.py:ro",
                          self.image)
             port = self.command("port", self.container, "2024/tcp").stdout.strip().rsplit(":", 1)[1]
             self.url = f"http://127.0.0.1:{port}"
