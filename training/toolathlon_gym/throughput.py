@@ -60,7 +60,9 @@ async def run(args):
     else:
         pool_bytes = args.pool.read_bytes()
         candidates = [t["task_id"] for t in json.loads(pool_bytes)["tasks"]]
-        repetitions = 5
+        repetitions = args.repetitions
+    if args.concurrency % repetitions:
+        raise ValueError("Concurrency must be divisible by repetitions")
     if args.concurrency > len(candidates) * repetitions:
         raise ValueError("Not enough tasks for requested concurrency")
     names = sorted(candidates, key=lambda t: hashlib.sha256(f"42:{t}".encode()).hexdigest())[:args.concurrency // repetitions]
@@ -141,7 +143,8 @@ async def run(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--concurrency", type=int, choices=[40, 60, 80, 120, 200, 300, 400, 500], required=True)
+    parser.add_argument("--concurrency", type=int, choices=[40, 60, 80, 120, 194, 200, 300, 400, 500], required=True)
+    parser.add_argument("--repetitions", type=int, choices=[1, 5], default=5)
     parser.add_argument("--all-tasks", action="store_true", help="Use distinct tasks from full Gym, one attempt each")
     parser.add_argument("--pool", type=Path, default=Path("training/toolathlon_gym/rl_task_pool.json"))
     parser.add_argument("--url", default="http://127.0.0.1:8026/v1")
