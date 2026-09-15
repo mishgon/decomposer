@@ -1,14 +1,22 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/../.."
+case "${1:-}" in
+    full|overfit) export RL_CONFIG="$1"; shift ;;
+    *) echo "Usage: $0 {full|overfit} [Hydra overrides...]" >&2; exit 2 ;;
+esac
+: "${RL_DATA:?Set RL_DATA to the prepared dataset (see README)}"
+: "${RL_ARTIFACTS:?Set RL_ARTIFACTS to the run directory}"
+test -f "$RL_DATA/train.parquet"
+test -f "$RL_DATA/evaluation.parquet"
+export RL_EPISODE_TIMEOUT="${RL_EPISODE_TIMEOUT:-2700}"
 source training/toolathlon_gym/router.sh
 export RL_ROOT="$PWD"
 export MODEL_CHECKPOINT_LINK="${MODEL_PATH:-$HOME/models/decomposer-4b-sft}"
 export MODEL_PATH
 MODEL_PATH="$(readlink -f "$MODEL_CHECKPOINT_LINK")"
 test -f "$MODEL_PATH/config.json" || { echo "Missing model config: $MODEL_PATH" >&2; exit 1; }
-export RL_DATA="${RL_DATA:-$PWD/artifacts/training/toolathlon_gym/pilot-data}"
-export RL_ARTIFACTS="${RL_ARTIFACTS:-$PWD/artifacts/training/toolathlon_gym/pilot}"
+export RL_DATA RL_ARTIFACTS
 export CUDA_VISIBLE_DEVICES="${POLICY_GPU:-0}"
 RL_GYM_IMAGE=$(podman image inspect --format '{{.Id}}' "${RL_GYM_IMAGE:-decomposer-toolathlon-rl:latest}")
 export RL_GYM_IMAGE
@@ -33,5 +41,12 @@ if [ -d "$checkpoint_root" ]; then
 fi
 .venv-rl/bin/python -m training.toolathlon_gym.record_run --pid "$$" --directory "$RL_ARTIFACTS" "$@"
 exec > >(tee -a "$RL_ARTIFACTS/trainer.log") 2>&1
-exec .venv-rl/bin/python -m verl.trainer.main_ppo \
-    --config-path "$PWD/training/toolathlon_gym" --config-name config "$@"
+finish() {
+    .venv-rl/bin/python -m training.toolathlon_gym.report \
+        --run "$RL_ARTIFACTS" --data "$RL_DATA" || true
+    .venv-rl/bin/python -m training.toolathlon_gym.select_checkpoints --run "$RL_ARTIFACTS" || true
+}
+trap finish EXIT
+.venv-rl/bin/python -m verl.trainer.main_ppo \
+    --config-path "$PWD/training/toolathlon_gym" --config-name "$RL_CONFIG" \
+    'hydra.searchpath=[pkg://verl.trainer.config]' "$@"

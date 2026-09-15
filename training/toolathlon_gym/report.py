@@ -46,8 +46,13 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--run", type=Path, required=True)
     parser.add_argument("--data", type=Path, required=True)
-    parser.add_argument("--samples", type=int, default=3)
+    parser.add_argument("--samples", type=int, help="Defaults to the saved run configuration")
     args = parser.parse_args()
+    if args.samples is None:
+        import yaml
+
+        config = yaml.safe_load((args.run / "hydra/.hydra/config.yaml").read_text())
+        args.samples = int(config["actor_rollout_ref"]["rollout"]["val_kwargs"]["n"])
     if args.samples < 1:
         parser.error("--samples must be positive")
     frame = pd.read_parquet(args.data / "evaluation.parquet")
