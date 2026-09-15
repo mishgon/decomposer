@@ -101,6 +101,7 @@ async def run(args):
 
     sensor = asyncio.create_task(sample())
     status["status"] = "running"
+    save(args.output / "status.json", status)
     try:
         cases = [(name, rep) for rep in range(1, 6) for name in names]
         if args.limit is not None:
