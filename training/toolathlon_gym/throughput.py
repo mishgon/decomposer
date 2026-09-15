@@ -133,7 +133,7 @@ async def run(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--concurrency", type=int, choices=[40, 60, 80], required=True)
+    parser.add_argument("--concurrency", type=int, choices=[40, 60, 80, 120], required=True)
     parser.add_argument("--pool", type=Path, default=Path("training/toolathlon_gym/rl_task_pool.json"))
     parser.add_argument("--url", default="http://127.0.0.1:8026/v1")
     parser.add_argument("--model", default="decomposer-4b-sft")
