@@ -66,5 +66,5 @@ for phase in "${phases[@]}"; do
     wait "$phase_pid"
     phase_pid=""
     .venv-rl/bin/python -m training.toolathlon_gym.throughput_cleanup "$TEST_ROOT/c$phase"
-    .venv-rl/bin/python -c 'import json,sys; s=json.load(open(sys.argv[1])); print(json.dumps(s)); assert s["status"]=="complete" and s["infrastructure_errors"] <= s["concurrency"]*.1, "Too many infrastructure failures; stopping escalation"' "$TEST_ROOT/c$phase/summary.json"
+    .venv-rl/bin/python -c 'import json,sys; s=json.load(open(sys.argv[1])); print(json.dumps(s)); assert s["status"]=="complete" and s["infrastructure_errors"] <= s["concurrency"]*float(sys.argv[2]), "Too many infrastructure failures; stopping escalation"' "$TEST_ROOT/c$phase/summary.json" "${THROUGHPUT_MAX_ERROR_FRACTION:-0.1}"
 done
