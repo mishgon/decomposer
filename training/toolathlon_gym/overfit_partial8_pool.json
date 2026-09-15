@@ -1,0 +1,128 @@
+{
+  "source_run": "sft-qwen4b-full-n3",
+  "source_manifest_sha256": "c54759ec11b59ad17344f4318d6cb8381dbb7afb52d3f82126b3e04c4c258134",
+  "selection": "User-selected rectangle on runtime/variance chart; eight fastest of ten enclosed tasks. Intended for train/evaluation overlap in an overfit experiment, not held-out benchmarking.",
+  "attempts": 5,
+  "tasks": [
+    {
+      "task_id": "yt-veritasium-scholarly-notion-excel",
+      "mean_runtime_minutes": 18.86024089018504,
+      "mean_score": 0.55,
+      "score_variance": 0.20225,
+      "partial_scores": [
+        0,
+        0.925,
+        0.875,
+        0,
+        0.95
+      ],
+      "timeouts": 0,
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "sf-sales-forecast-notion",
+      "mean_runtime_minutes": 21.886179757118224,
+      "mean_score": 0.5816326530612245,
+      "score_variance": 0.22553102873802583,
+      "partial_scores": [
+        0,
+        0.9693877551020408,
+        0,
+        0.9693877551020408,
+        0.9693877551020408
+      ],
+      "timeouts": 1,
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "sf-sales-regional-analysis-ppt-gcal-email",
+      "mean_runtime_minutes": 22.38868129094442,
+      "mean_score": 0.525,
+      "score_variance": 0.18843749999999998,
+      "partial_scores": [
+        0,
+        0,
+        0.75,
+        0.9375,
+        0.9375
+      ],
+      "timeouts": 2,
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "pw-sf-support-sla-benchmark-excel-gcal",
+      "mean_runtime_minutes": 25.196473172505694,
+      "mean_score": 0.5333333333333333,
+      "score_variance": 0.1945679012345679,
+      "partial_scores": [
+        0,
+        0.8888888888888888,
+        1,
+        0,
+        0.7777777777777778
+      ],
+      "timeouts": 2,
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "arxiv-latex-reasoning-gsheet",
+      "mean_runtime_minutes": 26.155013179779054,
+      "mean_score": 0.5110003323363244,
+      "score_variance": 0.18009812812586942,
+      "partial_scores": [
+        0.9019607843137255,
+        0,
+        0.9411764705882353,
+        0,
+        0.711864406779661
+      ],
+      "timeouts": 1,
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "canvas-quiz-analysis-gsheet-email",
+      "mean_runtime_minutes": 27.43036677678426,
+      "mean_score": 0.37142857142857144,
+      "score_variance": 0.20897959183673467,
+      "partial_scores": [
+        1,
+        0,
+        0.8571428571428571,
+        0,
+        0
+      ],
+      "timeouts": 1,
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "ppt-snowflake-executive",
+      "mean_runtime_minutes": 28.312071176369983,
+      "mean_score": 0.5714285714285714,
+      "score_variance": 0.2204081632653061,
+      "partial_scores": [
+        0,
+        0,
+        1,
+        0.8571428571428571,
+        1
+      ],
+      "timeouts": 2,
+      "infrastructure_errors": 0
+    },
+    {
+      "task_id": "sf-support-agent-performance-gsheet-gcal",
+      "mean_runtime_minutes": 32.157504110336305,
+      "mean_score": 0.4965909090909091,
+      "score_variance": 0.1883356290174472,
+      "partial_scores": [
+        0.5454545454545454,
+        0,
+        0.9791666666666666,
+        0.9583333333333334,
+        0
+      ],
+      "timeouts": 2,
+      "infrastructure_errors": 0
+    }
+  ]
+}
