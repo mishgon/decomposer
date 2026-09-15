@@ -111,7 +111,10 @@ class Episode:
                    "TOOLATHLON_SUBAGENT_CALL_LOG": "/artifacts/data/subagent_model_calls.jsonl",
                    "DECOMPOSER_SUBAGENT_MODEL": self.subagent_model,
                    "DECOMPOSER_SUBAGENT_BASE_URL": self.subagent_url or f"http://host.docker.internal:{self.subagent_port}/v1",
-                   "PYTHONPATH": "/rl-source/src"}
+                   "PYTHONPATH": "/rl-source/src",
+                   "RAYON_NUM_THREADS": "2", "UV_CONCURRENT_BUILDS": "2",
+                   "UV_CONCURRENT_INSTALLS": "2", "OMP_NUM_THREADS": "1",
+                   "OPENBLAS_NUM_THREADS": "1", "MKL_NUM_THREADS": "1"}
             # Pass credentials by environment name, never in command arguments or artifacts.
             credentials = ("-e", "VLLM_API_KEY") if self.subagent_url else ()
             self.start_task_container("run", "--http-proxy=false", "-d", "--name", self.container,
