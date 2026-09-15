@@ -53,14 +53,22 @@ async def run(args):
     task = asyncio.current_task()
     for sig in (signal.SIGINT, signal.SIGTERM):
         asyncio.get_running_loop().add_signal_handler(sig, task.cancel)
-    pool = json.loads(args.pool.read_text())
-    names = sorted((t["task_id"] for t in pool["tasks"]),
-                   key=lambda t: hashlib.sha256(f"42:{t}".encode()).hexdigest())[:args.concurrency // 5]
+    if args.all_tasks:
+        candidates = [p.parent.name for p in Path("external/toolathlon_gym/tasks/finalpool").glob("*/task_config.json")]
+        repetitions = 1
+        pool_bytes = json.dumps(sorted(candidates)).encode()
+    else:
+        pool_bytes = args.pool.read_bytes()
+        candidates = [t["task_id"] for t in json.loads(pool_bytes)["tasks"]]
+        repetitions = 5
+    if args.concurrency > len(candidates) * repetitions:
+        raise ValueError("Not enough tasks for requested concurrency")
+    names = sorted(candidates, key=lambda t: hashlib.sha256(f"42:{t}".encode()).hexdigest())[:args.concurrency // repetitions]
     started = time.time()
-    status = {"status": "starting", "concurrency": args.concurrency, "tasks": names, "repetitions": 5,
+    status = {"status": "starting", "concurrency": args.concurrency, "tasks": names, "repetitions": repetitions,
               "started_at": started, "rows": [], "model": args.model,
               "subagent_url": os.environ["SUBAGENT_URL"], "episode_timeout": args.timeout,
-              "pool_sha256": hashlib.sha256(args.pool.read_bytes()).hexdigest(),
+              "pool_sha256": hashlib.sha256(pool_bytes).hexdigest(), "all_tasks": args.all_tasks,
               "revision": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
               "scope": "Frozen SFT policy, exact RL AgentLoop/token budgets; no optimizer or Ray scheduling"}
     save(args.output / "status.json", status)
@@ -103,7 +111,7 @@ async def run(args):
     status["status"] = "running"
     save(args.output / "status.json", status)
     try:
-        cases = [(name, rep) for rep in range(1, 6) for name in names]
+        cases = [(name, rep) for rep in range(1, repetitions + 1) for name in names]
         if args.limit is not None:
             cases = cases[:args.limit]
         await asyncio.gather(*(episode(name, rep) for name, rep in cases))
@@ -133,7 +141,8 @@ async def run(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--concurrency", type=int, choices=[40, 60, 80, 120], required=True)
+    parser.add_argument("--concurrency", type=int, choices=[40, 60, 80, 120, 200, 300, 400, 500], required=True)
+    parser.add_argument("--all-tasks", action="store_true", help="Use distinct tasks from full Gym, one attempt each")
     parser.add_argument("--pool", type=Path, default=Path("training/toolathlon_gym/rl_task_pool.json"))
     parser.add_argument("--url", default="http://127.0.0.1:8026/v1")
     parser.add_argument("--model", default="decomposer-4b-sft")
