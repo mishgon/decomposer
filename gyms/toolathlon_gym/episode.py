@@ -76,6 +76,7 @@ class Episode:
         try:
             self.command("network", "create", self.network)
             self.command("run", "--http-proxy=false", "-d", "--name", self.pg,
+                         "--memory", "2g", "--memory-swap", "2g",
                          "--network", self.network, "--network-alias", "postgres",
                          "-e", "POSTGRES_DB=toolathlon_gym", "-e", "POSTGRES_USER=eigent",
                          "-e", "POSTGRES_PASSWORD=camel", "-v",
@@ -111,13 +112,14 @@ class Episode:
                    "TOOLATHLON_SUBAGENT_CALL_LOG": "/artifacts/data/subagent_model_calls.jsonl",
                    "DECOMPOSER_SUBAGENT_MODEL": self.subagent_model,
                    "DECOMPOSER_SUBAGENT_BASE_URL": self.subagent_url or f"http://host.docker.internal:{self.subagent_port}/v1",
-                   "PYTHONPATH": "/rl-source/src",
+                   "PYTHONPATH": "/rl-source/src:/opt/decomposer",
                    "RAYON_NUM_THREADS": "2", "UV_CONCURRENT_BUILDS": "2",
                    "UV_CONCURRENT_INSTALLS": "2", "OMP_NUM_THREADS": "1",
                    "OPENBLAS_NUM_THREADS": "1", "MKL_NUM_THREADS": "1"}
             # Pass credentials by environment name, never in command arguments or artifacts.
             credentials = ("-e", "VLLM_API_KEY") if self.subagent_url else ()
             self.start_task_container("run", "--http-proxy=false", "-d", "--name", self.container,
+                         "--memory", "16g", "--memory-swap", "16g",
                          "--network", self.network, "--add-host", "host.docker.internal:host-gateway",
                          *(("--add-host", self.subagent_host) if self.subagent_host else ()),
                          *credentials,
@@ -127,6 +129,7 @@ class Episode:
                          "-v", f"{self.root}/src:/rl-source/src:ro",
                          "-v", f"{self.root}/gyms/toolathlon_gym/subagents/graph.py:/opt/decomposer/gyms/toolathlon_gym/subagents/graph.py:ro",
                          "-v", f"{self.root}/gyms/toolathlon_gym/subagents/webapp.py:/opt/decomposer/gyms/toolathlon_gym/subagents/webapp.py:ro",
+                         "-v", f"{self.root}/gyms/toolathlon_gym/subagents/python_execute.py:/opt/decomposer/gyms/toolathlon_gym/subagents/python_execute.py:ro",
                          self.image)
             port = self.command("port", self.container, "2024/tcp").stdout.strip().rsplit(":", 1)[1]
             self.url = f"http://127.0.0.1:{port}"
