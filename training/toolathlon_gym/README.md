@@ -118,3 +118,16 @@ The report reads the actual evaluation repetition count from the saved config.
 The old one-task smoke, train8 and train32 launchers are retired. Saved runs,
 checkpoints, analysis tools and throughput measurements are untouched.
 This consolidation is config validation, not a GPU training/resume test.
+
+## ClearML
+
+The pinned SDK is included in the RL requirements. Keep credentials in
+`~/clearml.conf` (mode 600), never in Hydra arguments or Git. On Hertz-2 the
+verified API endpoint is `https://clearml.2a2i.org/api`, not port 8008.
+Opt in with `'trainer.logger=[console,tensorboard,clearml]'` at launch.
+Local TensorBoard, traces and checkpoints remain the source of truth.
+The launcher defaults the experiment name to the run-directory basename so fresh
+runs do not accidentally reuse an experiment named simply `overfit` or `full`.
+The upstream logger requests continuation of the matching ClearML task; check task
+identity when resuming from a different machine. Credentials must be configured
+before launch. Enabling logging does not require ClearML Agent or remote scheduling.

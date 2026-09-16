@@ -54,6 +54,7 @@ astor==0.8.1
 attrs==26.1.0
     # via
     #   aiohttp
+    #   clearml
     #   jsonschema
     #   referencing
 blake3==1.0.9
@@ -74,6 +75,8 @@ cfgv==3.5.0
     # via pre-commit
 charset-normalizer==3.5.1
     # via requests
+clearml==2.1.12
+    # via -r training/toolathlon_gym/requirements.txt
 click==8.5.0
     # via
     #   flashinfer-python
@@ -177,6 +180,8 @@ fsspec==2026.2.0
     #   datasets
     #   huggingface-hub
     #   torch
+furl==2.1.4
+    # via clearml
 gguf==0.19.0
     # via vllm
 google-api-core==2.36.0
@@ -271,6 +276,7 @@ jsonpointer==3.1.1
     # via jsonpatch
 jsonschema==4.26.0
     # via
+    #   clearml
     #   mcp
     #   mistral-common
     #   ray
@@ -365,6 +371,7 @@ networkx==3.6.1
     # via torch
 ninja==1.13.2
     # via
+    #   -r training/toolathlon_gym/requirements.txt
     #   flashinfer-python
     #   vllm
 nodeenv==1.10.0
@@ -375,6 +382,7 @@ numpy==2.2.6
     # via
     #   -r external/verl/requirements.txt
     #   accelerate
+    #   clearml
     #   datasets
     #   flashinfer-python
     #   gguf
@@ -522,6 +530,8 @@ opentelemetry-semantic-conventions==0.65b0
     #   opentelemetry-semantic-conventions-ai
 opentelemetry-semantic-conventions-ai==0.5.1
     # via vllm
+orderedmultidict==1.0.2
+    # via furl
 orjson==3.12.0
     # via
     #   langgraph-sdk
@@ -556,10 +566,13 @@ pandas==3.0.5
     #   datasets
 partial-json-parser==0.2.1.1.post7
     # via vllm
+pathlib2==2.3.7.post1
+    # via clearml
 peft==0.20.0
     # via -r external/verl/requirements.txt
 pillow==12.3.0
     # via
+    #   clearml
     #   mistral-common
     #   tensorboard
     #   torchvision
@@ -603,6 +616,7 @@ protobuf==6.33.6
 psutil==7.2.2
     # via
     #   accelerate
+    #   clearml
     #   peft
     #   transferqueue
     #   vllm
@@ -663,13 +677,19 @@ pygments==2.21.0
     #   pytest
     #   rich
 pyjwt==2.13.0
-    # via mcp
+    # via
+    #   clearml
+    #   mcp
 pylatexenc==2.11
     # via -r external/verl/requirements.txt
+pyparsing==3.3.2
+    # via clearml
 pytest==9.1.1
     # via -r training/toolathlon_gym/requirements.txt
 python-dateutil==2.9.0.post0
-    # via pandas
+    # via
+    #   clearml
+    #   pandas
 python-discovery==1.6.0
     # via virtualenv
 python-dotenv==1.2.3
@@ -687,6 +707,7 @@ pyvers==0.1.0
 pyyaml==6.0.3
     # via
     #   accelerate
+    #   clearml
     #   datasets
     #   gguf
     #   huggingface-hub
@@ -712,6 +733,7 @@ ray==2.58.0
     #   transferqueue
 referencing==0.37.0
     # via
+    #   clearml
     #   jsonschema
     #   jsonschema-specifications
 regex==2026.9.10
@@ -721,6 +743,7 @@ regex==2026.9.10
     #   vllm
 requests==2.34.2
     # via
+    #   clearml
     #   datasets
     #   flashinfer-python
     #   gguf
@@ -771,7 +794,11 @@ shellingham==1.5.4
     # via typer
 six==1.17.0
     # via
+    #   clearml
+    #   furl
     #   opencensus
+    #   orderedmultidict
+    #   pathlib2
     #   python-dateutil
     #   vllm
 smart-open==8.0.1
@@ -922,6 +949,7 @@ typing-inspection==0.4.4
     #   pydantic-settings
 urllib3==2.7.0
     # via
+    #   clearml
     #   requests
     #   sentry-sdk
     #   torchdata
