@@ -4,6 +4,7 @@ import sys
 from collections.abc import AsyncIterator
 from contextlib import AsyncExitStack, asynccontextmanager
 from datetime import timedelta
+from functools import wraps
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +19,21 @@ from langchain_mcp_adapters.tools import load_mcp_tools
 
 
 MAX_TOOL_OUTPUT_CHARS = 8000
+
+
+def threaded_local_tool(function):
+    """Expose upstream await-free disk tools as sync tools for LangChain's executor."""
+    @wraps(function)
+    def invoke(*args, **kwargs):
+        coroutine = function(*args, **kwargs)
+        try:
+            coroutine.send(None)
+        except StopIteration as result:
+            return result.value
+        finally:
+            coroutine.close()
+        raise RuntimeError("Native overlong tool unexpectedly awaited; update its adapter")
+    return invoke
 
 
 @wrap_tool_call
@@ -149,7 +165,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             tools.append(tool(make_python_execute(task_config["agent_workspace"])))
         if "handle_overlong_tool_outputs" in needed_local_tools:
             tools.extend(
-                tool(fn)
+                tool(threaded_local_tool(fn))
                 for fn in make_overlong_tools(task_config["agent_workspace"])
             )
         for server_name in connections:
