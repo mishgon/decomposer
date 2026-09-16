@@ -143,28 +143,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         ):
             sys.path.insert(0, str(toolathlon_root))
             from utils.aux_tools.overlong_tool_manager import make_overlong_tools
-            from utils.aux_tools.python_interpretor import make_python_execute
+            from gyms.toolathlon_gym.subagents.python_execute import make_python_execute
 
         if "python_execute" in needed_local_tools:
-            native_python_execute = make_python_execute(
-                task_config["agent_workspace"]
-            )
-
-            def python_execute(
-                code: str,
-                filename: str = "",
-                timeout: int = 30,
-            ) -> str:
-                """Execute Python code in the Toolathlon task workspace."""
-                coroutine = native_python_execute(code, filename, timeout)
-                try:
-                    coroutine.send(None)
-                except StopIteration as result:
-                    return result.value
-                coroutine.close()
-                raise RuntimeError("Toolathlon python_execute unexpectedly awaited")
-
-            tools.append(tool(python_execute))
+            tools.append(tool(make_python_execute(task_config["agent_workspace"])))
         if "handle_overlong_tool_outputs" in needed_local_tools:
             tools.extend(
                 tool(fn)
