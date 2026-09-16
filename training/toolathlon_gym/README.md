@@ -95,6 +95,13 @@ source revision/diff, image, endpoint, dataset and process identity. Override
 `~/.local/share/environment/lmrouter.env` (override with `LMROUTER_ENV`).
 Credentials travel by environment, not logs. No local subagent service is launched.
 Existing episode startup caching and owned-container cleanup stay intact.
+Task containers have a 16 GiB RAM limit and databases 2 GiB, with no additional
+swap allowance. Python tools run in isolated process groups; timeout/cancellation
+kills the group, including descendants. Output returned by the Python tool is
+capped at 8,000 bytes per stream. On trainer exit the launcher also cleans up
+containers recorded under that run, covering Ray-worker deaths that skip episode
+finally blocks. A hard kill of the launcher or host crash still requires recovery
+cleanup; no shell EXIT trap can handle SIGKILL.
 
 All outputs live under `RL_ARTIFACTS`: traces, evaluations, model calls,
 TensorBoard, resolved Hydra config, logs and checkpoints.
