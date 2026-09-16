@@ -24,6 +24,11 @@ class RecipeTests(unittest.TestCase):
             full = compose(config_name="full", overrides=overrides)
             overfit = compose(config_name="overfit", overrides=overrides)
             for config in (full, overfit):
+                self.assertEqual(config.trainer.save_freq, 1)
+                self.assertEqual(config.trainer.test_freq, 8)
+                self.assertEqual(config.trainer.max_actor_ckpt_to_keep, -1)
+                self.assertEqual(list(config.actor_rollout_ref.actor.checkpoint.save_contents),
+                                 ["model", "optimizer", "extra"])
                 self.assertEqual(config.actor_rollout_ref.model.lora_rank, 32)
                 self.assertEqual(config.actor_rollout_ref.model.lora_alpha, 64)
                 self.assertEqual(config.actor_rollout_ref.actor.optim.lr, 1.5e-5)
