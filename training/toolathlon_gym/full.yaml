@@ -80,7 +80,11 @@ trainer:
   nnodes: 1
   total_training_steps: null
   total_epochs: 1
-  save_freq: 8
+  # Save resumable state immediately after every optimizer update, before eval.
+  save_freq: 1
+  # Keep evaluated checkpoints too; latest-only eviction could delete the best.
+  max_actor_ckpt_to_keep: -1
+  max_critic_ckpt_to_keep: -1
   test_freq: 8
   val_before_train: true
   default_local_dir: ${oc.env:RL_ARTIFACTS}/checkpoints

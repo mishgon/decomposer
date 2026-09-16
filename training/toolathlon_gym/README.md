@@ -70,7 +70,10 @@ Episode timeout is 2700 seconds and recursion limit is 410. Infrastructure error
 stay explicit; retain raw evaluations because native check denominators can vary.
 
 Training generates 40 episodes/update. Evaluation uses five attempts/task before
-training and every eight updates. Checkpoint cadence is also eight updates.
+training and every eight updates. Resumable checkpoints (model, optimizer, extra
+state) are saved after **every update, before evaluation**. Automatic eviction is
+disabled so an unevaluated latest checkpoint cannot delete the best evaluated one.
+This keeps all 16 checkpoints for overfit; best/last are labeled on launcher exit.
 Overfit: 640 training + 120 evaluation = 760 episodes.
 Full: 960 training + 3,880 evaluation = 4,840 episodes.
 Full is a larger schedule, not a smoke run; choose epochs and evaluation cadence
