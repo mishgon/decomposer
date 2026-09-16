@@ -10,3 +10,4 @@ langgraph-sdk==0.4.2
 langchain-openai==1.3.0
 langchain-openrouter
 pytest
+clearml==2.1.12

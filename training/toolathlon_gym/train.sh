@@ -50,4 +50,5 @@ finish() {
 trap finish EXIT
 .venv-rl/bin/python -m verl.trainer.main_ppo \
     --config-path "$PWD/training/toolathlon_gym" --config-name "$RL_CONFIG" \
-    'hydra.searchpath=[pkg://verl.trainer.config]' "$@"
+    'hydra.searchpath=[pkg://verl.trainer.config]' \
+    "trainer.experiment_name=$(basename "$RL_ARTIFACTS")" "$@"
