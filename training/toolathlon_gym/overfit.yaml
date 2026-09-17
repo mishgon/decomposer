@@ -18,6 +18,8 @@ actor_rollout_ref:
     ppo_epochs: 2
     use_rollout_log_probs: true
   rollout:
+    agent:
+      num_workers: 2
     multi_turn:
       enable: true
     checkpoint_engine:
