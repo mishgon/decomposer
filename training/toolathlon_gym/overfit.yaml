@@ -1,4 +1,4 @@
-# Fully async two-task diagnostic: one completed five-rollout group per update.
+# Fully async two-task diagnostic: one completed eight-rollout group per update.
 defaults:
   - full
   - _self_
@@ -32,7 +32,7 @@ algorithm:
 rollout:
   nnodes: 1
   n_gpus_per_node: 1
-  n: 5
+  n: ${actor_rollout_ref.rollout.n}
   total_rollout_steps: 8
 
 async_training:

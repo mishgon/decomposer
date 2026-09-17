@@ -49,7 +49,7 @@ actor_rollout_ref:
     mode: async
     tensor_model_parallel_size: 1
     gpu_memory_utilization: 0.45
-    n: 5
+    n: 8
     temperature: 0.7
     top_p: 0.8
     top_k: 20
@@ -68,7 +68,7 @@ actor_rollout_ref:
       default_agent_loop: toolathlon_decomposer
       num_workers: 8
     val_kwargs:
-      n: 5
+      n: 8
       do_sample: true
       temperature: 0.7
       top_p: 0.8
