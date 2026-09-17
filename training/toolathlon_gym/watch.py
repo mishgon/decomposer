@@ -58,6 +58,17 @@ def manifest_files(value, data_dir):
 def run_plan(config, train_rows, validation_rows):
     trainer, data = config["trainer"], config["data"]
     rollout = config["actor_rollout_ref"]["rollout"]
+    if "async_training" in config:
+        async_config = config["async_training"]
+        groups = min(config["rollout"]["total_rollout_steps"], train_rows * trainer["total_epochs"])
+        groups_per_sync = (config["actor_rollout_ref"]["actor"]["ppo_mini_batch_size"]
+                           * async_config["require_batches"] * async_config["trigger_parameter_sync_step"])
+        total = groups // groups_per_sync
+        rounds = ({0} if trainer["val_before_train"] else set())
+        if trainer["test_freq"] > 0:
+            rounds.update(range(trainer["test_freq"], total + 1, trainer["test_freq"]))
+        validation_size = validation_rows * rollout["val_kwargs"]["n"]
+        return total, rounds, validation_size, groups * rollout["n"] + len(rounds) * validation_size
     total = trainer.get("total_training_steps")
     if total is None:
         total = (train_rows // data["train_batch_size"]) * trainer["total_epochs"]
@@ -195,6 +206,8 @@ def show(root, selected=None):
         validation_times.append(max(r[4] for r in rows) - min(r[4] - r[3] for r in rows))
     eta, basis = estimate_eta(elapsed, scored, total_episodes, max(0, total - step), update_times,
                               len(rounds - complete), validation_times)
+    if "async_training" in config:
+        eta, basis = estimate_eta(elapsed, scored, total_episodes, 0, [], 0, [])
     grad, clip = latest("actor/grad_norm"), latest("actor/pg_clipfrac")
     done = schedule_known and step >= total and rounds <= complete
     nonfinite = any(v is not None and not math.isfinite(v) for v in

@@ -5,10 +5,10 @@ Two experiment configs, one launcher:
 | Config | Task pool | Schedule |
 |---|---|---|
 | `full.yaml` | `rl_task_pool.json`: 194 tasks | One epoch, 24 updates |
-| `overfit.yaml` | `overfit_partial2_pool.json`: two fast graded-reward tasks | Four rollout rounds, 16 optimizer updates |
+| `overfit.yaml` | `overfit_partial2_pool.json`: two fast graded-reward tasks | Fully async: eight groups, 16 optimizer updates |
 
-`overfit.yaml` inherits `full.yaml`, with a smaller batch, two PPO epochs,
-evaluation after each round, and ClearML logging enabled.
+`overfit.yaml` inherits `full.yaml`, with fully asynchronous generation/training,
+one five-attempt group per training step, two PPO epochs, and ClearML logging.
 `agent_loop.yaml` registers our environment adapter, not another experiment.
 Both evaluate their training tasks, **not a holdout**. Rewards stay native partial
 scores; the >=0.9 threshold selects tasks, not training rewards.
@@ -38,7 +38,8 @@ Choose a free policy GPU and a fresh run directory:
 ```bash
 RL_DATA="$PWD/artifacts/training/toolathlon_gym/overfit-partial2-data" \
 RL_ARTIFACTS="$PWD/artifacts/training/toolathlon_gym/overfit-01" \
-POLICY_GPU=0 bash training/toolathlon_gym/train.sh overfit
+POLICY_GPU=2 ROLLOUT_GPU=3 bash training/toolathlon_gym/train.sh overfit \
+  ray_kwargs.ray_init.num_cpus=64
 ```
 
 For full training use `full-data`, a new run directory, and `train.sh full`.
@@ -61,7 +62,7 @@ follows Timur; RAG exposes this as an experiment choice. Task batch and optimize
 minibatch are eight (Timur), not RAG's 64/32.
 
 Intentional Gym differences: keep five attempts/task, rather than eight/sixteen;
-keep tested single-GPU synchronous updates with async AgentLoop generation,
+full training retains single-GPU synchronous updates with async AgentLoop generation,
 4096 prompt + 12288 response/observation budget, eager vLLM, SDPA, and disabled
 policy prefix caching. Do not copy RAG's multi-GPU pipeline or adapter-only saves:
 we retain optimizer state. The old run used LoRA 16/32 and LR 1e-5; this is a
@@ -77,21 +78,22 @@ training and every eight updates. Resumable checkpoints (model, optimizer, extra
 state) are saved after **every update, before evaluation**. Automatic eviction is
 disabled so an unevaluated latest checkpoint cannot delete the best evaluated one.
 Best/last are labeled on launcher exit.
-Overfit: 40 training + 50 evaluation = 90 episodes. Each round collects
-two groups of five trajectories, then takes four optimizer updates
-(two minibatches of five trajectories, repeated for two PPO epochs).
-The watcher/global step counts rollout rounds, not these inner optimizer updates.
-Checkpoints are saved after each round. This is deliberately different from
+Overfit: 40 training + 50 evaluation = 90 episodes. Eight groups of five
+trajectories stream to a dedicated trainer while a separate GPU generates.
+Each completed group gets two PPO epochs (16 optimizer updates total).
+The watcher/global step counts weight versions, not inner optimizer updates.
+Weights synchronize and checkpoints are saved after every group update;
+evaluation runs before training and at versions 2, 4, 6, 8. This differs from
 Timur's batch-eight, one-PPO-epoch recipe; LR and LoRA settings are unchanged.
 GRPO still computes advantages from complete five-attempt groups: a lone fresh
-rollout cannot supply that relative baseline. Minibatching does not implement
-streaming arrival-order training.
+rollout cannot supply that relative baseline.
 
-The pinned veRL includes `experimental/fully_async_policy`, but that uses separate
-trainer/rollouter resources, a sample queue, and policy-staleness controls. Our
-current colocated AgentLoop is concurrent generation, not fully asynchronous RL.
-Do not switch entrypoints without validating weight synchronization, grouped
-advantages, importance correction, checkpointing and our environment adapter.
+Overfit uses veRL's `experimental/fully_async_policy` with two active groups,
+staleness threshold 1.0, partial-rollout continuation, and rollout log probabilities
+as PPO's behavior-policy reference. Trajectories can span policy versions; their
+token log probabilities and version range are retained. LoRA is merged only for
+weight transfer to the rollout server; training still updates adapters.
+The previous synchronous two-task recipe is preserved at git revision `5fb2370`.
 Full: 960 training + 3,880 evaluation = 4,840 episodes.
 Full is a larger schedule, not a smoke run; choose epochs and evaluation cadence
 explicitly before launching if that budget is unsuitable.
