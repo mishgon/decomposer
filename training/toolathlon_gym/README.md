@@ -98,6 +98,9 @@ On Hertz-2 the direct NCCL transport stalled even in a two-GPU tensor test;
 the async launcher defaults to job-local `NCCL_P2P_DISABLE=1` and
 `NCCL_IB_DISABLE=1` (shared-memory transport). Override only after checking
 `python -m tests.toolathlon_gym.check_async_weights` on the selected GPUs.
+`setup.sh` applies `patches/verl-sdpa-padding.patch`: the separated trainer's
+batch conversion can use veRL's existing pure-PyTorch padding helpers when
+FlashAttention is absent. This does not change the model's SDPA attention.
 Full: 960 training + 3,880 evaluation = 4,840 episodes.
 Full is a larger schedule, not a smoke run; choose epochs and evaluation cadence
 explicitly before launching if that budget is unsuitable.
