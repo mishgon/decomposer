@@ -32,8 +32,8 @@ class RecipeTests(unittest.TestCase):
                 self.assertEqual(config.actor_rollout_ref.model.lora_alpha, 64)
                 self.assertEqual(config.actor_rollout_ref.actor.optim.lr, 1.5e-5)
                 self.assertFalse(config.algorithm.norm_adv_by_std_in_grpo)
-                self.assertEqual(config.actor_rollout_ref.rollout.n, 5)
-                self.assertEqual(config.actor_rollout_ref.rollout.val_kwargs.n, 5)
+                self.assertEqual(config.actor_rollout_ref.rollout.n, 8)
+                self.assertEqual(config.actor_rollout_ref.rollout.val_kwargs.n, 8)
             self.assertIsNone(full.trainer.total_training_steps)
             self.assertEqual(overfit.trainer.total_training_steps, 8)
             self.assertEqual(full.trainer.total_epochs, 1)
@@ -50,6 +50,7 @@ class RecipeTests(unittest.TestCase):
             self.assertFalse(overfit.actor_rollout_ref.hybrid_engine)
             self.assertTrue(overfit.async_training.partial_rollout)
             self.assertEqual(overfit.rollout.total_rollout_steps, 8)
+            self.assertEqual(overfit.rollout.n, 8)
             self.assertEqual(2 * overfit.actor_rollout_ref.rollout.val_kwargs.n
                              % overfit.actor_rollout_ref.rollout.agent.num_workers, 0)
             self.assertEqual(full.data.train_batch_size, 8)
