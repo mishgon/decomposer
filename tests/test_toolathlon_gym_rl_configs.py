@@ -39,7 +39,7 @@ class RecipeTests(unittest.TestCase):
             self.assertEqual(full.trainer.total_epochs, 1)
             self.assertEqual(overfit.trainer.total_epochs, 4)
             self.assertEqual(full.trainer.test_freq, 8)
-            self.assertEqual(overfit.trainer.test_freq, 2)
+            self.assertEqual(overfit.trainer.test_freq, 8)
             self.assertEqual(overfit.data.train_batch_size, 0)
             self.assertEqual(overfit.actor_rollout_ref.actor.ppo_mini_batch_size, 1)
             self.assertEqual(overfit.actor_rollout_ref.actor.ppo_epochs, 2)
