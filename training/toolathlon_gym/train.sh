@@ -23,6 +23,10 @@ if [[ "$RL_CONFIG" == overfit ]]; then
     : "${ROLLOUT_GPU:?Fully async overfit requires a separate ROLLOUT_GPU}"
     [[ "$ROLLOUT_GPU" != "$CUDA_VISIBLE_DEVICES" ]] || { echo "Trainer and rollout GPUs must differ" >&2; exit 1; }
     export CUDA_VISIBLE_DEVICES="$CUDA_VISIBLE_DEVICES,$ROLLOUT_GPU"
+    # Hertz-2 direct NCCL transport stalls in the isolated transfer test.
+    # Scope the verified shared-memory fallback to this job only.
+    export NCCL_P2P_DISABLE="${NCCL_P2P_DISABLE:-1}"
+    export NCCL_IB_DISABLE="${NCCL_IB_DISABLE:-1}"
     trainer_module=verl.experimental.fully_async_policy.fully_async_main
 fi
 export RL_TRAINER_MODULE="$trainer_module"
