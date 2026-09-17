@@ -51,5 +51,5 @@ trainer:
   experiment_name: overfit
   total_training_steps: 8
   total_epochs: 4
-  test_freq: 2
+  test_freq: 8
   logger: [console, tensorboard, clearml]

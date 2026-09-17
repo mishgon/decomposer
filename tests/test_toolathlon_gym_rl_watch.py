@@ -7,12 +7,12 @@ from training.toolathlon_gym.watch import (duration, estimate_eta, planned_evalu
 class WatchTests(unittest.TestCase):
     def test_fully_async_group_schedule(self):
         config = self.config(steps=8, batch=0, n=8, before=True)
-        config["trainer"].update(total_epochs=4, test_freq=2)
+        config["trainer"].update(total_epochs=4, test_freq=8)
         config["actor_rollout_ref"]["rollout"]["val_kwargs"]["n"] = 8
         config["actor_rollout_ref"]["actor"] = {"ppo_mini_batch_size": 1}
         config["async_training"] = {"require_batches": 1, "trigger_parameter_sync_step": 1}
         config["rollout"] = {"total_rollout_steps": 8}
-        self.assertEqual(run_plan(config, 2, 2), (8, {0, 2, 4, 6, 8}, 16, 144))
+        self.assertEqual(run_plan(config, 2, 2), (8, {0, 8}, 16, 96))
 
     def config(self, steps=1, batch=1, n=2, before=False):
         return {"trainer": {"total_training_steps": steps, "total_epochs": 2,
