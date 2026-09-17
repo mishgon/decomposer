@@ -1,20 +1,53 @@
-# Two-task diagnostic: 10 rollouts/round, four optimizer updates/round.
+# Fully async two-task diagnostic: one completed five-rollout group per update.
 defaults:
   - full
   - _self_
 
 data:
-  train_batch_size: 2
+  train_batch_size: 0
+  gen_batch_size: 1
   val_batch_size: 2
 
 actor_rollout_ref:
+  hybrid_engine: false
+  model:
+    lora:
+      merge: true
   actor:
     ppo_mini_batch_size: 1
     ppo_epochs: 2
+    use_rollout_log_probs: true
+  rollout:
+    multi_turn:
+      enable: true
+    checkpoint_engine:
+      backend: nccl
+
+algorithm:
+  rollout_correction:
+    bypass_mode: true
+
+rollout:
+  nnodes: 1
+  n_gpus_per_node: 1
+  n: 5
+  total_rollout_steps: 8
+
+async_training:
+  require_batches: 1
+  trigger_parameter_sync_step: 1
+  staleness_threshold: 1.0
+  concurrent_samples_per_replica: 2
+  partial_rollout: true
+  use_trainer_do_validate: false
+  use_dynamic_resource_scheduling: false
+  dynamic_schedule_policy: default
+  dynamic_schedule_deactivate_ratio: 0.3
+  dynamic_schedule_enable_rebalance: true
 
 trainer:
   experiment_name: overfit
-  total_training_steps: 4
+  total_training_steps: 8
   total_epochs: 4
-  test_freq: 1
+  test_freq: 2
   logger: [console, tensorboard, clearml]
