@@ -78,12 +78,12 @@ training and every eight updates. Resumable checkpoints (model, optimizer, extra
 state) are saved after **every update, before evaluation**. Automatic eviction is
 disabled so an unevaluated latest checkpoint cannot delete the best evaluated one.
 Best/last are labeled on launcher exit.
-Overfit: 64 training + 80 evaluation = 144 episodes. Eight groups of eight
+Overfit: 64 training + 32 evaluation = 96 episodes. Eight groups of eight
 trajectories stream to a dedicated trainer while a separate GPU generates.
 Each completed group gets two PPO epochs (16 optimizer updates total).
 The watcher/global step counts weight versions, not inner optimizer updates.
 Weights synchronize and checkpoints are saved after every group update;
-evaluation runs before training and at versions 2, 4, 6, 8. This differs from
+evaluation runs before training and every eight weight versions (step 8 in this smoke). This differs from
 Timur's batch-eight, one-PPO-epoch recipe; LR and LoRA settings are unchanged.
 GRPO still computes advantages from complete eight-attempt groups: a lone fresh
 rollout cannot supply that relative baseline.
