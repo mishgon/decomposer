@@ -1,0 +1,7 @@
+{
+  "selection": "Two fast native-partial-reward tasks for pipeline diagnosis, not a representative benchmark. Historical five-attempt means: 6.3 and 6.7 minutes; rewards 0.768 and 0.840. No historical infrastructure or missing-score failures.",
+  "tasks": [
+    {"task_id": "canvas-assignment-deadline-gcal"},
+    {"task_id": "sf-hr-experience-notion"}
+  ]
+}

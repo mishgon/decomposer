@@ -1,0 +1,55 @@
+# CANONICAL GRPO recipe — Qwen3.5-4B async AgentLoop champion.
+# Verified 2026-08-20 (v2.6, reward 0.35 -> 0.87). SINGLE SOURCE OF TRUTH for recipe hyperparameters.
+#
+# Consumed by training/scripts/lib/load_recipe.sh, which exports each KEY as the env var the launchers
+# already read (env→Hydra mapping lives unchanged in run_grpo_agentloop_4b.sh). Semantics: an explicit
+# env var WINS over the recipe (so ablations set e.g. GROUP_SIZE=16 and it takes effect).
+#
+# Make a variant by copying this file and overriding a few keys (see recipes in this dir).
+# After ANY change here, prove no drift:  DRY_RUN=1 ... bash run_specgen_arm.sh  -> diff resolved_launch.txt
+#
+# Parser is line-based KEY: VALUE (no nesting). Only ALLCAPS_UNDERSCORE keys are exported; the two
+# metadata keys below are ignored by the loader.
+name: champion
+model_family: qwen3.5-4b
+
+# --- optimization ---
+LR: 1.5e-5
+LOSS_AGG_MODE: seq-mean-token-mean      # fixes length-bias residual (direction); the winning lever
+NORM_ADV_BY_STD: "False"                # optional stabilizer: GRPO std-normalization OFF
+ADV_ESTIMATOR: grpo                     # advantage estimator (tailrl for the TailRL ablation)
+
+# --- GRPO group / batch ---
+GROUP_SIZE: 8                           # rollout.n (rollouts per prompt)
+TRAIN_BATCH: 8                          # prompts/step; also sets ppo_mini_batch_size
+
+# --- LoRA ---
+LORA_RANK: 32
+LORA_ALPHA: 64
+
+# --- context budget / turn caps ---
+MAX_PROMPT: 6144
+MAX_RESP: 14336                         # async loop accumulates ALL turns into one response_mask
+TAU2_MAX_ASSISTANT_TURNS: 20            # 20-turn cap trims the straggler tail
+TAU2_MAX_STEPS: 44
+
+# --- rollout ---
+GPU_MEM_UTIL: 0.4
+
+# --- deterministic reward (judge-free, binary; v3.0 band0 calibration) ---
+REWARD_BINARY: "true"
+REWARD_NORMALIZE_WEIGHTS: 1
+REWARD_W_NL: 0.0
+REWARD_W_FORMAT: 0.10
+REWARD_W_ACTION: 0.40
+REWARD_W_PARAM: 0.10
+REWARD_W_DB: 0.15
+REWARD_W_ANSWER: 0.25
+REWARD_W_FORMAT_RO: 0.10                # read-only-task variants
+REWARD_W_ACTION_RO: 0.50
+REWARD_W_PARAM_RO: 0.15
+REWARD_W_ANSWER_RO: 0.25
+REWARD_REPEAT_CALL_PENALTY: 0.15
+REWARD_REPEAT_CALL_CAP: 0.30
+REWARD_REPEAT_CONSECUTIVE_ONLY: 1
+REWARD_FORBIDDEN_PENALTY: 1.0

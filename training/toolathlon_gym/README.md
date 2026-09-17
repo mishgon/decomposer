@@ -5,9 +5,10 @@ Two experiment configs, one launcher:
 | Config | Task pool | Schedule |
 |---|---|---|
 | `full.yaml` | `rl_task_pool.json`: 194 tasks | One epoch, 24 updates |
-| `overfit.yaml` | `overfit_partial8_pool.json`: eight selected graded-reward tasks | 16 updates |
+| `overfit.yaml` | `overfit_partial2_pool.json`: two fast graded-reward tasks | Four rollout rounds, 16 optimizer updates |
 
-`overfit.yaml` inherits `full.yaml`; only the name and training duration change.
+`overfit.yaml` inherits `full.yaml`, with a smaller batch, two PPO epochs,
+evaluation after each round, and ClearML logging enabled.
 `agent_loop.yaml` registers our environment adapter, not another experiment.
 Both evaluate their training tasks, **not a holdout**. Rewards stay native partial
 scores; the >=0.9 threshold selects tasks, not training rewards.
@@ -23,19 +24,19 @@ From the repository root on Hertz-2, prepare either dataset (no GPU needed):
   --output artifacts/training/toolathlon_gym/full-data
 
 .venv-rl/bin/python -m training.toolathlon_gym.prepare_pilot \
-  --task-pool training/toolathlon_gym/overfit_partial8_pool.json \
-  --train-tasks 8 --evaluate-training-tasks \
-  --output artifacts/training/toolathlon_gym/overfit-data
+  --task-pool training/toolathlon_gym/overfit_partial2_pool.json \
+  --train-tasks 2 --evaluate-training-tasks \
+  --output artifacts/training/toolathlon_gym/overfit-partial2-data
 ```
 
 Preparation refuses to overwrite datasets and records task IDs, pool hash, and
 Gym revision. The full pool contains tasks with 1–4 successes out of five historical
-SFT attempts. The overfit pool freezes the user's eight selected graded tasks.
+SFT attempts. The old eight-task pool is retained for reproducibility.
 
 Choose a free policy GPU and a fresh run directory:
 
 ```bash
-RL_DATA="$PWD/artifacts/training/toolathlon_gym/overfit-data" \
+RL_DATA="$PWD/artifacts/training/toolathlon_gym/overfit-partial2-data" \
 RL_ARTIFACTS="$PWD/artifacts/training/toolathlon_gym/overfit-01" \
 POLICY_GPU=0 bash training/toolathlon_gym/train.sh overfit
 ```
@@ -48,6 +49,8 @@ Hydra overrides follow the config name. Use tmux for unattended training.
 Seeds:
 - Timur's `tau2-gym/training/configs/grpo/champion.yaml` at
   `08cc4f6ab2ff34abbf50fdc87b62df6313eecb4b`.
+  An unmodified copy is preserved in `references/timur-champion.yaml`;
+  it is an upstream reference, not a runnable Gym config.
 - Agentic-rag's `occ-train/experiments/templates/colocate.sh`, branch
   `ic/feat/train-verl09-agentloop`, at `89d1812bcac1313319f66354fb37efbf7f8326da`.
   Its old `configs/rl.yaml` is not the current recipe.
@@ -73,8 +76,22 @@ Training generates 40 episodes/update. Evaluation uses five attempts/task before
 training and every eight updates. Resumable checkpoints (model, optimizer, extra
 state) are saved after **every update, before evaluation**. Automatic eviction is
 disabled so an unevaluated latest checkpoint cannot delete the best evaluated one.
-This keeps all 16 checkpoints for overfit; best/last are labeled on launcher exit.
-Overfit: 640 training + 120 evaluation = 760 episodes.
+Best/last are labeled on launcher exit.
+Overfit: 40 training + 50 evaluation = 90 episodes. Each round collects
+two groups of five trajectories, then takes four optimizer updates
+(two minibatches of five trajectories, repeated for two PPO epochs).
+The watcher/global step counts rollout rounds, not these inner optimizer updates.
+Checkpoints are saved after each round. This is deliberately different from
+Timur's batch-eight, one-PPO-epoch recipe; LR and LoRA settings are unchanged.
+GRPO still computes advantages from complete five-attempt groups: a lone fresh
+rollout cannot supply that relative baseline. Minibatching does not implement
+streaming arrival-order training.
+
+The pinned veRL includes `experimental/fully_async_policy`, but that uses separate
+trainer/rollouter resources, a sample queue, and policy-staleness controls. Our
+current colocated AgentLoop is concurrent generation, not fully asynchronous RL.
+Do not switch entrypoints without validating weight synchronization, grouped
+advantages, importance correction, checkpointing and our environment adapter.
 Full: 960 training + 3,880 evaluation = 4,840 episodes.
 Full is a larger schedule, not a smoke run; choose epochs and evaluation cadence
 explicitly before launching if that budget is unsuitable.
