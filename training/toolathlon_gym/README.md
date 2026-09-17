@@ -8,7 +8,7 @@ Two experiment configs, one launcher:
 | `overfit.yaml` | `overfit_partial2_pool.json`: two fast graded-reward tasks | Fully async: eight groups, 16 optimizer updates |
 
 `overfit.yaml` inherits `full.yaml`, with fully asynchronous generation/training,
-one five-attempt group per training step, two PPO epochs, and ClearML logging.
+one eight-attempt group per training step, two PPO epochs, and ClearML logging.
 `agent_loop.yaml` registers our environment adapter, not another experiment.
 Both evaluate their training tasks, **not a holdout**. Rewards stay native partial
 scores; the >=0.9 threshold selects tasks, not training rewards.
@@ -61,7 +61,7 @@ Shared reference settings: all-linear LoRA rank 32/alpha 64, LR 1.5e-5,
 follows Timur; RAG exposes this as an experiment choice. Task batch and optimizer
 minibatch are eight (Timur), not RAG's 64/32.
 
-Intentional Gym differences: keep five attempts/task, rather than eight/sixteen;
+Training and evaluation now use eight attempts/task (historical runs used five);
 full training retains single-GPU synchronous updates with async AgentLoop generation,
 4096 prompt + 12288 response/observation budget, eager vLLM, SDPA, and disabled
 policy prefix caching. Do not copy RAG's multi-GPU pipeline or adapter-only saves:
@@ -73,19 +73,19 @@ also applies presence penalty 1.5. Subagents remain hosted Qwen3.5-4B.
 Episode timeout is 2700 seconds and recursion limit is 410. Infrastructure errors
 stay explicit; retain raw evaluations because native check denominators can vary.
 
-Training generates 40 episodes/update. Evaluation uses five attempts/task before
+Full training generates 64 episodes/update. Evaluation uses eight attempts/task before
 training and every eight updates. Resumable checkpoints (model, optimizer, extra
 state) are saved after **every update, before evaluation**. Automatic eviction is
 disabled so an unevaluated latest checkpoint cannot delete the best evaluated one.
 Best/last are labeled on launcher exit.
-Overfit: 40 training + 50 evaluation = 90 episodes. Eight groups of five
+Overfit: 64 training + 80 evaluation = 144 episodes. Eight groups of eight
 trajectories stream to a dedicated trainer while a separate GPU generates.
 Each completed group gets two PPO epochs (16 optimizer updates total).
 The watcher/global step counts weight versions, not inner optimizer updates.
 Weights synchronize and checkpoints are saved after every group update;
 evaluation runs before training and at versions 2, 4, 6, 8. This differs from
 Timur's batch-eight, one-PPO-epoch recipe; LR and LoRA settings are unchanged.
-GRPO still computes advantages from complete five-attempt groups: a lone fresh
+GRPO still computes advantages from complete eight-attempt groups: a lone fresh
 rollout cannot supply that relative baseline.
 
 Overfit uses veRL's `experimental/fully_async_policy` with two active groups,
@@ -101,7 +101,7 @@ the async launcher defaults to job-local `NCCL_P2P_DISABLE=1` and
 `setup.sh` applies `patches/verl-sdpa-padding.patch`: the separated trainer's
 batch conversion can use veRL's existing pure-PyTorch padding helpers when
 FlashAttention is absent. This does not change the model's SDPA attention.
-Full: 960 training + 3,880 evaluation = 4,840 episodes.
+Full: 1,536 training + 6,208 evaluation = 7,744 episodes.
 Full is a larger schedule, not a smoke run; choose epochs and evaluation cadence
 explicitly before launching if that budget is unsuitable.
 veRL drops the last incomplete training batch: 194 tasks yield 24 batches/epoch,
