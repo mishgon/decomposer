@@ -26,6 +26,7 @@ def main():
                 "model_requested_path": os.environ.get("MODEL_CHECKPOINT_LINK"),
                 "data_dir": os.environ.get("RL_DATA"),
                 "config_name": os.environ.get("RL_CONFIG"),
+                "trainer_module": os.environ.get("RL_TRAINER_MODULE"),
                 "checkpoint_path": str((args.directory / "checkpoints").resolve()),
                 "ray_tmpdir": os.environ.get("RAY_TMPDIR"),
                 "episode_timeout_seconds": float(os.environ.get("RL_EPISODE_TIMEOUT", "2700")),
