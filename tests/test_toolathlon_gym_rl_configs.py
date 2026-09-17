@@ -50,6 +50,8 @@ class RecipeTests(unittest.TestCase):
             self.assertFalse(overfit.actor_rollout_ref.hybrid_engine)
             self.assertTrue(overfit.async_training.partial_rollout)
             self.assertEqual(overfit.rollout.total_rollout_steps, 8)
+            self.assertEqual(2 * overfit.actor_rollout_ref.rollout.val_kwargs.n
+                             % overfit.actor_rollout_ref.rollout.agent.num_workers, 0)
             self.assertEqual(full.data.train_batch_size, 8)
             self.assertEqual(full.actor_rollout_ref.actor.ppo_epochs, 1)
 
