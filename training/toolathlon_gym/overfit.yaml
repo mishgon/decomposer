@@ -1,9 +1,20 @@
-# Same recipe; one eight-task batch repeated for 16 updates.
+# Two-task diagnostic: 10 rollouts/round, four optimizer updates/round.
 defaults:
   - full
   - _self_
 
+data:
+  train_batch_size: 2
+  val_batch_size: 2
+
+actor_rollout_ref:
+  actor:
+    ppo_mini_batch_size: 1
+    ppo_epochs: 2
+
 trainer:
   experiment_name: overfit
-  total_training_steps: 16
-  total_epochs: 16
+  total_training_steps: 4
+  total_epochs: 4
+  test_freq: 1
+  logger: [console, tensorboard, clearml]
