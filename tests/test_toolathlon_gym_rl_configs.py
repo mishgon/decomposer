@@ -25,7 +25,6 @@ class RecipeTests(unittest.TestCase):
             overfit = compose(config_name="overfit", overrides=overrides)
             for config in (full, overfit):
                 self.assertEqual(config.trainer.save_freq, 1)
-                self.assertEqual(config.trainer.test_freq, 8)
                 self.assertEqual(config.trainer.max_actor_ckpt_to_keep, -1)
                 self.assertEqual(list(config.actor_rollout_ref.actor.checkpoint.save_contents),
                                  ["model", "optimizer", "extra"])
@@ -36,19 +35,23 @@ class RecipeTests(unittest.TestCase):
                 self.assertEqual(config.actor_rollout_ref.rollout.n, 5)
                 self.assertEqual(config.actor_rollout_ref.rollout.val_kwargs.n, 5)
             self.assertIsNone(full.trainer.total_training_steps)
-            self.assertEqual(overfit.trainer.total_training_steps, 16)
+            self.assertEqual(overfit.trainer.total_training_steps, 4)
             self.assertEqual(full.trainer.total_epochs, 1)
-            self.assertEqual(overfit.trainer.total_epochs, 16)
-            overfit.trainer.total_training_steps = full.trainer.total_training_steps
-            overfit.trainer.total_epochs = full.trainer.total_epochs
-            overfit.trainer.experiment_name = full.trainer.experiment_name
-            self.assertEqual(OmegaConf.to_container(full), OmegaConf.to_container(overfit))
+            self.assertEqual(overfit.trainer.total_epochs, 4)
+            self.assertEqual(full.trainer.test_freq, 8)
+            self.assertEqual(overfit.trainer.test_freq, 1)
+            self.assertEqual(overfit.data.train_batch_size, 2)
+            self.assertEqual(overfit.actor_rollout_ref.actor.ppo_mini_batch_size, 1)
+            self.assertEqual(overfit.actor_rollout_ref.actor.ppo_epochs, 2)
+            self.assertIn("clearml", overfit.trainer.logger)
+            self.assertEqual(full.data.train_batch_size, 8)
+            self.assertEqual(full.actor_rollout_ref.actor.ppo_epochs, 1)
 
     def test_task_pools(self):
         full = json.loads((CONFIGS / "rl_task_pool.json").read_text())["tasks"]
-        overfit = json.loads((CONFIGS / "overfit_partial8_pool.json").read_text())["tasks"]
+        overfit = json.loads((CONFIGS / "overfit_partial2_pool.json").read_text())["tasks"]
         self.assertEqual(len(full), 194)
-        self.assertEqual(len(overfit), 8)
+        self.assertEqual(len(overfit), 2)
         self.assertTrue({t["task_id"] for t in overfit} <= {t["task_id"] for t in full})
 
 
