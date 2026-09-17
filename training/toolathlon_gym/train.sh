@@ -18,9 +18,20 @@ MODEL_PATH="$(readlink -f "$MODEL_CHECKPOINT_LINK")"
 test -f "$MODEL_PATH/config.json" || { echo "Missing model config: $MODEL_PATH" >&2; exit 1; }
 export RL_DATA RL_ARTIFACTS
 export CUDA_VISIBLE_DEVICES="${POLICY_GPU:-0}"
+trainer_module=verl.trainer.main_ppo
+if [[ "$RL_CONFIG" == overfit ]]; then
+    : "${ROLLOUT_GPU:?Fully async overfit requires a separate ROLLOUT_GPU}"
+    [[ "$ROLLOUT_GPU" != "$CUDA_VISIBLE_DEVICES" ]] || { echo "Trainer and rollout GPUs must differ" >&2; exit 1; }
+    export CUDA_VISIBLE_DEVICES="$CUDA_VISIBLE_DEVICES,$ROLLOUT_GPU"
+    trainer_module=verl.experimental.fully_async_policy.fully_async_main
+fi
+export RL_TRAINER_MODULE="$trainer_module"
 RL_GYM_IMAGE=$(podman image inspect --format '{{.Id}}' "${RL_GYM_IMAGE:-decomposer-toolathlon-rl:latest}")
 export RL_GYM_IMAGE
 export PYTHONPATH="$PWD:$PWD/src:$PWD/external/verl${PYTHONPATH:+:$PYTHONPATH}"
+if [[ "$RL_CONFIG" == overfit ]]; then
+    .venv-rl/bin/python -c 'import verl.checkpoint_engine.nccl_checkpoint_engine'
+fi
 export TOKENIZERS_PARALLELISM=false
 export PATH="$PWD/.venv-rl/bin:/usr/local/cuda/bin:$PATH"
 export TENSORBOARD_DIR="$RL_ARTIFACTS/tensorboard"
@@ -48,7 +59,7 @@ finish() {
     .venv-rl/bin/python -m training.toolathlon_gym.select_checkpoints --run "$RL_ARTIFACTS" || true
 }
 trap finish EXIT
-.venv-rl/bin/python -m verl.trainer.main_ppo \
+.venv-rl/bin/python -m "$trainer_module" \
     --config-path "$PWD/training/toolathlon_gym" --config-name "$RL_CONFIG" \
     'hydra.searchpath=[pkg://verl.trainer.config]' \
     "trainer.experiment_name=$(basename "$RL_ARTIFACTS")" "$@"
