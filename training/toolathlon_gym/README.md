@@ -94,6 +94,10 @@ as PPO's behavior-policy reference. Trajectories can span policy versions; their
 token log probabilities and version range are retained. LoRA is merged only for
 weight transfer to the rollout server; training still updates adapters.
 The previous synchronous two-task recipe is preserved at git revision `5fb2370`.
+On Hertz-2 the direct NCCL transport stalled even in a two-GPU tensor test;
+the async launcher defaults to job-local `NCCL_P2P_DISABLE=1` and
+`NCCL_IB_DISABLE=1` (shared-memory transport). Override only after checking
+`python -m tests.toolathlon_gym.check_async_weights` on the selected GPUs.
 Full: 960 training + 3,880 evaluation = 4,840 episodes.
 Full is a larger schedule, not a smoke run; choose epochs and evaluation cadence
 explicitly before launching if that budget is unsuitable.
