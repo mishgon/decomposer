@@ -34,7 +34,7 @@ RL_GYM_IMAGE=$(podman image inspect --format '{{.Id}}' "${RL_GYM_IMAGE:-decompos
 export RL_GYM_IMAGE
 export PYTHONPATH="$PWD:$PWD/src:$PWD/external/verl${PYTHONPATH:+:$PYTHONPATH}"
 if [[ "$RL_CONFIG" == overfit ]]; then
-    .venv-rl/bin/python -c 'import verl.checkpoint_engine.nccl_checkpoint_engine'
+    .venv-rl/bin/python -c 'import torch; import verl.checkpoint_engine.nccl_checkpoint_engine; from verl.utils.attention_utils import unpad_input; unpad_input(torch.ones(1, 2, 1), torch.ones(1, 2, dtype=torch.long))'
 fi
 export TOKENIZERS_PARALLELISM=false
 export PATH="$PWD/.venv-rl/bin:/usr/local/cuda/bin:$PATH"
