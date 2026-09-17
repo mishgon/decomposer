@@ -8,6 +8,11 @@ if [ ! -d external/verl ]; then
     git -C external/verl checkout "$verl_revision"
 fi
 test "$(git -C external/verl rev-parse HEAD)" = "$verl_revision"
+padding_patch="$PWD/training/toolathlon_gym/patches/verl-sdpa-padding.patch"
+if ! git -C external/verl apply --recount --reverse --check "$padding_patch" 2>/dev/null; then
+    git -C external/verl apply --recount --check "$padding_patch"
+    git -C external/verl apply --recount "$padding_patch"
+fi
 if [ ! -d .venv-rl ]; then
     "$uv_bin" venv --python 3.12 .venv-rl
 fi
