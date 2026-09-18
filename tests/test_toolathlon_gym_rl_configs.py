@@ -22,8 +22,9 @@ class RecipeTests(unittest.TestCase):
                 config_dir=str(CONFIGS), version_base=None):
             overrides = ["hydra.searchpath=[pkg://verl.trainer.config]"]
             full = compose(config_name="full", overrides=overrides)
-            overfit = compose(config_name="overfit", overrides=overrides)
-            for config in (full, overfit):
+            smoke = compose(config_name="smoke", overrides=overrides)
+            cold = compose(config_name="cold-start", overrides=overrides)
+            for config in (full, smoke, cold):
                 self.assertEqual(config.trainer.save_freq, 1)
                 self.assertEqual(config.trainer.max_actor_ckpt_to_keep, -1)
                 self.assertEqual(list(config.actor_rollout_ref.actor.checkpoint.save_contents),
@@ -32,36 +33,43 @@ class RecipeTests(unittest.TestCase):
                 self.assertEqual(config.actor_rollout_ref.model.lora_alpha, 64)
                 self.assertEqual(config.actor_rollout_ref.actor.optim.lr, 1.5e-5)
                 self.assertFalse(config.algorithm.norm_adv_by_std_in_grpo)
-                self.assertEqual(config.actor_rollout_ref.rollout.n, 8)
+                self.assertEqual(config.actor_rollout_ref.rollout.n, 10)
                 self.assertEqual(config.actor_rollout_ref.rollout.val_kwargs.n, 8)
-            self.assertIsNone(full.trainer.total_training_steps)
-            self.assertEqual(overfit.trainer.total_training_steps, 8)
-            self.assertEqual(full.trainer.total_epochs, 1)
-            self.assertEqual(overfit.trainer.total_epochs, 4)
-            self.assertEqual(full.trainer.test_freq, 8)
-            self.assertEqual(overfit.trainer.test_freq, 8)
-            self.assertEqual(overfit.data.train_batch_size, 0)
-            self.assertEqual(overfit.actor_rollout_ref.actor.ppo_mini_batch_size, 1)
-            self.assertEqual(overfit.actor_rollout_ref.actor.ppo_epochs, 2)
-            self.assertIn("clearml", overfit.trainer.logger)
-            self.assertTrue(overfit.actor_rollout_ref.rollout.multi_turn.enable)
-            self.assertTrue(overfit.actor_rollout_ref.model.lora.merge)
-            self.assertTrue(overfit.algorithm.rollout_correction.bypass_mode)
-            self.assertFalse(overfit.actor_rollout_ref.hybrid_engine)
-            self.assertTrue(overfit.async_training.partial_rollout)
-            self.assertEqual(overfit.rollout.total_rollout_steps, 8)
-            self.assertEqual(overfit.rollout.n, 8)
-            self.assertEqual(2 * overfit.actor_rollout_ref.rollout.val_kwargs.n
-                             % overfit.actor_rollout_ref.rollout.agent.num_workers, 0)
-            self.assertEqual(full.data.train_batch_size, 8)
-            self.assertEqual(full.actor_rollout_ref.actor.ppo_epochs, 1)
+                self.assertIsNone(config.trainer.total_training_steps)
+                self.assertIsNone(config.rollout.total_rollout_steps)
+                self.assertEqual(config.trainer.total_epochs, 1)
+                self.assertEqual(config.trainer.test_freq, 8)
+                self.assertEqual(config.data.train_batch_size, 0)
+                self.assertEqual(config.actor_rollout_ref.actor.ppo_mini_batch_size, 1)
+                self.assertEqual(config.actor_rollout_ref.actor.ppo_epochs, 2)
+                self.assertTrue(config.actor_rollout_ref.rollout.multi_turn.enable)
+                self.assertTrue(config.actor_rollout_ref.model.lora.merge)
+                self.assertTrue(config.algorithm.rollout_correction.bypass_mode)
+                self.assertFalse(config.actor_rollout_ref.hybrid_engine)
+                self.assertTrue(config.async_training.partial_rollout)
+                self.assertEqual(config.rollout.n * config.async_training.concurrent_samples_per_replica, 20)
+            recipes = []
+            for config in (full, smoke, cold):
+                config.trainer.experiment_name = "comparison"
+                recipe = OmegaConf.to_container(config, resolve=True)
+                recipes.append(recipe)
+            self.assertEqual(recipes[0], recipes[1])
+            self.assertEqual(recipes[0], recipes[2])
 
     def test_task_pools(self):
-        full = json.loads((CONFIGS / "rl_task_pool.json").read_text())["tasks"]
-        overfit = json.loads((CONFIGS / "overfit_partial2_pool.json").read_text())["tasks"]
-        self.assertEqual(len(full), 194)
-        self.assertEqual(len(overfit), 2)
-        self.assertTrue({t["task_id"] for t in overfit} <= {t["task_id"] for t in full})
+        pools = {name: json.loads((CONFIGS / "task_pools" / f"{name}.json").read_text())["tasks"]
+                 for name in ("full", "cold-start", "smoke")}
+        self.assertEqual([len(pools[n]) for n in pools], [346, 191, 2])
+        full_ids = {r["task_id"] for r in pools["full"]}
+        for name, rows in pools.items():
+            self.assertTrue({r["task_id"] for r in rows} <= full_ids)
+            for row in rows:
+                self.assertTrue(any(0 < s < 1 for s in row["scores"]))
+                self.assertFalse(all(s >= .9 for s in row["scores"]))
+                if name == "cold-start":
+                    self.assertLessEqual(row["mean_minutes"], 30)
+                    self.assertGreater(row["score_range"], .1)
+        self.assertTrue(any(max(r["scores"]) < .9 for r in pools["full"]))
 
 
 if __name__ == "__main__":
