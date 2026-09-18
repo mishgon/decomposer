@@ -17,6 +17,9 @@ export MODEL_PATH
 MODEL_PATH="$(readlink -f "$MODEL_CHECKPOINT_LINK")"
 test -f "$MODEL_PATH/config.json" || { echo "Missing model config: $MODEL_PATH" >&2; exit 1; }
 export RL_DATA RL_ARTIFACTS
+# Dependency source scanning can emit thousands of invalid-escape warnings.
+# Keep other SyntaxWarnings and all runtime warnings/errors visible.
+export PYTHONWARNINGS="${PYTHONWARNINGS:+$PYTHONWARNINGS,}ignore:invalid escape sequence:SyntaxWarning"
 export CUDA_VISIBLE_DEVICES="${POLICY_GPU:-0}"
 trainer_module=verl.trainer.main_ppo
 if [[ "$RL_CONFIG" == overfit ]]; then
