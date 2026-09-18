@@ -2,13 +2,14 @@
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 case "${1:-}" in
-    full|overfit) export RL_CONFIG="$1"; shift ;;
-    *) echo "Usage: $0 {full|overfit} [Hydra overrides...]" >&2; exit 2 ;;
+    full|cold-start|smoke) export RL_CONFIG="$1"; shift ;;
+    *) echo "Usage: $0 {full|cold-start|smoke} [Hydra overrides...]" >&2; exit 2 ;;
 esac
 : "${RL_DATA:?Set RL_DATA to the prepared dataset (see README)}"
 : "${RL_ARTIFACTS:?Set RL_ARTIFACTS to the run directory}"
 test -f "$RL_DATA/train.parquet"
 test -f "$RL_DATA/evaluation.parquet"
+.venv-rl/bin/python -m training.toolathlon_gym.task_profiles --check-data "$RL_DATA" --profile "$RL_CONFIG"
 export RL_EPISODE_TIMEOUT="${RL_EPISODE_TIMEOUT:-2700}"
 source training/toolathlon_gym/router.sh
 export RL_ROOT="$PWD"
@@ -21,24 +22,18 @@ export RL_DATA RL_ARTIFACTS
 # Keep other SyntaxWarnings and all runtime warnings/errors visible.
 export PYTHONWARNINGS="${PYTHONWARNINGS:+$PYTHONWARNINGS,}ignore:invalid escape sequence:SyntaxWarning"
 export CUDA_VISIBLE_DEVICES="${POLICY_GPU:-0}"
-trainer_module=verl.trainer.main_ppo
-if [[ "$RL_CONFIG" == overfit ]]; then
-    : "${ROLLOUT_GPU:?Fully async overfit requires a separate ROLLOUT_GPU}"
-    [[ "$ROLLOUT_GPU" != "$CUDA_VISIBLE_DEVICES" ]] || { echo "Trainer and rollout GPUs must differ" >&2; exit 1; }
-    export CUDA_VISIBLE_DEVICES="$CUDA_VISIBLE_DEVICES,$ROLLOUT_GPU"
-    # Hertz-2 direct NCCL transport stalls in the isolated transfer test.
-    # Scope the verified shared-memory fallback to this job only.
-    export NCCL_P2P_DISABLE="${NCCL_P2P_DISABLE:-1}"
-    export NCCL_IB_DISABLE="${NCCL_IB_DISABLE:-1}"
-    trainer_module=verl.experimental.fully_async_policy.fully_async_main
-fi
+trainer_module=verl.experimental.fully_async_policy.fully_async_main
+: "${ROLLOUT_GPU:?Fully async training requires a separate ROLLOUT_GPU}"
+[[ "$ROLLOUT_GPU" != "$CUDA_VISIBLE_DEVICES" ]] || { echo "Trainer and rollout GPUs must differ" >&2; exit 1; }
+export CUDA_VISIBLE_DEVICES="$CUDA_VISIBLE_DEVICES,$ROLLOUT_GPU"
+# Job-local shared-memory fallback verified on Hertz-2.
+export NCCL_P2P_DISABLE="${NCCL_P2P_DISABLE:-1}"
+export NCCL_IB_DISABLE="${NCCL_IB_DISABLE:-1}"
 export RL_TRAINER_MODULE="$trainer_module"
 RL_GYM_IMAGE=$(podman image inspect --format '{{.Id}}' "${RL_GYM_IMAGE:-decomposer-toolathlon-rl:latest}")
 export RL_GYM_IMAGE
 export PYTHONPATH="$PWD:$PWD/src:$PWD/external/verl${PYTHONPATH:+:$PYTHONPATH}"
-if [[ "$RL_CONFIG" == overfit ]]; then
-    .venv-rl/bin/python -c 'import torch; import verl.checkpoint_engine.nccl_checkpoint_engine; from verl.utils.attention_utils import unpad_input; unpad_input(torch.ones(1, 2, 1), torch.ones(1, 2, dtype=torch.long))'
-fi
+.venv-rl/bin/python -c 'import torch; import verl.checkpoint_engine.nccl_checkpoint_engine; from verl.utils.attention_utils import unpad_input; unpad_input(torch.ones(1, 2, 1), torch.ones(1, 2, dtype=torch.long))'
 export TOKENIZERS_PARALLELISM=false
 export PATH="$PWD/.venv-rl/bin:/usr/local/cuda/bin:$PATH"
 export TENSORBOARD_DIR="$RL_ARTIFACTS/tensorboard"
