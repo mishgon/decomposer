@@ -60,7 +60,9 @@ def run_plan(config, train_rows, validation_rows):
     rollout = config["actor_rollout_ref"]["rollout"]
     if "async_training" in config:
         async_config = config["async_training"]
-        groups = min(config["rollout"]["total_rollout_steps"], train_rows * trainer["total_epochs"])
+        groups = train_rows * trainer["total_epochs"]
+        if config["rollout"]["total_rollout_steps"] is not None:
+            groups = min(config["rollout"]["total_rollout_steps"], groups)
         groups_per_sync = (config["actor_rollout_ref"]["actor"]["ppo_mini_batch_size"]
                            * async_config["require_batches"] * async_config["trigger_parameter_sync_step"])
         total = groups // groups_per_sync

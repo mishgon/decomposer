@@ -23,7 +23,10 @@ def main():
                         help="Evaluate every training task; no held-out validation set")
     parser.add_argument("--exclude-task", action="append", default=[])
     parser.add_argument("--task-pool", type=Path, help="JSON task pool; replaces the local-server-only filter")
+    parser.add_argument("--groups-per-task", type=int, default=1)
     args = parser.parse_args()
+    if args.groups_per_task < 1:
+        parser.error("groups-per-task must be positive")
     root = Path("external/toolathlon_gym")
     tasks = root / "tasks/finalpool"
     local_servers = {"canvas", "notion", "google_sheet", "excel", "filesystem", "word",
@@ -73,6 +76,7 @@ def main():
         manifest["task_pool_sha256"] = hashlib.sha256(args.task_pool.read_bytes()).hexdigest()
     manifest["excluded_tasks"] = args.exclude_task
     manifest["eligible_tasks"] = len(eligible)
+    manifest["groups_per_task"] = args.groups_per_task
     args.output.mkdir(parents=True, exist_ok=False)
     (args.output / "split.json").write_text(json.dumps(manifest, indent=2))
     frames = {}
@@ -82,7 +86,11 @@ def main():
                        "reward_model": {"style": "rule", "ground_truth": ""},
                        "extra_info": {"task_id": name, "split": split}, "index": i}
                       for i, name in enumerate(names)])
-        frames[split].to_parquet(args.output / f"{split}.parquet")
+        output_frame = frames[split]
+        if split == "train":
+            output_frame = pd.concat([output_frame] * args.groups_per_task, ignore_index=True)
+            output_frame["index"] = range(len(output_frame))
+        output_frame.to_parquet(args.output / f"{split}.parquet")
     # A fixed training probe separates actual improvement from batch difficulty.
     # Held-out rows never enter the optimizer's train.parquet.
     probe = (frames["train"] if args.evaluate_training_tasks else frames["train"].head(4)).copy()

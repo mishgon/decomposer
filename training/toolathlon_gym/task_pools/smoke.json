@@ -1,0 +1,31 @@
+{
+  "profile": "smoke",
+  "source_manifest_sha256": "c54759ec11b59ad17344f4318d6cb8381dbb7afb52d3f82126b3e04c4c258134",
+  "selection": "Observed 0<score<1; exclude five scores >=0.9; missing/infra=0. Cold-start additionally mean_minutes<=30 and range>0.1; smoke fixed two tasks.",
+  "tasks": [
+    {
+      "task_id": "canvas-assignment-deadline-gcal",
+      "scores": [
+        0.9444444444444444,
+        0.32,
+        0.8679245283018868,
+        0.8490566037735849,
+        0.86
+      ],
+      "mean_minutes": 6.323167978127797,
+      "score_range": 0.6244444444444444
+    },
+    {
+      "task_id": "sf-hr-experience-notion",
+      "scores": [
+        0.975,
+        0.975,
+        0.975,
+        0.3,
+        0.975
+      ],
+      "mean_minutes": 6.721403251489003,
+      "score_range": 0.675
+    }
+  ]
+}
