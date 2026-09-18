@@ -1,48 +1,46 @@
 # Toolathlon Gym RL
 
-Two experiment configs, one launcher:
+Three experiment configs, one fully async recipe and launcher:
 
 | Config | Task pool | Schedule |
 |---|---|---|
-| `full.yaml` | `rl_task_pool.json`: 194 tasks | One epoch, 24 updates |
-| `overfit.yaml` | `overfit_partial2_pool.json`: two fast graded-reward tasks | Fully async: eight groups, 16 optimizer updates |
+| `full.yaml` | 346 observed partial-score tasks, excluding five >=90% scores | 100 attempts/task/epoch |
+| `cold-start.yaml` | 191 full-pool tasks: mean time <=30 min, range >0.1 | Same recipe |
+| `smoke.yaml` | Our existing two tasks | Same recipe |
 
-`overfit.yaml` inherits `full.yaml`, with fully asynchronous generation/training,
-one eight-attempt group per training step, two PPO epochs, and ClearML logging.
+`cold-start.yaml` and `smoke.yaml` inherit every training setting from `full.yaml`.
+Only task selection and the experiment label differ. Frozen pools live in `task_pools/`.
+The full pool includes 189 tasks with zero >=90% successes in five attempts.
+Observed partial means at least one native score strictly between zero and one;
+we cannot identify unobserved evaluator granularity from five all-zero attempts.
 `agent_loop.yaml` registers our environment adapter, not another experiment.
-Both evaluate their training tasks, **not a holdout**. Rewards stay native partial
+All evaluate their training tasks, **not a holdout**. Rewards stay native partial
 scores; the >=0.9 threshold selects tasks, not training rewards.
 
 ## Prepare and run
 
-From the repository root on Hertz-2, prepare either dataset (no GPU needed):
+From the repository root on Hertz-2, prepare a dataset (no GPU needed):
 
 ```bash
-.venv-rl/bin/python -m training.toolathlon_gym.prepare_pilot \
-  --task-pool training/toolathlon_gym/rl_task_pool.json \
-  --train-tasks 194 --evaluate-training-tasks \
-  --output artifacts/training/toolathlon_gym/full-data
-
-.venv-rl/bin/python -m training.toolathlon_gym.prepare_pilot \
-  --task-pool training/toolathlon_gym/overfit_partial2_pool.json \
-  --train-tasks 2 --evaluate-training-tasks \
-  --output artifacts/training/toolathlon_gym/overfit-partial2-data
+.venv-rl/bin/python -m training.toolathlon_gym.task_profiles \
+  --profile smoke --prepare artifacts/training/toolathlon_gym/smoke-data-v2
 ```
 
 Preparation refuses to overwrite datasets and records task IDs, pool hash, and
-Gym revision. The full pool contains tasks with 1–4 successes out of five historical
-SFT attempts. The old eight-task pool is retained for reproducibility.
+Gym revision. Ten training rows per task produce ten groups of ten attempts per
+epoch. Evaluation contains one row per task. Launcher validates pool hash and
+actual parquet task multiplicities. Old pools remain historical provenance only.
 
 Choose a free policy GPU and a fresh run directory:
 
 ```bash
-RL_DATA="$PWD/artifacts/training/toolathlon_gym/overfit-partial2-data" \
-RL_ARTIFACTS="$PWD/artifacts/training/toolathlon_gym/overfit-01" \
-POLICY_GPU=2 ROLLOUT_GPU=3 bash training/toolathlon_gym/train.sh overfit \
+RL_DATA="$PWD/artifacts/training/toolathlon_gym/smoke-data-v2" \
+RL_ARTIFACTS="$PWD/artifacts/training/toolathlon_gym/smoke-01" \
+POLICY_GPU=2 ROLLOUT_GPU=3 bash training/toolathlon_gym/train.sh smoke \
   ray_kwargs.ray_init.num_cpus=64
 ```
 
-For full training use `full-data`, a new run directory, and `train.sh full`.
+For other profiles replace `smoke` in both preparation and launcher commands.
 Hydra overrides follow the config name. Use tmux for unattended training.
 
 ## Shared recipe and provenance
@@ -58,11 +56,11 @@ Seeds:
 
 Shared reference settings: all-linear LoRA rank 32/alpha 64, LR 1.5e-5,
 `seq-mean-token-mean` loss averaging. GRPO without standard-deviation normalization
-follows Timur; RAG exposes this as an experiment choice. Task batch and optimizer
-minibatch are eight (Timur), not RAG's 64/32.
+follows Timur; RAG exposes this as an experiment choice. Our async learner takes
+one completed ten-attempt group at a time, with two PPO epochs per group.
 
-Training and evaluation now use eight attempts/task (historical runs used five);
-full training retains single-GPU synchronous updates with async AgentLoop generation,
+All profiles use one dataset epoch by default, 100 training attempts/task/epoch,
+eight evaluation attempts/task, and separate trainer/rollout GPUs. Shared settings:
 4096 prompt + 12288 response/observation budget, eager vLLM, SDPA, and disabled
 policy prefix caching. Do not copy RAG's multi-GPU pipeline or adapter-only saves:
 we retain optimizer state. The old run used LoRA 16/32 and LR 1e-5; this is a
@@ -73,22 +71,23 @@ also applies presence penalty 1.5. Subagents remain hosted Qwen3.5-4B.
 Episode timeout is 2700 seconds and recursion limit is 410. Infrastructure errors
 stay explicit; retain raw evaluations because native check denominators can vary.
 
-Full training generates 64 episodes/update. Evaluation uses eight attempts/task before
+Each group contains ten episodes. Evaluation uses eight attempts/task before
 training and every eight updates. Resumable checkpoints (model, optimizer, extra
 state) are saved after **every update, before evaluation**. Automatic eviction is
 disabled so an unevaluated latest checkpoint cannot delete the best evaluated one.
 Best/last are labeled on launcher exit.
-Overfit: 64 training + 32 evaluation = 96 episodes. Eight groups of eight
-trajectories stream to a dedicated trainer while a separate GPU generates.
-Each completed group gets two PPO epochs (16 optimizer updates total).
+Smoke: 200 training + 48 evaluation = 248 episodes (baseline and steps 8, 16).
+Twenty groups stream to a dedicated trainer while a separate GPU generates.
+Each completed group gets two PPO epochs (40 inner optimizer updates total).
 The watcher/global step counts weight versions, not inner optimizer updates.
 Weights synchronize and checkpoints are saved after every group update;
-evaluation runs before training and every eight weight versions (step 8 in this smoke). This differs from
+evaluation runs before training and every eight weight versions. This differs from
 Timur's batch-eight, one-PPO-epoch recipe; LR and LoRA settings are unchanged.
-GRPO still computes advantages from complete eight-attempt groups: a lone fresh
+GRPO still computes advantages from complete ten-attempt groups: a lone fresh
 rollout cannot supply that relative baseline.
 
-Overfit uses veRL's `experimental/fully_async_policy` with two active groups,
+All profiles use veRL's `experimental/fully_async_policy` with two active groups
+(20 active training episodes, not a cap on nested subagent requests),
 staleness threshold 1.0, partial-rollout continuation, and rollout log probabilities
 as PPO's behavior-policy reference. Trajectories can span policy versions; their
 token log probabilities and version range are retained. LoRA is merged only for
@@ -101,11 +100,14 @@ the async launcher defaults to job-local `NCCL_P2P_DISABLE=1` and
 `setup.sh` applies `patches/verl-sdpa-padding.patch`: the separated trainer's
 batch conversion can use veRL's existing pure-PyTorch padding helpers when
 FlashAttention is absent. This does not change the model's SDPA attention.
-Full: 1,536 training + 6,208 evaluation = 7,744 episodes.
+Full: 34,600 training episodes per epoch. Cold-start: 19,100.
+WARNING: evaluating the entire pool every eight groups is very expensive at scale:
+full schedules 1,198,544 evaluation episodes; cold-start schedules 365,192.
+The settings are intentionally identical, not automatically made cheaper for full.
+Choose a shared fixed evaluation panel/cadence before launching these large profiles.
 Full is a larger schedule, not a smoke run; choose epochs and evaluation cadence
 explicitly before launching if that budget is unsuitable.
-veRL drops the last incomplete training batch: 194 tasks yield 24 batches/epoch,
-with two shuffled tasks omitted that epoch. All 194 are evaluated each time.
+The generation batch size is one task group, so no task rows are dropped.
 
 ## Infrastructure and outputs
 
