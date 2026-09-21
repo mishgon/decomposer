@@ -6,10 +6,25 @@ import tempfile
 import time
 import unittest
 
-from scripts.watch_wideseek import display
+from scripts.watch_wideseek import display, subagent_counts
 
 
 class WatchTest(unittest.TestCase):
+    def test_peak_counts_only_successful_spawns_and_collected_reports(self):
+        messages = []
+        def call(name, result):
+            cid = str(len(messages))
+            messages.extend([{'type': 'ai', 'tool_calls': [{'id': cid, 'name': name}]},
+                             {'type': 'tool', 'tool_call_id': cid, 'content': json.dumps(result)}])
+        call('spawn_subagent', {'subagent_run_id': 'a'})
+        call('spawn_subagent', {'subagent_run_id': 'b'})
+        call('wait', 'Timed out')  # No collected reports: neither worker is removed.
+        call('spawn_subagent', {'subagent_run_id': 'c'})
+        call('wait', [{'subagent_run_id': 'a'}, {'subagent_run_id': 'b'}])
+        call('spawn_subagent', {'subagent_run_id': 'd'})
+        call('spawn_subagent', {'error': 'failed'})
+        self.assertEqual(subagent_counts(messages), (4, 3))
+
     def test_single_and_legacy_runs(self):
         for modes in (["simple"], ["simple", "decomposer"]):
             with self.subTest(modes=modes), tempfile.TemporaryDirectory() as folder:

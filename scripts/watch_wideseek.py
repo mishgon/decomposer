@@ -3,6 +3,7 @@ import argparse
 from collections import Counter
 from datetime import datetime, timezone
 import fcntl
+from functools import lru_cache
 import json
 from pathlib import Path
 import time
@@ -11,6 +12,37 @@ import time
 def duration(seconds):
     minutes = max(0, int(seconds)) // 60
     return f"{minutes // 60}h {minutes % 60:02d}m"
+
+
+def subagent_counts(messages):
+    """Workers stay active until wait returns their report, even if already done."""
+    calls, spawned, active = {}, set(), set()
+    peak = 0
+    for message in messages:
+        if message.get('type') == 'ai':
+            calls.update({c['id']: c['name'] for c in message.get('tool_calls', [])})
+        if message.get('type') != 'tool':
+            continue
+        name = calls.get(message.get('tool_call_id'))
+        try:
+            result = json.loads(message.get('content', ''))
+        except (ValueError, TypeError):
+            continue
+        if name == 'spawn_subagent' and isinstance(result, dict) and result.get('subagent_run_id'):
+            worker = result['subagent_run_id']
+            spawned.add(worker)
+            active.add(worker)
+            peak = max(peak, len(active))
+        elif name == 'wait' and isinstance(result, list):
+            for report in result:
+                if isinstance(report, dict):
+                    active.discard(report.get('subagent_run_id'))
+    return len(spawned), peak
+
+
+@lru_cache(maxsize=4096)
+def trace_counts(path):
+    return subagent_counts(json.loads(path.read_text())['messages'])
 
 
 def display(root, run=None):
@@ -25,9 +57,19 @@ def display(root, run=None):
     settings = manifest["settings"]
     total = len(settings["tasks"]) * settings["repetitions"] * len(settings["modes"])
     rows = []
+    counts = {}
     for result in directory.glob("*/*/attempt-*/result.json"):
         try:
-            rows.append(json.loads(result.read_text()))
+            row = json.loads(result.read_text())
+            rows.append(row)
+            if row['mode'] == 'simple':
+                counts[id(row)] = (0, 0)
+            else:
+                trace = result.parent / row.get('execution_directory', '') / 'trace.json'
+                try:
+                    counts[id(row)] = trace_counts(trace)
+                except (OSError, ValueError, KeyError):
+                    pass
         except (OSError, ValueError):
             pass  # A result may be in the middle of being written.
     active = False
@@ -66,6 +108,11 @@ def display(root, run=None):
             print("Stop reasons: " + ', '.join(f"{name.replace('_', ' ')}: {count}" for name, count in sorted(stops.items())))
         print(f"Mean native score: {mean} across all {len(selected)} ended attempts (not pass rate)")
         print(f"Evaluation errors: {sum(s is None for s in scores)} | Missing answers and evaluation errors count as zero in mean")
+        samples = [counts[id(r)] for r in selected if id(r) in counts]
+        if samples:
+            print(f"Subagents/attempt: {sum(s[0] for s in samples)/len(samples):.2f} | Peak unawaited/attempt: {sum(s[1] for s in samples)/len(samples):.2f} (mean over {len(samples)} ended attempts)")
+        else:
+            print("Subagents/attempt: -- | Peak unawaited/attempt: --")
     if finished:
         eta = '0h 00m — all scheduled episodes completed'
     elif not active:
