@@ -51,12 +51,15 @@ def display(root, run=None):
     judge = settings['judge']
     print(f"Agent: {settings['model']} | Judge: {judge.get('model') if isinstance(judge, dict) else judge}")
     print()
-    print(f"{'Setup':<14} {'Done':>9} {'Finished':>9} {'Unscored':>9} {'Mean score':>11}")
+    legacy = len(settings['modes']) > 1
+    if legacy:
+        print("Legacy combined run (new runs use one setup each)")
     for mode in settings['modes']:
         selected = [r for r in rows if r['mode'] == mode]
         scores = [r['evaluation'].get('score') for r in selected]
         mean = f"{sum(s or 0 for s in scores)/len(scores):.3f}" if scores else '--'
-        print(f"{mode:<14} {len(selected):>4}/{total//len(settings['modes']):<4} {sum(r['status']=='finished' for r in selected):>9} {sum(s is None for s in scores):>9} {mean:>11}")
+        print(f"Setup: {mode}" + (f" | {len(selected)}/{total//len(settings['modes'])} scored attempts" if legacy else ""))
+        print(f"Quality: mean score {mean} | {sum(r['status']=='finished' for r in selected)} normal finishes | {sum(s is None for s in scores)} unscored")
     print("Mean score: native score; unscored counted as zero, NOT binary pass rate.")
     print("Outcomes:", dict(Counter(r['status'] for r in rows)))
     if finished:
