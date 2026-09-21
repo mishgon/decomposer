@@ -1,0 +1,10 @@
+-e .
+langchain-openai==1.6.2
+langgraph-cli[inmem]==0.4.31
+huggingface-hub==0.36.2
+pandas==2.2.3
+httpx==0.28.1
+qdrant-client==1.16.2
+fastapi==0.141.1
+uvicorn==0.53.0
+transformers==4.57.6
