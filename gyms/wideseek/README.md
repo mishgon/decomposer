@@ -101,8 +101,8 @@ export WS_JUDGE_MODEL=Qwen/Qwen3.6-35B-A3B-FP8
 ```
 
 The queue stops on process failure. Use a new sequence name; existing artifacts
-are never overwritten. The watcher shows the active setup and pending job.
-Its ETA covers only the active setup, not the unmeasured queued setup.
+are never overwritten. The watcher independently shows the latest run (or the
+explicitly selected run); its ETA covers that run only, regardless of scheduling.
 
 Under one run directory:
 

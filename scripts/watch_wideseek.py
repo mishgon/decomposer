@@ -14,10 +14,6 @@ def duration(seconds):
 
 
 def display(root, run=None):
-    queue_file = root / 'sequence.json'
-    queue = json.loads(queue_file.read_text()) if queue_file.exists() and run is None else None
-    if queue:
-        run = queue.get('active') or (queue.get('completed') or [None])[-1]
     manifests = list(root.glob("*/manifest.json"))
     path = (root / run / "manifest.json") if run else max(
         manifests, key=lambda p: p.stat().st_mtime, default=None)
@@ -49,9 +45,6 @@ def display(root, run=None):
     elapsed = max(1, end - manifest["started_at"])
     print(f"WIDESEEK  {directory.name}  ({datetime.now(timezone.utc):%H:%M:%S UTC})")
     print("-" * 76)
-    if queue:
-        print(f"Sequence: {queue['status']} | completed {len(queue['completed'])}/{len(queue['jobs'])}")
-        print("Queued next: " + (', '.join(queue['pending']) or 'none'))
     print(f"Status: {'completed' if finished else 'running' if active else 'STOPPED / interrupted'} | concurrency {settings['concurrency']}")
     print(f"Elapsed: {duration(elapsed)} | Progress: {done}/{total} episodes ({100*done/total:.1f}%)")
     print(f"Tasks: {len(settings['tasks'])} | attempts per task/mode: {settings['repetitions']}")
@@ -80,8 +73,6 @@ def display(root, run=None):
         finish = datetime.fromtimestamp(now+remaining, timezone.utc)
         eta = f"{duration(remaining)} | finish {finish:%Y-%m-%d %H:%M UTC} | {done*3600/elapsed:.1f} episodes/hour"
     print(f"ETA whole run: {eta}")
-    if queue and queue['pending']:
-        print("ETA covers the ACTIVE setup only; queued setup timing is not yet measured.")
     print("ETA uses observed wall throughput including judging; approximate, not a deadline.")
     if done:
         print(f"Last completion: {duration(now-max(r['finished_at'] for r in rows))} ago")
