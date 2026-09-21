@@ -1,0 +1,28 @@
+diff --git a/local_servers/notion-mcp-server/src/openapi-mcp-server/client/pg-client.ts b/local_servers/notion-mcp-server/src/openapi-mcp-server/client/pg-client.ts
+--- a/local_servers/notion-mcp-server/src/openapi-mcp-server/client/pg-client.ts
++++ b/local_servers/notion-mcp-server/src/openapi-mcp-server/client/pg-client.ts
+@@ -71,6 +71,24 @@
+       throw new Error('Operation ID is required')
+     }
+ 
++    // MCP exposes properties as JSON text in some schemas. Never store that
++    // text as a JSONB string: native readers expect an object, not nested JSON.
++    if (['post-page', 'patch-page', 'create-a-database', 'update-a-database'].includes(operationId)
++        && params.properties !== undefined) {
++      let properties = params.properties
++      if (typeof properties === 'string') {
++        try {
++          properties = JSON.parse(properties)
++        } catch {
++          throw new Error('properties must contain valid JSON representing an object')
++        }
++      }
++      if (properties === null || typeof properties !== 'object' || Array.isArray(properties)) {
++        throw new Error('properties must be a JSON object')
++      }
++      params = { ...params, properties }
++    }
++
+     switch (operationId) {
+       case 'get-self':
+         return this.getSelf()
