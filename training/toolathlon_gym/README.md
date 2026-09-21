@@ -114,9 +114,11 @@ The generation batch size is one task group, so no task rows are dropped.
 One-time setup: `bash training/toolathlon_gym/setup.sh`, then:
 
 ```bash
-podman build -f training/toolathlon_gym/Dockerfile -t decomposer-toolathlon-rl:latest .
+podman build -f gyms/toolathlon_gym/Dockerfile -t decomposer-toolathlon:latest .
 ```
 
+RL and trace collection share the Gym Dockerfile; there is no separate RL image
+recipe. `RL_GYM_IMAGE` can pin an already-validated image ID for controlled reruns.
 The launcher resolves `~/models/decomposer-4b-sft` once and records model, config,
 source revision/diff, image, endpoint, dataset and process identity. Override
 `MODEL_PATH` for another checkpoint. `router.sh` sources

@@ -30,7 +30,7 @@ export CUDA_VISIBLE_DEVICES="$CUDA_VISIBLE_DEVICES,$ROLLOUT_GPU"
 export NCCL_P2P_DISABLE="${NCCL_P2P_DISABLE:-1}"
 export NCCL_IB_DISABLE="${NCCL_IB_DISABLE:-1}"
 export RL_TRAINER_MODULE="$trainer_module"
-RL_GYM_IMAGE=$(podman image inspect --format '{{.Id}}' "${RL_GYM_IMAGE:-decomposer-toolathlon-rl:latest}")
+RL_GYM_IMAGE=$(podman image inspect --format '{{.Id}}' "${RL_GYM_IMAGE:-decomposer-toolathlon:latest}")
 export RL_GYM_IMAGE
 export PYTHONPATH="$PWD:$PWD/src:$PWD/external/verl${PYTHONPATH:+:$PYTHONPATH}"
 .venv-rl/bin/python -c 'import torch; import verl.checkpoint_engine.nccl_checkpoint_engine; from verl.utils.attention_utils import unpad_input; unpad_input(torch.ones(1, 2, 1), torch.ones(1, 2, dtype=torch.long))'
