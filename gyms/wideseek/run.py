@@ -1,12 +1,14 @@
 """Collect simple/decomposer trajectories and native width scores under one resumable run."""
 import argparse
 import asyncio
+import fcntl
 import hashlib
 import importlib.metadata
 import json
 import os
 from pathlib import Path
 import statistics
+import signal
 import subprocess
 import time
 from uuid import uuid4
@@ -44,12 +46,11 @@ def usage(path):
 
 
 async def episode(task, mode, attempt, root, args):
-    path = root / mode / task["task_id"] / f"attempt-{attempt:03d}"
-    if (path / "result.json").exists():
+    attempt_path = root / mode / task["task_id"] / f"attempt-{attempt:03d}"
+    if (attempt_path / "result.json").exists():
         return
-    # A crashed attempt is retained, never overwritten by resume.
-    if path.exists():
-        path.rename(path.with_name(path.name + f".interrupted-{uuid4().hex[:8]}"))
+    # Never reuse a crashed execution's path: surviving workers retain that context.
+    path = attempt_path / f"execution-{uuid4().hex}"
     init_budget(path, args.model_calls, args.output_tokens)
     checkpoint = InMemorySaver()
     client = get_client(url=args.worker_url)
@@ -67,7 +68,8 @@ async def episode(task, mode, attempt, root, args):
         agent = create_agent(policy, tools=[search, access], system_prompt=SYSTEM_PROMPT,
             context_schema=Context, middleware=[ModelLog("researcher")], checkpointer=checkpoint)
     config = {"recursion_limit": 410, "configurable": {"thread_id": uuid4().hex}}
-    result = {"task_id": task["task_id"], "mode": mode, "attempt": attempt, "started_at": time.time()}
+    result = {"task_id": task["task_id"], "mode": mode, "attempt": attempt,
+              "execution_directory": path.name, "started_at": time.time()}
     state = {}
     try:
         state = await asyncio.wait_for(agent.ainvoke(agent_input(task), config=config,
@@ -75,7 +77,8 @@ async def episode(task, mode, attempt, root, args):
         result["status"] = "finished"
     except Exception as exc:
         result["status"] = ("timeout" if isinstance(exc, TimeoutError) else
-                            "budget_exceeded" if isinstance(exc, BudgetExceeded) else "error")
+                            "budget_exceeded" if isinstance(exc, BudgetExceeded) else
+                            "context_exceeded" if type(exc).__name__ == "OpenAIContextOverflowError" else "error")
         result["error"] = f"{type(exc).__name__}: {exc}"
     finally:
         snapshot = await agent.aget_state(config)
@@ -102,11 +105,12 @@ async def episode(task, mode, attempt, root, args):
                                 "error": f"{type(exc).__name__}: {exc}"}
     result["finished_at"] = time.time()
     result["usage"] = usage(path)
-    save(path / "result.json", result)
+    save(attempt_path / "result.json", result)
     print(json.dumps({k: result[k] for k in ("mode", "task_id", "attempt", "status", "evaluation")}), flush=True)
 
 
 async def main(args):
+    asyncio.get_running_loop().add_signal_handler(signal.SIGTERM, asyncio.current_task().cancel)
     root = args.output.resolve()
     os.environ.setdefault("WS_ARTIFACT_ROOT", str(root.parent))
     raw = args.data.read_bytes()
@@ -183,4 +187,9 @@ if __name__ == "__main__":
     args = parser.parse_args()
     if min(args.limit, args.n, args.concurrency, args.model_calls, args.output_tokens, args.timeout) < 1:
         parser.error("Counts and budgets must be positive")
-    asyncio.run(main(args))
+    # Lock outside the run directory so first-launch mkdir remains exclusive.
+    root = args.output.resolve()
+    root.parent.mkdir(parents=True, exist_ok=True)
+    with (root.parent / (root.name + ".lock")).open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        asyncio.run(main(args))

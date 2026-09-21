@@ -196,6 +196,10 @@ cython_debug/
 
 # Generated artifacts
 artifacts/
+/artifacts
+
+# Pinned WideSeek retrieval source downloaded by setup.sh
+/external/RLinf/
 
 # PyPI configuration file
 .pypirc
@@ -211,4 +215,3 @@ artifacts/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
-
