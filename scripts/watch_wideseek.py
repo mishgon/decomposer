@@ -46,7 +46,7 @@ def display(root, run=None):
     print(f"WIDESEEK  {directory.name}  ({datetime.now(timezone.utc):%H:%M:%S UTC})")
     print("-" * 76)
     print(f"Status: {'completed' if finished else 'running' if active else 'STOPPED / interrupted'} | concurrency {settings['concurrency']}")
-    print(f"Elapsed: {duration(elapsed)} | Progress: {done}/{total} episodes ({100*done/total:.1f}%)")
+    print(f"Elapsed: {duration(elapsed)} | Attempts ended: {done}/{total} ({100*done/total:.1f}%)")
     print(f"Tasks: {len(settings['tasks'])} | attempts per task/mode: {settings['repetitions']}")
     judge = settings['judge']
     print(f"Agent: {settings['model']} | Judge: {judge.get('model') if isinstance(judge, dict) else judge}")
@@ -58,10 +58,14 @@ def display(root, run=None):
         selected = [r for r in rows if r['mode'] == mode]
         scores = [r['evaluation'].get('score') for r in selected]
         mean = f"{sum(s or 0 for s in scores)/len(scores):.3f}" if scores else '--'
-        print(f"Setup: {mode}" + (f" | {len(selected)}/{total//len(settings['modes'])} scored attempts" if legacy else ""))
-        print(f"Quality: mean score {mean} | {sum(r['status']=='finished' for r in selected)} normal finishes | {sum(s is None for s in scores)} unscored")
-    print("Mean score: native score; unscored counted as zero, NOT binary pass rate.")
-    print("Outcomes:", dict(Counter(r['status'] for r in rows)))
+        returned = sum(r['status'] == 'finished' for r in selected)
+        print(f"Setup: {mode}")
+        print(f"Attempts ended: {len(selected)} = {returned} returned an answer + {len(selected)-returned} stopped early")
+        stops = Counter(r['status'] for r in selected if r['status'] != 'finished')
+        if stops:
+            print("Stop reasons: " + ', '.join(f"{name.replace('_', ' ')}: {count}" for name, count in sorted(stops.items())))
+        print(f"Mean native score: {mean} across all {len(selected)} ended attempts (not pass rate)")
+        print(f"Evaluation errors: {sum(s is None for s in scores)} | Missing answers and evaluation errors count as zero in mean")
     if finished:
         eta = '0h 00m — all scheduled episodes completed'
     elif not active:

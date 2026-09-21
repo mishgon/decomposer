@@ -25,7 +25,8 @@ class WatchTest(unittest.TestCase):
                     display(root)
                 text = output.getvalue()
                 self.assertIn("Setup: simple", text)
-                self.assertIn("Quality: mean score --", text)
+                self.assertIn("Mean native score: --", text)
+                self.assertIn("0 = 0 returned an answer + 0 stopped early", text)
                 self.assertIn("STOPPED / interrupted", text)
                 self.assertEqual("Legacy combined run" in text, len(modes) > 1)
 
