@@ -2,7 +2,7 @@
 
 
 def generation_config(model: str, *, thinking: bool = False) -> dict:
-    if "qwen3.5" in model.lower() and not thinking:
+    if any(family in model.lower() for family in ("qwen3.5", "qwen3.8")) and not thinking:
         return {
             "temperature": 0.7,
             "top_p": 0.8,
