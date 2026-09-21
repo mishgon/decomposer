@@ -84,8 +84,8 @@ class HostTransport(httpx.AsyncBaseTransport):
         await self.inner.aclose()
 
 
-def model():
-    return ChatOpenAI(model=os.environ.get("WS_MODEL", "Qwen/Qwen3.5-4B"),
+def model(model_id=None):
+    return ChatOpenAI(model=model_id or os.environ.get("WS_MODEL", "Qwen/Qwen3.5-4B"),
         base_url=os.environ["LLM_PROXY_URL"], api_key=os.environ["LLM_PROXY_MASTER_KEY"],
         **GENERATION,
         timeout=180, max_retries=2, use_responses_api=False,
