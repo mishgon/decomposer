@@ -12,7 +12,7 @@ On a Linux host with about 160 GB of disk available for the corpus/index and
 ample RAM (the page lookup loads the 27 GB JSONL into memory):
 
 ```bash
-bash gyms/wideseek/setup.sh
+UV_BIN="$HOME/.local/bin/uv" bash gyms/wideseek/setup.sh
 source .venv/bin/activate
 export WS_ASSETS=/large/disk/wideseek/assets
 python -m gyms.wideseek.assets --root "$WS_ASSETS"
@@ -116,3 +116,20 @@ pinned RLinf revision, retaining its Apache license. The wrapper detects malform
 judge replies/API errors instead of accepting upstream's silent zero fallback.
 Tests cover perfect, incomplete, wrong and malformed answers and shared-budget
 concurrency. Live retrieval and two-agent smoke must also pass before collection.
+
+## Verified integration (2026-09-21)
+
+- Offline service: 26,134,257 indexed passages and 5,903,530 pages; real search
+  and page access passed. The first search probe took 0.18 seconds.
+- Twelve tests pass, including invalid-tool feedback and cancelled-execution isolation.
+- `qwen4b-width-smoke-n3-v2`: two width tasks, three attempts per mode, completed.
+  `qwen4b-final-integration`: one depth task, three attempts per mode, completed on
+  the final execution-isolation code. These are plumbing checks, not benchmark claims.
+- Resume left all 96 final-integration files byte-identical and issued no new model
+  calls. A held run lock rejected a second writer. Evidence is saved under
+  `artifacts/gyms/wideseek/setup/final-integration-proof.json`.
+- The hosted endpoint reported a **131,072-token context limit** in the width smoke.
+  This is a deployment limit, not Qwen's advertised native context capacity.
+- Qwen4B is unreliable as a table judge: the smoke exposed invalid and semantically
+  wrong primary-key mappings. Use a stronger validated judge before interpreting
+  quality differences or selecting training traces. No bulk collection was launched.
