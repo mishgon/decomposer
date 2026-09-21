@@ -1,0 +1,7 @@
+{
+  "selection": "Two fast binary-reward tasks for overfitting, not a representative benchmark. Each had one score of 1 in five attempts (mean 0.2), no infrastructure failures; historical means 4.6 and 7.9 minutes. Binary rewards explicitly accepted for this smoke experiment.",
+  "tasks": [
+    {"task_id": "yf-sector-comparison"},
+    {"task_id": "sf-hr-dept-budget-ppt-email"}
+  ]
+}
