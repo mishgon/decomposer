@@ -28,7 +28,7 @@ class ToolathlonAgentLoop(AgentLoopBase):
                           subagent_url=os.environ["SUBAGENT_URL"],
                           subagent_host=os.environ.get("SUBAGENT_HOST") or None,
                           subagent_model=os.environ.get("SUBAGENT_MODEL", "Qwen/Qwen3.5-4B"),
-                          image=os.environ.get("RL_GYM_IMAGE", "decomposer-toolathlon-rl:latest"))
+                          image=os.environ.get("RL_GYM_IMAGE", "decomposer-toolathlon:latest"))
         started = time.time()
         startup = asyncio.create_task(asyncio.to_thread(episode.start))
         try:
