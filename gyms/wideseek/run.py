@@ -117,7 +117,9 @@ async def main(args):
     tasks = [json.loads(line) for line in raw.splitlines()][:args.limit]
     if not tasks:
         raise ValueError("Choose a nonempty task set")
-    modes = ["simple", "decomposer"] if args.mode == "both" else [args.mode]
+    if args.mode not in {"simple", "decomposer"}:
+        raise ValueError("Each run must use one setup: simple or decomposer")
+    modes = [args.mode]
     async with httpx.AsyncClient(timeout=30, trust_env=False) as http:
         response = await http.get(os.environ.get("WS_SEARCH_URL", "http://127.0.0.1:18080") + "/health")
         response.raise_for_status()
@@ -155,8 +157,7 @@ async def main(args):
         async with semaphore:
             await episode(task, mode, attempt, root, args)
 
-    # Matched task/repetition order interleaves modes rather than changing backend load by phase.
-    await asyncio.gather(*(bounded(t, m, n) for n in range(1, args.n + 1) for t in tasks for m in modes))
+    await asyncio.gather(*(bounded(t, args.mode, n) for n in range(1, args.n + 1) for t in tasks))
     for mode in modes:
         rows = [json.loads(p.read_text()) for p in (root / mode).glob("*/attempt-???/result.json")]
         scores = [r["evaluation"]["score"] for r in rows if r["evaluation"]["score"] is not None]
@@ -177,7 +178,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--data", type=Path, default=Path("artifacts/gyms/wideseek/data/width/tasks.jsonl"))
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--mode", choices=["simple", "decomposer", "both"], default="both")
+    parser.add_argument("--mode", choices=["simple", "decomposer"], required=True)
     parser.add_argument("--limit", type=int, default=2)
     parser.add_argument("-n", type=int, default=3)
     parser.add_argument("--concurrency", type=int, default=2)
