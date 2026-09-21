@@ -9,7 +9,7 @@ cd "$(dirname "$0")/.."
 : "${RAY_TMPDIR:?Set a short Ray temp path on checkpoint storage}"
 : "${RL_GYM_IMAGE:?Pin the baseline Gym image ID for this comparison}"
 test ! -e "$RL_ARTIFACTS/run.json"
-export SUBAGENT_MODEL=Qwen/Qwen3.8-27B-FP8
+export SUBAGENT_MODEL="${SUBAGENT_MODEL:-Qwen/Qwen3.5-4B}"
 export SUBAGENT_URL=https://lmrouter.2a2i.org/v1
 export SUBAGENT_HOST=lmrouter.2a2i.org:176.108.242.226
 export MODEL_PATH="${MODEL_PATH:-$HOME/models/decomposer-4b-sft}"

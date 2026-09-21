@@ -18,6 +18,9 @@ class ProfileTests(unittest.TestCase):
         pools = select_profiles(manifest, ["zero-pass"])
         self.assertEqual({r["task_id"] for r in pools["full"]}, {"zero-pass", "small-range", "slow"})
         self.assertEqual([r["task_id"] for r in pools["cold-start"]], ["zero-pass"])
+        binary_smoke = select_profiles(manifest, ["binary"])
+        self.assertEqual([r["task_id"] for r in binary_smoke["smoke"]], ["binary"])
+        self.assertEqual(binary_smoke["full"], pools["full"])
 
     def test_unbounded_group_plan(self):
         config = {"trainer": {"total_epochs": 1, "test_freq": 8, "val_before_train": True},

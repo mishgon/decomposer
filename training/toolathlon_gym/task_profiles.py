@@ -16,23 +16,25 @@ GROUPS_PER_TASK = 10
 def select_profiles(manifest, smoke_ids):
     if manifest["config"]["repetitions"] != 5:
         raise ValueError("Expected the completed five-attempt baseline")
-    full = []
+    full, smoke = [], []
     for name in sorted(manifest["tasks"]):
         episodes = [manifest["episodes"][f"{name}/rep-{i:03d}"] for i in range(1, 6)]
         if any(e["status"] not in {"completed", "infrastructure_error"} for e in episodes):
             raise ValueError(f"Unfinished baseline task: {name}")
         scores = [float(e.get("partial_score") or 0) if e["status"] == "completed" else 0.
                   for e in episodes]
+        row = {"task_id": name, "scores": scores,
+               "mean_minutes": mean(e["elapsed_seconds"] for e in episodes) / 60,
+               "score_range": max(scores) - min(scores)}
+        if name in smoke_ids:
+            smoke.append(row)
         # Native intermediate score is observed evidence, not inferred evaluator capability.
         if not any(0 < s < 1 for s in scores) or all(s >= .9 for s in scores):
             continue
-        full.append({"task_id": name, "scores": scores,
-                     "mean_minutes": mean(e["elapsed_seconds"] for e in episodes) / 60,
-                     "score_range": max(scores) - min(scores)})
+        full.append(row)
     cold = [r for r in full if r["mean_minutes"] <= 30 and r["score_range"] > .1]
-    smoke = [r for r in full if r["task_id"] in smoke_ids]
     if {r["task_id"] for r in smoke} != set(smoke_ids):
-        raise ValueError("Smoke tasks must belong to the full partial-score pool")
+        raise ValueError("Smoke tasks must exist in the completed baseline")
     return dict(zip(PROFILES, (full, cold, smoke)))
 
 
@@ -67,7 +69,7 @@ def main():
     args = parser.parse_args()
     if args.manifest:
         raw = args.manifest.read_bytes()
-        smoke = json.loads((ROOT / "overfit_partial2_pool.json").read_text())
+        smoke = json.loads((ROOT / "smoke_pool.json").read_text())
         pools = select_profiles(json.loads(raw), [r["task_id"] for r in smoke["tasks"]])
         (ROOT / "task_pools").mkdir(exist_ok=True)
         for name, tasks in pools.items():
@@ -75,6 +77,8 @@ def main():
                       "selection": "Observed 0<score<1; exclude five scores >=0.9; missing/infra=0. "
                                    "Cold-start additionally mean_minutes<=30 and range>0.1; smoke fixed two tasks.",
                       "tasks": tasks}
+            if name == "smoke":
+                result["selection"] = smoke["selection"]
             (ROOT / "task_pools" / f"{name}.json").write_text(json.dumps(result, indent=2) + "\n")
             print(f"{name}: {len(tasks)} tasks")
         return

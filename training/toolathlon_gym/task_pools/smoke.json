@@ -1,31 +1,31 @@
 {
   "profile": "smoke",
   "source_manifest_sha256": "c54759ec11b59ad17344f4318d6cb8381dbb7afb52d3f82126b3e04c4c258134",
-  "selection": "Observed 0<score<1; exclude five scores >=0.9; missing/infra=0. Cold-start additionally mean_minutes<=30 and range>0.1; smoke fixed two tasks.",
+  "selection": "Two fast binary-reward tasks for overfitting, not a representative benchmark. Each had one score of 1 in five attempts (mean 0.2), no infrastructure failures; historical means 4.6 and 7.9 minutes. Binary rewards explicitly accepted for this smoke experiment.",
   "tasks": [
     {
-      "task_id": "canvas-assignment-deadline-gcal",
+      "task_id": "sf-hr-dept-budget-ppt-email",
       "scores": [
-        0.9444444444444444,
-        0.32,
-        0.8679245283018868,
-        0.8490566037735849,
-        0.86
+        0.0,
+        1.0,
+        0.0,
+        0.0,
+        0.0
       ],
-      "mean_minutes": 6.323167978127797,
-      "score_range": 0.6244444444444444
+      "mean_minutes": 7.94328713575999,
+      "score_range": 1.0
     },
     {
-      "task_id": "sf-hr-experience-notion",
+      "task_id": "yf-sector-comparison",
       "scores": [
-        0.975,
-        0.975,
-        0.975,
-        0.3,
-        0.975
+        0.0,
+        1.0,
+        0.0,
+        0.0,
+        0.0
       ],
-      "mean_minutes": 6.721403251489003,
-      "score_range": 0.675
+      "mean_minutes": 4.585531466801962,
+      "score_range": 1.0
     }
   ]
 }
