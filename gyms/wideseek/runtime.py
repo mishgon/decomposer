@@ -15,7 +15,7 @@ from langchain_core.utils.function_calling import convert_to_openai_tool
 
 
 GENERATION = {"temperature": .7, "top_p": .8, "presence_penalty": 1.5,
-              "max_tokens": 4096, "extra_body": {"top_k": 20, "min_p": 0.,
+              "extra_body": {"top_k": 20, "min_p": 0.,
               "repetition_penalty": 1., "chat_template_kwargs": {"enable_thinking": False}}}
 
 
@@ -42,7 +42,7 @@ def save(path, value):
     temporary.replace(path)
 
 
-def init_budget(path, calls=64, tokens=64000):
+def init_budget(path, calls=None, tokens=None):
     path.mkdir(parents=True, exist_ok=False)
     with sqlite3.connect(path / "budget.sqlite") as db:
         db.execute("CREATE TABLE budget (calls INTEGER, tokens INTEGER)")
@@ -53,9 +53,9 @@ def reserve(path):
     with sqlite3.connect(path / "budget.sqlite", timeout=30) as db:
         db.execute("BEGIN IMMEDIATE")
         calls, tokens = db.execute("SELECT calls,tokens FROM budget").fetchone()
-        if calls < 1 or tokens < 1:
+        if (calls is not None and calls < 1) or (tokens is not None and tokens < 1):
             raise BudgetExceeded("Shared episode model budget exhausted")
-        limit = min(tokens, 4096)
+        limit = min(tokens, 4096) if tokens is not None else None
         db.execute("UPDATE budget SET calls=calls-1,tokens=tokens-?", (limit,))
     return limit
 
@@ -108,12 +108,15 @@ class ModelLog(AgentMiddleware):
             row["system_message"] = request.system_message.model_dump(mode="json")
         await asyncio.to_thread(save, log, row)
         try:
-            response = await handler(request.override(model_settings={**request.model_settings, "max_tokens": limit}))
+            settings = dict(request.model_settings)
+            if limit is not None:
+                settings["max_tokens"] = limit
+            response = await handler(request.override(model_settings=settings))
             row["responses"] = [m.model_dump(mode="json") for m in response.result]
             used = sum((getattr(m, "usage_metadata", None) or {}).get("output_tokens", 0)
                        for m in response.result)
             # If provider omits usage, conservatively keep the full reservation.
-            if any(getattr(m, "usage_metadata", None) for m in response.result):
+            if limit is not None and any(getattr(m, "usage_metadata", None) for m in response.result):
                 await asyncio.to_thread(refund, path, max(0, limit - used))
             return response
         except BaseException as exc:

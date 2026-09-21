@@ -13,6 +13,13 @@ from gyms.wideseek.vendor.table_reward import extract_final_answer, evaluate_mar
 
 
 class BudgetTests(unittest.TestCase):
+    def test_default_budget_is_uncapped(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / "episode"
+            init_budget(path)
+            for _ in range(100):
+                self.assertIsNone(reserve(path))
+
     def test_shared_budget_cannot_be_overspent(self):
         with tempfile.TemporaryDirectory() as root:
             path = Path(root) / "episode"

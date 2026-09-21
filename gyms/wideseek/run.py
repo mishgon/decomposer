@@ -182,13 +182,13 @@ if __name__ == "__main__":
     parser.add_argument("--limit", type=int, default=2)
     parser.add_argument("-n", type=int, default=3)
     parser.add_argument("--concurrency", type=int, default=2)
-    parser.add_argument("--model-calls", type=int, default=64)
-    parser.add_argument("--output-tokens", type=int, default=64000)
-    parser.add_argument("--timeout", type=int, default=900)
+    parser.add_argument("--model-calls", type=int, default=None, help="Optional shared call cap; default uncapped")
+    parser.add_argument("--output-tokens", type=int, default=None, help="Optional shared token cap; default uncapped")
+    parser.add_argument("--timeout", type=int, default=2700)
     parser.add_argument("--worker-url", default="http://127.0.0.1:18081")
     parser.add_argument("--resume", action="store_true")
     args = parser.parse_args()
-    if min(args.limit, args.n, args.concurrency, args.model_calls, args.output_tokens, args.timeout) < 1:
+    if min(v for v in (args.limit, args.n, args.concurrency, args.model_calls, args.output_tokens, args.timeout) if v is not None) < 1:
         parser.error("Counts and budgets must be positive")
     # Lock outside the run directory so first-launch mkdir remains exclusive.
     root = args.output.resolve()

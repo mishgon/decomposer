@@ -81,14 +81,28 @@ The watcher (`~/watch-wideseek.sh [run-name]`) selects the latest run by default
 and shows a single setup's progress and whole-run ETA. Historical combined runs
 remain readable; new combined runs are not supported.
 
-Each attempt has a 15-minute agent timeout and shared **64 model calls / 64,000
-generated tokens**, covering decomposer plus all workers. Per-call output cap is
-4,096 tokens, an explicit smoke resource limit, not the model's recommended full
-output allowance. CLI flags control total budgets/timeouts. Both modes receive
-the same budgets and researcher tools. Recursion limit is 410 for every agent.
+Each attempt uses Toolathlon Gym's 45-minute agent timeout and recursion limit
+410 for every agent. There is no default shared call/token budget or per-response
+completion cap. The hosted endpoint still enforces its own context/output limits
+(observed context: 131,072 tokens). Optional `--model-calls` / `--output-tokens`
+restore explicit smoke budgets; a token budget reserves up to 4,096 per call.
+Both modes receive the same limits and researcher tools.
 Sampling follows Qwen's general non-thinking recommendation: temperature .7,
 top_p .8, top_k 20, min_p 0, presence penalty 1.5, repetition penalty 1.
 Judge calls are greedy and separately accounted, outside the agent budget.
+
+To schedule separate evaluations sequentially:
+
+```bash
+source gyms/wideseek/env.sh
+export WS_JUDGE_MODEL=Qwen/Qwen3.6-35B-A3B-FP8
+.venv/bin/python -m scripts.wideseek_sequence --name qwen4b-width100-gym-limits \
+  --limit 100 -n 3 --concurrency 2
+```
+
+The queue stops on process failure. Use a new sequence name; existing artifacts
+are never overwritten. The watcher shows the active setup and pending job.
+Its ETA covers only the active setup, not the unmeasured queued setup.
 
 Under one run directory:
 
