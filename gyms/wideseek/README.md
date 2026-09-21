@@ -2,9 +2,9 @@
 
 Simple agent vs Decomposer using hosted Qwen3.5-4B non-thinking and fixed
 Wiki-2018 retrieval. Based on `dev`; no Toolathlon/RL changes are required.
-The first comparison uses **width/table tasks**. Depth/hybrid data can be prepared,
-but the runner deliberately rejects their non-table tasks until their native QA
-scorer is wired. This is not yet a full WideSeek benchmark reproduction.
+The first comparison uses **width/table tasks**. Depth and hybrid data are also
+supported: QA tasks receive upstream's boxed-answer format instruction and native
+equivalence judge. This is not a full WideSeek benchmark reproduction.
 
 ## Setup
 
@@ -86,9 +86,10 @@ Under one run directory:
   model/generation/retrieval settings and budgets.
 - `<mode>/<task>/attempt-NNN/`: full model requests/responses (including provider
   usage), tool I/O, final graph state, subagent states, judge I/O and `result.json`.
-- `<mode>-summary.json`: item-F1 and completion/error accounting. Judge failures
+- `<mode>-summary.json`: native score (table item-F1 or QA accuracy) and completion/error accounting. Judge failures
   remain unscored; the explicitly named `infra_zero` aggregate also counts them
-  as zero. Native partial score is not a binary pass rate.
+  as zero. Native table partial score is not a binary pass rate. Mixed hybrid
+  scores average different native metrics, explicitly listed in the summary.
 
 The judge is also hosted Qwen3.5-4B. Its scores are **diagnostic, not directly
 paper-comparable**. Reference answers never enter agent inputs. The scorer keeps

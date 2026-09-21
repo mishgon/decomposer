@@ -13,6 +13,9 @@ class DatasetTests(unittest.TestCase):
         task = normalize({"question": "Who?", "answer": "A", "aug_answer": ["Alias"], "qid": 7}, "depth", 1)
         self.assertEqual(task["metadata"]["aug_answer"], ["Alias"])
         self.assertEqual(task["unique_columns"], [])
+        prompt = agent_input(task)["messages"][0]["content"]
+        self.assertIn(r"\boxed{}", prompt)
+        self.assertNotIn("Alias", prompt)
 
     def test_question_hash_groups_duplicates_across_sources(self):
         row = {"question": "Who?", "answer": "A"}

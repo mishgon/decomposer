@@ -98,7 +98,7 @@ async def episode(task, mode, attempt, root, args):
     try:
         result["evaluation"] = await asyncio.wait_for(evaluate(task, answer, path), timeout=600)
     except Exception as exc:
-        result["evaluation"] = {"status": "evaluation_error", "item_f1": None,
+        result["evaluation"] = {"status": "evaluation_error", "score": None,
                                 "error": f"{type(exc).__name__}: {exc}"}
     result["finished_at"] = time.time()
     result["usage"] = usage(path)
@@ -111,8 +111,8 @@ async def main(args):
     os.environ.setdefault("WS_ARTIFACT_ROOT", str(root.parent))
     raw = args.data.read_bytes()
     tasks = [json.loads(line) for line in raw.splitlines()][:args.limit]
-    if not tasks or any(not t["unique_columns"] for t in tasks):
-        raise ValueError("Choose nonempty width/table tasks")
+    if not tasks:
+        raise ValueError("Choose a nonempty task set")
     modes = ["simple", "decomposer"] if args.mode == "both" else [args.mode]
     async with httpx.AsyncClient(timeout=30, trust_env=False) as http:
         response = await http.get(os.environ.get("WS_SEARCH_URL", "http://127.0.0.1:18080") + "/health")
@@ -128,18 +128,20 @@ async def main(args):
                 "model_url": os.environ["LLM_PROXY_URL"], "retrieval": retrieval,
                 "model_calls": args.model_calls, "output_tokens": args.output_tokens,
                 "timeout": args.timeout, "judge": "same hosted model, greedy; diagnostic not paper-comparable"}
+    sources = {str(p): hashlib.sha256(p.read_bytes()).hexdigest()
+               for base in (Path("gyms/wideseek"), Path("src/decomposer"))
+               for p in base.rglob("*") if p.is_file() and p.suffix in {".py", ".sh", ".json", ".txt"}}
     if args.resume:
-        if json.loads((root / "manifest.json").read_text())["settings"] != settings:
-            raise ValueError("Resume settings differ from the saved run")
+        previous = json.loads((root / "manifest.json").read_text())
+        if previous["settings"] != settings or previous["source_sha256"] != sources:
+            raise ValueError("Resume settings or source code differ from the saved run")
     else:
         root.mkdir(parents=True, exist_ok=False)
         save(root / "manifest.json", {"settings": settings, "started_at": time.time(),
              "revision": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
              "packages": {p: importlib.metadata.version(p) for p in
                  ("langchain", "langchain-openai", "langgraph", "langgraph-api", "httpx", "pandas")},
-             "source_sha256": {str(p): hashlib.sha256(p.read_bytes()).hexdigest()
-                 for base in (Path("gyms/wideseek"), Path("src/decomposer"))
-                 for p in base.rglob("*") if p.is_file() and p.suffix in {".py", ".sh", ".json", ".txt"}}})
+             "source_sha256": sources})
         (root / "source.diff").write_bytes(subprocess.check_output(["git", "diff", "HEAD"]))
     semaphore = asyncio.Semaphore(args.concurrency)
 
@@ -151,13 +153,14 @@ async def main(args):
     await asyncio.gather(*(bounded(t, m, n) for n in range(1, args.n + 1) for t in tasks for m in modes))
     for mode in modes:
         rows = [json.loads(p.read_text()) for p in (root / mode).glob("*/attempt-???/result.json")]
-        scores = [r["evaluation"]["item_f1"] for r in rows if r["evaluation"]["item_f1"] is not None]
+        scores = [r["evaluation"]["score"] for r in rows if r["evaluation"]["score"] is not None]
         seconds = [r["agent_finished_at"] - r["started_at"] for r in rows]
         tokens = {field: sum(role[field] for r in rows for name, role in r["usage"].items() if name != "judge")
                   for field in ("input_tokens", "output_tokens")}
         save(root / f"{mode}-summary.json", {"attempts": len(rows), "scored": len(scores),
-             "unscored": len(rows) - len(scores), "mean_item_f1": sum(scores)/len(scores) if scores else None,
-             "mean_item_f1_infra_zero": sum(scores)/len(rows) if rows else None,
+             "unscored": len(rows) - len(scores), "mean_native_score": sum(scores)/len(scores) if scores else None,
+             "mean_native_score_infra_zero": sum(scores)/len(rows) if rows else None,
+             "metrics": sorted({r["evaluation"].get("metric", "unscored") for r in rows}),
              "mean_agent_seconds": statistics.mean(seconds) if seconds else None,
              "median_agent_seconds": statistics.median(seconds) if seconds else None,
              "agent_tokens": tokens,
