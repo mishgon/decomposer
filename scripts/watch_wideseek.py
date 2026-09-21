@@ -48,7 +48,8 @@ def display(root, run=None):
     print(f"Status: {'completed' if finished else 'running' if active else 'STOPPED / interrupted'} | concurrency {settings['concurrency']}")
     print(f"Elapsed: {duration(elapsed)} | Progress: {done}/{total} episodes ({100*done/total:.1f}%)")
     print(f"Tasks: {len(settings['tasks'])} | attempts per task/mode: {settings['repetitions']}")
-    print(f"Agent: {settings['model']} | Judge: {settings['judge']}")
+    judge = settings['judge']
+    print(f"Agent: {settings['model']} | Judge: {judge.get('model') if isinstance(judge, dict) else judge}")
     print()
     print(f"{'Setup':<14} {'Done':>9} {'Finished':>9} {'Unscored':>9} {'Mean score':>11}")
     for mode in settings['modes']:
