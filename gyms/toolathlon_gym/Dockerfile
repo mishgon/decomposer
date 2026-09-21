@@ -35,6 +35,9 @@ RUN cd /opt \
 COPY gyms/toolathlon_gym/patches/postgres-services.patch /tmp/
 RUN cd /opt && git apply --no-index /tmp/postgres-services.patch
 
+COPY gyms/toolathlon_gym/patches/notion-properties.patch /tmp/
+RUN cd /opt && git apply --no-index /tmp/notion-properties.patch
+
 RUN set -e; for server in \
         12306-mcp \
         Calendar-Autoauth-MCP-Server \
