@@ -29,6 +29,33 @@ class BudgetTests(unittest.TestCase):
 
 
 class ScoreTests(unittest.IsolatedAsyncioTestCase):
+    async def test_rescore_preserves_original_and_selects_judge(self):
+        import hashlib, json
+        from gyms.wideseek.rescore import main
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            data = root / "tasks.jsonl"
+            data.write_text(json.dumps({"task_id": "t", "answer": "reference"}) + "\n")
+            run = root / "run"
+            path = run / "simple/t/attempt-001/result.json"
+            path.parent.mkdir(parents=True)
+            original = {"mode": "simple", "task_id": "t", "attempt": 1, "status": "finished",
+                        "answer": "prediction", "evaluation": {"score": None}}
+            path.write_text(json.dumps(original))
+            before = path.read_bytes()
+            (run / "manifest.json").write_text(json.dumps({"settings": {
+                "data_sha256": hashlib.sha256(data.read_bytes()).hexdigest()}}))
+            judge = AsyncMock(return_value={"score": .5, "status": "scored"})
+            args = SimpleNamespace(data=data, run=run, output=root/"new-scores", judge_model="large-judge", concurrency=2)
+            with patch("gyms.wideseek.rescore.evaluate", new=judge), \
+                    patch("gyms.wideseek.rescore.subprocess.check_output", return_value="test-revision"):
+                await main(args)
+            self.assertEqual(path.read_bytes(), before)
+            self.assertEqual(judge.await_args.kwargs["judge_model_id"], "large-judge")
+            saved = json.loads((args.output / "simple/t/attempt-001/result.json").read_text())
+            self.assertEqual(saved["previous_evaluation"], original["evaluation"])
+            self.assertEqual(saved["evaluation"]["score"], .5)
+
     async def test_cancelled_execution_is_not_reused_on_retry(self):
         graph = MagicMock()
         graph.ainvoke = AsyncMock(side_effect=[asyncio.CancelledError(), {}])

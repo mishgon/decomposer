@@ -2,6 +2,7 @@
 import ast
 import asyncio
 import json
+import os
 import re
 import time
 from uuid import uuid4
@@ -32,7 +33,7 @@ def validate_judge(text, messages):
     return text
 
 
-async def evaluate(task, answer, path):
+async def evaluate(task, answer, path, *, judge_model_id=None):
     is_table = bool(task["unique_columns"])
     metric = "item_f1" if is_table else "qa_accuracy"
     if is_table:
@@ -42,12 +43,14 @@ async def evaluate(task, answer, path):
     parsed = extract_final_answer(answer, mode="markdown" if is_table else "boxed", strict=True)
     if parsed is None or (is_table and parsed.empty):
         return {"status": "scored", "metric": metric, "score": 0., "format_ok": False}
-    judge_model = model()
+    judge_model_id = judge_model_id or os.environ.get("WS_JUDGE_MODEL") or os.environ.get("WS_MODEL", "Qwen/Qwen3.5-4B")
+    judge_model = model(judge_model_id)
     semaphore = asyncio.Semaphore(2)
     errors = []
 
     async def judge(messages):
-        row = {"started_at": time.time(), "messages": messages}
+        row = {"started_at": time.time(), "messages": messages, "model": judge_model_id,
+               "temperature": 0., "presence_penalty": 0., "thinking": False}
         try:
             async with semaphore:
                 response = await judge_model.ainvoke(messages, temperature=0., presence_penalty=0.)

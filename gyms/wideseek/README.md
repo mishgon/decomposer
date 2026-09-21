@@ -95,10 +95,26 @@ Under one run directory:
   as zero. Native table partial score is not a binary pass rate. Mixed hybrid
   scores average different native metrics, explicitly listed in the summary.
 
-The judge is also hosted Qwen3.5-4B. Its scores are **diagnostic, not directly
-paper-comparable**. Reference answers never enter agent inputs. The scorer keeps
+The judge defaults to the agent model; set `WS_JUDGE_MODEL` independently. The
+validated hosted alternative is `Qwen/Qwen3.6-35B-A3B-FP8`. Its scores remain
+**diagnostic, not directly paper-comparable** (upstream uses a different judge).
+Reference answers never enter agent inputs. The scorer keeps
 upstream strict Markdown extraction: an unfenced table may score zero even if it
 looks readable. Do not silently relax this between agent modes.
+
+Re-score existing answers without rerunning agents or modifying original traces:
+
+```bash
+source gyms/wideseek/env.sh
+.venv/bin/python -m gyms.wideseek.rescore \
+  --run artifacts/gyms/wideseek/runs/qwen4b-width-smoke-n3-v2 \
+  --data artifacts/gyms/wideseek/data/width/tasks.jsonl \
+  --output artifacts/gyms/wideseek/rejudged/qwen35b/qwen4b-width-smoke-n3-v2 \
+  --judge-model Qwen/Qwen3.6-35B-A3B-FP8 --concurrency 2
+```
+
+The output must be a new directory. It retains previous scores, source-result
+hashes, exact judge settings, full judge responses, and separate summaries.
 
 ## Tests and upstream references
 
@@ -121,7 +137,8 @@ concurrency. Live retrieval and two-agent smoke must also pass before collection
 
 - Offline service: 26,134,257 indexed passages and 5,903,530 pages; real search
   and page access passed. The first search probe took 0.18 seconds.
-- Twelve tests pass, including invalid-tool feedback and cancelled-execution isolation.
+- Thirteen tests pass, including invalid-tool feedback, cancelled-execution isolation,
+  and non-destructive re-scoring.
 - `qwen4b-width-smoke-n3-v2`: two width tasks, three attempts per mode, completed.
   `qwen4b-final-integration`: one depth task, three attempts per mode, completed on
   the final execution-isolation code. These are plumbing checks, not benchmark claims.

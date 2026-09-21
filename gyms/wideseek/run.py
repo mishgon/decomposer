@@ -131,7 +131,9 @@ async def main(args):
                 "generation": GENERATION, "recursion_limit": 410,
                 "model_url": os.environ["LLM_PROXY_URL"], "retrieval": retrieval,
                 "model_calls": args.model_calls, "output_tokens": args.output_tokens,
-                "timeout": args.timeout, "judge": "same hosted model, greedy; diagnostic not paper-comparable"}
+                "timeout": args.timeout,
+                "judge": {"model": os.environ.get("WS_JUDGE_MODEL") or os.environ.get("WS_MODEL", "Qwen/Qwen3.5-4B"),
+                          "temperature": 0., "thinking": False, "paper_comparable": False}}
     sources = {str(p): hashlib.sha256(p.read_bytes()).hexdigest()
                for base in (Path("gyms/wideseek"), Path("src/decomposer"))
                for p in base.rglob("*") if p.is_file() and p.suffix in {".py", ".sh", ".json", ".txt"}}
