@@ -46,7 +46,10 @@ def check_data(directory, profile):
         raise ValueError("Dataset does not match the current frozen task pool")
     if set(split["train"]) != names or set(split["validation"]) != names:
         raise ValueError("Both train and evaluation must use the entire selected pool")
-    for file, repeats in (("train", GROUPS_PER_TASK), ("evaluation", 1)):
+    groups = split.get("groups_per_task", GROUPS_PER_TASK)
+    if type(groups) is not int or groups < 1:
+        raise ValueError("groups_per_task must be a positive integer")
+    for file, repeats in (("train", groups), ("evaluation", 1)):
         frame = pd.read_parquet(directory / f"{file}.parquet")
         counts = Counter(row["task_id"] for row in frame.extra_info)
         if counts != Counter({name: repeats for name in names}):
@@ -60,6 +63,7 @@ def main():
     action.add_argument("--prepare", type=Path, help="New dataset output directory")
     action.add_argument("--check-data", type=Path)
     parser.add_argument("--profile", choices=PROFILES)
+    parser.add_argument("--groups-per-task", type=int, default=GROUPS_PER_TASK)
     args = parser.parse_args()
     if args.manifest:
         raw = args.manifest.read_bytes()
@@ -82,7 +86,7 @@ def main():
         subprocess.run([sys.executable, "-m", "training.toolathlon_gym.prepare_pilot",
                         "--output", str(args.prepare), "--task-pool", str(pool_path),
                         "--train-tasks", str(count), "--evaluate-training-tasks",
-                        "--groups-per-task", str(GROUPS_PER_TASK)], check=True)
+                        "--groups-per-task", str(args.groups_per_task)], check=True)
     check_data(args.prepare or args.check_data, args.profile)
 
 
