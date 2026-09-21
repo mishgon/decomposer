@@ -6,6 +6,8 @@ cd "$(dirname "$0")/.."
 : "${ROLLOUT_GPU:?Choose a free rollout GPU}"
 : "${RL_ARTIFACTS:?Choose a fresh run directory}"
 : "${RL_DATA:?Choose a fresh dataset directory}"
+: "${RAY_TMPDIR:?Set a short Ray temp path on checkpoint storage}"
+: "${RL_GYM_IMAGE:?Pin the baseline Gym image ID for this comparison}"
 test ! -e "$RL_ARTIFACTS/run.json"
 export SUBAGENT_MODEL=Qwen/Qwen3.8-27B-FP8
 export SUBAGENT_URL=https://lmrouter.2a2i.org/v1
