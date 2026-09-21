@@ -28,6 +28,24 @@ class BudgetTests(unittest.TestCase):
 
 
 class ScoreTests(unittest.IsolatedAsyncioTestCase):
+    async def test_invalid_tool_arguments_are_feedback_not_episode_crash(self):
+        from langchain_core.messages import AIMessage
+        from langgraph.prebuilt import ToolNode
+        from langgraph.graph import StateGraph, MessagesState, START, END
+        from gyms.wideseek.worker import access, search
+        builder = StateGraph(MessagesState)
+        builder.add_node("tools", ToolNode([access, search]))
+        builder.add_edge(START, "tools")
+        builder.add_edge("tools", END)
+        graph = builder.compile()
+        for name, arguments in [("access", {"url": "unused", "access_token": 50000}),
+                                ("search", {"query": "unused", "topk": 0})]:
+            result = await graph.ainvoke({"messages": [
+                AIMessage(content="", tool_calls=[{"id": "invalid", "name": name, "args": arguments}])]})
+            message = result["messages"][-1]
+            self.assertEqual(message.status, "error")
+            self.assertIn("Error", message.content)
+
     async def test_qa_native_score_and_bad_judge(self):
         class Judge:
             def __init__(self, text):

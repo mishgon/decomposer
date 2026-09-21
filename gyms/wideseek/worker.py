@@ -2,11 +2,13 @@
 import asyncio
 import os
 import time
+from typing import Annotated
 from uuid import uuid4
 
 import httpx
 from langchain.agents import create_agent
 from langchain.tools import tool, ToolRuntime
+from pydantic import Field
 
 from gyms.wideseek.runtime import Context, ModelLog, directory, model, save
 
@@ -30,7 +32,8 @@ async def request_tool(endpoint, payload, runtime):
 
 
 @tool
-async def search(query: str, runtime: ToolRuntime[Context], topk: int = 3) -> str:
+async def search(query: str, runtime: ToolRuntime[Context],
+                 topk: Annotated[int, Field(ge=1, le=10)] = 3) -> str:
     """Search the fixed Wiki-2018 corpus. Returns passages and URLs; topk is 1–10."""
     if not 1 <= topk <= 10:
         raise ValueError("topk must be between 1 and 10")
@@ -39,7 +42,8 @@ async def search(query: str, runtime: ToolRuntime[Context], topk: int = 3) -> st
 
 
 @tool
-async def access(url: str, runtime: ToolRuntime[Context], access_token: int = 5000) -> str:
+async def access(url: str, runtime: ToolRuntime[Context],
+                 access_token: Annotated[int, Field(ge=1, le=20000)] = 5000) -> str:
     """Read a Wiki-2018 page by URL. access_token limits characters, from 1 to 20000."""
     if not 1 <= access_token <= 20000:
         raise ValueError("access_token must be between 1 and 20000")
