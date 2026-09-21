@@ -8,9 +8,14 @@ from uuid import uuid4
 
 from gyms.wideseek.runtime import model, save
 from gyms.wideseek.vendor.table_reward import evaluate_markdown, extract_final_answer
+from gyms.wideseek.vendor.qa_prompt import LLM_JUDGE_PROMPT
 
 
 def validate_judge(text, messages):
+    if messages[0]["content"].startswith("You are an evaluation assistant."):
+        if text.strip().lower() not in {"correct", "incorrect"}:
+            raise ValueError("QA judge must return Correct or Incorrect")
+        return text
     matches = re.findall(r"```json\s*(\{.*?\})\s*```", text, re.DOTALL)
     if not matches:
         raise ValueError("Judge omitted fenced JSON")
@@ -28,14 +33,15 @@ def validate_judge(text, messages):
 
 
 async def evaluate(task, answer, path):
-    if not task["unique_columns"]:
-        raise ValueError("This scorer supports width/table tasks only; depth needs its native QA scorer")
-    reference = extract_final_answer(task["answer"], mode="markdown", strict=False)
-    if reference is None or reference.empty:
-        raise ValueError("Invalid dataset reference table")
-    parsed = extract_final_answer(answer, mode="markdown", strict=True)
-    if parsed is None or parsed.empty:
-        return {"status": "scored", "item_f1": 0., "format_ok": False}
+    is_table = bool(task["unique_columns"])
+    metric = "item_f1" if is_table else "qa_accuracy"
+    if is_table:
+        reference = extract_final_answer(task["answer"], mode="markdown", strict=False)
+        if reference is None or reference.empty:
+            raise ValueError("Invalid dataset reference table")
+    parsed = extract_final_answer(answer, mode="markdown" if is_table else "boxed", strict=True)
+    if parsed is None or (is_table and parsed.empty):
+        return {"status": "scored", "metric": metric, "score": 0., "format_ok": False}
     judge_model = model()
     semaphore = asyncio.Semaphore(2)
     errors = []
@@ -51,14 +57,29 @@ async def evaluate(task, answer, path):
             row["error"] = f"{type(exc).__name__}: {exc}"
             errors.append(row["error"])
             # Upstream swallows judge errors. Keep them externally and invalidate the score.
-            return "```json\n{}\n```"
+            return "```json\n{}\n```" if is_table else "Incorrect"
         finally:
             row["finished_at"] = time.time()
             await asyncio.to_thread(save, path / "judge_calls" / f"{uuid4().hex}.json", row)
 
     try:
-        score, format_ok = await evaluate_markdown(parsed, task, judge, False)
+        if is_table:
+            label = dict(task)
+            evaluation = task.get("metadata", {}).get("evaluation")
+            if isinstance(evaluation, str):
+                evaluation = json.loads(evaluation)
+            if isinstance(evaluation, dict):
+                label["required"] = evaluation.get("required", [])
+            score, format_ok = await evaluate_markdown(parsed, label, judge, False)
+        else:
+            reply = await judge([
+                {"role": "system", "content": "You are an evaluation assistant. Please determine if the predicted answer is equivalent to the labeled answer."},
+                {"role": "user", "content": LLM_JUDGE_PROMPT.format(question=task["question"],
+                    correct_answer=task["answer"], response=parsed)}])
+            # Same native QA decision; malformed/API responses are invalidated below.
+            score = float("correct" in reply.strip().lower() and "incorrect" not in reply.strip().lower())
+            format_ok = True
     finally:
         await judge_model.http_async_client.aclose()
-    return ({"status": "judge_error", "item_f1": None, "errors": errors} if errors else
-            {"status": "scored", "item_f1": float(score), "format_ok": bool(format_ok)})
+    return ({"status": "judge_error", "metric": metric, "score": None, "errors": errors} if errors else
+            {"status": "scored", "metric": metric, "score": float(score), "format_ok": bool(format_ok)})
