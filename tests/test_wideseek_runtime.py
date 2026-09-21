@@ -3,11 +3,12 @@ from concurrent.futures import ThreadPoolExecutor
 import tempfile
 from pathlib import Path
 import unittest
-from unittest.mock import patch
+from unittest.mock import patch, AsyncMock, MagicMock
+from types import SimpleNamespace
 
 from gyms.wideseek.runtime import BudgetExceeded, init_budget, reserve, refund
 from gyms.wideseek.evaluate import validate_judge, evaluate
-from gyms.wideseek.run import usage
+from gyms.wideseek.run import usage, episode
 from gyms.wideseek.vendor.table_reward import extract_final_answer, evaluate_markdown
 
 
@@ -28,6 +29,30 @@ class BudgetTests(unittest.TestCase):
 
 
 class ScoreTests(unittest.IsolatedAsyncioTestCase):
+    async def test_cancelled_execution_is_not_reused_on_retry(self):
+        graph = MagicMock()
+        graph.ainvoke = AsyncMock(side_effect=[asyncio.CancelledError(), {}])
+        graph.aget_state = AsyncMock(return_value=SimpleNamespace(values={}))
+        policy = MagicMock()
+        policy.http_async_client.aclose = AsyncMock()
+        args = SimpleNamespace(model_calls=2, output_tokens=100, worker_url="http://unused", timeout=1)
+        task = {"task_id": "test", "question": "Question", "answer": "Answer", "unique_columns": []}
+        with tempfile.TemporaryDirectory() as folder, patch("gyms.wideseek.run.model", return_value=policy), \
+                patch("langchain.agents.create_agent", return_value=graph), \
+                patch("gyms.wideseek.run.evaluate", new=AsyncMock(return_value={"score": 0.})):
+            root = Path(folder)
+            with self.assertRaises(asyncio.CancelledError):
+                await episode(task, "simple", 1, root, args)
+            parent = root / "simple/test/attempt-001"
+            old = next(parent.glob("execution-*"))
+            self.assertFalse((parent / "result.json").exists())
+            await episode(task, "simple", 1, root, args)
+            self.assertTrue((old / "trace.json").exists())
+            self.assertEqual(len(list(parent.glob("execution-*"))), 2)
+            import json
+            result = json.loads((parent / "result.json").read_text())
+            self.assertNotEqual(result["execution_directory"], old.name)
+
     async def test_invalid_tool_arguments_are_feedback_not_episode_crash(self):
         from langchain_core.messages import AIMessage
         from langgraph.prebuilt import ToolNode

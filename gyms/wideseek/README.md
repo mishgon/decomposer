@@ -67,9 +67,12 @@ source gyms/wideseek/env.sh
 ```
 
 Repeat the exact command with `--resume` to skip completed attempts. Interrupted
-attempt directories are retained and retried separately. For width collection,
+executions are retained and retried in a fresh `execution-<id>` directory, so
+surviving workers cannot contaminate a retry. SIGTERM requests cleanup; a killed
+process cannot guarantee worker cancellation, but execution paths remain isolated.
+For width collection,
 choose `--mode decomposer --limit 20000` and the desired `-n`; the default is only
-a two-task smoke, not a full dataset run. Do not run two writers on the same output.
+a two-task smoke, not a full dataset run. A file lock prevents two writers on the same output.
 
 Each attempt has a 15-minute agent timeout and shared **64 model calls / 64,000
 generated tokens**, covering decomposer plus all workers. Per-call output cap is
@@ -84,8 +87,9 @@ Under one run directory:
 
 - `manifest.json`: task IDs, data/source hashes, code revision, package versions,
   model/generation/retrieval settings and budgets.
-- `<mode>/<task>/attempt-NNN/`: full model requests/responses (including provider
-  usage), tool I/O, final graph state, subagent states, judge I/O and `result.json`.
+- `<mode>/<task>/attempt-NNN/result.json`: outcome and selected execution directory.
+  Its `execution-<id>/` contains full model requests/responses (including provider
+  usage), tool I/O, final graph state, subagent states and judge I/O.
 - `<mode>-summary.json`: native score (table item-F1 or QA accuracy) and completion/error accounting. Judge failures
   remain unscored; the explicitly named `infra_zero` aggregate also counts them
   as zero. Native table partial score is not a binary pass rate. Mixed hybrid
