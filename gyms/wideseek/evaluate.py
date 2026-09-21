@@ -1,0 +1,64 @@
+"""Pinned upstream item-F1; failed judge requests never become a model score."""
+import ast
+import asyncio
+import json
+import re
+import time
+from uuid import uuid4
+
+from gyms.wideseek.runtime import model, save
+from gyms.wideseek.vendor.table_reward import evaluate_markdown, extract_final_answer
+
+
+def validate_judge(text, messages):
+    matches = re.findall(r"```json\s*(\{.*?\})\s*```", text, re.DOTALL)
+    if not matches:
+        raise ValueError("Judge omitted fenced JSON")
+    result = json.loads(matches[-1])
+    if not isinstance(result, dict):
+        raise ValueError("Judge response must be an object")
+    if messages[0]["content"].startswith("You are an expert in grading"):
+        content = messages[1]["content"]
+        pairs = ast.literal_eval(content[content.index("{"):].strip())
+        if set(result) != set(pairs) or any(type(v) not in (int, float) or v not in (0, 1) for v in result.values()):
+            raise ValueError("Judge must score every cell exactly once with 0 or 1")
+    elif any(not isinstance(v, str) for v in result.values()):
+        raise ValueError("Judge alignment values must be strings")
+    return text
+
+
+async def evaluate(task, answer, path):
+    if not task["unique_columns"]:
+        raise ValueError("This scorer supports width/table tasks only; depth needs its native QA scorer")
+    reference = extract_final_answer(task["answer"], mode="markdown", strict=False)
+    if reference is None or reference.empty:
+        raise ValueError("Invalid dataset reference table")
+    parsed = extract_final_answer(answer, mode="markdown", strict=True)
+    if parsed is None or parsed.empty:
+        return {"status": "scored", "item_f1": 0., "format_ok": False}
+    judge_model = model()
+    semaphore = asyncio.Semaphore(2)
+    errors = []
+
+    async def judge(messages):
+        row = {"started_at": time.time(), "messages": messages}
+        try:
+            async with semaphore:
+                response = await judge_model.ainvoke(messages, temperature=0., presence_penalty=0.)
+            row["response"] = response.model_dump(mode="json")
+            return validate_judge(response.content, messages)
+        except Exception as exc:
+            row["error"] = f"{type(exc).__name__}: {exc}"
+            errors.append(row["error"])
+            # Upstream swallows judge errors. Keep them externally and invalidate the score.
+            return "```json\n{}\n```"
+        finally:
+            row["finished_at"] = time.time()
+            await asyncio.to_thread(save, path / "judge_calls" / f"{uuid4().hex}.json", row)
+
+    try:
+        score, format_ok = await evaluate_markdown(parsed, task, judge, False)
+    finally:
+        await judge_model.http_async_client.aclose()
+    return ({"status": "judge_error", "item_f1": None, "errors": errors} if errors else
+            {"status": "scored", "item_f1": float(score), "format_ok": bool(format_ok)})

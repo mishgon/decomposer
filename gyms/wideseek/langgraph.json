@@ -1,0 +1,5 @@
+{
+  "dependencies": ["."],
+  "graphs": {"researcher": "gyms.wideseek.worker:graph"},
+  "python_version": "3.12"
+}
