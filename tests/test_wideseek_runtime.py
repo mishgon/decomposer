@@ -28,6 +28,29 @@ class BudgetTests(unittest.TestCase):
 
 
 class ScoreTests(unittest.IsolatedAsyncioTestCase):
+    async def test_qa_native_score_and_bad_judge(self):
+        class Judge:
+            def __init__(self, text):
+                self.content = text
+                self.http_async_client = self
+            async def ainvoke(self, *args, **kwargs):
+                return self
+            def model_dump(self, **kwargs):
+                return {"content": self.content}
+            async def aclose(self):
+                pass
+        task = {"question": "Nationality?", "answer": "Australian", "unique_columns": []}
+        for reply, status, score in [("Correct", "scored", 1.), ("Incorrect", "scored", 0.),
+                                      ("Sorry", "judge_error", None)]:
+            with tempfile.TemporaryDirectory() as root, patch("gyms.wideseek.evaluate.model", return_value=Judge(reply)):
+                result = await evaluate(task, r"\boxed{Australian}", Path(root))
+                self.assertEqual((result["status"], result["score"]), (status, score))
+                self.assertEqual(result["metric"], "qa_accuracy")
+        with tempfile.TemporaryDirectory() as root:
+            result = await evaluate(task, "Australian", Path(root))
+            self.assertEqual(result["score"], 0.)
+            self.assertFalse(result["format_ok"])
+
     def test_vendor_functions_match_pinned_upstream(self):
         import ast
         upstream = Path("external/RLinf/rlinf/agents/wideseek_r1/utils/reward.py")
@@ -53,7 +76,7 @@ class ScoreTests(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as root, patch("gyms.wideseek.evaluate.model", return_value=judge):
             result = await evaluate({"answer": table, "unique_columns": ["Name"]}, table, Path(root))
             self.assertEqual(result["status"], "judge_error")
-            self.assertIsNone(result["item_f1"])
+            self.assertIsNone(result["score"])
             self.assertGreater(usage(Path(root))["judge"]["errors"], 0)
 
     async def test_native_perfect_partial_wrong_malformed(self):
