@@ -62,8 +62,8 @@ WideSearch benchmark result.
 ```bash
 source gyms/wideseek/env.sh
 .venv/bin/python -m gyms.wideseek.run \
-  --output artifacts/gyms/wideseek/runs/qwen4b-smoke \
-  --mode both --limit 2 -n 3 --concurrency 2
+  --output artifacts/gyms/wideseek/runs/qwen4b-simple-smoke \
+  --mode simple --limit 2 -n 3 --concurrency 2
 ```
 
 Repeat the exact command with `--resume` to skip completed attempts. Interrupted
@@ -73,6 +73,13 @@ process cannot guarantee worker cancellation, but execution paths remain isolate
 For width collection,
 choose `--mode decomposer --limit 20000` and the desired `-n`; the default is only
 a two-task smoke, not a full dataset run. A file lock prevents two writers on the same output.
+
+Each run requires exactly one `--mode`: `simple` or `decomposer`. For a comparison,
+finish the simple run, then launch `--mode decomposer` with a different output
+directory and the same task/budget settings. No implicit second job is scheduled.
+The watcher (`~/watch-wideseek.sh [run-name]`) selects the latest run by default
+and shows a single setup's progress and whole-run ETA. Historical combined runs
+remain readable; new combined runs are not supported.
 
 Each attempt has a 15-minute agent timeout and shared **64 model calls / 64,000
 generated tokens**, covering decomposer plus all workers. Per-call output cap is
