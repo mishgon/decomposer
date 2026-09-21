@@ -13,6 +13,13 @@ if __name__ == "__main__":
     parser.add_argument("--root", type=Path, required=True)
     args = parser.parse_args()
     args.root.mkdir(parents=True, exist_ok=True)
+    manifest = args.root / "assets.json"
+    if manifest.exists():
+        saved = json.loads(manifest.read_text())
+        if saved["corpus_revision"] != CORPUS_REVISION or saved["rlinf_revision"] != RLINF_REVISION:
+            raise ValueError("Existing assets use another revision; choose a new directory")
+        print("Offline assets already prepared; not overwriting a potentially live Qdrant store")
+        raise SystemExit(0)
     snapshot_download("RLinf/Wiki-2018-Corpus", repo_type="dataset", revision=CORPUS_REVISION,
                       local_dir=args.root / "Wiki-2018-Corpus", max_workers=4)
     # E5's model revision is recorded after the immutable snapshot resolves.
@@ -24,7 +31,7 @@ if __name__ == "__main__":
     snapshot_download("intfloat/e5-base-v2", revision=revision,
                       local_dir=args.root / "e5-base-v2",
                       allow_patterns=["*.json", "*.txt", "model.safetensors", "pytorch_model.bin"], max_workers=2)
-    (args.root / "assets.json").write_text(json.dumps({
+    manifest.write_text(json.dumps({
         "corpus": "RLinf/Wiki-2018-Corpus", "corpus_revision": CORPUS_REVISION,
         "encoder": "intfloat/e5-base-v2", "encoder_revision": revision,
         "rlinf_revision": RLINF_REVISION}, indent=2) + "\n")
