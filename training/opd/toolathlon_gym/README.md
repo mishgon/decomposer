@@ -4,7 +4,9 @@ Teacher scoring, smoke/full configuration composition and the actual masked
 loss have passed tests. On Hertz-2, `smoke-opd-20260922` completed its first
 end-to-end GPU update and saved model, optimizer and training state at
 `global_step_1`. This verifies the training path, not convergence or overfitting;
-the 20-update smoke is still running.
+the original smoke stopped at update 5 on a text re-tokenization mismatch.
+Teacher requests now send exact student token IDs and verify returned token
+meanings, avoiding text re-tokenization of non-canonical generated sequences.
 
 Student: decomposer-4b SFT. Subagents: hosted Qwen3.5-4B non-thinking.
 Teacher: hosted `Qwen/Qwen3.8-Flash-Next-NVFP4`.
@@ -28,7 +30,7 @@ python -m training.opd.toolathlon_gym.teacher \
   --output artifacts/training/toolathlon_gym_opd/preflight/teacher-score.json
 ```
 
-The preflight checks round-trip tokenization and every scored token ID against
+The preflight checks every scored token ID and its decoded meaning against
 the teacher's prompt scores. A mismatch is an error, never a substituted zero.
 Requests/responses are saved without authentication headers. The first token
 has no context and is excluded from student response targets.
@@ -55,6 +57,16 @@ export RL_ARTIFACTS="$PWD/artifacts/training/toolathlon_gym_opd/smoke"
 export RAY_TMPDIR=/path/to/short/ray-temp
 bash training/opd/toolathlon_gym/train.sh smoke
 ```
+
+Monitor the latest OPD run separately from RL:
+
+```bash
+bash training/opd/toolathlon_gym/watch-opd.sh
+# Add --once for a single snapshot, or --run /path/to/run for a specific run.
+```
+
+ClearML logging is inherited from the RL recipe; the task URL is printed in
+`trainer.log` under project `decomposer-toolathlon-gym-opd`.
 
 For the full pool, use `full` with new dataset/artifact directories. Smoke uses
 `yf-sector-comparison` and `sf-hr-dept-budget-ppt-email`; full uses the same
