@@ -27,6 +27,9 @@ def main():
                 "data_dir": os.environ.get("RL_DATA"),
                 "config_name": os.environ.get("RL_CONFIG"),
                 "trainer_module": os.environ.get("RL_TRAINER_MODULE"),
+                "config_dir": os.environ.get("RL_CONFIG_DIR"),
+                "teacher_model": os.environ.get("OPD_TEACHER_MODEL"),
+                "teacher_url": os.environ.get("OPD_TEACHER_URL"),
                 "nccl_transport": {key: os.environ.get(key) for key in ("NCCL_P2P_DISABLE", "NCCL_IB_DISABLE")},
                 "checkpoint_path": str((args.directory / "checkpoints").resolve()),
                 "ray_tmpdir": os.environ.get("RAY_TMPDIR"),
@@ -34,7 +37,7 @@ def main():
                 "revision": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
                 "policy_gpu": os.environ.get("CUDA_VISIBLE_DEVICES"), "overrides": overrides}
     (args.directory / "run.json").write_text(json.dumps(metadata, indent=2))
-    diff = subprocess.check_output(["git", "diff", "HEAD", "--", "training/toolathlon_gym",
+    diff = subprocess.check_output(["git", "diff", "HEAD", "--", "training/rl/toolathlon_gym", "training/opd/toolathlon_gym",
                                     "gyms/toolathlon_gym", "src/decomposer"], text=True)
     (args.directory / "source.diff").write_text(diff)
 
