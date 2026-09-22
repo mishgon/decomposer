@@ -26,28 +26,36 @@ class HostTransport(httpx.AsyncHTTPTransport):
         return await super().handle_async_request(request)
 
 
-def aligned_logprobs(response, token_ids):
+def aligned_logprobs(response, token_ids, tokenizer=None):
     rows = response['choices'][0].get('prompt_logprobs')
     if not isinstance(rows, list) or len(rows) != len(token_ids):
         raise ValueError('Teacher omitted prompt scores or tokenization lengths differ')
     values = [0.0]  # First token has no preceding context; never a trained token.
+    decoded = []
     for index, (token, row) in enumerate(zip(token_ids[1:], rows[1:]), 1):
         if not isinstance(row, dict) or str(token) not in row:
             raise ValueError(f'Teacher/student token mismatch at position {index}')
+        if tokenizer is not None:
+            part = row[str(token)].get('decoded_token')
+            if not isinstance(part, str):
+                raise ValueError(f'Teacher omitted decoded token at position {index}')
+            decoded.append(part)
         value = row[str(token)]['logprob']
         if not isinstance(value, (float, int)) or not math.isfinite(value):
             raise ValueError(f'Non-finite teacher logprob at position {index}')
         values.append(float(value))
+    # vLLM decodes incrementally: UTF-8 byte tokens can emit '' followed by
+    # the complete character. Compare the sequence, not individual fragments.
+    if tokenizer is not None and ''.join(decoded) != tokenizer.decode(
+            token_ids[1:], skip_special_tokens=False, clean_up_tokenization_spaces=False):
+        raise ValueError('Teacher/student token meaning mismatch')
     return values
 
 
 async def score(token_ids, *, tokenizer, output, model=None):
-    """Text round-trip verifies teacher token IDs, not just returned array length."""
-    text = tokenizer.decode(token_ids, skip_special_tokens=False)
-    if tokenizer.encode(text, add_special_tokens=False) != token_ids:
-        raise ValueError('Student trajectory does not round-trip through its tokenizer')
+    """Score exact generated IDs; decoding/re-encoding can change BPE boundaries."""
     model = model or os.environ['OPD_TEACHER_MODEL']
-    payload = {'model': model, 'prompt': text, 'prompt_logprobs': 0,
+    payload = {'model': model, 'prompt': token_ids, 'prompt_logprobs': 0,
                'max_tokens': 1, 'temperature': 1.0}
     mapping = os.environ.get('OPD_TEACHER_HOST')
     transport = HostTransport(*mapping.split(':', 1)) if mapping else None
@@ -64,7 +72,7 @@ async def score(token_ids, *, tokenizer, output, model=None):
     output.write_text(json.dumps({'model': model, 'started_at': started,
                                  'elapsed_seconds': time.time() - started,
                                  'request': payload, 'response': raw}))
-    return aligned_logprobs(raw, token_ids)
+    return aligned_logprobs(raw, token_ids, tokenizer)
 
 
 def main():

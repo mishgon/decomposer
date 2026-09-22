@@ -125,6 +125,7 @@ def show(root, selected=None):
         print(f"TOOLATHLON RL  {run.parent.name} | {'starting' if active else 'stopped'} | {duration(elapsed)}")
         return
     config = yaml.safe_load(config_path.read_text())
+    stage = 'OPD' if config.get('distillation', {}).get('enabled') else 'RL'
     trainer = config["trainer"]
     rollout = config["actor_rollout_ref"]["rollout"]
     samples = rollout["val_kwargs"]["n"]
@@ -225,7 +226,7 @@ def show(root, selected=None):
     phase = f"baseline ({scored}/{validation_size} scored)" if baseline else "training / periodic validation"
     if done:
         phase = "complete"
-    print(f"TOOLATHLON RL  {run.parent.name} | {health}")
+    print(f"TOOLATHLON {stage}  {run.parent.name} | {health}")
     print(f"Elapsed {duration(elapsed)} | phase: {phase} | updates {step}/{total}")
     print("Tasks: unknown (saved dataset manifest unavailable)" if missing else task_coverage(train_tasks, expected))
     print(f"Episodes {scored}/{total_episodes if schedule_known else '?'} scored | {len(episodes) - scored} unfinished")
