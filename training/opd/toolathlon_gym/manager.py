@@ -31,7 +31,12 @@ class HostedTeacherClient:
 
 class HostedTeacherManager:
     def __init__(self, config):
+        from verl.utils.config import omega_conf_to_dataclass
+        keys = list(omega_conf_to_dataclass(config.distillation).teacher_models)
+        if len(keys) != 1:
+            raise ValueError('Hosted OPD expects exactly one teacher')
+        self.key = keys[0]
         self.client = HostedTeacherClient(config.actor_rollout_ref.model.path)
 
     def get_client(self):
-        return {'default': self.client}
+        return {self.key: self.client}

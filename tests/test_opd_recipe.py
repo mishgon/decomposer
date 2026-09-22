@@ -53,6 +53,14 @@ class RecipeTests(unittest.TestCase):
         self.assertLess(logits.grad[1].item(), 0.)
         self.assertLess(logits.grad[3].item(), 0.)
 
+    def test_teacher_manager_routing_matches_verl(self):
+        from training.opd.toolathlon_gym.manager import HostedTeacherManager
+        from verl.experimental.teacher_loop.teacher_manager import AsyncTeacherLLMServerManager
+        config = self.config('smoke')
+        clients = HostedTeacherManager(config).get_client()
+        manager = AsyncTeacherLLMServerManager(config, clients)
+        self.assertEqual(set(clients), set(manager.teacher_model_configs))
+
 
 class ClientTests(unittest.IsolatedAsyncioTestCase):
     async def test_teacher_alignment_matches_verl_next_token_convention(self):
