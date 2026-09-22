@@ -113,6 +113,7 @@ def show(root, selected=None):
         return
     run = max(runs, key=lambda path: path.stat().st_mtime)
     metadata = json.loads(run.read_text())
+    stage = 'OPD' if '/opd/' in (metadata.get('config_dir') or '') else 'RL'
     try:
         fields = Path(f"/proc/{metadata['pid']}/stat").read_text().split()
         active = fields[21] == metadata["process_start_ticks"] and fields[2] != "Z"
@@ -122,7 +123,7 @@ def show(root, selected=None):
     import yaml
     config_path = run.parent / "hydra/.hydra/config.yaml"
     if not config_path.exists():
-        print(f"TOOLATHLON RL  {run.parent.name} | {'starting' if active else 'stopped'} | {duration(elapsed)}")
+        print(f"TOOLATHLON {stage}  {run.parent.name} | {'starting' if active else 'stopped'} | {duration(elapsed)}")
         return
     config = yaml.safe_load(config_path.read_text())
     stage = 'OPD' if config.get('distillation', {}).get('enabled') else 'RL'
@@ -212,6 +213,8 @@ def show(root, selected=None):
     if "async_training" in config:
         eta, basis = estimate_eta(elapsed, scored, total_episodes, 0, [], 0, [])
     grad, clip = latest("actor/grad_norm"), latest("actor/pg_clipfrac")
+    if stage == 'OPD':
+        clip = latest("actor/distillation/pg_clipfrac")
     done = schedule_known and step >= total and rounds <= complete
     nonfinite = any(v is not None and not math.isfinite(v) for v in
                     (grad, clip, latest("actor/loss")))
@@ -247,8 +250,10 @@ def show(root, selected=None):
         delta = f"{after['reward'] - base:+.3f}" if after and base is not None else "--"
         print(f"  {source.rsplit('/', 1)[-1]:<22} {b:>5}  {a:>10}  {delta:>7}")
     rewards = [p.value for p in scalars.get("critic/rewards/mean", [])]
-    if rewards:
+    if rewards and stage != 'OPD':
         print(f"Batch reward: {trend(rewards)} {rewards[-1]:.3f} (varying tasks; not proof of learning)")
+    if stage == 'OPD' and latest('actor/distillation/loss') is not None:
+        print(f"Distillation loss: {latest('actor/distillation/loss'):.4f} (not task reward)")
     if grad is None:
         print("Training health: checkpoint saved; awaiting logged gradient metrics" if step else
               "Training health: awaiting first optimizer update; learning not established")
