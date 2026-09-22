@@ -1,0 +1,33 @@
+# Shared optimizer/model/harness recipe; only the learning objective changes.
+defaults:
+  - rl_recipe
+  - _self_
+
+actor_rollout_ref:
+  rollout:
+    n: 1
+
+trainer:
+  total_epochs: 10
+  project_name: decomposer-toolathlon-gym-opd
+  experiment_name: full
+
+async_training:
+  concurrent_samples_per_replica: 2
+  teacher_manager_class: training.opd.toolathlon_gym.manager.HostedTeacherManager
+
+distillation:
+  enabled: true
+  n_gpus_per_node: 0
+  nnodes: 0
+  teacher_models:
+    teacher_model:
+      model_path: ${oc.env:OPD_TEACHER_MODEL}
+      inference:
+        temperature: 1.0
+  distillation_loss:
+    loss_mode: k1
+    use_policy_gradient: true
+    use_task_rewards: false
+    loss_max_clamp: 10.0
+    log_prob_min_clamp: -10.0

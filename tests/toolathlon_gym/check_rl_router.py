@@ -10,13 +10,13 @@ def check():
     import asyncio
     import tempfile
     from unittest.mock import patch
-    from training.toolathlon_gym.agent_loop import ToolathlonAgentLoop
+    from training.rl.toolathlon_gym.agent_loop import ToolathlonAgentLoop
 
     class ProbeDone(Exception):
         pass
 
     with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"RL_ARTIFACTS": directory}):
-        with patch("training.toolathlon_gym.agent_loop.Episode") as episode:
+        with patch("training.rl.toolathlon_gym.agent_loop.Episode") as episode:
             episode.return_value.start.side_effect = ProbeDone
             try:
                 asyncio.run(ToolathlonAgentLoop.run(None, {}, extra_info={"task_id": "probe"}))

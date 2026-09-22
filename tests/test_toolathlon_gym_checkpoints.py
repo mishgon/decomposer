@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from training.toolathlon_gym.select_checkpoints import select
+from training.rl.toolathlon_gym.select_checkpoints import select
 
 
 class CheckpointSelectionTest(unittest.TestCase):

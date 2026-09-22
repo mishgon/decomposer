@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
-cd "$(dirname "$0")/../.."
-source training/toolathlon_gym/router.sh
+cd "$(dirname "$0")/../../.."
+source training/rl/toolathlon_gym/router.sh
 export MODEL_PATH="$(readlink -f "${MODEL_PATH:-$HOME/models/decomposer-4b-sft}")"
 export PYTHONPATH="$PWD:$PWD/src:$PWD/external/verl${PYTHONPATH:+:$PYTHONPATH}"
 export PATH="$PWD/.venv-rl/bin:/usr/local/cuda/bin:$PATH"
@@ -25,7 +25,7 @@ cleanup() {
         for i in {1..15}; do kill -0 "$server_pid" 2>/dev/null || break; sleep 1; done
         kill -KILL -- "-$server_pid" 2>/dev/null || true
     fi
-    .venv-rl/bin/python -m training.toolathlon_gym.throughput_cleanup "$TEST_ROOT"
+    .venv-rl/bin/python -m training.rl.toolathlon_gym.throughput_cleanup "$TEST_ROOT"
 }
 trap cleanup EXIT
 trap 'exit 130' TERM INT
@@ -44,7 +44,7 @@ for i in {1..120}; do
 done
 [[ "$ready" == 1 ]] || { echo 'Inference startup timed out'; exit 1; }
 echo 'Running one-minute end-to-end rollout preflight'
-setsid .venv-rl/bin/python -m training.toolathlon_gym.throughput \
+setsid .venv-rl/bin/python -m training.rl.toolathlon_gym.throughput \
     --output "$TEST_ROOT/preflight" --concurrency 40 --limit 1 --timeout 60 --gpu "$CUDA_VISIBLE_DEVICES" \
     > "$TEST_ROOT/preflight.log" 2>&1 &
 phase_pid=$!
@@ -59,12 +59,12 @@ for phase in "${phases[@]}"; do
     if [[ "$phase" == 40-repeat && $((SECONDS-start)) -gt 9900 ]]; then break; fi
     conc="${phase%%-*}"
     echo "Starting c$phase at $(date -u +%FT%TZ)"
-    setsid .venv-rl/bin/python -m training.toolathlon_gym.throughput \
+    setsid .venv-rl/bin/python -m training.rl.toolathlon_gym.throughput \
         --output "$TEST_ROOT/c$phase" --concurrency "$conc" --gpu "$CUDA_VISIBLE_DEVICES" "${task_args[@]}" \
         > "$TEST_ROOT/c$phase.log" 2>&1 &
     phase_pid=$!
     wait "$phase_pid"
     phase_pid=""
-    .venv-rl/bin/python -m training.toolathlon_gym.throughput_cleanup "$TEST_ROOT/c$phase"
+    .venv-rl/bin/python -m training.rl.toolathlon_gym.throughput_cleanup "$TEST_ROOT/c$phase"
     .venv-rl/bin/python -c 'import json,sys; s=json.load(open(sys.argv[1])); print(json.dumps(s)); assert s["status"]=="complete" and s["infrastructure_errors"] <= s["concurrency"]*float(sys.argv[2]), "Too many infrastructure failures; stopping escalation"' "$TEST_ROOT/c$phase/summary.json" "${THROUGHPUT_MAX_ERROR_FRACTION:-0.1}"
 done
