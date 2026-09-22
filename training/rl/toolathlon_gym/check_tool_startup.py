@@ -24,7 +24,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=False)
     root = Path("external/toolathlon_gym/tasks/finalpool")
-    pool = json.loads(Path("training/toolathlon_gym/rl_task_pool.json").read_text())
+    pool = json.loads(Path("training/rl/toolathlon_gym/rl_task_pool.json").read_text())
     configs = {t["task_id"]: json.loads((root / t["task_id"] / "task_config.json").read_text())
                for t in pool["tasks"]}
     remaining = set().union(*(set(c["needed_mcp_servers"]) for c in configs.values()))

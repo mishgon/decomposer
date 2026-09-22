@@ -1,7 +1,7 @@
 import unittest
 
-from training.toolathlon_gym.task_profiles import select_profiles
-from training.toolathlon_gym.watch import run_plan
+from training.rl.toolathlon_gym.task_profiles import select_profiles
+from training.rl.toolathlon_gym.watch import run_plan
 
 
 class ProfileTests(unittest.TestCase):

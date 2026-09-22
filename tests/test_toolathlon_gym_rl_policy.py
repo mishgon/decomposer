@@ -7,7 +7,7 @@ from types import SimpleNamespace
 class PolicyTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         from transformers import AutoTokenizer
-        from training.toolathlon_gym.policy import PolicyTokens
+        from training.rl.toolathlon_gym.policy import PolicyTokens
         self.tokenizer = AutoTokenizer.from_pretrained(os.environ["RL_TOKENIZER"])
 
         async def generate(ids, params):
@@ -46,7 +46,7 @@ class PolicyTests(unittest.IsolatedAsyncioTestCase):
             await self.policy.respond([{"role": "user", "content": "hi"}], [])
 
     async def test_observation_overflow_preserves_generated_tokens(self):
-        from training.toolathlon_gym.policy import RolloutBudgetExceeded
+        from training.rl.toolathlon_gym.policy import RolloutBudgetExceeded
         messages = [{"role": "user", "content": "hi"}]
         await self.policy.respond(messages, [])
         original = list(self.policy.response_ids)

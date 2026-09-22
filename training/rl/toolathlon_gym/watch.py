@@ -10,7 +10,7 @@ from functools import lru_cache
 from pathlib import Path
 from statistics import mean
 
-from training.toolathlon_gym.report import summarize
+from training.rl.toolathlon_gym.report import summarize
 
 
 def duration(seconds):
@@ -267,7 +267,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--once", action="store_true")
     parser.add_argument("--run", type=Path, help="Inspect a specific run directory instead of the newest run")
-    parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[2] /
+    parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[3] /
                         "artifacts/training/toolathlon_gym", help="Directory containing RL runs")
     args = parser.parse_args()
     while True:

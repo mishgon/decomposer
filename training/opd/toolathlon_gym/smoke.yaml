@@ -1,0 +1,6 @@
+# Same algorithm/hyperparameters as full; selects the fixed two-task pool.
+defaults:
+  - full
+  - _self_
+trainer:
+  experiment_name: smoke
