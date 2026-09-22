@@ -1,8 +1,10 @@
 # Toolathlon Gym on-policy distillation
 
-Work in progress: teacher scoring, veRL integration, smoke/full configuration
-composition and the actual masked loss have passed tests. End-to-end GPU
-training has not yet been verified.
+Teacher scoring, smoke/full configuration composition and the actual masked
+loss have passed tests. On Hertz-2, `smoke-opd-20260922` completed its first
+end-to-end GPU update and saved model, optimizer and training state at
+`global_step_1`. This verifies the training path, not convergence or overfitting;
+the 20-update smoke is still running.
 
 Student: decomposer-4b SFT. Subagents: hosted Qwen3.5-4B non-thinking.
 Teacher: hosted `Qwen/Qwen3.8-Flash-Next-NVFP4`.
@@ -75,6 +77,6 @@ feeds veRL's policy-gradient distillation objective, without GRPO group ranking.
 Teacher calls are saved in `teacher_calls/`; existing episode traces,
 checkpoints, TensorBoard and ClearML logging are reused.
 
-The currently running RL checkout on Hertz-2 retains its old paths deliberately;
+The separate RL checkout on Hertz-2 retains its old paths deliberately;
 only the new OPD checkout receives this reorganization. Do not pull the path
 migration into a live RL checkout.
