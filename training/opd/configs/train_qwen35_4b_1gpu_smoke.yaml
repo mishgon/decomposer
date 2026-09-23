@@ -1,0 +1,39 @@
+# Smoke variant of train_qwen35_4b_3gpu.yaml: one GPU, four samples per step.
+model:
+  # fp32 master weights, bf16 compute: see training/opd/train.py.
+  dtype: float32
+  attn_implementation: sdpa
+
+loss:
+  advantage_clamp: 4.0
+  ratio_clip: 0.2
+  reward_coef: 0.0
+
+training:
+  # Samples per optimizer step across all ranks (batch size one per device).
+  global_batch_size: 4
+  learning_rate: 1.0e-6
+  lr_scheduler_type: constant
+  warmup_steps: 0
+  weight_decay: 0.0
+  max_grad_norm: 1.0
+  optim: adamw_torch_fused
+  bf16: true
+  tf32: true
+  gradient_checkpointing: false
+  dataloader_num_workers: 2
+  fsdp: true
+  fsdp_config:
+    auto_wrap_policy: TRANSFORMER_BASED_WRAP
+    reshard_after_forward: true
+    cpu_offload: false
+    activation_checkpointing: true
+    state_dict_type: SHARDED_STATE_DICT
+    cpu_ram_efficient_loading: false
+    sync_module_states: true
+
+run:
+  # As in the SFT configs: cuDNN SDPA is disabled on this host.
+  disable_cudnn_sdpa: true
+  expected_world_size: 1
+  max_length: 65536

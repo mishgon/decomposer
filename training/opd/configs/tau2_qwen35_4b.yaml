@@ -1,0 +1,43 @@
+# Iterative OPD of the Qwen3.5-4B Decomposer manager on the tau2 gym, with
+# Qwen3.8-Flash-Next (same tokenizer) as the teacher on the shared LLM proxy.
+run:
+  name: tau2-qwen35-4b-student-opd-v1
+  root: /mnt/share14T-2/sukhorukov/decomposer_artifacts/training/opd
+  # Until the tau2 SFT release (v6) exists, start from the v5 student-prompt SFT.
+  init_checkpoint: /mnt/share14T-2/sukhorukov/decomposer_artifacts/training/sft/checkpoints/qwen35-4b-nonthinking-mixed-v3-student-4gpu/final
+  rounds: 20
+  seed: 0
+
+rollout:
+  experiment: opd_rollout
+  pool: decomposer_train_v2
+  tasks_per_round: 48
+  repeats: 2
+  manager_gpu: "5"
+  subagent_backend: llm_proxy
+  concurrency: 16
+
+teacher:
+  model: Qwen/Qwen3.8-Flash-Next-NVFP4
+  base_url_env: LLM_PROXY_URL
+  api_key_env: LLM_PROXY_MASTER_KEY
+  verify_tls: false
+  concurrency: 8
+
+samples:
+  max_length: 65536
+  include_failed: true
+
+train:
+  config: training/opd/configs/train_qwen35_4b_3gpu.yaml
+  gpus: "5,6,7"
+  # Triton 3.7.1 for Qwen3.5's gated-delta backward on Hopper (see loop.train_environment).
+  pythonpath:
+    - /mnt/share14T-2/sukhorukov/decomposer_artifacts/kernels/sft/qwen35-overlay/triton
+
+eval:
+  every: 5
+  experiment: qwen35_4b_student_checkpoint
+  pool: decomposer_eval_v1
+  tasks_per_domain: 5
+  repeats: 1
