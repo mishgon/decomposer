@@ -188,6 +188,19 @@ EXPERIMENTS: tuple[Tau2Experiment, ...] = (
         manager_checkpoint=SFT_CHECKPOINTS_ROOT / "qwen35-4b-nonthinking-mixed-v3-student-4gpu" / "final",
     ),
     Tau2Experiment(
+        name="qwen35_4b_student_checkpoint",
+        description=(
+            "Any Qwen3.5-4B student-prompt manager checkpoint (`run.py --manager-checkpoint`), "
+            "with evaluation sampling: SFT and OPD round evaluations."
+        ),
+        manager_backend="local_vllm",
+        manager_model_id="decomposer/qwen35-4b-student",
+        prompt_profile="student",
+        pool=EVAL_POOL,
+        manager_reasoning_mode="non_thinking",
+        manager_sampling=QWEN35_GENERAL_NON_THINKING,
+    ),
+    Tau2Experiment(
         name="opd_rollout",
         description=(
             "On-policy rollouts for OPD: the round's student checkpoint, untruncated "

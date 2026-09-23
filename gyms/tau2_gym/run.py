@@ -138,9 +138,19 @@ def component_venv_root() -> Path:
     return COMPONENT_VENV_ROOT / digest.hexdigest()[:16]
 
 
-def dataset_path(pool: str, pool_sha: str, tasks_per_domain: int | None) -> Path:
+def subset_sha256(tasks_file: Path) -> str:
+    """Mirrors tau2_export.subset_sha256, which runs in the tau2 venv."""
+    tasks = sorted((str(domain), str(task_id)) for domain, task_id in json.loads(tasks_file.read_text()))
+    return hashlib.sha256(json.dumps([list(key) for key in tasks]).encode()).hexdigest()[:12]
+
+
+def dataset_path(
+    pool: str, pool_sha: str, tasks_per_domain: int | None, tasks_file: Path | None = None
+) -> Path:
     """Mirrors tau2_export.dataset_filename, which runs in the tau2 venv."""
     suffix = f"-k{tasks_per_domain}" if tasks_per_domain is not None else ""
+    if tasks_file is not None:
+        suffix += f"-s{subset_sha256(tasks_file)}"
     return DATASETS_ROOT / f"{pool}-{pool_sha}{suffix}.decomposer.jsonl"
 
 
@@ -411,7 +421,12 @@ def base_environment(ports: PortLayout, *, subagent_backend: str) -> dict[str, s
 
 
 def prepare_dataset(
-    *, pool: str, tasks_per_domain: int | None, output: Path, env: dict[str, str]
+    *,
+    pool: str,
+    tasks_per_domain: int | None,
+    tasks_file: Path | None,
+    output: Path,
+    env: dict[str, str],
 ) -> dict[str, Any]:
     """Materialise the Gym dataset by running tau2_export inside the tau2 venv."""
     python = TAU2_VENV / "bin" / "python"
@@ -431,6 +446,8 @@ def prepare_dataset(
     ]
     if tasks_per_domain is not None:
         command.extend(["--tasks-per-domain", str(tasks_per_domain)])
+    if tasks_file is not None:
+        command.extend(["--tasks-file", str(tasks_file)])
     result = subprocess.run(command, cwd=REPO_ROOT, env=env, capture_output=True, text=True)
     if result.returncode != 0:
         # capture_output hides the child's traceback; without this the caller sees
@@ -699,7 +716,8 @@ def execute(args: argparse.Namespace) -> int:
     logs = output_dir / "logs"
     rollouts = output_dir / "rollouts.jsonl"
     config_path = output_dir / "configuration" / "tau2_gym.yaml"
-    dataset = dataset_path(pool, pool_meta["sha256"], args.tasks_per_domain)
+    tasks_file = Path(args.tasks_file).resolve() if args.tasks_file else None
+    dataset = dataset_path(pool, pool_meta["sha256"], args.tasks_per_domain, tasks_file)
     config = gym_config(experiment, ports)
 
     env = base_environment(ports, subagent_backend=args.subagent_backend)
@@ -762,7 +780,11 @@ def execute(args: argparse.Namespace) -> int:
 
     with phase("prepare", timings):
         summary = prepare_dataset(
-            pool=pool, tasks_per_domain=args.tasks_per_domain, output=dataset, env=env
+            pool=pool,
+            tasks_per_domain=args.tasks_per_domain,
+            tasks_file=tasks_file,
+            output=dataset,
+            env=env,
         )
         print(f"[tau2-gym] dataset: {json.dumps(summary)}", flush=True)
     expected_tasks = summary["rows"] if args.limit is None else min(args.limit, summary["rows"])
@@ -774,6 +796,7 @@ def execute(args: argparse.Namespace) -> int:
         "pool": pool,
         "pool_sha256": pool_meta["sha256"],
         "tasks_per_domain": args.tasks_per_domain,
+        "tasks_file": str(tasks_file) if tasks_file else None,
         "num_repeats": args.num_repeats,
         "concurrency": concurrency,
         "limit": args.limit,
@@ -875,6 +898,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--pool", default=None, help="task pool; defaults to the experiment's")
     parser.add_argument("--tasks-per-domain", type=int, default=None,
                         help="deterministic stratified subsample of the pool")
+    parser.add_argument("--tasks-file", default=None,
+                        help="explicit task subset of the pool: JSON list of [domain, task_id]")
     parser.add_argument("--num-repeats", type=int, default=1)
     parser.add_argument("--concurrency", type=int, default=None,
                         help="defaults to the experiment's concurrency")

@@ -19,6 +19,7 @@ import argparse
 import collections
 import hashlib
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -90,8 +91,30 @@ def build_rows(tasks: list[TaskKey], language: str) -> tuple[list[dict], dict[st
     return rows, dict(skipped)
 
 
-def dataset_filename(pool_name: str, pool_sha: str, tasks_per_domain: int | None) -> str:
+def read_tasks_file(path: Path, pool_tasks: list[TaskKey]) -> list[TaskKey]:
+    """An explicit task subset (JSON list of [domain, task_id]) in pool order.
+
+    Used by the OPD loop, which samples each round's tasks from a pool. Every task
+    must belong to the pool, so a subset can never reach outside the pool's
+    held-out hygiene.
+    """
+    wanted = {(str(domain), str(task_id)) for domain, task_id in json.loads(path.read_text(encoding="utf-8"))}
+    outside = sorted(wanted - set(pool_tasks))
+    if outside:
+        raise SystemExit(f"{len(outside)} tasks in {path} are not in the pool, e.g. {outside[:3]}")
+    return [key for key in pool_tasks if key in wanted]
+
+
+def subset_sha256(tasks: list[TaskKey]) -> str:
+    return hashlib.sha256(json.dumps(sorted(tasks)).encode()).hexdigest()[:12]
+
+
+def dataset_filename(
+    pool_name: str, pool_sha: str, tasks_per_domain: int | None, subset_sha: str | None = None
+) -> str:
     suffix = f"-k{tasks_per_domain}" if tasks_per_domain is not None else ""
+    if subset_sha is not None:
+        suffix += f"-s{subset_sha}"
     return f"{pool_name}-{pool_sha}{suffix}.decomposer.jsonl"
 
 
@@ -104,11 +127,15 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="deterministic stratified subsample, for smoke runs and quick evals",
     )
+    parser.add_argument("--tasks-file", type=Path, default=None,
+                        help="explicit task subset of the pool: JSON list of [domain, task_id]")
     parser.add_argument("--language", default=bridge.DEFAULT_LANGUAGE)
     parser.add_argument("--output", required=True, type=Path)
     args = parser.parse_args(argv)
 
     tasks, meta = load_pool(args.pool)
+    if args.tasks_file is not None:
+        tasks = read_tasks_file(args.tasks_file, tasks)
     if args.tasks_per_domain is not None:
         if args.tasks_per_domain < 1:
             raise SystemExit("--tasks-per-domain must be at least 1")
@@ -116,7 +143,9 @@ def main(argv: list[str] | None = None) -> int:
     rows, skipped = build_rows(tasks, args.language)
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    tmp = args.output.with_suffix(args.output.suffix + ".tmp")
+    # Per-process temp name: concurrent runs on one pool export the same file, and a
+    # shared temp path let one run's replace() steal the other's.
+    tmp = args.output.with_suffix(args.output.suffix + f".{os.getpid()}.tmp")
     with tmp.open("w", encoding="utf-8") as handle:
         for row in rows:
             handle.write(json.dumps(row, ensure_ascii=False) + "\n")
@@ -128,6 +157,7 @@ def main(argv: list[str] | None = None) -> int:
         "pool_sha256": meta["sha256"],
         "pool_path": str(resolve_pool(args.pool)),
         "tasks_per_domain": args.tasks_per_domain,
+        "tasks_file": str(args.tasks_file) if args.tasks_file else None,
         "domains": sorted({row["domain"] for row in rows}),
         "skipped": skipped,
         "output": str(args.output),
