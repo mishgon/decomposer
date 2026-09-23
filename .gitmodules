@@ -7,3 +7,6 @@
 [submodule "external/gaia2"]
 	path = external/gaia2
 	url = https://gitlab.2a2i.org/Ionov/gaia2.git
+[submodule "external/tau2_gym"]
+	path = external/tau2_gym
+	url = https://gitlab.2a2i.org/Sukhorukov/tau2-gym.git
