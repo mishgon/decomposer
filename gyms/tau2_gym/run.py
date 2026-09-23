@@ -1,14 +1,19 @@
-"""Local runner for Decomposer evaluations on the tau2 gym.
+"""Local runner for Decomposer runs on the tau2 gym.
 
-Starts the Qwen3.5-4B subagent worker, the LangGraph subagent server, the Gym
+Starts the manager endpoint (local vLLM, or a credential-isolating proxy for a remote
+manager), the Qwen3.5-4B subagent worker, the LangGraph subagent server and the Gym
 servers, performs one `gym eval run`, validates the output, and stops every child
-process. Structure follows gyms/workplace_assistant/run.py; that code is
-duplicated per gym rather than shared, so this is a trimmed copy of the same
-phases, port layout, supervisor and status contract.
+process. Structure follows gyms/workplace_assistant/run.py; that code is duplicated
+per gym rather than shared, so this is a trimmed copy of the same phases, port
+layout, supervisor and status contract.
+
+What runs is an experiment from `experiments.py` on a task pool from `task_pools/`.
+The Gym config is generated from the experiment and written into the run directory,
+so a run is described completely by its `run_status.json` and `configuration/`.
 
 The tau2 resources server lives at gyms/tau2_gym/gym_components/resources_servers/
-and is found through NEMO_GYM_EXTRA_ROOTS, which Gym searches ahead of its own
-tree (nemo_gym/__init__.py:52-79). The Gym submodule is untouched.
+and is found through NEMO_GYM_EXTRA_ROOTS, which Gym searches ahead of its own tree
+(nemo_gym/__init__.py:52-79). The Gym submodule is untouched.
 """
 
 from __future__ import annotations
@@ -27,10 +32,29 @@ import time
 import urllib.error
 import urllib.request
 from collections.abc import Sequence
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+import yaml  # noqa: E402
+
+from gyms.tau2_gym.experiments import (  # noqa: E402
+    EXPERIMENTS_BY_NAME,
+    LLM_PROXY_API_KEY_ENV,
+    LLM_PROXY_URL_ENV,
+    OPENROUTER_API_KEY_ENV,
+    OPENROUTER_BASE_URL,
+    SUBAGENT_ASSISTANT_ID,
+    SUBAGENT_DESCRIPTION,
+    SUBAGENT_TYPE_ID,
+    Tau2Experiment,
+    get_experiment,
+)
+from gyms.tau2_gym.task_pools import load_pool  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PROJECT_VENV = REPO_ROOT / ".venv"
@@ -46,41 +70,30 @@ RESULTS_ROOT = ARTIFACTS_ROOT / "evaluation" / "results" / "tau2_gym"
 DATASETS_ROOT = ARTIFACTS_ROOT / "datasets" / "tau2_gym"
 
 TAU2_CHECKOUT = REPO_ROOT / "external" / "tau2_gym"
+# The Gym CLIs run from here, as in the workplace runner, so Hydra's per-invocation
+# outputs/ directories land in Gym's ignored tree instead of the repository root.
+GYM_CHECKOUT = REPO_ROOT / "external" / "Gym"
 TAU2_DATA_DIR = TAU2_CHECKOUT / "data"
 GYM_EXTRA_ROOT = REPO_ROOT / "gyms" / "tau2_gym" / "gym_components"
 SUBAGENT_DIR = REPO_ROOT / "gyms" / "tau2_gym" / "subagents"
-GYM_CONFIG = (
-    REPO_ROOT
-    / "gyms"
-    / "tau2_gym"
-    / "configs"
-    / "tau2_gym_deepseek_v4_flash_0731_qwen35_4b_non_thinking.yaml"
-)
 
 QWEN35_4B_MODEL_ID = "Qwen/Qwen3.5-4B"
 ROLLOUT_FAILURE_POLICY = "score_zero"
-
-# Shared LLM proxy serving Qwen/Qwen3.5-4B (two replicas). Credentials live in
-# ~/.secrets/decomposer.env; gyms.remote_model_proxy injects them so the subagent
-# process only ever talks plaintext HTTP to loopback.
-LLM_PROXY_URL_ENV = "LLM_PROXY_URL"
-LLM_PROXY_API_KEY_ENV = "LLM_PROXY_MASTER_KEY"
+VERIFIER_FACTORY = "responses_api_agents.decomposer_agent.app:_subagent_tool_calls_and_final_message"
 SUBAGENT_BACKENDS = ("local_vllm", "llm_proxy")
-STATUS_SCHEMA_VERSION = 1
-
-# Defaults for the first tau2 milestone: three GAIA2-hard domains that run with
-# ScriptedUser (single compound user turn, no user-simulator LLM) -- see
-# _EXPLICIT_AUTO_DOMAINS in external/tau2_gym/training/tau2_env_manager.py:60-68.
-DEFAULT_DOMAINS = ("hotel_reservations", "library_lending", "gym_memberships")
-DEFAULT_TASKS_PER_DOMAIN = 5
+STATUS_SCHEMA_VERSION = 2
 
 
 @dataclass(frozen=True)
 class PortLayout:
     offset: int = 0
+    # Subagent worker. Hertz-2 is shared and 8025 often serves someone else's
+    # Qwen3.5-4B; --subagent-port moves it without touching the other ports.
     qwen35_4b: int = 8025
+    manager_vllm: int = 8026
     # 8142 is the workplace gym's manager proxy; keep clear of it.
     subagent_proxy: int = 8143
+    manager_proxy: int = 8144
     langgraph: int = 2024
     gym_head: int = 11000
     gym_component_low: int = 11001
@@ -92,7 +105,9 @@ class PortLayout:
         return replace(
             self,
             qwen35_4b=self.qwen35_4b + self.offset,
+            manager_vllm=self.manager_vllm + self.offset,
             subagent_proxy=self.subagent_proxy + self.offset,
+            manager_proxy=self.manager_proxy + self.offset,
             langgraph=self.langgraph + self.offset,
             gym_head=self.gym_head + self.offset,
             gym_component_low=self.gym_component_low + self.offset,
@@ -100,15 +115,11 @@ class PortLayout:
         )
 
     def as_dict(self) -> dict[str, int]:
-        return {
-            "offset": self.offset,
-            "qwen35_4b": self.qwen35_4b,
-            "subagent_proxy": self.subagent_proxy,
-            "langgraph": self.langgraph,
-            "gym_head": self.gym_head,
-            "gym_component_low": self.gym_component_low,
-            "gym_component_high": self.gym_component_high,
-        }
+        return asdict(self)
+
+
+def loopback_url(port: int) -> str:
+    return f"http://127.0.0.1:{port}/v1"
 
 
 def gym_lock_hash() -> str:
@@ -127,24 +138,137 @@ def component_venv_root() -> Path:
     return COMPONENT_VENV_ROOT / digest.hexdigest()[:16]
 
 
-def dataset_filename(domains: Sequence[str], tasks_per_domain: int | None) -> str:
-    """Readable for a few domains, hashed once it would blow the 255-byte limit.
+def dataset_path(pool: str, pool_sha: str, tasks_per_domain: int | None) -> Path:
+    """Mirrors tau2_export.dataset_filename, which runs in the tau2 venv."""
+    suffix = f"-k{tasks_per_domain}" if tasks_per_domain is not None else ""
+    return DATASETS_ROOT / f"{pool}-{pool_sha}{suffix}.decomposer.jsonl"
 
-    Joining 26 domain names produces a ~450 character filename and ENAMETOOLONG.
-    """
-    stem = "-".join(domains)
-    suffix = f"-{tasks_per_domain}.decomposer.jsonl"
-    if len(stem) + len(suffix) <= 120:
-        return stem + suffix
-    digest = hashlib.sha256("\n".join(domains).encode()).hexdigest()[:12]
-    return f"{len(domains)}domains-{digest}{suffix}"
+
+def run_name(
+    experiment: Tau2Experiment,
+    *,
+    pool: str,
+    tasks_per_domain: int | None,
+    num_repeats: int,
+    port_offset: int,
+) -> str:
+    name = f"{experiment.name}-{pool}"
+    if tasks_per_domain is not None:
+        name += f"-k{tasks_per_domain}"
+    name += f"-n{num_repeats}"
+    if port_offset:
+        name += f"-port-offset-{port_offset}"
+    return name
 
 
 def atomic_json(path: Path, value: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    tmp.write_text(json.dumps(value, indent=2, sort_keys=True, default=str) + "\n", encoding="utf-8")
     tmp.replace(path)
+
+
+def checkpoint_fingerprint(checkpoint: Path) -> str:
+    """Cheap identity for a served checkpoint: file names, sizes and mtimes.
+
+    Hashing multi-GB weights on every run is too slow; this still changes whenever a
+    checkpoint is rewritten, which is what lets an OPD round prove its rollouts came
+    from the weights it just exported.
+    """
+    digest = hashlib.sha256()
+    for path in sorted(p for p in checkpoint.rglob("*") if p.is_file()):
+        stat = path.stat()
+        digest.update(f"{path.relative_to(checkpoint)}:{stat.st_size}:{stat.st_mtime_ns}\n".encode())
+    return digest.hexdigest()[:16]
+
+
+def gym_config(experiment: Tau2Experiment, ports: PortLayout) -> dict[str, Any]:
+    """The complete Gym config for `experiment`."""
+    sampling = experiment.manager_sampling
+    if experiment.manager_backend == "openrouter":
+        create_params: dict[str, Any] = {"temperature": 1.0, "top_p": 1.0}
+        policy: dict[str, Any] = {
+            "openai_model": {
+                "entrypoint": "app.py",
+                "openai_base_url": OPENROUTER_BASE_URL,
+                # Resolved by OmegaConf inside Gym; the key never touches disk.
+                "openai_api_key": "${oc.env:" + OPENROUTER_API_KEY_ENV + "}",
+                "openai_model": experiment.manager_model_id,
+                **({"extra_body": dict(experiment.manager_extra_body)} if experiment.manager_extra_body else {}),
+            }
+        }
+    elif experiment.manager_backend == "llm_proxy":
+        assert sampling is not None
+        # The manager proxy's --extra-body-json overrides these server-side; they are
+        # set to the same values so the request is honest on its own.
+        create_params = {"temperature": sampling.temperature, "top_p": sampling.top_p}
+        policy = {
+            "openai_model": {
+                "entrypoint": "app.py",
+                "openai_base_url": loopback_url(ports.manager_proxy),
+                "openai_api_key": "EMPTY",
+                "openai_model": experiment.manager_model_id,
+            }
+        }
+    else:
+        assert sampling is not None
+        create_params = {
+            "temperature": sampling.temperature,
+            "top_p": sampling.top_p,
+            "presence_penalty": sampling.presence_penalty,
+        }
+        policy = {
+            "vllm_model": {
+                "entrypoint": "app.py",
+                "base_url": loopback_url(ports.manager_vllm),
+                "api_key": "EMPTY",
+                "model": experiment.manager_model_id,
+                "return_token_id_information": experiment.return_token_ids,
+                # Non-thinking Qwen3.5 is served without a reasoning parser.
+                "uses_reasoning_parser": False,
+                "chat_template_kwargs": experiment.chat_template_kwargs,
+                "extra_body": {**sampling.extra_body, "include_reasoning": False},
+            }
+        }
+
+    return {
+        "responses_create_params": create_params,
+        "tau2_gym": {
+            "resources_servers": {
+                "tau2_gym": {
+                    "entrypoint": "app.py",
+                    "domain": "agent",
+                    "verified": False,
+                    "description": "tau2 GAIA2-hard domains as a multi-step tool-using environment.",
+                    "value": "Improve multi-step tool use and task decomposition.",
+                    "language": "en",
+                }
+            }
+        },
+        "policy_model": {"responses_api_models": policy},
+        "decomposer": {
+            "responses_api_agents": {
+                "decomposer_agent": {
+                    "entrypoint": "app.py",
+                    "resources_server": {"type": "resources_servers", "name": "tau2_gym"},
+                    "model_server": {"type": "responses_api_models", "name": "policy_model"},
+                    "join_gym_system_and_user_prompts": True,
+                    "decomposer_system_prompt_profile": experiment.prompt_profile,
+                    "manager_max_model_calls": experiment.manager_max_model_calls,
+                    "subagent_recursion_limit": experiment.subagent_recursion_limit,
+                    "response_for_verifier_factory": VERIFIER_FACTORY,
+                    "subagent_types": [
+                        {
+                            "subagent_type_id": SUBAGENT_TYPE_ID,
+                            "assistant_id": SUBAGENT_ASSISTANT_ID,
+                            "url": f"http://127.0.0.1:{ports.langgraph}",
+                            "description": SUBAGENT_DESCRIPTION,
+                        }
+                    ],
+                }
+            }
+        },
+    }
 
 
 class Supervisor:
@@ -234,8 +358,8 @@ def require_free_port(port: int, name: str) -> None:
         if probe.connect_ex(("127.0.0.1", port)) == 0:
             raise SystemExit(
                 f"Port {port} ({name}) is already in use by another process.\n"
-                f"Pass --qwen-port <free port> (model server), or --port-offset N "
-                f"(langgraph/gym; note the gym config pins the langgraph URL at 2024)."
+                f"Pass --subagent-port <free port> (subagent model server), or "
+                f"--port-offset N (everything else)."
             )
 
 
@@ -247,12 +371,10 @@ def subagent_base_url(ports: PortLayout, backend: str) -> str:
     real credentials and terminates the proxy's self-signed TLS.
     """
     port = ports.subagent_proxy if backend == "llm_proxy" else ports.qwen35_4b
-    return f"http://127.0.0.1:{port}/v1"
+    return loopback_url(port)
 
 
-def base_environment(
-    ports: PortLayout, cuda_devices: str | None, *, subagent_backend: str = "local_vllm"
-) -> dict[str, str]:
+def base_environment(ports: PortLayout, *, subagent_backend: str) -> dict[str, str]:
     env = dict(os.environ)
     python_path = [str(REPO_ROOT), str(REPO_ROOT / "src"), str(REPO_ROOT / "external" / "Gym")]
     existing = env.get("PYTHONPATH")
@@ -283,13 +405,13 @@ def base_environment(
         }
     )
     env.setdefault("DECOMPOSER_SUBAGENT_MAX_MODEL_CALLS", "100")
-    if cuda_devices is not None:
-        env["CUDA_VISIBLE_DEVICES"] = cuda_devices
+    # Nothing but the vLLM servers needs a GPU; each gets its own CUDA_VISIBLE_DEVICES.
+    env.pop("CUDA_VISIBLE_DEVICES", None)
     return env
 
 
 def prepare_dataset(
-    *, domains: Sequence[str], tasks_per_domain: int | None, output: Path, env: dict[str, str]
+    *, pool: str, tasks_per_domain: int | None, output: Path, env: dict[str, str]
 ) -> dict[str, Any]:
     """Materialise the Gym dataset by running tau2_export inside the tau2 venv."""
     python = TAU2_VENV / "bin" / "python"
@@ -302,16 +424,14 @@ def prepare_dataset(
     command = [
         str(python),
         str(REPO_ROOT / "gyms" / "tau2_gym" / "tau2_export.py"),
-        "--domains",
-        ",".join(domains),
+        "--pool",
+        pool,
         "--output",
         str(output),
     ]
     if tasks_per_domain is not None:
         command.extend(["--tasks-per-domain", str(tasks_per_domain)])
-    result = subprocess.run(
-        command, cwd=REPO_ROOT, env=env, capture_output=True, text=True
-    )
+    result = subprocess.run(command, cwd=REPO_ROOT, env=env, capture_output=True, text=True)
     if result.returncode != 0:
         # capture_output hides the child's traceback; without this the caller sees
         # only CalledProcessError and has to re-run the command by hand.
@@ -322,7 +442,7 @@ def prepare_dataset(
     return json.loads(result.stdout.strip().splitlines()[-1])
 
 
-def vllm_command(ports: PortLayout, *, max_model_len: int, gpu_memory_utilization: float) -> list[str]:
+def subagent_vllm_command(ports: PortLayout, *, max_model_len: int, gpu_memory_utilization: float) -> list[str]:
     return [
         str(PROJECT_VENV / "bin" / "vllm"),
         "serve",
@@ -335,8 +455,8 @@ def vllm_command(ports: PortLayout, *, max_model_len: int, gpu_memory_utilizatio
         str(max_model_len),
         "--gpu-memory-utilization",
         str(gpu_memory_utilization),
-        # The manager re-sends a growing context every ReAct turn; without prefix
-        # caching total prefill is quadratic in turn count.
+        # Every ReAct turn re-sends a growing context; without prefix caching total
+        # prefill is quadratic in turn count.
         "--enable-prefix-caching",
         "--enable-auto-tool-choice",
         "--tool-call-parser",
@@ -346,40 +466,68 @@ def vllm_command(ports: PortLayout, *, max_model_len: int, gpu_memory_utilizatio
     ]
 
 
-def require_llm_proxy_credentials() -> None:
-    missing = [
-        name
-        for name in (LLM_PROXY_URL_ENV, LLM_PROXY_API_KEY_ENV)
-        if not os.environ.get(name)
+def manager_vllm_command(
+    experiment: Tau2Experiment,
+    checkpoint: Path,
+    ports: PortLayout,
+    *,
+    gpu_memory_utilization: float,
+) -> list[str]:
+    """Serves a Qwen3.5-4B manager checkpoint as workplace does for its SFT students."""
+    return [
+        str(PROJECT_VENV / "bin" / "vllm"),
+        "serve",
+        str(checkpoint),
+        "--served-model-name",
+        experiment.manager_model_id,
+        "--host",
+        "127.0.0.1",
+        "--port",
+        str(ports.manager_vllm),
+        "--max-model-len",
+        str(experiment.manager_max_model_len),
+        "--gpu-memory-utilization",
+        str(gpu_memory_utilization),
+        "--dtype",
+        "bfloat16",
+        "--language-model-only",
+        "--enable-prefix-caching",
+        "--enable-auto-tool-choice",
+        "--tool-call-parser",
+        "qwen3_xml",
+        # Non-thinking Qwen3.5 closes the think block inside the prompt, so the
+        # completion carries no tags for a reasoning parser.
+        "--default-chat-template-kwargs",
+        json.dumps({"enable_thinking": False}, separators=(",", ":")),
+        "--gdn-prefill-backend",
+        "triton",
     ]
+
+
+def require_env(names: Sequence[str], hint: str) -> None:
+    missing = [name for name in names if not os.environ.get(name)]
     if missing:
-        raise SystemExit(
-            f"--subagent-backend llm_proxy needs {' and '.join(missing)} in the "
-            f"environment. Source them first:\n  source ~/.secrets/decomposer.env"
-        )
+        raise SystemExit(f"{' and '.join(missing)} must be set. {hint}")
 
 
-def subagent_proxy_command(ports: PortLayout) -> list[str]:
+def remote_proxy_command(
+    port: int, *, response_tool_parser: str | None = None, extra_body: dict[str, Any] | None = None
+) -> list[str]:
     """Local credential-isolating proxy in front of the shared LLM proxy.
 
-    Deliberately omits two flags:
-      --response-tool-parser  its Qwen XML normalisation only runs on the Responses
-                              API path (remote_model_proxy.py:317); subagents use Chat
-                              Completions, and the upstream already returns structured
-                              tool calls, so normalising would be wrong.
-      --extra-body-json       it merges server-side and overrides caller keys
-                              (remote_model_proxy.py:49-54); leaving it empty keeps the
-                              graph's own sampling, so proxy and local runs stay
-                              comparable.
+    Subagents (Chat Completions) get neither option: their upstream already returns
+    structured tool calls, and --extra-body-json would override the graph's own
+    sampling (remote_model_proxy.py:49-54). The manager (Responses API) gets both:
+    the qwen3_xml normaliser, and the experiment's sampling as the one source of truth.
     """
-    return [
+    command = [
         str(PROJECT_VENV / "bin" / "python"),
         "-m",
         "gyms.remote_model_proxy",
         "--host",
         "127.0.0.1",
         "--port",
-        str(ports.subagent_proxy),
+        str(port),
         "--upstream-url-env",
         LLM_PROXY_URL_ENV,
         "--api-key-env",
@@ -391,6 +539,11 @@ def subagent_proxy_command(ports: PortLayout) -> list[str]:
         # The shared proxy presents a self-signed certificate.
         "--no-verify-tls",
     ]
+    if response_tool_parser is not None:
+        command.extend(["--response-tool-parser", response_tool_parser])
+    if extra_body:
+        command.extend(["--extra-body-json", json.dumps(extra_body, separators=(",", ":"))])
+    return command
 
 
 def langgraph_command(ports: PortLayout, jobs: int) -> list[str]:
@@ -410,18 +563,13 @@ def langgraph_command(ports: PortLayout, jobs: int) -> list[str]:
     ]
 
 
-def gym_start_command(ports: PortLayout, *, prompt_profile: str, logs: Path) -> list[str]:
-    prefix = "++decomposer.responses_api_agents.decomposer_agent."
+def gym_start_command(ports: PortLayout, *, config: Path, logs: Path) -> list[str]:
     return [
         str(gym_venv() / "bin" / "gym"),
         "env",
         "start",
         "--config",
-        str(GYM_CONFIG),
-        f"{prefix}decomposer_system_prompt_profile={prompt_profile}",
-        f"{prefix}manager_max_model_calls=100",
-        f"{prefix}subagent_recursion_limit=1000",
-        "++policy_api_key=${oc.env:OPENROUTER_API_KEY_DECOMPOSER}",
+        str(config),
         "+head_server.host=127.0.0.1",
         f"+head_server.port={ports.gym_head}",
         f"+port_range_low={ports.gym_component_low}",
@@ -519,75 +667,127 @@ def phase(name: str, timings: dict[str, float]):
         print(f"[tau2-gym] {name}: {timings[name]}s", flush=True)
 
 
-def execute(args: argparse.Namespace) -> int:
-    ports = PortLayout(offset=args.port_offset).shifted()
-    if args.qwen_port is not None:
-        ports = replace(ports, qwen35_4b=args.qwen_port)
-    domains = tuple(d.strip() for d in args.domains.split(",") if d.strip())
+def resolve_checkpoint(experiment: Tau2Experiment, override: str | None) -> Path | None:
+    if experiment.manager_backend != "local_vllm":
+        if override is not None:
+            raise SystemExit(f"{experiment.name} has a remote manager; --manager-checkpoint does not apply")
+        return None
+    checkpoint = Path(override) if override is not None else experiment.manager_checkpoint
+    if checkpoint is None:
+        raise SystemExit(f"{experiment.name} needs --manager-checkpoint")
+    return checkpoint.resolve()
 
-    run_name = f"deepseek-v4-flash-0731-teacher-qwen35-4b-non-thinking-n{args.num_repeats}"
-    if args.port_offset:
-        run_name += f"-port-offset-{args.port_offset}"
-    output_dir = Path(args.output_dir) if args.output_dir else RESULTS_ROOT / run_name
+
+def execute(args: argparse.Namespace) -> int:
+    experiment = get_experiment(args.experiment)
+    ports = PortLayout(offset=args.port_offset).shifted()
+    if args.subagent_port is not None:
+        ports = replace(ports, qwen35_4b=args.subagent_port)
+    pool = args.pool or experiment.pool
+    _, pool_meta = load_pool(pool)
+    checkpoint = resolve_checkpoint(experiment, args.manager_checkpoint)
+    concurrency = args.concurrency or experiment.concurrency
+
+    name = run_name(
+        experiment,
+        pool=pool,
+        tasks_per_domain=args.tasks_per_domain,
+        num_repeats=args.num_repeats,
+        port_offset=args.port_offset,
+    )
+    output_dir = Path(args.output_dir) if args.output_dir else RESULTS_ROOT / name
     logs = output_dir / "logs"
     rollouts = output_dir / "rollouts.jsonl"
-    dataset = DATASETS_ROOT / dataset_filename(domains, args.tasks_per_domain)
+    config_path = output_dir / "configuration" / "tau2_gym.yaml"
+    dataset = dataset_path(pool, pool_meta["sha256"], args.tasks_per_domain)
+    config = gym_config(experiment, ports)
 
-    env = base_environment(
-        ports, args.cuda_visible_devices, subagent_backend=args.subagent_backend
+    env = base_environment(ports, subagent_backend=args.subagent_backend)
+    use_subagent_proxy = args.subagent_backend == "llm_proxy"
+    manager_command: list[str] | None = None
+    if experiment.manager_backend == "local_vllm":
+        assert checkpoint is not None
+        manager_command = manager_vllm_command(
+            experiment, checkpoint, ports, gpu_memory_utilization=args.manager_gpu_memory_utilization
+        )
+    elif experiment.manager_backend == "llm_proxy":
+        manager_command = remote_proxy_command(
+            ports.manager_proxy,
+            response_tool_parser="qwen3_xml",
+            extra_body=experiment.manager_proxy_extra_body,
+        )
+    subagent_command = (
+        remote_proxy_command(ports.subagent_proxy)
+        if use_subagent_proxy
+        else subagent_vllm_command(
+            ports, max_model_len=args.max_model_len, gpu_memory_utilization=args.gpu_memory_utilization
+        )
     )
-    use_proxy = args.subagent_backend == "llm_proxy"
     timings: dict[str, float] = {}
 
     if args.dry:
         print(json.dumps({
-            "run_name": run_name, "output_dir": str(output_dir), "dataset": str(dataset),
-            "domains": domains, "ports": ports.as_dict(),
-            "subagent_backend": args.subagent_backend,
-            "subagent_endpoint": subagent_base_url(ports, args.subagent_backend),
-            **({"subagent_proxy": subagent_proxy_command(ports)} if use_proxy else
-               {"vllm": vllm_command(ports, max_model_len=args.max_model_len,
-                                     gpu_memory_utilization=args.gpu_memory_utilization)}),
+            "run_name": name, "output_dir": str(output_dir), "dataset": str(dataset),
+            "pool": pool, "pool_sha256": pool_meta["sha256"], "ports": ports.as_dict(),
+            "manager_checkpoint": str(checkpoint) if checkpoint else None,
+            "manager": manager_command, "manager_gpu": args.manager_gpu,
+            "subagent_backend": args.subagent_backend, "subagent": subagent_command,
+            "subagent_gpu": args.subagent_gpu,
             "langgraph": langgraph_command(ports, args.langgraph_jobs),
-            "gym_start": gym_start_command(ports, prompt_profile=args.prompt_profile, logs=logs),
+            "gym_start": gym_start_command(ports, config=config_path, logs=logs),
             "gym_eval": gym_eval_command(ports, dataset=dataset, output=rollouts,
-                                         num_repeats=args.num_repeats,
-                                         concurrency=args.concurrency, limit=args.limit,
-                                         resume=args.resume),
+                                         num_repeats=args.num_repeats, concurrency=concurrency,
+                                         limit=args.limit, resume=args.resume),
+            "gym_config": config,
         }, indent=2))
         return 0
 
-    if use_proxy:
-        require_llm_proxy_credentials()
+    if experiment.manager_backend == "openrouter":
+        require_env([OPENROUTER_API_KEY_ENV], "Source ~/.secrets/decomposer.env first.")
+    if experiment.manager_backend == "llm_proxy" or use_subagent_proxy:
+        require_env([LLM_PROXY_URL_ENV, LLM_PROXY_API_KEY_ENV], "Source ~/.secrets/decomposer.env first.")
+    if experiment.manager_backend == "local_vllm" and args.manager_gpu is None:
+        raise SystemExit("A local manager needs --manager-gpu")
+    if not use_subagent_proxy and args.subagent_gpu is None:
+        raise SystemExit("--subagent-backend local_vllm needs --subagent-gpu")
+    if checkpoint is not None and not checkpoint.is_dir():
+        raise SystemExit(f"Manager checkpoint not found: {checkpoint}")
 
     if output_dir.exists() and not (args.force or args.resume):
         raise SystemExit(f"{output_dir} already exists; pass --force or --resume")
     output_dir.mkdir(parents=True, exist_ok=True)
     logs.mkdir(parents=True, exist_ok=True)
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
 
     with phase("prepare", timings):
         summary = prepare_dataset(
-            domains=domains, tasks_per_domain=args.tasks_per_domain, output=dataset, env=env
+            pool=pool, tasks_per_domain=args.tasks_per_domain, output=dataset, env=env
         )
-        print(f"[tau2-gym] dataset: {summary}", flush=True)
+        print(f"[tau2-gym] dataset: {json.dumps(summary)}", flush=True)
     expected_tasks = summary["rows"] if args.limit is None else min(args.limit, summary["rows"])
 
     status: dict[str, Any] = {
         "schema_version": STATUS_SCHEMA_VERSION,
-        "run_name": run_name,
-        "domains": list(domains),
+        "run_name": name,
+        "experiment": asdict(experiment),
+        "pool": pool,
+        "pool_sha256": pool_meta["sha256"],
         "tasks_per_domain": args.tasks_per_domain,
         "num_repeats": args.num_repeats,
-        "concurrency": args.concurrency,
+        "concurrency": concurrency,
         "limit": args.limit,
-        "prompt_profile": args.prompt_profile,
+        "manager_checkpoint": str(checkpoint) if checkpoint else None,
+        "manager_checkpoint_fingerprint": checkpoint_fingerprint(checkpoint) if checkpoint else None,
         "subagent_backend": args.subagent_backend,
         "subagent_endpoint": subagent_base_url(ports, args.subagent_backend),
         "ports": ports.as_dict(),
+        "gyms_config_sha256": hashlib.sha256(config_path.read_bytes()).hexdigest()[:16],
         "dataset": str(dataset),
         "dataset_rows": summary["rows"],
         "started_at": datetime.now(timezone.utc).isoformat(),
-        "cuda_visible_devices": args.cuda_visible_devices,
+        "manager_gpu": args.manager_gpu,
+        "subagent_gpu": args.subagent_gpu,
     }
     atomic_json(output_dir / "run_status.json", status)
 
@@ -596,40 +796,45 @@ def execute(args: argparse.Namespace) -> int:
         with phase("model_startup", timings):
             require_free_port(ports.langgraph, "LangGraph subagent server")
             require_free_port(ports.gym_head, "Gym head server")
-            if use_proxy:
+            model_processes: list[subprocess.Popen[Any]] = []
+            if experiment.manager_backend == "local_vllm":
+                require_free_port(ports.manager_vllm, "manager vLLM")
+                model_processes.append(supervisor.start(
+                    "vllm_manager", manager_command, cwd=REPO_ROOT,
+                    env={"CUDA_VISIBLE_DEVICES": args.manager_gpu},
+                ))
+            elif experiment.manager_backend == "llm_proxy":
+                require_free_port(ports.manager_proxy, "manager LLM proxy")
+                model_processes.append(supervisor.start("manager_llm_proxy", manager_command, cwd=REPO_ROOT))
+            if use_subagent_proxy:
                 # No GPU and no model load: subagents reach the shared replicas
                 # through a local credential-isolating proxy.
                 require_free_port(ports.subagent_proxy, "subagent LLM proxy")
-                proxy = supervisor.start(
-                    "subagent_llm_proxy", subagent_proxy_command(ports), cwd=REPO_ROOT
-                )
-                wait_http(f"http://127.0.0.1:{ports.subagent_proxy}/health", [proxy], 300)
-                model_processes = [proxy]
+                model_processes.append(supervisor.start("subagent_llm_proxy", subagent_command, cwd=REPO_ROOT))
             else:
-                require_free_port(ports.qwen35_4b, "Qwen3.5-4B vLLM")
-                vllm = supervisor.start(
-                    "vllm_qwen35_4b",
-                    vllm_command(ports, max_model_len=args.max_model_len,
-                                 gpu_memory_utilization=args.gpu_memory_utilization),
-                    cwd=REPO_ROOT,
-                )
-                wait_http(f"http://127.0.0.1:{ports.qwen35_4b}/v1/models", [vllm], 1800)
-                model_processes = [vllm]
+                require_free_port(ports.qwen35_4b, "Qwen3.5-4B subagent vLLM")
+                model_processes.append(supervisor.start(
+                    "vllm_qwen35_4b", subagent_command, cwd=REPO_ROOT,
+                    env={"CUDA_VISIBLE_DEVICES": args.subagent_gpu},
+                ))
+            if experiment.manager_backend == "local_vllm":
+                wait_http(f"{loopback_url(ports.manager_vllm)}/models", model_processes, 1800)
+            elif experiment.manager_backend == "llm_proxy":
+                wait_http(f"http://127.0.0.1:{ports.manager_proxy}/health", model_processes, 300)
+            if use_subagent_proxy:
+                wait_http(f"http://127.0.0.1:{ports.subagent_proxy}/health", model_processes, 300)
+            else:
+                wait_http(f"{loopback_url(ports.qwen35_4b)}/models", model_processes, 1800)
 
         with phase("langgraph_startup", timings):
             langgraph = supervisor.start(
                 "langgraph", langgraph_command(ports, args.langgraph_jobs), cwd=SUBAGENT_DIR
             )
-            wait_http(
-                f"http://127.0.0.1:{ports.langgraph}/docs",
-                [*model_processes, langgraph],
-                300,
-            )
+            wait_http(f"http://127.0.0.1:{ports.langgraph}/docs", [*model_processes, langgraph], 300)
 
         with phase("gym_startup", timings):
             gym = supervisor.start(
-                "gym_env", gym_start_command(ports, prompt_profile=args.prompt_profile, logs=logs),
-                cwd=REPO_ROOT,
+                "gym_env", gym_start_command(ports, config=config_path, logs=logs), cwd=GYM_CHECKOUT
             )
             wait_http(
                 f"http://127.0.0.1:{ports.gym_head}/server_instances",
@@ -640,20 +845,18 @@ def execute(args: argparse.Namespace) -> int:
         with phase("rollout", timings):
             command = gym_eval_command(
                 ports, dataset=dataset, output=rollouts, num_repeats=args.num_repeats,
-                concurrency=args.concurrency, limit=args.limit, resume=args.resume,
+                concurrency=concurrency, limit=args.limit, resume=args.resume,
             )
             with (logs / "gym_eval.log").open("a") as stream:
                 subprocess.run(
-                    command, cwd=REPO_ROOT, env=env, check=True,
+                    command, cwd=GYM_CHECKOUT, env=env, check=True,
                     stdout=stream, stderr=subprocess.STDOUT,
                 )
     finally:
         supervisor.stop()
 
     with phase("validation", timings):
-        result = validate_result(
-            rollouts, expected_tasks=expected_tasks, num_repeats=args.num_repeats
-        )
+        result = validate_result(rollouts, expected_tasks=expected_tasks, num_repeats=args.num_repeats)
         print(f"[tau2-gym] result: {json.dumps(result)}", flush=True)
 
     status.update(
@@ -667,26 +870,28 @@ def execute(args: argparse.Namespace) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--domains", default=",".join(DEFAULT_DOMAINS))
-    parser.add_argument("--tasks-per-domain", type=int, default=DEFAULT_TASKS_PER_DOMAIN)
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--experiment", required=True, choices=sorted(EXPERIMENTS_BY_NAME))
+    parser.add_argument("--pool", default=None, help="task pool; defaults to the experiment's")
+    parser.add_argument("--tasks-per-domain", type=int, default=None,
+                        help="deterministic stratified subsample of the pool")
     parser.add_argument("--num-repeats", type=int, default=1)
-    parser.add_argument("--concurrency", type=int, default=4)
+    parser.add_argument("--concurrency", type=int, default=None,
+                        help="defaults to the experiment's concurrency")
     parser.add_argument("--limit", type=int, default=None)
-    parser.add_argument("--prompt-profile", choices=("teacher", "student"), default="teacher")
-    parser.add_argument("--subagent-backend", choices=SUBAGENT_BACKENDS,
-                        default="local_vllm",
-                        help="local_vllm starts a dedicated Qwen3.5-4B on a GPU; "
-                             "llm_proxy reaches the shared replicas through "
-                             "gyms.remote_model_proxy and needs no GPU.")
+    parser.add_argument("--manager-checkpoint", default=None,
+                        help="local manager weights; overrides the experiment's checkpoint")
+    parser.add_argument("--manager-gpu", default=None, help="CUDA device(s) for a local manager vLLM")
+    parser.add_argument("--manager-gpu-memory-utilization", type=float, default=0.9)
+    parser.add_argument("--subagent-backend", choices=SUBAGENT_BACKENDS, default="llm_proxy",
+                        help="local_vllm starts a dedicated Qwen3.5-4B on --subagent-gpu; "
+                             "llm_proxy reaches the shared replicas and needs no GPU.")
+    parser.add_argument("--subagent-gpu", default=None, help="CUDA device(s) for a local subagent vLLM")
+    parser.add_argument("--subagent-port", type=int, default=None,
+                        help="move the subagent vLLM port independently of --port-offset")
     parser.add_argument("--port-offset", type=int, default=0)
-    parser.add_argument("--qwen-port", type=int, default=None,
-                        help="Override the Qwen3.5-4B vLLM port independently of --port-offset. "
-                             "The subagent graph reads its endpoint from an env var, so this "
-                             "does not require editing the gym config.")
-    parser.add_argument("--cuda-visible-devices", default=None)
-    parser.add_argument("--max-model-len", type=int, default=128000)
-    parser.add_argument("--gpu-memory-utilization", type=float, default=0.9)
+    parser.add_argument("--max-model-len", type=int, default=128000, help="subagent vLLM context")
+    parser.add_argument("--gpu-memory-utilization", type=float, default=0.9, help="subagent vLLM")
     parser.add_argument("--langgraph-jobs", type=int, default=16)
     parser.add_argument("--output-dir", default=None)
     parser.add_argument("--force", action="store_true")

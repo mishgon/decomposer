@@ -61,6 +61,35 @@ QWEN36_THINKING = QwenSamplingParams(
 )
 
 
+# Qwen3.8 ships no presets of its own yet; these are the Qwen3.5/3.6 family values.
+QWEN38_NON_THINKING = QwenSamplingParams(
+    temperature=0.7,
+    top_p=0.8,
+    top_k=20,
+    min_p=0.0,
+    presence_penalty=1.5,
+    repetition_penalty=1.0,
+)
+QWEN38_THINKING = QwenSamplingParams(
+    temperature=1.0,
+    top_p=0.95,
+    top_k=20,
+    min_p=0.0,
+    presence_penalty=1.5,
+    repetition_penalty=1.0,
+)
+# On-policy training rollouts sample from the raw policy: the per-token estimators
+# (reverse KL, importance ratios) assume the sampled token came from pi itself, which
+# top-k/top-p truncation and penalties would violate.
+UNTRUNCATED_SAMPLING = QwenSamplingParams(
+    temperature=1.0,
+    top_p=1.0,
+    top_k=-1,
+    min_p=0.0,
+    presence_penalty=0.0,
+    repetition_penalty=1.0,
+)
+
 def qwen35_general_sampling(*, thinking: bool) -> QwenSamplingParams:
     """Return Qwen3.5's recommended general-task preset for ``thinking`` mode."""
 
