@@ -25,16 +25,21 @@ gyms/tau2_gym/
 
 ## One-time setup
 
-The submodule is `external/tau2_gym`. Hertz-2 has no GitLab access, so it is fed from
-a bundle made on a machine that has it:
+The submodule is `external/tau2_gym`. Hertz-2 has no GitLab access, so its submodule
+fetches from the `~/tau2-gym` checkout there, which is fast-forwarded from bundles made
+on a machine that has GitLab:
 
 ```bash
 # laptop: only the commits Hertz-2 lacks (the full history carries ~600 MB of data/sft)
 git -C tau2-gym bundle create tau2-gym.bundle <hertz-2 commit>..main
+scp tau2-gym.bundle Hertz-2:repo-bundles/
 # Hertz-2
 git -C ~/tau2-gym fetch ~/repo-bundles/tau2-gym.bundle main && git -C ~/tau2-gym merge --ff-only FETCH_HEAD
-git config submodule.external/tau2_gym.url ~/repo-bundles/tau2-gym.bundle   # local, not committed
-git submodule update external/tau2_gym
+# once: point the submodule at that checkout (local config, not committed)
+git config submodule.external/tau2_gym.url ~/tau2-gym
+git -C external/tau2_gym remote set-url origin ~/tau2-gym
+# after every pin change
+git -C external/tau2_gym fetch origin && git submodule update external/tau2_gym
 ```
 
 Create the tau2 venv used by `tau2_export.py` and the integration tests (tau2's
