@@ -4,7 +4,7 @@ Three experiment configs, one fully async recipe and launcher:
 
 | Config | Task pool | Schedule |
 |---|---|---|
-| `full.yaml` | 346 observed partial-score tasks, excluding five >=90% scores | 100 attempts/task/epoch |
+| `full.yaml` | 346 observed partial-score tasks, excluding five >=90% scores | 96 attempts/task/epoch |
 | `cold-start.yaml` | 191 full-pool tasks: mean time <=30 min, range >0.1 | Same recipe |
 | `smoke.yaml` | Our existing two tasks | Same recipe |
 
@@ -27,7 +27,7 @@ From the repository root on Hertz-2, prepare a dataset (no GPU needed):
 ```
 
 Preparation refuses to overwrite datasets and records task IDs, pool hash, and
-Gym revision. Ten training rows per task produce ten groups of ten attempts per
+Gym revision. Three training rows per task produce three groups of 32 attempts per
 epoch. Evaluation contains one row per task. Launcher validates pool hash and
 actual parquet task multiplicities. Old pools remain historical provenance only.
 
@@ -57,9 +57,9 @@ Seeds:
 Shared reference settings: all-linear LoRA rank 32/alpha 64, LR 1.5e-5,
 `seq-mean-token-mean` loss averaging. GRPO without standard-deviation normalization
 follows Timur; RAG exposes this as an experiment choice. Our async learner takes
-one completed ten-attempt group at a time, with two PPO epochs per group.
+one completed 32-attempt group at a time, with two PPO epochs per group.
 
-All profiles use one dataset epoch by default, 100 training attempts/task/epoch,
+All profiles use one dataset epoch by default, 96 training attempts/task/epoch,
 eight evaluation attempts/task, and separate trainer/rollout GPUs. Shared settings:
 4096 prompt + 12288 response/observation budget, eager vLLM, SDPA, and disabled
 policy prefix caching. Do not copy RAG's multi-GPU pipeline or adapter-only saves:
@@ -71,23 +71,25 @@ also applies presence penalty 1.5. Subagents remain hosted Qwen3.5-4B.
 Episode timeout is 2700 seconds and recursion limit is 410. Infrastructure errors
 stay explicit; retain raw evaluations because native check denominators can vary.
 
-Each group contains ten episodes. Evaluation uses eight attempts/task before
+Each group contains 32 episodes. Evaluation uses eight attempts/task before
 training and every eight updates. Resumable checkpoints (model, optimizer, extra
 state) are saved after **every update, before evaluation**. Automatic eviction is
 disabled so an unevaluated latest checkpoint cannot delete the best evaluated one.
 Best/last are labeled on launcher exit.
-Smoke: 200 training + 48 evaluation = 248 episodes (baseline and steps 8, 16).
-Twenty groups stream to a dedicated trainer while a separate GPU generates.
-Each completed group gets two PPO epochs (40 inner optimizer updates total).
+Smoke: 192 training + 16 baseline evaluation = 208 scheduled episodes.
+Six groups stream to a dedicated trainer while a separate GPU generates.
+Each completed group gets two PPO epochs (12 inner optimizer updates total).
+With the unchanged evaluation interval of eight updates, one smoke epoch has
+no post-training evaluation; use more epochs or an explicit evaluation override.
 The watcher/global step counts weight versions, not inner optimizer updates.
 Weights synchronize and checkpoints are saved after every group update;
 evaluation runs before training and every eight weight versions. This differs from
 Timur's batch-eight, one-PPO-epoch recipe; LR and LoRA settings are unchanged.
-GRPO still computes advantages from complete ten-attempt groups: a lone fresh
+GRPO still computes advantages from complete 32-attempt groups: a lone fresh
 rollout cannot supply that relative baseline.
 
 All profiles use veRL's `experimental/fully_async_policy` with two active groups
-(20 active training episodes, not a cap on nested subagent requests),
+(64 active training episodes, not a cap on nested subagent requests),
 staleness threshold 1.0, partial-rollout continuation, and rollout log probabilities
 as PPO's behavior-policy reference. Trajectories can span policy versions; their
 token log probabilities and version range are retained. LoRA is merged only for
@@ -100,7 +102,9 @@ the async launcher defaults to job-local `NCCL_P2P_DISABLE=1` and
 `setup.sh` applies `patches/verl-sdpa-padding.patch`: the separated trainer's
 batch conversion can use veRL's existing pure-PyTorch padding helpers when
 FlashAttention is absent. This does not change the model's SDPA attention.
-Full: 34,600 training episodes per epoch. Cold-start: 19,100.
+Full: 33,216 training episodes per epoch. Cold-start: 18,336.
+Prepare fresh datasets with three groups/task; historical ten-group datasets
+are not rewritten. OPD explicitly prepares one group/task and remains unchanged.
 WARNING: evaluating the entire pool every eight groups is very expensive at scale:
 full schedules 1,198,544 evaluation episodes; cold-start schedules 365,192.
 The settings are intentionally identical, not automatically made cheaper for full.

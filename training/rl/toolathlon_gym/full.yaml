@@ -57,8 +57,8 @@ actor_rollout_ref:
     mode: async
     tensor_model_parallel_size: 1
     gpu_memory_utilization: 0.45
-    # Ten dataset rows per task x ten attempts = 100 attempts/task/epoch.
-    n: 10
+    # Three dataset rows per task x 32 attempts = 96 attempts/task/epoch.
+    n: 32
     multi_turn:
       enable: true
     checkpoint_engine:

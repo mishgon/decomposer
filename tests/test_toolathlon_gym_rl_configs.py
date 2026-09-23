@@ -33,7 +33,7 @@ class RecipeTests(unittest.TestCase):
                 self.assertEqual(config.actor_rollout_ref.model.lora_alpha, 64)
                 self.assertEqual(config.actor_rollout_ref.actor.optim.lr, 1.5e-5)
                 self.assertFalse(config.algorithm.norm_adv_by_std_in_grpo)
-                self.assertEqual(config.actor_rollout_ref.rollout.n, 10)
+                self.assertEqual(config.actor_rollout_ref.rollout.n, 32)
                 self.assertEqual(config.actor_rollout_ref.rollout.val_kwargs.n, 8)
                 self.assertIsNone(config.trainer.total_training_steps)
                 self.assertIsNone(config.rollout.total_rollout_steps)
@@ -47,7 +47,7 @@ class RecipeTests(unittest.TestCase):
                 self.assertTrue(config.algorithm.rollout_correction.bypass_mode)
                 self.assertFalse(config.actor_rollout_ref.hybrid_engine)
                 self.assertTrue(config.async_training.partial_rollout)
-                self.assertEqual(config.rollout.n * config.async_training.concurrent_samples_per_replica, 20)
+                self.assertEqual(config.rollout.n * config.async_training.concurrent_samples_per_replica, 64)
             recipes = []
             for config in (full, smoke, cold):
                 config.trainer.experiment_name = "comparison"
