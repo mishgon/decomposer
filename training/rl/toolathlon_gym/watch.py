@@ -240,7 +240,7 @@ def show(root, selected=None):
     else:
         print("ETA: -- (trainer stopped or task manifest unavailable)")
     print("Reward (native partial score, NOT pass rate):")
-    print("  Fixed panel             Base    Latest    Delta")
+    print("  Fixed panel             Base    Latest    Delta   Trend")
     for source in sorted(expected):
         rows = sorted([p for p in panels if p["panel"] == source and p["complete"]], key=lambda p: p["step"])
         base = next((p["reward"] for p in rows if p["step"] == 0), None)
@@ -248,12 +248,14 @@ def show(root, selected=None):
         b = f"{base:.3f}" if base is not None else "--"
         a = f"{after['reward']:.3f} s{after['step']}" if after else "--"
         delta = f"{after['reward'] - base:+.3f}" if after and base is not None else "--"
-        print(f"  {source.rsplit('/', 1)[-1]:<22} {b:>5}  {a:>10}  {delta:>7}")
+        panel_trend = trend([p['reward'] for p in rows])
+        print(f"  {source.rsplit('/', 1)[-1]:<22} {b:>5}  {a:>10}  {delta:>7}   {panel_trend}")
     rewards = [p.value for p in scalars.get("critic/rewards/mean", [])]
     if rewards and stage != 'OPD':
         print(f"Batch reward: {trend(rewards)} {rewards[-1]:.3f} (varying tasks; not proof of learning)")
-    if stage == 'OPD' and latest('actor/distillation/loss') is not None:
-        print(f"Distillation loss: {latest('actor/distillation/loss'):.4f} (not task reward)")
+    losses = [p.value for p in scalars.get('actor/distillation/loss', [])]
+    if stage == 'OPD' and losses:
+        print(f"Distillation loss: {trend(losses)} {losses[-1]:.4f} (last 8 updates; autoscaled, not task reward)")
     if grad is None:
         print("Training health: checkpoint saved; awaiting logged gradient metrics" if step else
               "Training health: awaiting first optimizer update; learning not established")

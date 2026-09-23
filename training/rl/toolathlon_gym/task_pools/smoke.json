@@ -1,30 +1,30 @@
 {
   "profile": "smoke",
   "source_manifest_sha256": "c54759ec11b59ad17344f4318d6cb8381dbb7afb52d3f82126b3e04c4c258134",
-  "selection": "Two fast binary-reward tasks for overfitting, not a representative benchmark. Each had one score of 1 in five attempts (mean 0.2), no infrastructure failures; historical means 4.6 and 7.9 minutes. Binary rewards explicitly accepted for this smoke experiment.",
+  "selection": "Two observed native partial-reward tasks with full successes. User-selected faster compromise: means 0.371 and 0.55, historical runtimes 27.4 and 12.2 minutes. Five attempts each, including one timeout each; no recorded infrastructure failures. For future smoke runs only, not a representative benchmark.",
   "tasks": [
     {
-      "task_id": "sf-hr-dept-budget-ppt-email",
+      "task_id": "canvas-quiz-analysis-gsheet-email",
       "scores": [
-        0.0,
         1.0,
         0.0,
+        0.8571428571428571,
         0.0,
         0.0
       ],
-      "mean_minutes": 7.94328713575999,
+      "mean_minutes": 27.43036677678426,
       "score_range": 1.0
     },
     {
-      "task_id": "yf-sector-comparison",
+      "task_id": "yf-stock-comparison-word-gcal",
       "scores": [
         0.0,
         1.0,
-        0.0,
-        0.0,
-        0.0
+        1.0,
+        0.375,
+        0.375
       ],
-      "mean_minutes": 4.585531466801962,
+      "mean_minutes": 12.225350021521251,
       "score_range": 1.0
     }
   ]
