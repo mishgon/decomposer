@@ -1,7 +1,7 @@
 {
-  "selection": "Two fast binary-reward tasks for overfitting, not a representative benchmark. Each had one score of 1 in five attempts (mean 0.2), no infrastructure failures; historical means 4.6 and 7.9 minutes. Binary rewards explicitly accepted for this smoke experiment.",
+  "selection": "Two observed native partial-reward tasks with full successes. User-selected faster compromise: means 0.371 and 0.55, historical runtimes 27.4 and 12.2 minutes. Five attempts each, including one timeout each; no recorded infrastructure failures. For future smoke runs only, not a representative benchmark.",
   "tasks": [
-    {"task_id": "yf-sector-comparison"},
-    {"task_id": "sf-hr-dept-budget-ppt-email"}
+    {"task_id": "canvas-quiz-analysis-gsheet-email"},
+    {"task_id": "yf-stock-comparison-word-gcal"}
   ]
 }

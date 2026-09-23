@@ -63,8 +63,8 @@ class RecipeTests(unittest.TestCase):
         full_ids = {r["task_id"] for r in pools["full"]}
         for name, rows in pools.items():
             if name == "smoke":
-                self.assertTrue(all(max(r["scores"]) == 1 and sum(r["scores"]) == 1 for r in rows))
-                continue  # Explicit binary smoke pool is separate from partial-reward full.
+                self.assertTrue(all(max(r["scores"]) == 1 and
+                                    sum(r["scores"]) / len(r["scores"]) <= .55 for r in rows))
             self.assertTrue({r["task_id"] for r in rows} <= full_ids)
             for row in rows:
                 self.assertTrue(any(0 < s < 1 for s in row["scores"]))
