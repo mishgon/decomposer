@@ -10,7 +10,7 @@ a ``verify`` that scores the flattened Decomposer trajectory.
 """
 
 import uuid
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
@@ -57,10 +57,12 @@ class Tau2GymVerifyRequest(BaseVerifyRequest):
 
 
 class Tau2GymVerifyResponse(BaseVerifyResponse):
-    # All three are declared explicitly: pydantic drops undeclared extras, so
-    # without this the rollout row loses which task it came from.
+    # Declared explicitly: pydantic drops undeclared extras, so without this the
+    # rollout row loses which task it came from.
     domain: str
     task_id: str
+    category: Optional[str] = None
+    environment_name: Optional[str] = None
     breakdown: Dict[str, Any] = Field(default_factory=dict)
 
 
@@ -120,7 +122,11 @@ class Tau2GymResourcesServer(SimpleResourcesServer):
         # decomposer_agent/app.py:287-311: every subagent function_call in report
         # order, then the final assistant message.
         predicted_tool_calls: list[ToolCall] = []
+        final_message: str | None = None
         for item in body.response.output:
+            if item.type == "message" and getattr(item, "role", None) == "assistant":
+                final_message = _message_text(item.model_dump())
+                continue
             if item.type != "function_call":
                 continue
             call = item.model_dump()
@@ -137,9 +143,23 @@ class Tau2GymResourcesServer(SimpleResourcesServer):
             body.domain,
             body.task_id,
             predicted_tool_calls,
+            final_message,
             language=self.config.language,
         )
         return Tau2GymVerifyResponse(**body.model_dump(), reward=reward, breakdown=breakdown)
+
+
+def _message_text(message: dict) -> str | None:
+    """Text of a Responses message item: ``content`` is a string or a list of parts."""
+    content = message.get("content")
+    if isinstance(content, str):
+        return content or None
+    text = "".join(
+        part.get("text") or ""
+        for part in content or []
+        if isinstance(part, dict) and part.get("type") in ("output_text", "input_text", "text")
+    )
+    return text or None
 
 
 def _parse_arguments(arguments: Any) -> dict:

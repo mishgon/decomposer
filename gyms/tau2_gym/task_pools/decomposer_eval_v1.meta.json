@@ -1,0 +1,38 @@
+{
+ "name": "decomposer_eval_v1",
+ "role": "eval",
+ "purpose": "HELDOUT_v2: 18 domains reserved from all tau2 training.",
+ "built": "2026-09-23",
+ "built_by": "gyms/tau2_gym/task_pools/build_pool.py",
+ "recipe": {
+  "name": "decomposer_eval_v1",
+  "role": "eval",
+  "purpose": "HELDOUT_v2: 18 domains reserved from all tau2 training.",
+  "sources": [
+   "HELDOUT_v2.json"
+  ],
+  "exclude": [
+   "QUARANTINE.json"
+  ],
+  "exclude_reserved_domains": [],
+  "dead_reports": null,
+  "domain_filter": "all"
+ },
+ "tau2_commit": "e9f4fc4995252cc55e8ac0128e0d2e4bdd514a72",
+ "counts": {
+  "sources_union": 479,
+  "dead_from_calibration": 0,
+  "dead_outside_sources": 0,
+  "dropped": {
+   "excluded_split": 7,
+   "not_in_tasks_hard": 17
+  },
+  "pool_tasks": 455,
+  "pool_domains": 16,
+  "of_which_dead": 0
+ },
+ "shared_domains_with": {
+  "decomposer_pool_v1": 0
+ },
+ "sha256": "7fcbb8ac576a9d07"
+}
