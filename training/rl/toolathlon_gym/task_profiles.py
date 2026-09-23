@@ -10,7 +10,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parent
 PROFILES = ("full", "cold-start", "smoke")
-GROUPS_PER_TASK = 10
+GROUPS_PER_TASK = 3
 
 
 def select_profiles(manifest, smoke_ids):
