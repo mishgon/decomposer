@@ -6,10 +6,13 @@ Three experiment configs, one fully async recipe and launcher:
 |---|---|---|
 | `full.yaml` | 346 observed partial-score tasks, excluding five >=90% scores | 96 attempts/task/epoch |
 | `cold-start.yaml` | 191 full-pool tasks: mean time <=30 min, range >0.1 | Same recipe |
-| `smoke.yaml` | Our existing two tasks | Same recipe |
+| `smoke.yaml` | Two partial-reward tasks with observed full successes | Same recipe |
 
 `cold-start.yaml` and `smoke.yaml` inherit every training setting from `full.yaml`.
 Only task selection and the experiment label differ. Frozen pools live in `task_pools/`.
+Future smoke uses historical score means 0.371 and 0.55, population variances
+0.209 and 0.154, and mean runtimes 27.4 and 12.2 minutes (including one timeout
+per task). Prepare fresh datasets after this pool change; old runs are untouched.
 The full pool includes 189 tasks with zero >=90% successes in five attempts.
 Observed partial means at least one native score strictly between zero and one;
 we cannot identify unobserved evaluator granularity from five all-zero attempts.

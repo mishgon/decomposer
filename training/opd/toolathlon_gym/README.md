@@ -69,9 +69,13 @@ ClearML logging is inherited from the RL recipe; the task URL is printed in
 `trainer.log` under project `decomposer-toolathlon-gym-opd`.
 
 For the full pool, use `full` with new dataset/artifact directories. Smoke uses
-`yf-sector-comparison` and `sf-hr-dept-budget-ppt-email`; full uses the same
+`canvas-quiz-analysis-gsheet-email` and `yf-stock-comparison-word-gcal`; full uses the same
 346-task observed-partial-score pool as RL. Both evaluate on their training
 pool: these scores measure fitting, not held-out generalization.
+
+Future smoke datasets use observed partial rewards (historical means 0.371 and
+0.55, runtimes 27.4 and 12.2 minutes). Existing runs retain their original tasks;
+prepare a new dataset directory rather than overwriting or reusing the old pool.
 
 Both configs share the optimizer/model/harness recipe by linking `rl_recipe.yaml`
 to `training/rl/toolathlon_gym/full.yaml`. They differ only in experiment name
