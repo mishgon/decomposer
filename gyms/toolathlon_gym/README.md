@@ -32,11 +32,12 @@ environment.
 
 The container resolves the host vLLM server through this variable:
 
-- `GEMMA_4_26B_A4B_BASE_URL`
+- `QWEN_3_5_4B_BASE_URL`
 
-It defaults to port 8023 on `host.docker.internal`.
+It defaults to port 8024 on `host.docker.internal`.
 
-Start the vLLM server first, then run an episode from the host:
+Start Qwen3.5-4B with `scripts/vllm/serve_qwen_3_5_4b.sh` first,
+then run an episode from the host:
 
 ```bash
 export OPENROUTER_API_KEY=...

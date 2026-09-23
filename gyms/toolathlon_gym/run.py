@@ -12,11 +12,10 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from langchain_core.messages import message_to_dict
+from langchain_core.messages import HumanMessage, message_to_dict
 from langchain_openrouter import ChatOpenRouter
 
 from decomposer.core import create_decomposer_agent
-from decomposer.prompts import DECOMPOSER_TEACHER_SYSTEM_PROMPT
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -24,7 +23,7 @@ TOOLATHLON_ROOT = REPO_ROOT / "external" / "toolathlon_gym"
 DEFAULT_ARTIFACTS_DIR = REPO_ROOT / "artifacts" / "data" / "toolathlon_gym"
 DEFAULT_EVALS_DIR = REPO_ROOT / "artifacts" / "evals" / "toolathlon_gym"
 DEFAULT_IMAGE = "decomposer-toolathlon:latest"
-DEFAULT_MODEL = "deepseek/deepseek-v4-flash-0731"
+DEFAULT_MODEL = "qwen/qwen3.8-flash"
 POSTGRES_IMAGE = "postgres:15"
 POSTGRES_ENV = {
     "PGHOST": "postgres",
@@ -34,22 +33,10 @@ POSTGRES_ENV = {
     "PGPASSWORD": "camel",
     "PGDATABASE": "toolathlon_gym",
 }
-VLLM_MODELS = {
-    # 8020: "google/gemma-4-E2B-it",
-    # 8021: "google/gemma-4-E4B-it",
-    # 8022: "google/gemma-4-12B-it",
-    8023: "google/gemma-4-26B-A4B-it",
-}
+VLLM_MODELS = {8024: "Qwen/Qwen3.5-4B"}
 SUBAGENT_TYPES = (
     # subagent_type_id, assistant_id, model_description
-    # ("gemma_4_2b_thinking", "gemma_4_2b_thinking", "Gemma-4-2B thinking"),
-    # ("gemma_4_2b_non_thinking", "gemma_4_2b_non_thinking", "Gemma-4-2B non-thinking"),
-    # ("gemma_4_4b_thinking", "gemma_4_4b_thinking", "Gemma-4-4B thinking"),
-    # ("gemma_4_4b_non_thinking", "gemma_4_4b_non_thinking", "Gemma-4-4B non-thinking"),
-    # ("gemma_4_12b_thinking", "gemma_4_12b_thinking", "Gemma-4-12B thinking"),
-    # ("gemma_4_12b_non_thinking", "gemma_4_12b_non_thinking", "Gemma-4-12B non-thinking"),
-    ("gemma_4_26b_a4b_thinking", "gemma_4_26b_a4b_thinking", "Gemma-4-26B-A4B thinking"),
-    # ("gemma_4_26b_a4b_non_thinking", "gemma_4_26b_a4b_non_thinking", "Gemma-4-26B-A4B non-thinking"),
+    ("qwen_3_5_4b_non_thinking", "qwen_3_5_4b_non_thinking", "Qwen3.5-4B non-thinking"),
 )
 
 
@@ -240,8 +227,10 @@ def main() -> None:
             decomposer_model=ChatOpenRouter(
                 model=args.model,
                 temperature=1.0,
-                top_p=1.0,
-                reasoning={"effort": "high"},
+                top_p=0.95,
+                presence_penalty=0.0,
+                reasoning={"effort": "low"},
+                model_kwargs={"top_k": 20, "min_p": 0.0, "repetition_penalty": 1.0},
             ),
             subagent_types=[
                 {
@@ -255,39 +244,44 @@ def main() -> None:
                 }
                 for subagent_type_id, assistant_id, model_description in SUBAGENT_TYPES
             ],
-            decomposer_system_prompt=DECOMPOSER_TEACHER_SYSTEM_PROMPT,
+            decomposer_recursion_limit=None,
+            subagent_recursion_limit=None,
         )
-        state = asyncio.run(
-            agent.ainvoke(
-                {
-                    "messages": [
-                        {
-                            "role": "user",
-                            "content": runtime["task_config"]["task_str"],
-                        }
-                    ]
-                },
-                config={"recursion_limit": 200},
+        state = {"messages": [HumanMessage(runtime["task_config"]["task_str"])]}
+
+        async def run_decomposer():
+            nonlocal state
+            async for state in agent.astream(state, stream_mode="values"):
+                pass
+
+        error = None
+        try:
+            asyncio.run(run_decomposer())
+        except Exception as exc:
+            error = {"type": type(exc).__name__, "message": str(exc)}
+            raise
+        finally:
+            (episode_dir / "trace.json").write_text(
+                json.dumps(
+                    {
+                        "episode_id": episode_id,
+                        "task": args.task,
+                        "decomposer_model": args.model,
+                        "started_at": started_at,
+                        "finished_at": datetime.now(timezone.utc).isoformat(),
+                        "messages": [
+                            message_to_dict(message) for message in state["messages"]
+                        ],
+                        "subagent_runs": state.get("subagent_runs", {}),
+                        "error": error,
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                    default=str,
+                ),
+                encoding="utf-8",
             )
-        )
         messages = state["messages"]
-        (episode_dir / "trace.json").write_text(
-            json.dumps(
-                {
-                    "episode_id": episode_id,
-                    "task": args.task,
-                    "decomposer_model": args.model,
-                    "started_at": started_at,
-                    "finished_at": datetime.now(timezone.utc).isoformat(),
-                    "messages": [message_to_dict(message) for message in messages],
-                    "subagent_runs": state.get("subagent_runs", {}),
-                },
-                indent=2,
-                ensure_ascii=False,
-                default=str,
-            ),
-            encoding="utf-8",
-        )
         answer = str(messages[-1].content)
         (episode_dir / "answer.txt").write_text(answer, encoding="utf-8")
 

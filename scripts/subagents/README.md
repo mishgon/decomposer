@@ -1,10 +1,11 @@
-# Generic Gemma subagents
+# Generic Qwen subagents
 
-This self-contained LangGraph server exposes thinking and non-thinking variants
-of Gemma-4-E2B, Gemma-4-E4B, Gemma-4-12B, and Gemma-4-26B-A4B. The agents have
-no tools or environment-specific middleware.
+This self-contained LangGraph server exposes Qwen3.5-4B with thinking disabled.
+The agent has no tools or environment-specific middleware.
 
-Start the required vLLM servers, then run from the repository root:
+Start the required vLLM server with `scripts/vllm/serve_qwen_3_5_4b.sh`
+(port 8024), then run
+from the repository root:
 
 ```bash
 scripts/subagents/serve.sh

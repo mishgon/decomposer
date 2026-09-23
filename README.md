@@ -2,21 +2,40 @@
 
 ## Goal
 
-The goal of this project is to build an agent, called Decomposer, that solves tasks exclusively by decomposing them into subtasks and delegating them to subagents. Decomposer is based on a small language model trained with RL to optimize the quality, cost and speed of the whole system.
+Build Decomposer, an agent that orchestrates other agents to solve tasks faster, at lower cost, and with higher quality by:
+
+- Parallelizing work across multiple agents.
+- Routing tasks to cheaper models according to task difficulty.
+- Reducing each agent's context.
+- Handling subagent errors.
+
+We aim to demonstrate improvements in speed, cost, and task-solving quality over standalone agents on Gaia2, Toolathlon, BrowseComp, and WideSearch.
 
 ## Methodology
 
-At a high level, idea is similar to [Sakana Fugu](https://arxiv.org/abs/2606.21228), however, there are substantial differences. Sakana's Conductor model does not work in a ReAct loop. It produces a static decomposition once, subagents complete the subtasks and the last subagent's response is returned as the output. On the contrary, our Decomposer agent works in a standard tool-calling loop with two tools: `spawn_subagent` (spawns a new subagent and delegates a subtask to it) and `wait` (waits for subagents' reports). This enables a dynamic, adaptive decomposition. You could check out our design choices and implementation details in `src/decomposer/core.py` and `src/decomposer/core.py`.
+Decomposer uses a minimal harness: a standard tool-calling loop with four tools for orchestrating subagents:
+
+- `new(subagent_type_id) -> subagent_id`: creates a subagent of the specified type with an empty conversation history.
+- `fork(subagent_id) -> subagent_id`: creates a subagent of the same type with a copy of the source conversation and state. Subsequent conversations are independent; the external environment remains shared.
+- `run(subagent_id, prompt) -> subagent_run_id`: starts a run of an existing subagent and immediately returns its run ID. The same subagent can run multiple times, retaining its conversation history across runs.
+- `wait() -> [...]`: waits for at least one new run to finish and returns all newly available subagent responses since the previous `wait` call. Each result includes the run status and any error. Waiting is bounded by a timeout.
+
+This loop enables fully asynchronous orchestration and execution: Decomposer can launch newly unblocked subtasks without waiting for unrelated subagent runs to finish. It can also adapt its decomposition as subagent results arrive. See `src/decomposer/core.py` for the implementation.
+
+We plan to train the orchestration model in two stages:
+
+1. Off-policy distillation of a carefully prompted LLM into a smaller model.
+2. Reinforcement learning that optimizes final task-solving quality, speed, and cost.
 
 ## Get started
 
-The minimal example runs Decomposer with DeepSeek V4 Flash 0731 through OpenRouter and one
-Gemma-4-E4B-IT subagent through a local vLLM and LangGraph server. From
-the repository root, install the development environment and start vLLM:
+The minimal example runs Decomposer with DeepSeek V4 Flash 0731 through OpenRouter and
+Qwen3.5-4B non-thinking workers through local vLLM and LangGraph servers.
+From the repository root, install the development environment and start vLLM:
 
 ```bash
 uv sync
-scripts/vllm/serve_gemma_4_e4b.sh
+scripts/vllm/serve_qwen_3_5_4b.sh
 ```
 
 With `OPENROUTER_API_KEY` set, start the subagent server in another terminal:
@@ -34,44 +53,20 @@ uv run python examples/minimal/run.py
 The final answer is printed and the complete message history is saved to
 `examples/minimal/messages.md`. See `examples/minimal/README.md` for details.
 
-## Plan
-
-Training envs:
-- [NeMo-Gym's Workplace assistant](https://github.com/NVIDIA-NeMo/Gym/tree/main/resources_servers/workplace_assistant)
-- [Toolathlon-Gym](https://github.com/eigent-ai/toolathlon_gym)
-- [NeMo-Gym's Finance Sec Search](https://github.com/NVIDIA-NeMo/Gym/tree/main/resources_servers/finance_sec_search)
-- [NeMo-Gym's Google Search](https://github.com/NVIDIA-NeMo/Gym/tree/main/resources_servers/google_search)
-- [Z.ai's DeepDive](https://huggingface.co/datasets/zai-org/DeepDive)
-- [WideSeek-R1](https://huggingface.co/collections/RLinf/wideseek-r1)
-
-Test envs:
-- [Gaia2](https://huggingface.co/datasets/meta-agents-research-environments/gaia2)
-- [Toolathlon](https://github.com/hkust-nlp/Toolathlon)
-- [BrowseComp-Plus](https://github.com/texttron/BrowseComp-Plus)
-- [GPQA Diamond](https://github.com/NVIDIA-NeMo/Gym/tree/main/resources_servers/gpqa_diamond)
-
-Subagent types: Gemma-4-E2B / -E4B / -12B / -26B-A4B (thinking / non-thinking), 8 types in total. We select Gemma-4 models family, because they are incredibly fast and laconic compared to Qwen models. In the first version we use only Gemma-4-26B-A4B non-thinking model.
-
-The current plan:
-- [ ] Start generating SFT data and training SFT models (version and backup them on CDS and main NFS) on training envs.
-- [ ] Start evaluating SFT models on test envs.
-- [ ] Start setting up RL training on training envs.
-
-Ideas:
-- Train Decomposer to anonymize prompts based on [PII public data](https://huggingface.co/datasets/Pritesh-2711/pii-bench)
-
 ## Repo structure
 
 - `src/decomposer/`: core Decomposer package. This should stay benchmark- and training-agnostic.
 - `examples/`: runnable examples of configuring and using Decomposer.
-- `gyms/`: environment integrations that collect traces and run native evaluation.
-- `training/`: training and finetuning workflows.
-- `artifacts/data/`: collected trajectories and episode workspaces ignored by git.
-- `artifacts/evals/`: evaluation results and aggregate metrics ignored by git.
-- `artifacts/training/`: model checkpoints and training logs ignored by git.
+- `gyms/<gym_name>/`: reusable environment code for loading tasks, exposing tools, running a ReAct agent or Decomposer on one task or several tasks in parallel, and native result checking.
+- `evals/<gym_name>/`: scripts for evaluating agents on all tasks in an environment, aggregating metrics, and saving traces for error analysis.
+- `sft/<gym_name>/`: code for SFT traces collection on a gym. Shared SFT training code lives alongside these directories in `sft/`.
+- `opd/<gym_name>/`: code for on-policy distillation (OPD) on a gym.
+- `rl/<gym_name>/`: code for reinforcement learning (RL) on a gym.
 - `external/`: third-party repositories, submodules, or vendored code.
 - `tests/`: lightweight checks for reusable code and harness utilities.
 - `docs/`: design notes, experiment notes, and persistent documentation.
+
+Evaluation and training workflows reuse `gyms/<gym_name>/`.
 
 ## Development setup
 

@@ -1,5 +1,4 @@
 import json
-import subprocess
 import sys
 from pathlib import Path
 
@@ -16,23 +15,6 @@ def test_configured_subagents_are_registered() -> None:
     assert {
         assistant_id for _, assistant_id, _ in run.SUBAGENT_TYPES
     } <= registered.keys()
-
-
-def test_docker(monkeypatch) -> None:
-    calls = []
-
-    def fake_run(*args, **kwargs):
-        calls.append((args, kwargs))
-        return subprocess.CompletedProcess(args, 0, "output", "")
-
-    monkeypatch.setattr(run.subprocess, "run", fake_run)
-
-    result = run._docker("ps", check=False)
-
-    assert result.stdout == "output"
-    assert calls == [
-        ((["docker", "ps"],), {"check": False, "capture_output": True, "text": True})
-    ]
 
 
 def test_main_rejects_path_traversal(monkeypatch) -> None:

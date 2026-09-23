@@ -1,9 +1,0 @@
-{
-  "dependencies": [
-    "."
-  ],
-  "graphs": {
-    "literesearcher_4b": "./graph.py:literesearcher_4b"
-  },
-  "python_version": "3.12"
-}
