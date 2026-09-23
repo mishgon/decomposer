@@ -1,6 +1,7 @@
 """One isolated Gym environment; no model client or training dependencies."""
 
 import json
+import posixpath
 import re
 import shlex
 import subprocess
@@ -12,16 +13,46 @@ from pathlib import Path
 from .adaptive_scheduler import extract_partial_score
 
 
+def agent_output_error(evaluation):
+    """Recognize file-shape errors only when the exception names agent output.
+
+    Do not turn arbitrary evaluator bugs, missing dependencies, permissions or
+    missing ground truth into model failures.
+    """
+    workspace = evaluation.get("agent_workspace")
+    if not workspace or evaluation["returncode"] != 1:
+        return None
+    stderr = evaluation["stderr"].strip()
+    if "Traceback (most recent call last)" not in stderr:
+        return None
+    match = re.fullmatch(
+        r"(IsADirectoryError|NotADirectoryError|FileNotFoundError): \[Errno (?:2|20|21)\] "
+        r"[^\n]+: (['\"])(/[^\n]+)\2", stderr.splitlines()[-1])
+    if not match:
+        return None
+    path = posixpath.normpath(match[3])
+    workspace = posixpath.normpath(workspace)
+    groundtruth = evaluation.get("groundtruth_workspace")
+    if groundtruth and (path == posixpath.normpath(groundtruth) or
+                        path.startswith(posixpath.normpath(groundtruth).rstrip('/') + '/')):
+        return None
+    if path.startswith(workspace.rstrip('/') + '/'):
+        return {"type": match[1], "path": path}
+    return None
+
+
 def native_reward(evaluation):
     stdout, stderr = evaluation["stdout"], evaluation["stderr"]
-    if "Traceback (most recent call last)" in stdout + stderr:
-        raise RuntimeError("Native evaluator crashed")
     if any(marker in (stdout + stderr).lower() for marker in (
         "connection refused", "could not connect to server", "db fetch failed", "[warn] expected fetch:"
     )):
         raise RuntimeError("Native evaluator could not access its environment")
     if "groundtruth not found" in stdout.lower() or "groundtruth" in stdout.lower() and "not found" in stdout.lower():
         raise RuntimeError("Native evaluator is missing ground truth")
+    if agent_output_error(evaluation):
+        return 0.0
+    if "Traceback (most recent call last)" in stdout + stderr:
+        raise RuntimeError("Native evaluator crashed")
     # Audited binary formats: missing output is a legitimate failure, unlike a
     # missing groundtruth file or a Python exception (both can also exit with 1).
     if evaluation["returncode"] == 1 and (
@@ -181,11 +212,18 @@ class Episode:
         except ValueError:
             native = None
         evaluation = {"pass": result.returncode == 0, "returncode": result.returncode,
-                      "native_result": native, "stdout": result.stdout, "stderr": result.stderr}
+                      "native_result": native, "stdout": result.stdout, "stderr": result.stderr,
+                      "agent_workspace": config["agent_workspace"],
+                      "groundtruth_workspace": config["evaluation"]["groundtruth_workspace"]}
+        output_error = agent_output_error(evaluation)
+        if output_error:
+            evaluation.update(outcome="invalid_agent_output", output_error=output_error)
         (self.directory / "evaluation.json").write_text(json.dumps(evaluation, indent=2))
         try:
             evaluation["reward"] = native_reward(evaluation)
         except RuntimeError as error:
+            evaluation.update(reward=None, outcome="evaluator_error", error=str(error))
+            (self.directory / "evaluation.json").write_text(json.dumps(evaluation, indent=2))
             if require_partial or str(error) != "Unscorable native evaluator output":
                 raise
             evaluation["reward"] = None
