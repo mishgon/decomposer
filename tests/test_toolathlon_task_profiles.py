@@ -27,8 +27,8 @@ class ProfileTests(unittest.TestCase):
                   "data": {}, "rollout": {"total_rollout_steps": None},
                   "async_training": {"require_batches": 1, "trigger_parameter_sync_step": 1},
                   "actor_rollout_ref": {"actor": {"ppo_mini_batch_size": 1},
-                                        "rollout": {"n": 10, "val_kwargs": {"n": 8}}}}
-        self.assertEqual(run_plan(config, 20, 2), (20, {0, 8, 16}, 16, 248))
+                                        "rollout": {"n": 32, "val_kwargs": {"n": 8}}}}
+        self.assertEqual(run_plan(config, 6, 2), (6, {0}, 16, 208))
 
 
 if __name__ == "__main__":
