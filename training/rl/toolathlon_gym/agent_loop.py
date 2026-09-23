@@ -74,7 +74,11 @@ class ToolathlonAgentLoop(AgentLoopBase):
             from langgraph_sdk import get_client
             client = get_client(url=episode.url)
             await cancel_subagents(client, state.get("subagent_runs", {}))
-            evaluation = await asyncio.to_thread(episode.score)
+            try:
+                evaluation = await asyncio.to_thread(episode.score)
+            except Exception:
+                stop_reason = "evaluator_error"
+                raise
             if failure is not None:
                 raise failure
             if not tokens.response_ids or not any(tokens.mask):

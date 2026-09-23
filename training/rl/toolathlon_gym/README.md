@@ -73,6 +73,11 @@ Qwen non-thinking sampling remains temperature 0.7, top-p 0.8, top-k 20; the ada
 also applies presence penalty 1.5. Subagents remain hosted Qwen3.5-4B.
 Episode timeout is 2700 seconds and recursion limit is 410. Infrastructure errors
 stay explicit; retain raw evaluations because native check denominators can vary.
+Native evaluator file-shape exceptions naming a file inside the agent workspace
+(`IsADirectoryError`, `NotADirectoryError`, `FileNotFoundError`) are classified as
+`invalid_agent_output` and scored zero, preserving the original traceback.
+Ground-truth, dependency, permission and unknown evaluator errors remain unscored
+errors, not substituted zero rewards. This handling is shared with OPD.
 
 Each group contains 32 episodes. Evaluation uses eight attempts/task before
 training and every eight updates. Resumable checkpoints (model, optimizer, extra

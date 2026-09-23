@@ -262,6 +262,9 @@ def show(root, selected=None):
     else:
         print(f"Training health: grad {grad:.3g} | clip {clip:.1%}" if clip is not None else f"Training health: grad {grad:.3g}")
     stops = Counter(r[2] for r in records)
+    invalid_outputs = sum(r[1].get('outcome') == 'invalid_agent_output' for r in records)
+    if invalid_outputs:
+        print(f"Invalid agent outputs: {invalid_outputs} (scored zero; evaluator traceback saved)")
     print(f"Outcomes: {stops['finished']} finished | {stops['TimeoutError']} timeouts | "
           f"{sum(v for k, v in stops.items() if k not in ('finished', 'TimeoutError'))} other stops")
     gpu = subprocess.run(["nvidia-smi", "--query-gpu=index,memory.used,utilization.gpu",
