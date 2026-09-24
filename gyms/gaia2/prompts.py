@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Literal, cast
 
-from decomposer.prompts import resolve_decomposer_system_prompt
+from decomposer.prompt_profiles import resolve_decomposer_system_prompt
 
 Gaia2ManagerPromptAddendumProfile = Literal["gaia2-ambiguity"]
 

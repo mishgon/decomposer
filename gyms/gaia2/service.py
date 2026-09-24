@@ -22,10 +22,7 @@ from pydantic import BaseModel, Field
 
 from decomposer.chat_vllm import ChatVLLM
 from decomposer.core import TERMINAL_STATUSES, create_decomposer_agent
-from decomposer.prompts import (
-    DECOMPOSER_SYSTEM_PROMPT,
-    DECOMPOSER_TEACHER_SYSTEM_PROMPT,
-)
+from decomposer.prompt_profiles import system_prompt_middleware
 from gyms.gaia2.model_overflow import (
     ExactModelCallLimitMiddleware,
     Gaia2ModelOverflowError,
@@ -154,20 +151,32 @@ def _public_context(context: EpisodeContext) -> dict[str, Any]:
 
 
 def _subagent_summary(state: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
+    """One entry per subagent run, and the runs whose response the manager never received.
+
+    Subagents persist across runs (and turns), so the type lives on the subagent,
+    not on the run.
+    """
+    subagents = state.get("subagents") or {}
     summaries: list[dict[str, Any]] = []
     outstanding: list[str] = []
     for run_id, run in (state.get("subagent_runs") or {}).items():
+        subagent = subagents.get(run.get("subagent_id")) or {}
         item = {
             "subagent_run_id": run_id,
-            "subagent_type_id": run.get("subagent_type_id"),
+            "subagent_id": run.get("subagent_id"),
+            "subagent_type_id": subagent.get("subagent_type_id"),
             "status": run.get("status"),
             "prompt": run.get("prompt"),
-            "report": run.get("report"),
+            "response": run.get("response"),
+            "error": run.get("error"),
             "tool_calls": run.get("tool_calls", []),
-            "report_sequence_number": run.get("report_sequence_number"),
+            "response_sequence_number": run.get("response_sequence_number"),
         }
         summaries.append(item)
-        if run.get("status") not in TERMINAL_STATUSES or run.get("report") is None:
+        if (
+            run.get("status") not in TERMINAL_STATUSES
+            or run.get("response_sequence_number") is None
+        ):
             outstanding.append(run_id)
     return summaries, outstanding
 
@@ -186,7 +195,7 @@ def _notification_prompt(request: TurnRequest) -> str:
             lines.append("Attachments: " + json.dumps(attachments, ensure_ascii=False))
     lines.append(
         "Delegate the work to subagents. Return exactly the text that should be sent "
-        "to the user for this turn. Collect every spawned subagent before answering."
+        "to the user for this turn. Wait for every run you started before answering."
     )
     return "\n\n".join(lines)
 
@@ -197,6 +206,7 @@ def create_app(config: dict[str, Any]) -> FastAPI:
     if not subagent_types:
         raise ValueError("At least one subagent_types entry must be configured")
     middleware = [
+        system_prompt_middleware(_decomposer_system_prompt(config)),
         Gaia2ModelOverflowMiddleware(
             "manager",
             max_completion_tokens=config["manager"].get("max_completion_tokens"),
@@ -218,7 +228,6 @@ def create_app(config: dict[str, Any]) -> FastAPI:
     graph = create_decomposer_agent(
         decomposer_model=manager_model,
         subagent_types=subagent_types,
-        decomposer_system_prompt=_decomposer_system_prompt(config),
         checkpointer=checkpointer,
         context_schema=EpisodeContext,
         middleware=middleware,
@@ -229,7 +238,27 @@ def create_app(config: dict[str, Any]) -> FastAPI:
     lock = asyncio.Lock()
     app = FastAPI(title="GAIA2 Decomposer Service", version="1")
 
-    async def cancel_subagents(episode: Episode) -> None:
+    def _subagent_client(subagent: dict[str, Any]) -> Any:
+        subagent_type = next(
+            (
+                item
+                for item in subagent_types
+                if item["subagent_type_id"] == subagent.get("subagent_type_id")
+            ),
+            None,
+        )
+        if subagent_type is None or not subagent_type.get("url"):
+            return None
+        from langgraph_sdk import get_client
+
+        return get_client(url=subagent_type["url"], headers=subagent_type.get("headers"))
+
+    async def cancel_subagents(episode: Episode, *, delete_threads: bool = False) -> None:
+        """Cancel the episode's active subagent runs; optionally delete their threads.
+
+        Subagents persist across turns, so their threads are deleted only when the
+        episode itself ends.
+        """
         try:
             snapshot = await graph.aget_state(
                 {"configurable": {"thread_id": episode.thread_id}}
@@ -237,29 +266,28 @@ def create_app(config: dict[str, Any]) -> FastAPI:
             state = snapshot.values
         except Exception:
             return
+        subagents = state.get("subagents") or {}
         for run in (state.get("subagent_runs") or {}).values():
             if run.get("status") in TERMINAL_STATUSES:
                 continue
-            subagent_type = next(
-                (
-                    item
-                    for item in subagent_types
-                    if item["subagent_type_id"] == run.get("subagent_type_id")
-                ),
-                None,
-            )
-            if subagent_type is None or not subagent_type.get("url"):
+            subagent = subagents.get(run.get("subagent_id")) or {}
+            client = _subagent_client(subagent)
+            if client is None or not subagent.get("thread_id"):
                 continue
-            from langgraph_sdk import get_client
-
-            client = get_client(
-                url=subagent_type["url"], headers=subagent_type.get("headers")
-            )
             try:
                 await client.runs.cancel(
-                    thread_id=run["thread_id"], run_id=run["run_id"], wait=False
+                    thread_id=subagent["thread_id"], run_id=run["run_id"], wait=False
                 )
-                await client.threads.delete(thread_id=run["thread_id"])
+            except Exception:
+                pass
+        if not delete_threads:
+            return
+        for subagent in subagents.values():
+            client = _subagent_client(subagent)
+            if client is None or not subagent.get("thread_id"):
+                continue
+            try:
+                await client.threads.delete(thread_id=subagent["thread_id"])
             except Exception:
                 pass
 
@@ -359,7 +387,7 @@ def create_app(config: dict[str, Any]) -> FastAPI:
                 await episode.task
             except (asyncio.CancelledError, HTTPException):
                 pass
-        await cancel_subagents(episode)
+        await cancel_subagents(episode, delete_threads=True)
         checkpointer.delete_thread(episode.thread_id)
         return {"deleted": True}
 

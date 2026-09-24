@@ -17,7 +17,7 @@ for _import_root in (_REPO_ROOT, _REPO_ROOT / "src"):
     if str(_import_root) not in sys.path:
         sys.path.insert(0, str(_import_root))
 
-from decomposer.prompts import DECOMPOSER_PROMPT_PROFILES  # noqa: E402
+from decomposer.prompt_profiles import DECOMPOSER_PROMPT_PROFILES  # noqa: E402
 
 from gyms.gaia2.experiments import (  # noqa: E402
     BASE_IMAGE,

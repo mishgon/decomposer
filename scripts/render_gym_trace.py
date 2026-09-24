@@ -67,6 +67,7 @@ def _render_rollout(row: dict[str, Any], number: int) -> list[str]:
         lines.append("")
 
     calls: dict[str, tuple[str, Any]] = {}
+    subagent_types: dict[str, str] = {}
     run_types: dict[str, str] = {}
     for item in output:
         if item.get("type") == "function_call":
@@ -79,6 +80,18 @@ def _render_rollout(row: dict[str, Any], number: int) -> list[str]:
                 run_id = result.get("subagent_run_id")
                 if run_id:
                     run_types[run_id] = arguments.get("subagent_type_id", "unknown subagent")
+            elif name in {"new", "create_subagent"} and isinstance(arguments, dict) and isinstance(result, dict):
+                subagent_id = result.get("subagent_id")
+                if subagent_id:
+                    subagent_types[subagent_id] = arguments.get("subagent_type_id", "unknown subagent")
+            elif name in {"fork", "fork_subagent"} and isinstance(arguments, dict) and isinstance(result, dict):
+                subagent_id = result.get("subagent_id")
+                if subagent_id:
+                    subagent_types[subagent_id] = subagent_types.get(arguments.get("subagent_id"), "unknown subagent")
+            elif name in {"run", "run_subagent", "prompt_subagent"} and isinstance(arguments, dict) and isinstance(result, dict):
+                run_id = result.get("subagent_run_id")
+                if run_id:
+                    run_types[run_id] = subagent_types.get(arguments.get("subagent_id"), "unknown subagent")
 
     lines.extend(["## Trace", ""])
     step = 0
@@ -102,6 +115,15 @@ def _render_rollout(row: dict[str, Any], number: int) -> list[str]:
                 lines.extend([f"### {step}. Spawn `{subagent_type}`", "", "**Prompt**", ""])
                 lines.extend(_text_block(str(arguments.get("prompt", ""))))
                 lines.append("")
+            elif name in {"new", "create_subagent"} and isinstance(arguments, dict):
+                subagent_type = arguments.get("subagent_type_id", "unknown")
+                lines.extend([f"### {step}. Create `{subagent_type}`", ""])
+            elif name in {"run", "run_subagent", "prompt_subagent"} and isinstance(arguments, dict):
+                subagent_id = arguments.get("subagent_id", "unknown")
+                subagent_type = subagent_types.get(subagent_id, "unknown subagent")
+                lines.extend([f"### {step}. Run `{subagent_type}` · Subagent: `{subagent_id}`", ""])
+                lines.extend(_text_block(str(arguments.get("prompt", ""))))
+                lines.append("")
             elif name == "wait":
                 lines.extend([f"### {step}. Wait", ""])
             else:
@@ -123,7 +145,10 @@ def _render_rollout(row: dict[str, Any], number: int) -> list[str]:
                             "",
                         ]
                     )
-                    lines.extend(_text_block(str(report.get("content", ""))))
+                    lines.extend(_text_block(str(report.get("response", report.get("content", "")) or "")))
+                    if report.get("error") is not None:
+                        lines.extend(["", "**Error**", ""])
+                        lines.extend(_text_block(str(report["error"])))
                     lines.append("")
             elif name not in {"spawn_subagent", "wait"}:
                 lines.extend(["**Tool output**", "", "```json", json.dumps(result, indent=2, ensure_ascii=False), "```", ""])

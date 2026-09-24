@@ -18,6 +18,8 @@ from .builder import compute_dataset_fingerprint
 from .schema import (
     CANONICAL_SCHEMA_VERSION,
     MANIFEST_FORMAT_VERSION,
+    PARALLEL_CALL_NORMALIZATION_ATTRIBUTE,
+    PARALLEL_CALL_NORMALIZATION_STRATEGY,
     CanonicalRollout,
     canonical_json,
     sha256_file,
@@ -182,7 +184,7 @@ def _count_records(records: Sequence[CanonicalRollout], field: str) -> dict[str,
 def _normalization_summary(records: Sequence[CanonicalRollout]) -> JsonObject:
     traces = messages = tool_calls = 0
     for record in records:
-        value = record.attributes.get("parallel_spawn_normalization")
+        value = record.attributes.get(PARALLEL_CALL_NORMALIZATION_ATTRIBUTE)
         if value is None:
             continue
         if not isinstance(value, Mapping):
@@ -191,7 +193,7 @@ def _normalization_summary(records: Sequence[CanonicalRollout]) -> JsonObject:
         messages += int(value.get("messages", 0))
         tool_calls += int(value.get("tool_calls", 0))
     return {
-        "strategy": "parallel_spawn_calls_to_single_call_turns",
+        "strategy": PARALLEL_CALL_NORMALIZATION_STRATEGY,
         "traces": traces,
         "messages": messages,
         "tool_calls": tool_calls,

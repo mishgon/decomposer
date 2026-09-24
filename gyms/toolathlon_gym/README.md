@@ -32,11 +32,14 @@ Python environment, writes `/artifacts/data/runtime.json`, and then starts the
 LangGraph server on port 2024. The server uses the separate `/opt/subagents`
 environment.
 
-The container resolves the host vLLM server through this variable:
+The container resolves the host vLLM server through one variable per subagent
+model:
 
-- `GEMMA_4_26B_A4B_BASE_URL`
+- `GEMMA_4_26B_A4B_BASE_URL` (the runner's default subagent), port 8023
+- `QWEN_3_5_4B_BASE_URL` (main's Qwen3.5-4B subagent, served by
+  `scripts/vllm/serve_qwen_3_5_4b.sh`), port 8024
 
-It defaults to port 8023 on `host.docker.internal`.
+Both default to `host.docker.internal`.
 
 Set the Decomposer credential and model path once:
 

@@ -9,8 +9,8 @@ import pytest
 from data.sft.adapters.gaia2 import read_gaia2_source
 from data.sft.builder import load_build_spec
 from data.sft.schema import SelectionSpec, SourceSpec
-from decomposer.core import build_decomposer_chat_tools
-from decomposer.prompts import DECOMPOSER_SYSTEM_PROMPT
+from decomposer.chat_tools import build_decomposer_chat_tools
+from decomposer.prompts import DECOMPOSER_SYSTEM_PROMPT, PARALLEL_WAIT_CALL_ERROR
 
 
 def _write_json(path: Path, value: object) -> None:
@@ -53,85 +53,80 @@ def _split_manifest(path: Path) -> Path:
     return path
 
 
+def _call(call_id: str, name: str, **arguments: str) -> dict:
+    return {"id": call_id, "name": name, "args": arguments}
+
+
+def _tool(call_id: str, name: str, content: str) -> dict:
+    return {
+        "type": "tool",
+        "data": {"content": content, "tool_call_id": call_id, "name": name},
+    }
+
+
+def _ai(content: list[dict], *calls: dict) -> dict:
+    return {
+        "type": "ai",
+        "data": {
+            "content": content,
+            "tool_calls": list(calls),
+            "invalid_tool_calls": [],
+        },
+    }
+
+
 def _manager_messages() -> list[dict]:
+    responses = [
+        {
+            "subagent_id": subagent_id,
+            "subagent_run_id": f"run-{subagent_id}",
+            "status": "responded",
+            "response": f"Did {subagent_id}.",
+            "error": None,
+        }
+        for subagent_id in ("a", "b")
+    ]
     return [
         {"type": "human", "data": {"content": "Complete the scenario."}},
-        {
-            "type": "ai",
-            "data": {
-                "content": [
-                    {
-                        "type": "reasoning",
-                        "content": [{"type": "reasoning_text", "text": "Delegate."}],
-                    },
-                    {"type": "text", "text": "I will delegate."},
-                ],
-                "tool_calls": [
-                    {
-                        "id": "spawn-a",
-                        "name": "spawn_subagent",
-                        "args": {
-                            "subagent_type_id": "gaia2_worker",
-                            "prompt": "Do A.",
-                        },
-                    },
-                    {
-                        "id": "spawn-b",
-                        "name": "spawn_subagent",
-                        "args": {
-                            "subagent_type_id": "gaia2_worker",
-                            "prompt": "Do B.",
-                        },
-                    },
-                ],
-                "invalid_tool_calls": [],
-            },
-        },
-        {
-            "type": "tool",
-            "data": {
-                "content": "run b",
-                "tool_call_id": "spawn-b",
-                "name": "spawn_subagent",
-            },
-        },
-        {
-            "type": "tool",
-            "data": {
-                "content": "run a",
-                "tool_call_id": "spawn-a",
-                "name": "spawn_subagent",
-            },
-        },
-        {
-            "type": "ai",
-            "data": {
-                "content": [],
-                "tool_calls": [{"id": "wait", "name": "wait", "args": {}}],
-                "invalid_tool_calls": [],
-            },
-        },
-        {
-            "type": "tool",
-            "data": {"content": "done", "tool_call_id": "wait", "name": "wait"},
-        },
-        {
-            "type": "ai",
-            "data": {
-                "content": [{"type": "text", "text": "Finished."}],
-                "tool_calls": [],
-                "invalid_tool_calls": [],
-            },
-        },
+        _ai(
+            [
+                {
+                    "type": "reasoning",
+                    "content": [{"type": "reasoning_text", "text": "Delegate."}],
+                },
+                {"type": "text", "text": "I will delegate."},
+            ],
+            _call("new-a", "new", subagent_type_id="gaia2_worker"),
+            _call("new-b", "new", subagent_type_id="gaia2_worker"),
+        ),
+        _tool("new-b", "new", '{"subagent_id": "b"}'),
+        _tool("new-a", "new", '{"subagent_id": "a"}'),
+        _ai(
+            [],
+            _call("run-a", "run", subagent_id="a", prompt="Do A."),
+            _call("run-b", "run", subagent_id="b", prompt="Do B."),
+            _call("early-wait", "wait"),
+        ),
+        _tool("early-wait", "wait", PARALLEL_WAIT_CALL_ERROR),
+        _tool("run-b", "run", '{"subagent_run_id": "run-b"}'),
+        _tool("run-a", "run", '{"subagent_run_id": "run-a"}'),
+        _ai([], _call("wait", "wait")),
+        _tool("wait", "wait", json.dumps(responses)),
+        _ai([{"type": "text", "text": "Finished."}]),
     ]
 
 
-def _sidecar(scenario_id: str, native_run_number: int | None) -> dict:
+def _sidecar(
+    scenario_id: str,
+    native_run_number: int | None,
+    *,
+    prompt_profile: str | None = "teacher",
+) -> dict:
     return {
         "scenario_id": scenario_id,
         "run_number": native_run_number,
         "configuration": {
-            "decomposer_system_prompt_profile": "teacher",
+            "decomposer_system_prompt_profile": prompt_profile,
             "model_configuration": {
                 "manager": {
                     "served_name": "deepseek/deepseek-v4-flash-0731",
@@ -207,9 +202,9 @@ def _read(source: SourceSpec):
     )
 
 
-def test_gaia2_evaluation_filters_binary_reward_and_holdout(tmp_path: Path) -> None:
-    split = _split_manifest(tmp_path / "split.json")
-    source_dir = tmp_path / "source"
+def _write_evaluation_source(
+    source_dir: Path, *, prompt_profile: str | None = "teacher"
+) -> None:
     rows: list[dict] = []
     for universe in (21, 25):
         for suffix in ("a", "b"):
@@ -233,7 +228,9 @@ def test_gaia2_evaluation_filters_binary_reward_and_holdout(tmp_path: Path) -> N
                         source_dir
                         / "decomposer_sidecars"
                         / f"{scenario_id}__run{run_number}.json",
-                        _sidecar(scenario_id, run_number),
+                        _sidecar(
+                            scenario_id, run_number, prompt_profile=prompt_profile
+                        ),
                     )
     _write_jsonl(source_dir / "output.jsonl", rows)
     _write_json(
@@ -249,6 +246,12 @@ def test_gaia2_evaluation_filters_binary_reward_and_holdout(tmp_path: Path) -> N
         },
     )
 
+
+def test_gaia2_evaluation_filters_binary_reward_and_holdout(tmp_path: Path) -> None:
+    split = _split_manifest(tmp_path / "split.json")
+    source_dir = tmp_path / "source"
+    _write_evaluation_source(source_dir)
+
     result = _read(_source(source_dir, split))
 
     assert result.counts["rollouts"] == 4
@@ -259,22 +262,59 @@ def test_gaia2_evaluation_filters_binary_reward_and_holdout(tmp_path: Path) -> N
     assert record.group_id == "gaia2:scenario_universe_21_a"
     assert record.outcome.reward == 1.0
     assert record.messages[0]["content"] == DECOMPOSER_SYSTEM_PROMPT
-    spawn_messages = [
+    calls = [
+        message["tool_calls"][0]
+        for message in record.messages
+        if message["role"] == "assistant" and message.get("tool_calls")
+    ]
+    assert [(call["function"]["name"], call["id"]) for call in calls] == [
+        ("new", "new-a"),
+        ("new", "new-b"),
+        ("run", "run-a"),
+        ("run", "run-b"),
+        ("wait", "wait"),
+    ]
+    new_messages = [
         message
         for message in record.messages
-        if message["role"] == "assistant"
-        and message.get("tool_calls")
-        and message["tool_calls"][0]["function"]["name"] == "spawn_subagent"
+        if message.get("tool_calls")
+        and message["tool_calls"][0]["function"]["name"] == "new"
     ]
-    assert len(spawn_messages) == 2
-    assert spawn_messages[0]["teacher_reasoning"] == "Delegate."
+    assert new_messages[0]["teacher_reasoning"] == "Delegate."
+    assert new_messages[0]["content"] == "I will delegate."
     assert all(
         message["tool_calls"][0]["function"]["arguments"]["subagent_type_id"]
         == "qwen35_4b_non_thinking"
-        for message in spawn_messages
+        for message in new_messages
     )
+    assert record.attributes["parallel_call_normalization"] == {
+        "messages": 2,
+        "tool_calls": 4,
+    }
     assert result.source_manifest["layout"]["holdout_rollouts"] == 4
     assert result.source_manifest["binary_reward_counts"] == {"0": 3, "1": 1}
+    assert result.source_manifest["adapter_version"] == 3
+    assert result.source_manifest["dropped_refused_calls"] == {
+        "tool_calls": 1,
+        "assistant_turns": 0,
+    }
+
+
+@pytest.mark.parametrize(
+    ("prompt_profile", "eligible"),
+    [("teacher", 1), ("student", 1), (None, 1), ("unknown", 0)],
+)
+def test_gaia2_accepts_known_prompt_profiles(
+    tmp_path: Path, prompt_profile: str | None, eligible: int
+) -> None:
+    split = _split_manifest(tmp_path / "split.json")
+    source_dir = tmp_path / "source"
+    _write_evaluation_source(source_dir, prompt_profile=prompt_profile)
+
+    result = _read(_source(source_dir, split))
+
+    assert result.counts["eligible"] == eligible
+    assert result.counts["excluded_invalid_metadata"] == 1 - eligible
 
 
 def test_gaia2_trace_manifest_requires_terminal_full_grid(tmp_path: Path) -> None:

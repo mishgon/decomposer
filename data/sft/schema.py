@@ -12,6 +12,12 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from decomposer.prompts import (
+    PARALLEL_FORK_RUN_CALL_ERROR,
+    PARALLEL_RUN_CALL_ERROR,
+    PARALLEL_WAIT_CALL_ERROR,
+)
+
 JsonObject = dict[str, Any]
 InvalidPolicy = Literal["exclude", "error"]
 SourcePartition = Literal["train", "validation", "test"]
@@ -43,7 +49,34 @@ EXCLUSION_REASONS = (
     "excluded_invalid_messages",
     "excluded_invalid_metadata",
     "excluded_prompt_teacher_cap",
+    "excluded_legacy_tool_interface",
 )
+
+# The Decomposer manager's tool interface. Canonical SFT records use exactly these
+# tools, one call per assistant message.
+DECOMPOSER_TOOL_NAMES = frozenset({"new", "fork", "run", "wait"})
+# String parameters each tool requires; there are no optional parameters.
+DECOMPOSER_TOOL_PARAMETERS: dict[str, tuple[str, ...]] = {
+    "new": ("subagent_type_id",),
+    "fork": ("subagent_id",),
+    "run": ("subagent_id", "prompt"),
+    "wait": (),
+}
+# Tools of the retired spawn_subagent/wait core. Preparation accepts only the
+# new/fork/run/wait interface and excludes traces that use these tools.
+LEGACY_DECOMPOSER_TOOL_NAMES = frozenset({"spawn_subagent"})
+# Exact tool-result contents with which the harness refuses, without executing,
+# calls that must not share one assistant message.
+REFUSED_PARALLEL_CALL_ERRORS = frozenset(
+    {
+        PARALLEL_WAIT_CALL_ERROR,
+        PARALLEL_FORK_RUN_CALL_ERROR,
+        PARALLEL_RUN_CALL_ERROR,
+    }
+)
+# Record attribute and manifest strategy for sequentialized parallel calls.
+PARALLEL_CALL_NORMALIZATION_ATTRIBUTE = "parallel_call_normalization"
+PARALLEL_CALL_NORMALIZATION_STRATEGY = "parallel_calls_to_single_call_turns"
 
 _IDENTIFIER = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
 
@@ -574,6 +607,16 @@ def require_mapping(value: Any, description: str, reason: str) -> Mapping[str, A
     return value
 
 
+def reject_legacy_tool_name(name: Any, description: str) -> None:
+    """Exclude traces of the retired spawn_subagent/wait Decomposer core."""
+    if name in LEGACY_DECOMPOSER_TOOL_NAMES:
+        raise TraceValidationError(
+            "excluded_legacy_tool_interface",
+            f"{description} uses the retired {name!r} tool; SFT preparation "
+            "accepts only new/fork/run/wait Decomposer trajectories.",
+        )
+
+
 def normalize_response_tools(tools: Any) -> list[JsonObject]:
     """Normalize Responses API function tools into Transformers chat format."""
     if not isinstance(tools, list):
@@ -598,6 +641,7 @@ def normalize_response_tools(tools: Any) -> list[JsonObject]:
             raise TraceValidationError(
                 "excluded_invalid_tool_schema", f"Tool {index} has no name."
             )
+        reject_legacy_tool_name(name, f"response.tools[{index}]")
         if not isinstance(description, str) or not isinstance(parameters, Mapping):
             raise TraceValidationError(
                 "excluded_invalid_tool_schema", f"Tool {name!r} has an invalid schema."
@@ -613,12 +657,8 @@ def normalize_response_tools(tools: Any) -> list[JsonObject]:
                 },
             }
         )
-    if len(names) != 2 or set(names) != {"spawn_subagent", "wait"}:
-        raise TraceValidationError(
-            "excluded_invalid_tool_schema",
-            "Exposed tools must be exactly one spawn_subagent and one wait tool.",
-        )
-    return normalized
+    # Apply the same parameter and tool-set checks as embedded chat schemas.
+    return validate_chat_tools(normalized)
 
 
 def validate_chat_tools(tools: Any) -> list[JsonObject]:
@@ -641,6 +681,7 @@ def validate_chat_tools(tools: Any) -> list[JsonObject]:
         name = function.get("name")
         description = function.get("description")
         parameters = function.get("parameters")
+        reject_legacy_tool_name(name, f"trace.tools[{index}]")
         if (
             tool.get("type") != "function"
             or not isinstance(name, str)
@@ -667,12 +708,14 @@ def validate_chat_tools(tools: Any) -> list[JsonObject]:
                 "excluded_invalid_tool_schema",
                 f"Tool {name!r} has an invalid required-parameter list.",
             )
-        if name == "spawn_subagent":
-            expected = {"subagent_type_id", "prompt"}
-            if set(properties) != expected or set(required) != expected:
+        expected = DECOMPOSER_TOOL_PARAMETERS.get(name)
+        if expected is not None:
+            if set(properties) != set(expected) or set(required) != set(expected):
                 raise TraceValidationError(
                     "excluded_invalid_tool_schema",
-                    "spawn_subagent must require subagent_type_id and prompt.",
+                    f"{name} must take no arguments."
+                    if not expected
+                    else f"{name} must require exactly: {', '.join(expected)}.",
                 )
             if any(
                 not isinstance(properties[item], Mapping)
@@ -681,19 +724,14 @@ def validate_chat_tools(tools: Any) -> list[JsonObject]:
             ):
                 raise TraceValidationError(
                     "excluded_invalid_tool_schema",
-                    "spawn_subagent parameters must be strings.",
-                )
-        elif name == "wait":
-            if properties or required:
-                raise TraceValidationError(
-                    "excluded_invalid_tool_schema", "wait must take no arguments."
+                    f"{name} parameters must be strings.",
                 )
         names.append(name)
         validated.append(dict(tool))
-    if len(names) != 2 or set(names) != {"spawn_subagent", "wait"}:
+    if len(names) != len(DECOMPOSER_TOOL_NAMES) or set(names) != DECOMPOSER_TOOL_NAMES:
         raise TraceValidationError(
             "excluded_invalid_tool_schema",
-            "Exposed tools must be exactly one spawn_subagent and one wait tool.",
+            "Exposed tools must be exactly one each of new, fork, run, and wait.",
         )
     return validated
 
@@ -704,7 +742,11 @@ def normalize_subagent_type_ids(
     allowed_ids: frozenset[str],
     aliases: Mapping[str, str],
 ) -> int:
-    """Normalize spawn-call subagent IDs to one canonical policy interface."""
+    """Normalize ``new``-call subagent type IDs to one canonical policy interface.
+
+    Only ``new`` names a subagent type; ``fork`` and ``run`` address existing
+    subagents by ID and inherit their type.
+    """
     if not allowed_ids:
         return 0
     normalized = 0
@@ -720,18 +762,18 @@ def normalize_subagent_type_ids(
                 "tool-call function",
                 "excluded_invalid_tool_calls",
             )
-            if function.get("name") != "spawn_subagent":
+            if function.get("name") != "new":
                 continue
             arguments = require_mapping(
                 function.get("arguments"),
-                "spawn_subagent arguments",
+                "new arguments",
                 "excluded_invalid_tool_calls",
             )
             raw_id = arguments.get("subagent_type_id")
             if not isinstance(raw_id, str) or not raw_id.strip():
                 raise TraceValidationError(
                     "excluded_invalid_tool_calls",
-                    "spawn_subagent has no valid subagent_type_id.",
+                    "new has no valid subagent_type_id.",
                 )
             canonical_id = aliases.get(raw_id, raw_id)
             if canonical_id not in allowed_ids:
@@ -743,63 +785,75 @@ def normalize_subagent_type_ids(
                 if not isinstance(arguments, dict):
                     raise TraceValidationError(
                         "excluded_invalid_tool_calls",
-                        "spawn_subagent arguments must be mutable JSON objects.",
+                        "new arguments must be mutable JSON objects.",
                     )
                 arguments["subagent_type_id"] = canonical_id
                 normalized += 1
     return normalized
 
 
-def sequentialize_parallel_spawn_calls(
+def _is_refused_call_result(result: Mapping[str, Any]) -> bool:
+    content = result.get("content")
+    return isinstance(content, str) and content in REFUSED_PARALLEL_CALL_ERRORS
+
+
+def sequentialize_parallel_calls(
     messages: list[JsonObject],
 ) -> tuple[list[JsonObject], int, int, int, int]:
-    """Convert parallel spawn batches into single-call assistant/tool turns.
+    """Convert multi-call assistant messages into single-call assistant/tool turns.
 
-    Decomposer may emit several asynchronous ``spawn_subagent`` calls in one
-    assistant message. The canonical SFT format intentionally keeps one tool
-    call per assistant message, so each parallel batch is paired with its tool
-    results by call ID and emitted in the teacher's original call order.
+    Decomposer may emit several tool calls in one assistant message, and the
+    harness executes them concurrently. The canonical SFT format intentionally
+    keeps one tool call per assistant message, so each such batch is paired with
+    its tool results by call ID and emitted in the teacher's original call order.
 
     Shared assistant content and teacher reasoning belong to the original
     completion and are retained only on the first sequentialized turn.
 
-    A ``wait`` inside such a batch is dropped along with the tool message
-    answering it. The harness refuses to run those calls -- it replies "A `wait`
-    call must be the only tool call in the message. This `wait` call was not
-    executed." -- so removing them reproduces the trajectory the environment
-    actually saw rather than editing away a real action. When a batch holds
-    nothing but waits the whole turn goes, text and all, because what remains is
-    usually a summary truncated mid-sentence by the token limit that produced the
-    stray calls in the first place.
+    Calls the harness refused are dropped along with the tool messages answering
+    them. ``DecomposerAgentMiddleware.after_model`` does not execute a ``wait``
+    that shares its message with any other call, a ``fork`` and a ``run`` of the
+    same subagent in one message, or several ``run`` calls of the same subagent in
+    one message; it answers each such call with exactly ``PARALLEL_WAIT_CALL_ERROR``,
+    ``PARALLEL_FORK_RUN_CALL_ERROR`` or ``PARALLEL_RUN_CALL_ERROR``. Refused calls
+    are identified by that exact tool-result content, so removing them reproduces
+    the actions the environment actually executed rather than editing away a real
+    action. Executed calls that failed, such as a ``run`` of an unknown subagent,
+    keep their error results.
 
-    A lone ``wait`` is a valid, executed call and passes through untouched: only
+    When no call of a batch was executed the whole turn goes, text and all. For a
+    batch holding nothing but waits, what remains is usually a summary truncated
+    mid-sentence by the token limit that produced the stray calls in the first
+    place, and in general a turn without an executed call carries no supervision
+    worth keeping.
+
+    A single-call message is never refused and passes through untouched: only
     multi-call messages are rewritten, matching the harness's own rule.
 
-    Returns the rewritten messages, the number of batches sequentialized, the
-    number of spawn calls they contained, and the number of dropped wait calls
-    and dropped turns.
+    Returns the rewritten messages, the number of batches sequentialized (those
+    still holding several executed calls), the number of calls they contained,
+    the number of dropped refused calls, and the number of dropped turns.
     """
     normalized: list[JsonObject] = []
     normalized_messages = 0
     normalized_calls = 0
-    dropped_wait_calls = 0
+    dropped_calls = 0
     dropped_turns = 0
     index = 0
     while index < len(messages):
         message = messages[index]
         raw_calls = message.get("tool_calls") or []
-        if message.get("role") != "assistant" or not isinstance(raw_calls, list):
-            normalized.append(message)
-            index += 1
-            continue
-        if len(raw_calls) <= 1:
+        if (
+            message.get("role") != "assistant"
+            or not isinstance(raw_calls, list)
+            or len(raw_calls) <= 1
+        ):
             normalized.append(message)
             index += 1
             continue
 
         calls: list[Mapping[str, Any]] = []
         call_ids: list[str] = []
-        wait_ids: list[str] = []
         for raw_call in raw_calls:
             call = require_mapping(
                 raw_call,
@@ -813,9 +867,10 @@ def sequentialize_parallel_spawn_calls(
             )
             call_id = call.get("id")
             name = function.get("name")
+            reject_legacy_tool_name(name, f"Assistant message {index}")
             if (
                 call.get("type") != "function"
-                or name not in {"spawn_subagent", "wait"}
+                or name not in DECOMPOSER_TOOL_NAMES
                 or not isinstance(call_id, str)
                 or not call_id
             ):
@@ -823,9 +878,6 @@ def sequentialize_parallel_spawn_calls(
                     "excluded_invalid_tool_calls",
                     f"Assistant message {index} shares an invalid tool call.",
                 )
-            if name == "wait":
-                wait_ids.append(call_id)
-                continue
             calls.append(call)
             call_ids.append(call_id)
         if len(call_ids) != len(set(call_ids)):
@@ -837,9 +889,8 @@ def sequentialize_parallel_spawn_calls(
         result_end = index + 1
         while result_end < len(messages) and messages[result_end].get("role") == "tool":
             result_end += 1
-        results = messages[index + 1 : result_end]
         results_by_id: dict[str, JsonObject] = {}
-        for result in results:
+        for result in messages[index + 1 : result_end]:
             result_id = result.get("tool_call_id")
             if not isinstance(result_id, str) or result_id in results_by_id:
                 raise TraceValidationError(
@@ -847,22 +898,27 @@ def sequentialize_parallel_spawn_calls(
                     f"Parallel assistant message {index} has malformed tool results.",
                 )
             results_by_id[result_id] = result
-        if not all(call_id in results_by_id for call_id in call_ids):
+        if set(results_by_id) != set(call_ids):
             raise TraceValidationError(
                 "excluded_invalid_tool_calls",
                 f"Parallel assistant message {index} must be followed by exactly one "
-                "matching tool result for every spawn call.",
+                "matching tool result for every call.",
             )
 
-        dropped_wait_calls += len(wait_ids)
-        if not calls:
+        executed = [
+            (call, call_id)
+            for call, call_id in zip(calls, call_ids)
+            if not _is_refused_call_result(results_by_id[call_id])
+        ]
+        dropped_calls += len(calls) - len(executed)
+        index = result_end
+        if not executed:
             # Nothing the environment executed survives, so the turn carries no
             # supervision worth keeping.
             dropped_turns += 1
-            index = result_end
             continue
 
-        for call_index, (call, call_id) in enumerate(zip(calls, call_ids)):
+        for call_index, (call, call_id) in enumerate(executed):
             split_message = dict(message)
             split_message["tool_calls"] = [dict(call)]
             if call_index:
@@ -870,24 +926,78 @@ def sequentialize_parallel_spawn_calls(
                 split_message.pop("teacher_reasoning", None)
             normalized.extend((split_message, results_by_id[call_id]))
 
-        if len(calls) > 1:
+        if len(executed) > 1:
             # Only a batch that stayed parallel counts as sequentialized; once the
-            # waits are gone a lone spawn is an ordinary single-call turn.
+            # refused calls are gone a lone call is an ordinary single-call turn.
             normalized_messages += 1
-            normalized_calls += len(calls)
-        index = result_end
+            normalized_calls += len(executed)
 
     return (
         normalized,
         normalized_messages,
         normalized_calls,
-        dropped_wait_calls,
+        dropped_calls,
         dropped_turns,
     )
 
 
-def validate_decomposer_messages(messages: list[JsonObject]) -> None:
-    """Validate the benchmark-neutral Decomposer tool-calling trajectory."""
+def _validate_call_arguments(
+    name: str,
+    arguments: Mapping[str, Any],
+    subagent_type_ids: frozenset[str],
+) -> None:
+    if name == "new":
+        type_id = arguments.get("subagent_type_id")
+        if (
+            set(arguments) != {"subagent_type_id"}
+            or not isinstance(type_id, str)
+            or not type_id.strip()
+        ):
+            raise TraceValidationError(
+                "excluded_invalid_tool_calls",
+                "new requires exactly one non-empty subagent_type_id string.",
+            )
+        if subagent_type_ids and type_id not in subagent_type_ids:
+            raise TraceValidationError(
+                "excluded_invalid_tool_calls",
+                f"Unknown subagent_type_id {type_id!r}.",
+            )
+    elif name == "fork":
+        if set(arguments) != {"subagent_id"} or not isinstance(
+            arguments["subagent_id"], str
+        ):
+            raise TraceValidationError(
+                "excluded_invalid_tool_calls",
+                "fork requires exactly one subagent_id string.",
+            )
+    elif name == "run":
+        prompt = arguments.get("prompt")
+        if (
+            set(arguments) != {"subagent_id", "prompt"}
+            or not isinstance(arguments["subagent_id"], str)
+            or not isinstance(prompt, str)
+            or not prompt.strip()
+        ):
+            raise TraceValidationError(
+                "excluded_invalid_tool_calls",
+                "run requires a subagent_id string and a non-empty prompt string.",
+            )
+    elif arguments:
+        raise TraceValidationError(
+            "excluded_invalid_tool_calls", "wait arguments must be empty."
+        )
+
+
+def validate_decomposer_messages(
+    messages: list[JsonObject],
+    *,
+    subagent_type_ids: frozenset[str] = frozenset(),
+) -> None:
+    """Validate the benchmark-neutral Decomposer tool-calling trajectory.
+
+    ``subagent_type_ids``, when non-empty, lists the subagent types ``new`` may
+    create; otherwise any non-empty type ID is accepted.
+    """
     if len(messages) < 3 or messages[0].get("role") != "system":
         raise TraceValidationError(
             "excluded_invalid_messages",
@@ -963,32 +1073,19 @@ def validate_decomposer_messages(messages: list[JsonObject]) -> None:
                 )
                 name = function.get("name")
                 arguments = function.get("arguments")
+                reject_legacy_tool_name(name, f"Assistant message {index}")
                 if (
                     call.get("type") != "function"
                     or not isinstance(call_id, str)
                     or not call_id
-                    or name not in {"spawn_subagent", "wait"}
+                    or name not in DECOMPOSER_TOOL_NAMES
                     or not isinstance(arguments, Mapping)
                 ):
                     raise TraceValidationError(
                         "excluded_invalid_tool_calls",
                         f"Assistant message {index} has an invalid call.",
                     )
-                arguments = dict(arguments)
-                if name == "spawn_subagent":
-                    if set(arguments) != {"subagent_type_id", "prompt"} or not all(
-                        isinstance(arguments[key], str) and arguments[key].strip()
-                        for key in ("subagent_type_id", "prompt")
-                    ):
-                        raise TraceValidationError(
-                            "excluded_invalid_tool_calls",
-                            "spawn_subagent requires non-empty subagent_type_id "
-                            "and prompt strings.",
-                        )
-                elif arguments:
-                    raise TraceValidationError(
-                        "excluded_invalid_tool_calls", "wait arguments must be empty."
-                    )
+                _validate_call_arguments(str(name), arguments, subagent_type_ids)
                 if call_id in seen_call_ids:
                     raise TraceValidationError(
                         "excluded_invalid_tool_calls",

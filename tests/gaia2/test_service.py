@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from langchain.agents.middleware import ModelCallLimitMiddleware
 from langchain_core.messages import AIMessage
 
+from decomposer.prompts import DECOMPOSER_SYSTEM_PROMPT
 from gyms.gaia2 import service
 from gyms.gaia2.model_overflow import (
     ExactModelCallLimitMiddleware,
@@ -171,12 +172,21 @@ def test_episode_persists_thread_and_forwards_runtime_context(monkeypatch):
 def test_uncollected_subagent_is_reported_as_outstanding():
     summaries, outstanding = service._subagent_summary(
         {
+            "subagents": {
+                "s1": {"subagent_id": "s1", "subagent_type_id": "worker"},
+            },
             "subagent_runs": {
-                "running": {"status": "running", "report": None},
-                "uncollected": {"status": "success", "report": None},
+                "running": {"subagent_id": "s1", "status": "running"},
+                "uncollected": {
+                    "subagent_id": "s1",
+                    "status": "responded",
+                    "response": "ok",
+                },
                 "collected": {
-                    "status": "success",
-                    "report": {"content": "ok"},
+                    "subagent_id": "s1",
+                    "status": "responded",
+                    "response": "ok",
+                    "response_sequence_number": 1,
                     "messages": [
                         AIMessage(
                             content="",
@@ -189,6 +199,9 @@ def test_uncollected_subagent_is_reported_as_outstanding():
     )
     assert outstanding == ["running", "uncollected"]
     assert all("messages" not in summary for summary in summaries)
+    # The type lives on the persistent subagent, not on the run.
+    assert {summary["subagent_type_id"] for summary in summaries} == {"worker"}
+    assert summaries[2]["response"] == "ok"
 
 
 def test_manager_sidecar_message_keeps_structured_reasoning_separate():
@@ -263,6 +276,7 @@ def test_reasoning_only_response_is_not_a_final_answer(monkeypatch):
 def test_prompt_profile_is_forwarded_to_decomposer(monkeypatch):
     captured = {}
     monkeypatch.setattr(service, "_model_from_config", lambda value: object())
+    monkeypatch.setattr(service, "system_prompt_middleware", lambda prompt: ("prompt", prompt))
 
     def fake_create_decomposer_agent(**kwargs):
         captured.update(kwargs)
@@ -277,12 +291,15 @@ def test_prompt_profile_is_forwarded_to_decomposer(monkeypatch):
         }
     )
 
-    assert captured["decomposer_system_prompt"] == service.DECOMPOSER_TEACHER_SYSTEM_PROMPT
+    # The core takes no prompt argument; the profile reaches it as the first middleware.
+    assert "decomposer_system_prompt" not in captured
+    assert captured["middleware"][0] == ("prompt", DECOMPOSER_SYSTEM_PROMPT)
 
 
 def test_prompt_addendum_is_appended_only_when_configured(monkeypatch):
     captured = {}
     monkeypatch.setattr(service, "_model_from_config", lambda value: object())
+    monkeypatch.setattr(service, "system_prompt_middleware", lambda prompt: ("prompt", prompt))
 
     def fake_create_decomposer_agent(**kwargs):
         captured.update(kwargs)
@@ -298,9 +315,9 @@ def test_prompt_addendum_is_appended_only_when_configured(monkeypatch):
         }
     )
 
-    assert captured["decomposer_system_prompt"] == (
-        f"{service.DECOMPOSER_TEACHER_SYSTEM_PROMPT}\n\n"
-        f"{GAIA2_AMBIGUITY_MANAGER_ADDENDUM}"
+    assert captured["middleware"][0] == (
+        "prompt",
+        f"{DECOMPOSER_SYSTEM_PROMPT}\n\n{GAIA2_AMBIGUITY_MANAGER_ADDENDUM}",
     )
 
 
