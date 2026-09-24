@@ -61,9 +61,9 @@ WideSearch benchmark result.
 
 ```bash
 source gyms/wideseek/env.sh
-.venv/bin/python -m gyms.wideseek.run \
+.venv/bin/python -m evals.wideseek.run \
   --output artifacts/gyms/wideseek/runs/qwen4b-simple-smoke \
-  --mode simple --limit 2 -n 3 --concurrency 2
+  --harness react --limit 2 -n 3 --concurrency 2
 ```
 
 Repeat the exact command with `--resume` to skip completed attempts. Interrupted
@@ -96,7 +96,7 @@ To schedule separate evaluations sequentially:
 ```bash
 source gyms/wideseek/env.sh
 export WS_JUDGE_MODEL=Qwen/Qwen3.6-35B-A3B-FP8
-.venv/bin/python -m scripts.wideseek_sequence --name qwen4b-width100-gym-limits \
+.venv/bin/python -m evals.wideseek.sequence --name qwen4b-width100-gym-limits \
   --limit 100 -n 3 --concurrency 2
 ```
 
@@ -127,7 +127,7 @@ Re-score existing answers without rerunning agents or modifying original traces:
 
 ```bash
 source gyms/wideseek/env.sh
-.venv/bin/python -m gyms.wideseek.rescore \
+.venv/bin/python -m evals.wideseek.rescore \
   --run artifacts/gyms/wideseek/runs/qwen4b-width-smoke-n3-v2 \
   --data artifacts/gyms/wideseek/data/width/tasks.jsonl \
   --output artifacts/gyms/wideseek/rejudged/qwen35b/qwen4b-width-smoke-n3-v2 \

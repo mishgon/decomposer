@@ -38,7 +38,7 @@ class BudgetTests(unittest.TestCase):
 class ScoreTests(unittest.IsolatedAsyncioTestCase):
     async def test_rescore_preserves_original_and_selects_judge(self):
         import hashlib, json
-        from gyms.wideseek.rescore import main
+        from evals.wideseek.rescore import main
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
             data = root / "tasks.jsonl"
@@ -54,8 +54,8 @@ class ScoreTests(unittest.IsolatedAsyncioTestCase):
                 "data_sha256": hashlib.sha256(data.read_bytes()).hexdigest()}}))
             judge = AsyncMock(return_value={"score": .5, "status": "scored"})
             args = SimpleNamespace(data=data, run=run, output=root/"new-scores", judge_model="large-judge", concurrency=2)
-            with patch("gyms.wideseek.rescore.evaluate", new=judge), \
-                    patch("gyms.wideseek.rescore.subprocess.check_output", return_value="test-revision"):
+            with patch("evals.wideseek.rescore.evaluate", new=judge), \
+                    patch("evals.wideseek.rescore.subprocess.check_output", return_value="test-revision"):
                 await main(args)
             self.assertEqual(path.read_bytes(), before)
             self.assertEqual(judge.await_args.kwargs["judge_model_id"], "large-judge")

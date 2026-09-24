@@ -1,4 +1,4 @@
-"""Collect simple/decomposer trajectories and native width scores under one resumable run."""
+"""Run WideSeek episodes and save raw trajectories and native scores."""
 import argparse
 import asyncio
 import fcntl
@@ -7,7 +7,6 @@ import importlib.metadata
 import json
 import os
 from pathlib import Path
-import statistics
 import signal
 import subprocess
 import time
@@ -159,27 +158,15 @@ async def main(args):
             await episode(task, mode, attempt, root, args)
 
     await asyncio.gather(*(bounded(t, args.mode, n) for n in range(1, args.n + 1) for t in tasks))
-    for mode in modes:
-        rows = [json.loads(p.read_text()) for p in (root / mode).glob("*/attempt-???/result.json")]
-        scores = [r["evaluation"]["score"] for r in rows if r["evaluation"]["score"] is not None]
-        seconds = [r["agent_finished_at"] - r["started_at"] for r in rows]
-        tokens = {field: sum(role[field] for r in rows for name, role in r["usage"].items() if name != "judge")
-                  for field in ("input_tokens", "output_tokens")}
-        save(root / f"{mode}-summary.json", {"attempts": len(rows), "scored": len(scores),
-             "unscored": len(rows) - len(scores), "mean_native_score": sum(scores)/len(scores) if scores else None,
-             "mean_native_score_infra_zero": sum(scores)/len(rows) if rows else None,
-             "metrics": sorted({r["evaluation"].get("metric", "unscored") for r in rows}),
-             "mean_agent_seconds": statistics.mean(seconds) if seconds else None,
-             "median_agent_seconds": statistics.median(seconds) if seconds else None,
-             "agent_tokens": tokens,
-             "normal_finishes": sum(r["status"] == "finished" for r in rows)})
 
 
-if __name__ == "__main__":
+def create_parser():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--data", type=Path, default=Path("artifacts/gyms/wideseek/data/width/tasks.jsonl"))
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--mode", choices=["simple", "decomposer"], required=True)
+    harness = parser.add_mutually_exclusive_group(required=True)
+    harness.add_argument("--harness", choices=["react", "decomposer"])
+    harness.add_argument("--mode", choices=["simple", "decomposer"], help=argparse.SUPPRESS)
     parser.add_argument("--limit", type=int, default=2)
     parser.add_argument("-n", type=int, default=3)
     parser.add_argument("--concurrency", type=int, default=2)
@@ -188,7 +175,14 @@ if __name__ == "__main__":
     parser.add_argument("--timeout", type=int, default=2700)
     parser.add_argument("--worker-url", default="http://127.0.0.1:18081")
     parser.add_argument("--resume", action="store_true")
-    args = parser.parse_args()
+    return parser
+
+
+def cli(run=main, argv=None):
+    parser = create_parser()
+    args = parser.parse_args(argv)
+    if args.harness is not None:
+        args.mode = "simple" if args.harness == "react" else "decomposer"
     if min(v for v in (args.limit, args.n, args.concurrency, args.model_calls, args.output_tokens, args.timeout) if v is not None) < 1:
         parser.error("Counts and budgets must be positive")
     # Lock outside the run directory so first-launch mkdir remains exclusive.
@@ -196,4 +190,8 @@ if __name__ == "__main__":
     root.parent.mkdir(parents=True, exist_ok=True)
     with (root.parent / (root.name + ".lock")).open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        asyncio.run(main(args))
+        asyncio.run(run(args))
+
+
+if __name__ == "__main__":
+    cli()
