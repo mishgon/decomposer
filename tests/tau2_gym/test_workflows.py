@@ -47,6 +47,9 @@ def test_subagent_schema_matches_the_sft_releases() -> None:
         ({"manager_reasoning_mode": "thinking"}, "non_thinking"),
         ({"prompt_profile": "expert"}, "unknown prompt profile"),
         ({"concurrency": 0}, "at least 1"),
+        # effort only means something to a thinking manager behind the proxy
+        ({"manager_reasoning_effort": "low"}, "llm_proxy thinking manager"),
+        ({"manager_backend": "llm_proxy", "manager_reasoning_effort": "low"}, "llm_proxy thinking manager"),
     ],
 )
 def test_invalid_experiments_are_rejected(overrides: dict, message: str) -> None:
@@ -125,6 +128,9 @@ def test_manager_proxy_carries_the_experiment_sampling() -> None:
     assert body["temperature"] == 0.7
     thinking = get_experiment("qwen38_flash_teacher_thinking").manager_proxy_extra_body
     assert thinking["reasoning"] == {"effort": "xhigh"}
+    low = get_experiment("qwen38_flash_teacher_thinking_low").manager_proxy_extra_body
+    assert low["reasoning"] == {"effort": "low"}
+    assert low["include_reasoning"] is True
     assert "--response-tool-parser" not in run_module.remote_proxy_command(8143)
 
 
@@ -139,6 +145,21 @@ def test_dry_run_plans_an_opd_round(capsys: pytest.CaptureFixture[str], tmp_path
     assert plan["manager"][plan["manager"].index("serve") + 1] == str(checkpoint)
     assert plan["dataset"].endswith(f"decomposer_train_v2-{plan['pool_sha256']}-k2.decomposer.jsonl")
     assert plan["subagent_backend"] == "llm_proxy"
+    assert plan["subagent_model_id"] == "Qwen/Qwen3.5-4B-unlooped"
+
+
+def test_subagent_model_follows_the_backend_unless_given() -> None:
+    assert run_module.resolve_subagent_model_id("llm_proxy", None) == "Qwen/Qwen3.5-4B-unlooped"
+    assert run_module.resolve_subagent_model_id("local_vllm", None) == "Qwen/Qwen3.5-4B"
+    assert run_module.resolve_subagent_model_id("llm_proxy", "Qwen/Other") == "Qwen/Other"
+    ports = run_module.PortLayout()
+    env = run_module.base_environment(ports, subagent_backend="llm_proxy", subagent_model_id="Qwen/Other")
+    assert env["TAU2_GYM_SUBAGENT_MODEL_ID"] == "Qwen/Other"
+    assert list(json.loads(env["TAU2_GYM_MODEL_BASE_URLS_JSON"])) == ["Qwen/Other"]
+    command = run_module.subagent_vllm_command(
+        ports, model_id="Qwen/Qwen3.5-4B", max_model_len=1024, gpu_memory_utilization=0.5
+    )
+    assert command[command.index("serve") + 1] == "Qwen/Qwen3.5-4B"
 
 
 def test_remote_experiments_refuse_a_checkpoint(tmp_path: Path) -> None:

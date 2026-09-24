@@ -27,10 +27,12 @@ from responses_api_agents.decomposer_agent.subagents.graph import (
 
 from decomposer.chat_vllm import ChatVLLM
 from gyms.qwen_sampling import qwen35_general_sampling
+from gyms.tau2_gym.experiments import DEFAULT_SUBAGENT_MODEL_ID, SUBAGENT_MODEL_ENV
 
 REQUEST_TIMEOUT_SECONDS = 300.0
 MODEL_BASE_URLS_ENV = "TAU2_GYM_MODEL_BASE_URLS_JSON"
-QWEN35_4B_MODEL_ID = "Qwen/Qwen3.5-4B"
+# The model the subagents request; run.py sets it per run (`--subagent-model-id`).
+QWEN35_4B_MODEL_ID = os.environ.get(SUBAGENT_MODEL_ENV) or DEFAULT_SUBAGENT_MODEL_ID
 QWEN35_4B_DEFAULT_PORT = 8025
 
 SUBAGENT_MAX_MODEL_CALLS = int(os.environ.get("DECOMPOSER_SUBAGENT_MAX_MODEL_CALLS", "100"))

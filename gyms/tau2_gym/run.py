@@ -43,13 +43,16 @@ if __package__ in (None, ""):
 import yaml  # noqa: E402
 
 from gyms.tau2_gym.experiments import (  # noqa: E402
+    DEFAULT_SUBAGENT_MODEL_ID,
     EXPERIMENTS_BY_NAME,
     LLM_PROXY_API_KEY_ENV,
     LLM_PROXY_URL_ENV,
+    LOCAL_SUBAGENT_MODEL_ID,
     OPENROUTER_API_KEY_ENV,
     OPENROUTER_BASE_URL,
     SUBAGENT_ASSISTANT_ID,
     SUBAGENT_DESCRIPTION,
+    SUBAGENT_MODEL_ENV,
     SUBAGENT_TYPE_ID,
     Tau2Experiment,
     get_experiment,
@@ -77,7 +80,6 @@ TAU2_DATA_DIR = TAU2_CHECKOUT / "data"
 GYM_EXTRA_ROOT = REPO_ROOT / "gyms" / "tau2_gym" / "gym_components"
 SUBAGENT_DIR = REPO_ROOT / "gyms" / "tau2_gym" / "subagents"
 
-QWEN35_4B_MODEL_ID = "Qwen/Qwen3.5-4B"
 ROLLOUT_FAILURE_POLICY = "score_zero"
 VERIFIER_FACTORY = "responses_api_agents.decomposer_agent.app:_subagent_tool_calls_and_final_message"
 SUBAGENT_BACKENDS = ("local_vllm", "llm_proxy")
@@ -384,7 +386,14 @@ def subagent_base_url(ports: PortLayout, backend: str) -> str:
     return loopback_url(port)
 
 
-def base_environment(ports: PortLayout, *, subagent_backend: str) -> dict[str, str]:
+def resolve_subagent_model_id(subagent_backend: str, override: str | None) -> str:
+    """The model id the subagents request: explicit, else the one the backend serves."""
+    if override:
+        return override
+    return LOCAL_SUBAGENT_MODEL_ID if subagent_backend == "local_vllm" else DEFAULT_SUBAGENT_MODEL_ID
+
+
+def base_environment(ports: PortLayout, *, subagent_backend: str, subagent_model_id: str) -> dict[str, str]:
     env = dict(os.environ)
     python_path = [str(REPO_ROOT), str(REPO_ROOT / "src"), str(REPO_ROOT / "external" / "Gym")]
     existing = env.get("PYTHONPATH")
@@ -408,8 +417,9 @@ def base_environment(ports: PortLayout, *, subagent_backend: str) -> dict[str, s
             # tau2 logs every tool response at DEBUG through loguru.
             "LOGURU_LEVEL": env.get("LOGURU_LEVEL", "WARNING"),
             "TAU2_GYM_MODEL_BASE_URLS_JSON": json.dumps(
-                {QWEN35_4B_MODEL_ID: subagent_base_url(ports, subagent_backend)}
+                {subagent_model_id: subagent_base_url(ports, subagent_backend)}
             ),
+            SUBAGENT_MODEL_ENV: subagent_model_id,
             "UV_CACHE_DIR": str(UV_CACHE),
             "TOKENIZERS_PARALLELISM": "false",
         }
@@ -459,11 +469,13 @@ def prepare_dataset(
     return json.loads(result.stdout.strip().splitlines()[-1])
 
 
-def subagent_vllm_command(ports: PortLayout, *, max_model_len: int, gpu_memory_utilization: float) -> list[str]:
+def subagent_vllm_command(
+    ports: PortLayout, *, model_id: str, max_model_len: int, gpu_memory_utilization: float
+) -> list[str]:
     return [
         str(PROJECT_VENV / "bin" / "vllm"),
         "serve",
-        QWEN35_4B_MODEL_ID,
+        model_id,
         "--host",
         "127.0.0.1",
         "--port",
@@ -726,7 +738,8 @@ def execute(args: argparse.Namespace) -> int:
     dataset = dataset_path(pool, pool_meta["sha256"], args.tasks_per_domain, tasks_file)
     config = gym_config(experiment, ports)
 
-    env = base_environment(ports, subagent_backend=args.subagent_backend)
+    subagent_model_id = resolve_subagent_model_id(args.subagent_backend, args.subagent_model_id)
+    env = base_environment(ports, subagent_backend=args.subagent_backend, subagent_model_id=subagent_model_id)
     use_subagent_proxy = args.subagent_backend == "llm_proxy"
     manager_command: list[str] | None = None
     if experiment.manager_backend == "local_vllm":
@@ -744,7 +757,10 @@ def execute(args: argparse.Namespace) -> int:
         remote_proxy_command(ports.subagent_proxy)
         if use_subagent_proxy
         else subagent_vllm_command(
-            ports, max_model_len=args.max_model_len, gpu_memory_utilization=args.gpu_memory_utilization
+            ports,
+            model_id=subagent_model_id,
+            max_model_len=args.max_model_len,
+            gpu_memory_utilization=args.gpu_memory_utilization,
         )
     )
     timings: dict[str, float] = {}
@@ -755,7 +771,8 @@ def execute(args: argparse.Namespace) -> int:
             "pool": pool, "pool_sha256": pool_meta["sha256"], "ports": ports.as_dict(),
             "manager_checkpoint": str(checkpoint) if checkpoint else None,
             "manager": manager_command, "manager_gpu": args.manager_gpu,
-            "subagent_backend": args.subagent_backend, "subagent": subagent_command,
+            "subagent_backend": args.subagent_backend, "subagent_model_id": subagent_model_id,
+            "subagent": subagent_command,
             "subagent_gpu": args.subagent_gpu,
             "langgraph": langgraph_command(ports, args.langgraph_jobs),
             "gym_start": gym_start_command(ports, config=config_path, logs=logs),
@@ -809,6 +826,7 @@ def execute(args: argparse.Namespace) -> int:
         "manager_checkpoint": str(checkpoint) if checkpoint else None,
         "manager_checkpoint_fingerprint": checkpoint_fingerprint(checkpoint) if checkpoint else None,
         "subagent_backend": args.subagent_backend,
+        "subagent_model_id": subagent_model_id,
         "subagent_endpoint": subagent_base_url(ports, args.subagent_backend),
         "ports": ports.as_dict(),
         "gyms_config_sha256": hashlib.sha256(config_path.read_bytes()).hexdigest()[:16],
@@ -917,6 +935,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--subagent-backend", choices=SUBAGENT_BACKENDS, default="llm_proxy",
                         help="local_vllm starts a dedicated Qwen3.5-4B on --subagent-gpu; "
                              "llm_proxy reaches the shared replicas and needs no GPU.")
+    parser.add_argument("--subagent-model-id", default=None,
+                        help=f"model the subagents request; default {DEFAULT_SUBAGENT_MODEL_ID} on the proxy, "
+                             f"{LOCAL_SUBAGENT_MODEL_ID} on a local vLLM")
     parser.add_argument("--subagent-gpu", default=None, help="CUDA device(s) for a local subagent vLLM")
     parser.add_argument("--subagent-port", type=int, default=None,
                         help="move the subagent vLLM port independently of --port-offset")
