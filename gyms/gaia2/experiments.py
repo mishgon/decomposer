@@ -279,6 +279,12 @@ QWEN35_4B_GAIA2_EXECUTION_ONLY_SFT = (
 )
 
 DecomposerManagerBackend = Literal["local_vllm", "openrouter", "llm_proxy"]
+# A worker is either a local vLLM or a model on the shared LLM proxy, reached
+# through a loopback proxy (gyms/remote_model_proxy.py) as tau2's subagents are.
+DecomposerWorkerBackend = Literal["local_vllm", "llm_proxy"]
+# `reasoning.effort` for an llm_proxy manager on the Responses API, where the proxy
+# ignores chat_template_kwargs (see gyms/tau2_gym/experiments.py).
+ReasoningEffort = Literal["none", "low", "medium", "high", "xhigh"]
 DecomposerPromptProfile = Literal["student", "teacher"]
 # "are_native": workers get ARE's native agent system prompt for the scenario
 # (gyms/gaia2/worker_prompt.py); "legacy": the worker text used before it.
@@ -291,7 +297,7 @@ SimulatedTime = Literal["frozen_turn", "wall_clock"]
 # Domains whose scenarios schedule nothing during a turn (checked per scenario by
 # gyms/gaia2/simulated_time.py:frozen_turn_refusals); Ambiguity has several turns.
 FROZEN_TURN_DOMAINS: tuple[Gaia2Domain, ...] = ("execution", "search")
-SimpleAgentBackend = Literal["local_vllm", "openrouter"]
+SimpleAgentBackend = Literal["local_vllm", "openrouter", "llm_proxy"]
 Purpose = Literal["evaluation", "trace-generation"]
 Partition = Literal["train", "test", "full"]
 
@@ -371,12 +377,15 @@ class WorkerSampling:
     min_p: float | None = None
     presence_penalty: float | None = None
     repetition_penalty: float | None = None
+    # Caps the worker's completions alone; None inherits max_completion_tokens.
+    max_completion_tokens: int | None = None
 
 
 @dataclass(frozen=True)
 class DecomposerExperiment:
     name: str
-    worker_checkpoint: Path
+    # None only for a worker served by the LLM proxy.
+    worker_checkpoint: Path | None
     manager_checkpoint: Path | None = None
     manager_backend: DecomposerManagerBackend = "local_vllm"
     manager_upstream_url_env: str | None = None
@@ -386,6 +395,11 @@ class DecomposerExperiment:
         "service_default", "non_thinking", "thinking"
     ] | None = None
     manager_verify_tls: bool = True
+    manager_reasoning_effort: ReasoningEffort | None = None
+    worker_backend: DecomposerWorkerBackend = "local_vllm"
+    worker_upstream_url_env: str | None = None
+    worker_api_key_env: str | None = None
+    worker_verify_tls: bool = True
     prompt_profile: DecomposerPromptProfile = "student"
     manager_prompt_addendum_profile: Gaia2ManagerPromptAddendumProfile | None = None
     worker_system_prompt: WorkerSystemPrompt = "are_native"
@@ -447,7 +461,34 @@ class DecomposerExperiment:
                 raise ValueError(f"{self.name}: {field_name} must be at least 1")
         if self.manager_backend == "local_vllm" and self.manager_checkpoint is None:
             raise ValueError("A local_vllm manager requires manager_checkpoint")
+        if (
+            self.worker_sampling is not None
+            and self.worker_sampling.max_completion_tokens is not None
+            and self.worker_sampling.max_completion_tokens < 1
+        ):
+            raise ValueError(
+                f"{self.name}: worker max_completion_tokens must be at least 1"
+            )
+        remote_worker_fields = (self.worker_upstream_url_env, self.worker_api_key_env)
+        if self.worker_backend == "local_vllm":
+            if self.worker_checkpoint is None:
+                raise ValueError(f"{self.name}: a local_vllm worker requires worker_checkpoint")
+            if any(value is not None for value in remote_worker_fields):
+                raise ValueError(
+                    f"{self.name}: remote worker fields require worker_backend=llm_proxy"
+                )
+        else:
+            if self.worker_checkpoint is not None:
+                raise ValueError(f"{self.name}: an llm_proxy worker has no checkpoint")
+            if any(value is None for value in remote_worker_fields):
+                raise ValueError(
+                    f"{self.name}: llm_proxy requires complete remote worker fields"
+                )
         if self.share_local_vllm:
+            if self.worker_backend != "local_vllm":
+                raise ValueError(
+                    f"{self.name}: share_local_vllm requires a local_vllm worker"
+                )
             if self.manager_backend != "local_vllm":
                 raise ValueError(
                     f"{self.name}: share_local_vllm requires a local_vllm manager"
@@ -501,12 +542,17 @@ class DecomposerExperiment:
                     f"{self.name}: shared manager/worker server options differ: "
                     + ", ".join(mismatched)
                 )
+        # One GPU per local vLLM server: a dedicated manager, a worker, or both
+        # sharing one server.
         expected_gpus = (
-            1 if self.share_local_vllm or self.manager_backend != "local_vllm" else 2
+            int(self.requires_local_manager)
+            + int(self.requires_local_worker)
+            - int(self.share_local_vllm)
         )
         if self.num_gpus != expected_gpus:
             raise ValueError(
-                f"{self.manager_backend} Decomposer requires {expected_gpus} GPU(s)"
+                f"{self.manager_backend} Decomposer with a {self.worker_backend} "
+                f"worker requires {expected_gpus} GPU(s)"
             )
         remote_fields = (
             self.manager_upstream_url_env,
@@ -523,10 +569,71 @@ class DecomposerExperiment:
             raise ValueError(
                 f"{self.name}: remote manager fields require manager_backend=llm_proxy"
             )
+        if self.manager_reasoning_effort is not None and (
+            self.manager_backend != "llm_proxy"
+            or self.manager_reasoning_mode != "thinking"
+        ):
+            raise ValueError(
+                f"{self.name}: manager_reasoning_effort requires a thinking "
+                "llm_proxy manager"
+            )
 
     @property
     def requires_local_manager(self) -> bool:
         return self.manager_backend == "local_vllm"
+
+    @property
+    def requires_local_worker(self) -> bool:
+        return self.worker_backend == "local_vllm"
+
+    @property
+    def uses_llm_proxy_models(self) -> bool:
+        """Whether the manager or the worker is served by the LLM proxy."""
+
+        return self.requires_llm_proxy or self.worker_backend == "llm_proxy"
+
+    @property
+    def remote_manager_record(self) -> dict[str, object]:
+        """How a remote manager is identified in preparation manifests."""
+
+        record: dict[str, object] = {
+            "backend": self.manager_backend,
+            "model": self.manager_served_name,
+        }
+        if self.requires_llm_proxy:
+            record.update(
+                {
+                    "upstream_url_env": self.manager_upstream_url_env,
+                    "api_key_env": self.manager_api_key_env,
+                    "response_tool_parser": self.manager_response_tool_parser,
+                    "reasoning_mode": self.manager_reasoning_mode,
+                    "verify_tls": self.manager_verify_tls,
+                }
+            )
+            if self.manager_reasoning_effort is not None:
+                record["reasoning_effort"] = self.manager_reasoning_effort
+        return record
+
+    @property
+    def remote_worker_record(self) -> dict[str, object]:
+        """How an LLM-proxy worker is identified in preparation manifests."""
+
+        return {
+            "backend": self.worker_backend,
+            "model": self.worker_served_name,
+            "upstream_url_env": self.worker_upstream_url_env,
+            "api_key_env": self.worker_api_key_env,
+            "verify_tls": self.worker_verify_tls,
+        }
+
+    @property
+    def worker_max_completion_tokens(self) -> int | None:
+        if (
+            self.worker_sampling is not None
+            and self.worker_sampling.max_completion_tokens is not None
+        ):
+            return self.worker_sampling.max_completion_tokens
+        return self.max_completion_tokens
 
     @property
     def requires_openrouter(self) -> bool:
@@ -563,6 +670,8 @@ class DecomposerExperiment:
                 ),
             },
         }
+        if self.manager_reasoning_effort is not None:
+            body["reasoning"] = {"effort": self.manager_reasoning_effort}
         if self.max_completion_tokens is not None:
             body["max_output_tokens"] = self.max_completion_tokens
         return body
@@ -577,7 +686,10 @@ class SimpleExperiment:
     served_name: str = "google/gemma-4-E4B-it"
     port: int = 8100
     base_url: str | None = None
+    # For llm_proxy: the environment variable that holds the proxy URL.
+    upstream_url_env: str | None = None
     api_key_env: str | None = None
+    verify_tls: bool = True
     reasoning_effort: str | None = None
     max_model_len: int = 65536
     max_num_seqs: int = 64
@@ -611,23 +723,66 @@ class SimpleExperiment:
                 raise ValueError(f"{self.name}: local_vllm requires checkpoint")
             if self.num_gpus != 1:
                 raise ValueError(f"{self.name}: local_vllm requires one GPU")
-            if any(value is not None for value in (self.base_url, self.api_key_env)):
+            if any(
+                value is not None
+                for value in (self.base_url, self.upstream_url_env, self.api_key_env)
+            ):
                 raise ValueError(
                     f"{self.name}: local_vllm cannot configure remote model fields"
                 )
-        elif self.backend == "openrouter":
+        else:
             if self.checkpoint is not None:
-                raise ValueError(f"{self.name}: openrouter cannot use checkpoint")
+                raise ValueError(f"{self.name}: {self.backend} cannot use checkpoint")
             if self.num_gpus != 0:
-                raise ValueError(f"{self.name}: openrouter simple agent uses no GPU")
-            if not self.base_url or not self.api_key_env:
+                raise ValueError(
+                    f"{self.name}: {self.backend} simple agent uses no GPU"
+                )
+            if self.backend == "openrouter" and (
+                not self.base_url or not self.api_key_env or self.upstream_url_env
+            ):
                 raise ValueError(
                     f"{self.name}: openrouter requires base_url and api_key_env"
+                )
+            if self.backend == "llm_proxy" and (
+                not self.upstream_url_env or not self.api_key_env or self.base_url
+            ):
+                raise ValueError(
+                    f"{self.name}: llm_proxy requires upstream_url_env and api_key_env"
+                )
+            if self.backend == "llm_proxy" and self.reasoning_effort is not None:
+                raise ValueError(
+                    f"{self.name}: llm_proxy sampling comes from ARE_SAMPLING_PARAMS"
                 )
 
     @property
     def requires_openrouter(self) -> bool:
         return self.backend == "openrouter"
+
+    @property
+    def requires_llm_proxy(self) -> bool:
+        return self.backend == "llm_proxy"
+
+    @property
+    def requires_local_model(self) -> bool:
+        return self.backend == "local_vllm"
+
+    @property
+    def remote_policy_record(self) -> dict[str, object]:
+        """How a remote policy is identified in preparation manifests."""
+
+        record: dict[str, object] = {
+            "backend": self.backend,
+            "model": self.served_name,
+        }
+        if self.requires_llm_proxy:
+            record.update(
+                {
+                    "upstream_url_env": self.upstream_url_env,
+                    "api_key_env": self.api_key_env,
+                    "verify_tls": self.verify_tls,
+                }
+            )
+        return record
 
     @property
     def remote_extra_body(self) -> dict[str, object]:
@@ -969,6 +1124,59 @@ QWEN36_THINKING_TEXT_DEFAULTS_DECOMPOSER_EXPERIMENT = replace(
     manager_thinking=True,
     worker_thinking=False,
     worker_language_model_only=True,
+    manager_max_model_calls=80,
+    subagent_max_model_calls=80,
+    manager_recursion_limit=1000,
+    subagent_recursion_limit=1000,
+)
+# Both actors on the shared LLM proxy, so the run needs no GPU. The manager is
+# tau2's `qwen38_flash_teacher_thinking_low` teacher; the worker is the proxy's
+# unlooped Qwen3.5-4B, non-thinking. Sampling values are the ones chosen for this
+# pair (2026-09-25); unset penalties keep the serving defaults.
+QWEN38_FLASH_MODEL_ID = "Qwen/Qwen3.8-Flash-Next-NVFP4"
+QWEN35_4B_UNLOOPED_MODEL_ID = "Qwen/Qwen3.5-4B-unlooped"
+QWEN35_4B_UNLOOPED_SAMPLING = WorkerSampling(
+    temperature=0.6, top_p=0.95, top_k=20, max_completion_tokens=8192
+)
+QWEN38_LOW_QWEN35_UNLOOPED_EXPERIMENT = DecomposerExperiment(
+    name="qwen38-flash-thinking-low-teacher-qwen35-4b-unlooped-non-thinking",
+    worker_checkpoint=None,
+    manager_backend="llm_proxy",
+    manager_upstream_url_env="LLM_PROXY_URL",
+    manager_api_key_env="LLM_PROXY_MASTER_KEY",
+    manager_response_tool_parser="qwen3_xml",
+    manager_reasoning_mode="thinking",
+    manager_reasoning_effort="low",
+    manager_verify_tls=False,
+    worker_backend="llm_proxy",
+    worker_upstream_url_env="LLM_PROXY_URL",
+    worker_api_key_env="LLM_PROXY_MASTER_KEY",
+    worker_verify_tls=False,
+    prompt_profile="teacher",
+    num_gpus=0,
+    manager_served_name=QWEN38_FLASH_MODEL_ID,
+    worker_served_name=QWEN35_4B_UNLOOPED_MODEL_ID,
+    manager_port=8076,
+    worker_port=8077,
+    service_port=8155,
+    subagent_port=2053,
+    max_model_len=131072,
+    temperature=1.0,
+    top_p=0.95,
+    top_k=20,
+    min_p=0.0,
+    presence_penalty=0.0,
+    repetition_penalty=1.0,
+    worker_sampling=QWEN35_4B_UNLOOPED_SAMPLING,
+    concurrency=16,
+    manager_thinking=True,
+    manager_tool_call_parser="qwen3_xml",
+    manager_reasoning_parser=None,
+    manager_language_model_only=False,
+    worker_thinking=False,
+    worker_tool_call_parser="qwen3_xml",
+    worker_reasoning_parser=None,
+    worker_language_model_only=False,
     manager_max_model_calls=80,
     subagent_max_model_calls=80,
     manager_recursion_limit=1000,
@@ -1481,6 +1689,29 @@ SIMPLE_DEEPSEEK_EXPERIMENT = SimpleExperiment(
     language_model_only=False,
     gdn_prefill_backend=None,
 )
+# ARE's native agent on the Decomposer worker's model and sampling above.
+SIMPLE_QWEN35_UNLOOPED_EXPERIMENT = SimpleExperiment(
+    name="qwen35-4b-unlooped-non-thinking-simple",
+    checkpoint=None,
+    backend="llm_proxy",
+    num_gpus=0,
+    served_name=QWEN35_4B_UNLOOPED_MODEL_ID,
+    port=8078,
+    upstream_url_env="LLM_PROXY_URL",
+    api_key_env="LLM_PROXY_MASTER_KEY",
+    verify_tls=False,
+    max_model_len=131072,
+    max_completion_tokens=QWEN35_4B_UNLOOPED_SAMPLING.max_completion_tokens,
+    temperature=QWEN35_4B_UNLOOPED_SAMPLING.temperature,
+    top_p=QWEN35_4B_UNLOOPED_SAMPLING.top_p,
+    top_k=QWEN35_4B_UNLOOPED_SAMPLING.top_k,
+    concurrency=16,
+    thinking=False,
+    tool_call_parser="",
+    reasoning_parser=None,
+    language_model_only=False,
+    max_model_calls=80,
+)
 ALL_EXPERIMENTS: tuple[Experiment, ...] = (
     DECOMPOSER_EXPERIMENT,
     DEEPSEEK_GEMMA_EXPERIMENT,
@@ -1531,6 +1762,8 @@ ALL_EXPERIMENTS: tuple[Experiment, ...] = (
     QWEN35_BASE_TEACHER_E4B_DECOMPOSER_EXPERIMENT,
     QWEN35_BASE_26B_A4B_DECOMPOSER_EXPERIMENT,
     QWEN35_BASE_TEACHER_26B_A4B_DECOMPOSER_EXPERIMENT,
+    QWEN38_LOW_QWEN35_UNLOOPED_EXPERIMENT,
+    SIMPLE_QWEN35_UNLOOPED_EXPERIMENT,
 )
 EXPERIMENTS = {experiment.name: experiment for experiment in ALL_EXPERIMENTS}
 if len(EXPERIMENTS) != len(ALL_EXPERIMENTS):

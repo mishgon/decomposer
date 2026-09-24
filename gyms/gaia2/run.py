@@ -188,33 +188,56 @@ def runtime_configuration(experiment: Experiment) -> dict[str, Any]:
                 "max_model_calls": experiment.max_model_calls,
             }
         )
-    else:
-        configuration.update(
-            {
-                "manager": {
-                    "backend": experiment.manager_backend,
-                    "local_model_topology": (
-                        "shared"
-                        if experiment.share_local_vllm
-                        else (
-                            "dedicated"
-                            if experiment.requires_local_manager
-                            else None
-                        )
-                    ),
-                    "thinking": experiment.manager_thinking,
-                    "reasoning_mode": experiment.manager_reasoning_mode,
-                    "max_model_calls": experiment.manager_max_model_calls,
-                    "recursion_limit": experiment.manager_recursion_limit,
-                },
-                "subagent": {
-                    "thinking": experiment.worker_thinking,
-                    "language_model_only": experiment.worker_language_model_only,
-                    "max_model_calls": experiment.subagent_max_model_calls,
-                    "recursion_limit": experiment.subagent_recursion_limit,
-                },
+        # Remote-policy keys are added only when present, so existing run
+        # identities stay valid.
+        if experiment.requires_llm_proxy:
+            configuration["policy"] = {
+                "backend": experiment.backend,
+                "model": experiment.served_name,
             }
-        )
+    else:
+        manager: dict[str, Any] = {
+            "backend": experiment.manager_backend,
+            "local_model_topology": (
+                "shared"
+                if experiment.share_local_vllm
+                else ("dedicated" if experiment.requires_local_manager else None)
+            ),
+            "thinking": experiment.manager_thinking,
+            "reasoning_mode": experiment.manager_reasoning_mode,
+            "max_model_calls": experiment.manager_max_model_calls,
+            "recursion_limit": experiment.manager_recursion_limit,
+        }
+        if experiment.manager_reasoning_effort is not None:
+            manager["reasoning_effort"] = experiment.manager_reasoning_effort
+        subagent: dict[str, Any] = {
+            "thinking": experiment.worker_thinking,
+            "language_model_only": experiment.worker_language_model_only,
+            "max_model_calls": experiment.subagent_max_model_calls,
+            "recursion_limit": experiment.subagent_recursion_limit,
+        }
+        if not experiment.requires_local_worker:
+            worker_sampling = experiment.worker_sampling or experiment
+            subagent.update(
+                {
+                    "backend": experiment.worker_backend,
+                    "model": experiment.worker_served_name,
+                    "sampling": {
+                        name: getattr(worker_sampling, name)
+                        for name in (
+                            "temperature",
+                            "top_p",
+                            "top_k",
+                            "min_p",
+                            "presence_penalty",
+                            "repetition_penalty",
+                        )
+                        if getattr(worker_sampling, name) is not None
+                    },
+                    "max_completion_tokens": experiment.worker_max_completion_tokens,
+                }
+            )
+        configuration.update({"manager": manager, "subagent": subagent})
     return configuration
 
 
@@ -520,7 +543,14 @@ def wait_http(
     raise TimeoutError(f"Timed out waiting for {url}")
 
 
-def check_judge(endpoint: str, api_key: str) -> None:
+def check_judge(
+    endpoint: str, api_key: str, required_models: Sequence[str] = ()
+) -> None:
+    """Check the LLM proxy answers and serves every model this run needs.
+
+    Messages never include the endpoint: it is the shared proxy's address.
+    """
+
     request = urllib.request.Request(
         endpoint.rstrip("/") + "/models",
         headers={"Authorization": f"Bearer {api_key}"},
@@ -534,10 +564,35 @@ def check_judge(endpoint: str, api_key: str) -> None:
         with opener.open(request, timeout=20) as response:
             if response.status >= 500:
                 raise RuntimeError(f"Judge endpoint returned HTTP {response.status}")
+            body = response.read() if required_models else b""
     except (OSError, TimeoutError, urllib.error.URLError) as error:
         raise RuntimeError(
-            f"Judge endpoint is unavailable: {endpoint}: {error}"
+            f"LLM proxy is unavailable: {type(error).__name__}"
         ) from error
+    if not required_models:
+        return
+    try:
+        served = {item["id"] for item in json.loads(body)["data"]}
+    except (ValueError, KeyError, TypeError) as error:
+        raise RuntimeError("LLM proxy returned an unreadable model list") from error
+    missing = [model for model in required_models if model not in served]
+    if missing:
+        raise RuntimeError(f"LLM proxy does not serve: {', '.join(missing)}")
+
+
+def llm_proxy_models(experiment: Experiment) -> tuple[str, ...]:
+    """Every model a run requests from the LLM proxy, the judge included."""
+
+    models = [JUDGE_MODEL.removeprefix("openai/")]
+    if isinstance(experiment, SimpleExperiment):
+        if experiment.requires_llm_proxy:
+            models.append(experiment.served_name)
+    else:
+        if experiment.requires_llm_proxy:
+            models.append(experiment.manager_served_name)
+        if not experiment.requires_local_worker:
+            models.append(experiment.worker_served_name)
+    return tuple(models)
 
 
 def _common_vllm_command(
@@ -665,6 +720,70 @@ def openrouter_proxy_command(
     ]
 
 
+def loopback_model_proxy_command(
+    port: int,
+    *,
+    upstream_url_env: str,
+    api_key_env: str,
+    verify_tls: bool,
+) -> list[str]:
+    """A loopback proxy to one LLM-proxy model, as tau2's subagents use.
+
+    It adds no tool parser and no extra body: Chat Completions already return
+    structured tool calls, and the caller (the worker graph, or ARE through
+    ARE_SAMPLING_PARAMS) sends its own sampling.
+    """
+
+    command = [
+        str(PROJECT_VENV / "bin" / "python"),
+        "-m",
+        "gyms.remote_model_proxy",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        str(port),
+        "--upstream-url-env",
+        upstream_url_env,
+        "--api-key-env",
+        api_key_env,
+        "--timeout-seconds",
+        "3300",
+        "--max-retries",
+        "2",
+    ]
+    if not verify_tls:
+        command.append("--no-verify-tls")
+    return command
+
+
+def remote_worker_proxy_command(
+    experiment: DecomposerExperiment,
+    ports: Gaia2PortLayout = DEFAULT_PORT_LAYOUT,
+) -> list[str]:
+    if experiment.requires_local_worker:
+        raise ValueError(f"{experiment.name} serves its worker locally")
+    return loopback_model_proxy_command(
+        ports.worker_port(experiment),
+        upstream_url_env=str(experiment.worker_upstream_url_env),
+        api_key_env=str(experiment.worker_api_key_env),
+        verify_tls=experiment.worker_verify_tls,
+    )
+
+
+def simple_llm_proxy_command(
+    experiment: SimpleExperiment,
+    ports: Gaia2PortLayout = DEFAULT_PORT_LAYOUT,
+) -> list[str]:
+    if not experiment.requires_llm_proxy:
+        raise ValueError(f"{experiment.name} does not use the LLM proxy")
+    return loopback_model_proxy_command(
+        ports.simple_agent_port(experiment),
+        upstream_url_env=str(experiment.upstream_url_env),
+        api_key_env=str(experiment.api_key_env),
+        verify_tls=experiment.verify_tls,
+    )
+
+
 def remote_manager_proxy_command(
     experiment: DecomposerExperiment,
     ports: Gaia2PortLayout = DEFAULT_PORT_LAYOUT,
@@ -708,7 +827,7 @@ def remote_manager_proxy_command(
 def decomposer_vllm_commands(
     experiment: DecomposerExperiment,
     ports: Gaia2PortLayout = DEFAULT_PORT_LAYOUT,
-) -> tuple[list[str] | None, list[str]]:
+) -> tuple[list[str] | None, list[str] | None]:
     manager = None
     if experiment.requires_local_manager:
         if experiment.manager_checkpoint is None:
@@ -728,6 +847,10 @@ def decomposer_vllm_commands(
                 trust_remote_code=experiment.manager_trust_remote_code,
                 gdn_prefill_backend=experiment.manager_gdn_prefill_backend,
             )
+    if not experiment.requires_local_worker:
+        return manager, None
+    if experiment.worker_checkpoint is None:
+        raise ValueError("Local worker requires worker_checkpoint")
     worker = _common_vllm_command(
         experiment.worker_checkpoint,
         experiment.worker_served_name,
@@ -799,9 +922,9 @@ def subagent_environment(
         "GAIA2_SUBAGENT_MAX_MODEL_LEN": str(experiment.max_model_len),
         "GAIA2_SUBAGENT_THINKING": "1" if experiment.worker_thinking else "0",
     }
-    if experiment.max_completion_tokens is not None:
+    if experiment.worker_max_completion_tokens is not None:
         environment["GAIA2_SUBAGENT_MAX_COMPLETION_TOKENS"] = str(
-            experiment.max_completion_tokens
+            experiment.worker_max_completion_tokens
         )
     if sampling.min_p is not None:
         environment["GAIA2_SUBAGENT_MIN_P"] = str(sampling.min_p)
@@ -995,11 +1118,8 @@ def validate_preparation(
     models = manifest.get("models") or {}
     if isinstance(experiment, SimpleExperiment):
         policy = models.get("policy") or {}
-        if experiment.requires_openrouter:
-            if policy != {
-                "backend": experiment.backend,
-                "model": experiment.served_name,
-            }:
+        if not experiment.requires_local_model:
+            if policy != experiment.remote_policy_record:
                 raise ValueError("Preparation manifest points at an unexpected policy")
         else:
             if experiment.checkpoint is None:
@@ -1010,9 +1130,16 @@ def validate_preparation(
     else:
         manager = models.get("manager") or {}
         worker = models.get("worker") or {}
-        if Path(worker.get("path", "")) != experiment.worker_checkpoint:
+        if not experiment.requires_local_worker:
+            if worker != experiment.remote_worker_record:
+                raise ValueError("Preparation manifest points at an unexpected worker")
+        elif (
+            experiment.worker_checkpoint is None
+            or Path(worker.get("path", "")) != experiment.worker_checkpoint
+        ):
             raise ValueError("Preparation manifest points at an unexpected worker")
-        _validate_file_manifest(experiment.worker_checkpoint, worker)
+        else:
+            _validate_file_manifest(experiment.worker_checkpoint, worker)
         if experiment.requires_local_manager:
             if experiment.manager_checkpoint is None:
                 raise ValueError("Local manager requires manager_checkpoint")
@@ -1025,21 +1152,7 @@ def validate_preparation(
                     )
             else:
                 _validate_file_manifest(experiment.manager_checkpoint, manager)
-        elif manager != {
-            "backend": experiment.manager_backend,
-            "model": experiment.manager_served_name,
-            **(
-                {
-                    "upstream_url_env": experiment.manager_upstream_url_env,
-                    "api_key_env": experiment.manager_api_key_env,
-                    "response_tool_parser": experiment.manager_response_tool_parser,
-                    "reasoning_mode": experiment.manager_reasoning_mode,
-                    "verify_tls": experiment.manager_verify_tls,
-                }
-                if experiment.requires_llm_proxy
-                else {}
-            ),
-        }:
+        elif manager != experiment.remote_manager_record:
             raise ValueError("Preparation manifest points at an unexpected manager")
     return manifest
 
@@ -1520,9 +1633,19 @@ def _runtime_configs(
                     if experiment.requires_llm_proxy
                     else {}
                 ),
+                **(
+                    {"reasoning_effort": experiment.manager_reasoning_effort}
+                    if experiment.manager_reasoning_effort is not None
+                    else {}
+                ),
             },
             "subagent": {
-                "path": str(experiment.worker_checkpoint),
+                "backend": experiment.worker_backend,
+                **(
+                    {"path": str(experiment.worker_checkpoint)}
+                    if experiment.worker_checkpoint is not None
+                    else {}
+                ),
                 "served_name": experiment.worker_served_name,
                 "thinking": experiment.worker_thinking,
                 "system_prompt": experiment.worker_system_prompt,
@@ -1599,6 +1722,36 @@ def _base_environment(
     }
 
 
+def _start_worker(
+    supervisor: "Supervisor",
+    experiment: DecomposerExperiment,
+    worker_command: list[str] | None,
+    *,
+    local_repo: Path,
+    visible_devices: tuple[str, ...],
+    ports: Gaia2PortLayout,
+) -> tuple[subprocess.Popen[Any], str, int]:
+    """Start the worker's server; return it with its readiness URL and timeout."""
+
+    if worker_command is None:
+        process = supervisor.start(
+            "remote_worker_proxy",
+            remote_worker_proxy_command(experiment, ports),
+            cwd=local_repo,
+        )
+        return process, f"http://127.0.0.1:{ports.worker_port(experiment)}/health", 300
+    device_index = (
+        1 if experiment.requires_local_manager and not experiment.share_local_vllm else 0
+    )
+    process = supervisor.start(
+        "manager_worker_vllm" if experiment.share_local_vllm else "worker_vllm",
+        worker_command,
+        cwd=local_repo,
+        env={"CUDA_VISIBLE_DEVICES": visible_devices[device_index]},
+    )
+    return process, f"http://127.0.0.1:{ports.worker_port(experiment)}/v1/models", 1800
+
+
 def _dry_plan(
     local_repo: Path,
     experiment: Experiment,
@@ -1632,6 +1785,9 @@ def _dry_plan(
         if experiment.requires_openrouter:
             services.append(openrouter_proxy_command(experiment, ports))
             gpu_assignments = {}
+        elif experiment.requires_llm_proxy:
+            services.append(simple_llm_proxy_command(experiment, ports))
+            gpu_assignments = {}
         else:
             services.append(simple_vllm_command(experiment, ports))
             gpu_assignments = {"policy_vllm": visible_devices[0]}
@@ -1641,7 +1797,10 @@ def _dry_plan(
             services.append(remote_manager_proxy_command(experiment, ports))
         if manager_command is not None:
             services.append(manager_command)
-        services.append(worker_command)
+        if worker_command is not None:
+            services.append(worker_command)
+        else:
+            services.append(remote_worker_proxy_command(experiment, ports))
         service_config = directory / "configuration" / "service.json"
         plugin_directory = (
             directory / f"round_{rollout_offset + 1:02d}"
@@ -1656,13 +1815,17 @@ def _dry_plan(
         services.append(service_command(experiment, service_config, ports))
         if experiment.share_local_vllm:
             gpu_assignments = {"manager_worker_vllm": visible_devices[0]}
-        elif experiment.requires_local_manager:
+        elif experiment.requires_local_manager and experiment.requires_local_worker:
             gpu_assignments = {
                 "manager_vllm": visible_devices[0],
                 "worker_vllm": visible_devices[1],
             }
-        else:
+        elif experiment.requires_local_manager:
+            gpu_assignments = {"manager_vllm": visible_devices[0]}
+        elif experiment.requires_local_worker:
             gpu_assignments = {"worker_vllm": visible_devices[0]}
+        else:
+            gpu_assignments = {}
     selected_dataset_root = partition_dataset_root(partition, spec.name)
     effective_concurrency = concurrency or experiment.concurrency
     first_round_output = (
@@ -1887,7 +2050,7 @@ def execute_trace_generation(local_repo: Path, args: argparse.Namespace) -> int:
             raise RuntimeError("OPENROUTER_API_KEY_DECOMPOSER is required")
         if not (os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy")):
             raise RuntimeError("HTTPS_PROXY or https_proxy is required for OpenRouter")
-    check_judge(judge_endpoint, judge_key)
+    check_judge(judge_endpoint, judge_key, llm_proxy_models(experiment))
 
     archived = archive_attempt(directory) if args.force and directory.exists() else None
     directory.mkdir(parents=True, exist_ok=True)
@@ -1916,6 +2079,16 @@ def execute_trace_generation(local_repo: Path, args: argparse.Namespace) -> int:
             "endpoint": judge_endpoint,
             "response_tool_parser": experiment.manager_response_tool_parser,
             "reasoning_mode": experiment.manager_reasoning_mode,
+            **(
+                {"reasoning_effort": experiment.manager_reasoning_effort}
+                if experiment.manager_reasoning_effort is not None
+                else {}
+            ),
+        }
+    if isinstance(experiment, DecomposerExperiment) and not experiment.requires_local_worker:
+        status["worker"] = {
+            "backend": experiment.worker_backend,
+            "model": experiment.worker_served_name,
         }
     atomic_json(status_path, status)
 
@@ -1947,20 +2120,13 @@ def execute_trace_generation(local_repo: Path, args: argparse.Namespace) -> int:
                 cwd=local_repo,
                 env={"CUDA_VISIBLE_DEVICES": visible_devices[0]},
             )
-        worker_device_index = (
-            1
-            if experiment.requires_local_manager and not experiment.share_local_vllm
-            else 0
-        )
-        worker_process = supervisor.start(
-            (
-                "manager_worker_vllm"
-                if experiment.share_local_vllm
-                else "worker_vllm"
-            ),
+        worker_process, worker_ready_url, worker_timeout = _start_worker(
+            supervisor,
+            experiment,
             worker_command,
-            cwd=local_repo,
-            env={"CUDA_VISIBLE_DEVICES": visible_devices[worker_device_index]},
+            local_repo=local_repo,
+            visible_devices=visible_devices,
+            ports=ports,
         )
         if manager_process is not None:
             wait_http(
@@ -1968,11 +2134,7 @@ def execute_trace_generation(local_repo: Path, args: argparse.Namespace) -> int:
                 [manager_process],
                 1800,
             )
-        wait_http(
-            f"http://127.0.0.1:{ports.worker_port(experiment)}/v1/models",
-            [worker_process],
-            1800,
-        )
+        wait_http(worker_ready_url, [worker_process], worker_timeout)
         service_config, base_plugin = _runtime_configs(
             local_repo, directory, experiment, ports
         )
@@ -2225,7 +2387,7 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
             raise RuntimeError("OPENROUTER_API_KEY_DECOMPOSER is required")
         if not (os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy")):
             raise RuntimeError("HTTPS_PROXY or https_proxy is required for OpenRouter")
-    check_judge(judge_endpoint, judge_key)
+    check_judge(judge_endpoint, judge_key, llm_proxy_models(experiment))
 
     archived = archive_attempt(directory) if directory.exists() else None
     directory.mkdir(parents=True, exist_ok=True)
@@ -2255,6 +2417,16 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
             "endpoint": judge_endpoint,
             "response_tool_parser": experiment.manager_response_tool_parser,
             "reasoning_mode": experiment.manager_reasoning_mode,
+            **(
+                {"reasoning_effort": experiment.manager_reasoning_effort}
+                if experiment.manager_reasoning_effort is not None
+                else {}
+            ),
+        }
+    if isinstance(experiment, DecomposerExperiment) and not experiment.requires_local_worker:
+        status["worker"] = {
+            "backend": experiment.worker_backend,
+            "model": experiment.worker_served_name,
         }
     atomic_json(status_path, status)
 
@@ -2273,6 +2445,17 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
                 process = supervisor.start(
                     "openrouter_policy_proxy",
                     openrouter_proxy_command(experiment, ports),
+                    cwd=local_repo,
+                )
+                wait_http(
+                    f"http://127.0.0.1:{ports.simple_agent_port(experiment)}/health",
+                    [process],
+                    300,
+                )
+            elif experiment.requires_llm_proxy:
+                process = supervisor.start(
+                    "llm_proxy_policy_proxy",
+                    simple_llm_proxy_command(experiment, ports),
                     cwd=local_repo,
                 )
                 wait_http(
@@ -2319,21 +2502,13 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
                     cwd=local_repo,
                     env={"CUDA_VISIBLE_DEVICES": visible_devices[0]},
                 )
-            worker_device_index = (
-                1
-                if experiment.requires_local_manager
-                and not experiment.share_local_vllm
-                else 0
-            )
-            worker_process = supervisor.start(
-                (
-                    "manager_worker_vllm"
-                    if experiment.share_local_vllm
-                    else "worker_vllm"
-                ),
+            worker_process, worker_ready_url, worker_timeout = _start_worker(
+                supervisor,
+                experiment,
                 worker_command,
-                cwd=local_repo,
-                env={"CUDA_VISIBLE_DEVICES": visible_devices[worker_device_index]},
+                local_repo=local_repo,
+                visible_devices=visible_devices,
+                ports=ports,
             )
             if manager_process is not None:
                 wait_http(
@@ -2341,11 +2516,7 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
                     [manager_process],
                     1800,
                 )
-            wait_http(
-                f"http://127.0.0.1:{ports.worker_port(experiment)}/v1/models",
-                [worker_process],
-                1800,
-            )
+            wait_http(worker_ready_url, [worker_process], worker_timeout)
             service_config, plugin_config = _runtime_configs(
                 local_repo, directory, experiment, ports
             )
