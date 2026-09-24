@@ -216,7 +216,7 @@ PY
     printf '\nSubagents: hosted router (no local subagent GPU)\n'
   fi
   evaluator_state="stopped"
-  if pgrep -f "(gyms/toolathlon_gym/run.py|gyms.toolathlon_gym.evaluate_sft).*${RUN_ID}" >/dev/null 2>&1; then
+  if pgrep -f "(gyms/toolathlon_gym/run.py|evals.toolathlon_gym.evaluate_sft).*${RUN_ID}" >/dev/null 2>&1; then
     evaluator_state="running"
   fi
   container_count="$($DOCKER ps --format '{{.Names}}' 2>/dev/null | wc -l)"

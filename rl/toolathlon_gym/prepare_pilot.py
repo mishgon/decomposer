@@ -6,7 +6,7 @@ import json
 import subprocess
 from pathlib import Path
 
-from training.rl.toolathlon_gym.prepare_data import make_split
+from rl.toolathlon_gym.prepare_data import make_split
 
 
 def main():

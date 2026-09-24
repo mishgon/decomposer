@@ -10,7 +10,7 @@ import urllib.request
 import uuid
 from pathlib import Path
 
-from .adaptive_scheduler import extract_partial_score
+from .scoring import extract_partial_score
 
 
 def agent_output_error(evaluation):
