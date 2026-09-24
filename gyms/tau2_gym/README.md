@@ -13,7 +13,6 @@ gyms/tau2_gym/
 ├── run.py                    # local runner: manager + subagents -> langgraph -> gym env -> gym eval -> validate
 ├── tau2_export.py            # builds the Gym dataset from a task pool (runs inside the tau2 venv)
 ├── task_pools/               # versioned task pools and the recipe-driven builder
-├── analyze_traces.py         # decomposition / parallelism statistics
 ├── subagents/                # LangGraph subagent server (Qwen3.5-4B, non-thinking)
 └── gym_components/           # <- NEMO_GYM_EXTRA_ROOTS
     ├── pyproject.toml        # marker; see "Why the marker file" below
@@ -114,8 +113,9 @@ source ~/.secrets/decomposer.env      # LLM_PROXY_* (and OPENROUTER_API_KEY_DECO
 # teacher traces for SFT: no GPU at all (manager and subagents on the proxy)
 .venv/bin/python gyms/tau2_gym/run.py --experiment qwen38_flash_teacher_non_thinking --num-repeats 4
 
-# a student checkpoint on the held-out pool, one domain-stratified task per domain
-.venv/bin/python gyms/tau2_gym/run.py --experiment qwen35_4b_sft_mixed_v3_student \
+# a student checkpoint on the held-out pool, five domain-stratified tasks per domain,
+# evaluated in one command: the run, then metrics into <run>/eval_metrics.json
+.venv/bin/python -m evals.tau2_gym.run --experiment qwen35_4b_sft_mixed_v3_student \
   --tasks-per-domain 5 --num-repeats 3 --manager-gpu 6
 
 # OPD rollouts from a round's checkpoint (what opd/ drives)
@@ -203,10 +203,11 @@ empty trajectory and a wrong answer both scoring 0.
 ```bash
 OUT=/home/sukhorukov/decomposer_artifacts_new/evaluation/results/tau2_gym/<run>
 .venv/bin/python scripts/render_gym_trace.py $OUT/rollouts.jsonl $OUT/traces.md
-.venv/bin/python gyms/tau2_gym/analyze_traces.py $OUT/rollouts.jsonl --json $OUT/decomposition.json
+.venv/bin/python -m evals.tau2_gym.run --metrics-only $OUT        # pass@1/@k/^k overall and per domain
+.venv/bin/python -m evals.tau2_gym.analyze_traces $OUT/rollouts.jsonl --json $OUT/decomposition.json
 ```
 
-`analyze_traces.py` reports spawns, waits, and **spawns per wait batch**: subagents
+`evals/tau2_gym/analyze_traces.py` reports spawns, waits, and **spawns per wait batch**: subagents
 spawned between two consecutive `wait` calls are exactly the ones that ran
 concurrently, so that number is the parallelism measure. `share_any_parallel` near 0
 means the manager is running a sequential loop with extra steps.

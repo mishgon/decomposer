@@ -695,6 +695,19 @@ def resolve_checkpoint(experiment: Tau2Experiment, override: str | None) -> Path
     return checkpoint.resolve()
 
 
+def resolve_output_dir(args: argparse.Namespace) -> tuple[str, Path]:
+    """The run name and output directory `execute` uses for these arguments."""
+    experiment = get_experiment(args.experiment)
+    name = run_name(
+        experiment,
+        pool=args.pool or experiment.pool,
+        tasks_per_domain=args.tasks_per_domain,
+        num_repeats=args.num_repeats,
+        port_offset=args.port_offset,
+    )
+    return name, Path(args.output_dir) if args.output_dir else RESULTS_ROOT / name
+
+
 def execute(args: argparse.Namespace) -> int:
     experiment = get_experiment(args.experiment)
     ports = PortLayout(offset=args.port_offset).shifted()
@@ -705,14 +718,7 @@ def execute(args: argparse.Namespace) -> int:
     checkpoint = resolve_checkpoint(experiment, args.manager_checkpoint)
     concurrency = args.concurrency or experiment.concurrency
 
-    name = run_name(
-        experiment,
-        pool=pool,
-        tasks_per_domain=args.tasks_per_domain,
-        num_repeats=args.num_repeats,
-        port_offset=args.port_offset,
-    )
-    output_dir = Path(args.output_dir) if args.output_dir else RESULTS_ROOT / name
+    name, output_dir = resolve_output_dir(args)
     logs = output_dir / "logs"
     rollouts = output_dir / "rollouts.jsonl"
     config_path = output_dir / "configuration" / "tau2_gym.yaml"

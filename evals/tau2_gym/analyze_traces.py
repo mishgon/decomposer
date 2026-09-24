@@ -10,7 +10,7 @@ that spawns one subagent and immediately waits is a sequential loop with extra
 steps; a manager that spawns several before waiting is using the architecture.
 
 Usage:
-    python gyms/tau2_gym/analyze_traces.py ROLLOUTS.jsonl [--json OUT.json]
+    python -m evals.tau2_gym.analyze_traces ROLLOUTS.jsonl [--json OUT.json]
 """
 
 from __future__ import annotations
