@@ -49,6 +49,8 @@ RESUME_CONFIG_FIELDS = (
     "model",
     "subagent_model",
     "subagent_api_model",
+    "subagent_base_url",
+    "subagent_host",
     "subagent_port",
     "subagent_ports",
     "subagent_gpu",
@@ -229,6 +231,8 @@ def parse_args(argv: Sequence[str], defaults: dict[str, Any]) -> argparse.Namesp
         default=defaults.get("subagent_api_model", defaults["subagent_model"]),
     )
     parser.add_argument("--subagent-port", type=int, default=defaults["subagent_port"])
+    parser.add_argument("--subagent-base-url", help="Hosted endpoint; skips local vLLM.")
+    parser.add_argument("--subagent-host", help="Optional container DNS mapping, hostname:IP.")
     parser.add_argument(
         "--subagent-ports",
         type=int,
@@ -294,6 +298,8 @@ def parse_args(argv: Sequence[str], defaults: dict[str, Any]) -> argparse.Namesp
         help="Maximum total wall-clock seconds for one episode (default: 3300).",
     )
     args = parser.parse_args(argv)
+    if args.subagent_base_url and args.subagent_ports:
+        parser.error("--subagent-base-url cannot be combined with --subagent-ports")
     if args.resume and (args.all or args.tasks):
         parser.error("--resume cannot be combined with --all or --tasks")
     if not args.resume and not (args.all or args.tasks):
@@ -502,6 +508,8 @@ def episode_command(
         "--subagent-api-model",
         getattr(args, "subagent_api_model", args.subagent_model),
         "--subagent-port", str(port),
+        *(["--subagent-base-url", args.subagent_base_url] if getattr(args, "subagent_base_url", None) else []),
+        *(["--subagent-host", args.subagent_host] if getattr(args, "subagent_host", None) else []),
         "--subagent-gpu", args.subagent_gpu,
         "--vllm-max-model-len", str(args.vllm_max_model_len),
         "--vllm-gpu-memory-utilization", str(args.vllm_gpu_memory_utilization),
@@ -729,7 +737,9 @@ def main(
         if args.purpose != manifest["config"]["purpose"]:
             raise ValueError("Resume purpose does not match the manifest")
         for name in RESUME_CONFIG_FIELDS:
-            if name == "subagent_ports" and name not in manifest["config"]:
+            if name in {"subagent_base_url", "subagent_host"} and name not in manifest["config"]:
+                setattr(args, name, None)
+            elif name == "subagent_ports" and name not in manifest["config"]:
                 setattr(args, name, [manifest["config"]["subagent_port"]])
             elif name == "vllm_data_parallel_size" and name not in manifest["config"]:
                 setattr(args, name, 1)
@@ -788,7 +798,7 @@ def main(
     processes: list[subprocess.Popen[bytes] | None] = []
     interrupted = False
     try:
-        for port in args.subagent_ports:
+        for port in ([] if args.subagent_base_url else args.subagent_ports):
             processes.append(
                 start_vllm(
                     model=args.subagent_model,
@@ -805,7 +815,7 @@ def main(
             )
         append_event(
             run_dir,
-            "vllm_ready",
+            "hosted_subagents_selected" if args.subagent_base_url else "vllm_ready",
             externally_managed=args.reuse_vllm,
             ports=args.subagent_ports,
         )

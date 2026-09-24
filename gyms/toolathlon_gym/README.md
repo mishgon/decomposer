@@ -13,6 +13,18 @@ the `subagents` registry and per-run `subagent_runs` messages, including model
 usage. Reusing or forking a subagent does not duplicate earlier messages in its
 new run's usage totals. Historical artifacts remain unchanged.
 
+For hosted subagents, pass `--subagent-base-url https://router.example/v1` and
+the exact deployment ID through `--subagent-api-model`. This skips local vLLM
+entirely. Authentication uses `VLLM_API_KEY`, falling back to
+`LLM_PROXY_MASTER_KEY`; keys are not written to the manifest. An optional
+`--subagent-host hostname:IP` adds a container DNS mapping while retaining TLS
+hostname verification.
+
+Coverage-first collection uses `--all --adaptive -n 1`: one attempt per unsolved
+task per wave, qualifying scores strictly above 0.90, and six attempts before
+culling zero-success tasks. Afterwards it balances retained tasks toward four
+qualifying traces (`--adaptive-target-successes`). All attempts remain saved.
+
 ## Image layout
 
 The adapter image extends `toolathlon-pack:latest`, preserving Toolathlon's

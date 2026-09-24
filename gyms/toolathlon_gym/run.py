@@ -363,6 +363,8 @@ def main() -> None:
     parser.add_argument("--subagent-model", default=DEFAULT_SUBAGENT_MODEL)
     parser.add_argument("--subagent-api-model", default=DEFAULT_SUBAGENT_API_MODEL)
     parser.add_argument("--subagent-port", type=int, default=DEFAULT_SUBAGENT_PORT)
+    parser.add_argument("--subagent-base-url", help="Hosted OpenAI-compatible endpoint; skips local vLLM.")
+    parser.add_argument("--subagent-host", help="Optional container DNS mapping, hostname:IP.")
     parser.add_argument("--subagent-gpu", default="0")
     parser.add_argument("--vllm-max-model-len", type=int, default=256000)
     parser.add_argument("--vllm-gpu-memory-utilization", type=float, default=0.9)
@@ -396,6 +398,10 @@ def main() -> None:
     decomposer_vllm_url = os.environ.get("DECOMPOSER_VLLM_BASE_URL")
     llm_proxy_url = os.environ.get("LLM_PROXY_URL")
     llm_proxy_key = os.environ.get("LLM_PROXY_MASTER_KEY")
+    if args.subagent_base_url:
+        os.environ.setdefault("VLLM_API_KEY", llm_proxy_key or "")
+        if not os.environ["VLLM_API_KEY"]:
+            raise RuntimeError("Hosted subagents require VLLM_API_KEY or LLM_PROXY_MASTER_KEY")
     if decomposer_vllm_url:
         pass
     elif llm_proxy_url:
@@ -429,8 +435,8 @@ def main() -> None:
         / episode_id
         / "vllm.log"
     )
-    print(f"Starting vLLM on GPU {args.subagent_gpu}...", flush=True)
-    vllm_process = start_vllm(
+    print("Using hosted subagents." if args.subagent_base_url else f"Starting vLLM on GPU {args.subagent_gpu}...", flush=True)
+    vllm_process = None if args.subagent_base_url else start_vllm(
         model=args.subagent_model,
         served_model_name=args.subagent_api_model,
         port=args.subagent_port,
@@ -562,6 +568,7 @@ def main() -> None:
             network,
             "--add-host",
             "host.docker.internal:host-gateway",
+            *(["--add-host", args.subagent_host] if args.subagent_host else []),
             "--publish",
             "127.0.0.1::2024",
             "--env",
@@ -575,8 +582,9 @@ def main() -> None:
             "--env",
             (
                 "DECOMPOSER_SUBAGENT_BASE_URL="
-                f"http://host.docker.internal:{args.subagent_port}/v1"
+                + (args.subagent_base_url or f"http://host.docker.internal:{args.subagent_port}/v1")
             ),
+            "--env", "VLLM_API_KEY",
             *postgres_env,
             "--volume",
             f"{episode_dir.resolve()}:/artifacts/data",
@@ -798,6 +806,7 @@ def main() -> None:
                     "openrouter_max_retries": openrouter_max_retries,
                     "subagent_model": args.subagent_model,
                     "subagent_api_model": args.subagent_api_model,
+                    "subagent_base_url": args.subagent_base_url,
                     "subagent_generation_config": generation_config(args.subagent_api_model),
                     "started_at": started_at,
                     "finished_at": datetime.now(timezone.utc).isoformat(),

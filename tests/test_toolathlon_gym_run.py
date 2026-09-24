@@ -366,7 +366,8 @@ def test_batch_repetitions_and_resume_skip_completed(tmp_path, monkeypatch) -> N
     assert len(vllm_starts) == 2
 
 
-def test_batch_runs_episodes_with_requested_concurrency(tmp_path, monkeypatch) -> None:
+@pytest.mark.parametrize("hosted", [False, True])
+def test_batch_runs_episodes_with_requested_concurrency(tmp_path, monkeypatch, hosted) -> None:
     toolathlon_root = tmp_path / "toolathlon"
     tasks = [f"task-{index}" for index in range(4)]
     for task in tasks:
@@ -402,6 +403,7 @@ def test_batch_runs_episodes_with_requested_concurrency(tmp_path, monkeypatch) -
         }
 
     monkeypatch.setattr(batch, "execute_episode", fake_execute_episode)
+    starts = []
     manifest = batch.main(
         [
             "--tasks",
@@ -412,6 +414,7 @@ def test_batch_runs_episodes_with_requested_concurrency(tmp_path, monkeypatch) -
             "4",
             "--gym-artifacts-dir",
             str(artifacts),
+            *(["--subagent-base-url", "https://router.test/v1"] if hosted else []),
         ],
         repo_root=tmp_path,
         toolathlon_root=toolathlon_root,
@@ -420,12 +423,14 @@ def test_batch_runs_episodes_with_requested_concurrency(tmp_path, monkeypatch) -
         default_model="decomposer-model",
         default_subagent_model="subagent-model",
         default_subagent_port=8023,
-        start_vllm=lambda **kwargs: "process",
+        start_vllm=lambda **kwargs: starts.append(kwargs) or "process",
         stop_vllm=lambda process: None,
         docker=lambda *args, **kwargs: subprocess.CompletedProcess(args, 0, "", ""),
     )
 
     assert maximum_active == 4
+    assert len(starts) == (0 if hosted else 1)
+    assert manifest["config"]["subagent_base_url"] == ("https://router.test/v1" if hosted else None)
     assert manifest["counts"]["completed"] == 4
 
 
@@ -751,6 +756,8 @@ def test_episode_command_distributes_container_operations_across_slots(tmp_path)
         n_jobs_per_worker=1000,
         agent_timeout=1200,
         container_slots=2,
+        subagent_base_url="https://router.test/v1",
+        subagent_host="router.test:192.0.2.1",
     )
 
     command = batch.episode_command(
@@ -770,3 +777,5 @@ def test_episode_command_distributes_container_operations_across_slots(tmp_path)
     )
     assert command[command.index("--vllm-data-parallel-size") + 1] == "2"
     assert command[command.index("--agent-timeout") + 1] == "1200"
+    assert command[command.index("--subagent-base-url") + 1] == "https://router.test/v1"
+    assert command[command.index("--subagent-host") + 1] == "router.test:192.0.2.1"
