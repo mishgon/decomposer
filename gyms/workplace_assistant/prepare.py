@@ -1,4 +1,7 @@
-"""Prepare Workplace Assistant evaluation inputs or canonical SFT datasets."""
+"""Prepare Workplace Assistant evaluation inputs.
+
+SFT releases are built by `sft.workplace_assistant.prepare`.
+"""
 
 from __future__ import annotations
 
@@ -21,7 +24,6 @@ if __package__ in (None, ""):
 from gyms.workplace_assistant.experiments import (  # noqa: E402
     DATA_DIR,
     PROJECT_VENV,
-    SFT_OUTPUT_ROOT,
     SPLIT_ROWS,
     SPLITS,
     UV_BIN,
@@ -40,17 +42,6 @@ from gyms.workplace_assistant.experiments import (  # noqa: E402
 )
 
 AGENT_REF = {"type": "responses_api_agents", "name": "decomposer"}
-SFT_SPECS = {
-    "workplace-all-v3": "workplace_all_v3.yaml",
-    "workplace-26b-nonthinking-v3": "workplace_26b_nonthinking_v3.yaml",
-    "workplace-deepseek-e4b-thinking-v1": "workplace_deepseek_e4b_thinking_v1.yaml",
-    "workplace-deepseek-e4b-thinking-v2-8k": (
-        "workplace_deepseek_e4b_thinking_v2_8k.yaml"
-    ),
-    "workplace-deepseek-e4b-thinking-v2-32k": (
-        "workplace_deepseek_e4b_thinking_v2_32k.yaml"
-    ),
-}
 
 
 def sha256_file(path: Path, chunk_size: int = 8 * 1024 * 1024) -> str:
@@ -528,29 +519,6 @@ def prepare_eval(args: argparse.Namespace) -> int:
     return 0
 
 
-def prepare_sft(args: argparse.Namespace) -> int:
-    from sft.builder import prepare_dataset
-
-    spec = Path(__file__).with_name("sft_specs") / SFT_SPECS[args.dataset]
-    prepared = prepare_dataset(spec, args.output_root)
-    print(
-        json.dumps(
-            {
-                "dataset": prepared.manifest["dataset"],
-                "release_dir": str(prepared.release_dir),
-                "manifest_path": str(prepared.manifest_path),
-                "filtering": prepared.manifest["filtering"],
-                "tokenization": prepared.manifest.get("tokenization"),
-                "records": prepared.manifest["records"],
-            },
-            indent=2,
-            ensure_ascii=False,
-            sort_keys=True,
-        )
-    )
-    return 0
-
-
 def run_upstream(args: argparse.Namespace) -> int:
     external = args.repo_root / "external" / "Gym"
     sys.path.insert(0, str(external))
@@ -576,10 +544,6 @@ def build_parser() -> argparse.ArgumentParser:
     eval_parser.add_argument("--reuse-source", action="store_true")
     eval_parser.add_argument("--full-checkpoint-hashes", action="store_true")
 
-    sft_parser = subparsers.add_parser("sft", help="Build a canonical SFT release")
-    sft_parser.add_argument("--dataset", choices=tuple(SFT_SPECS), required=True)
-    sft_parser.add_argument("--output-root", type=Path, default=SFT_OUTPUT_ROOT)
-
     return parser
 
 
@@ -594,8 +558,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(arguments)
     if args.command == "eval":
         return prepare_eval(args)
-    if args.command == "sft":
-        return prepare_sft(args)
     raise AssertionError(f"Unhandled preparation command: {args.command}")
 
 

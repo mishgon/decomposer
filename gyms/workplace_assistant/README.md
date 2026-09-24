@@ -1,8 +1,8 @@
 # Workplace Assistant gym
 
 This package owns Workplace Assistant dataset preparation, local execution,
-MLSpace submission, experiment profiles, and conversion of successful
-Decomposer rollouts into canonical SFT releases. The pinned `external/Gym`
+MLSpace submission, and experiment profiles. Turning successful Decomposer
+rollouts into canonical SFT releases lives in `sft/workplace_assistant`. The pinned `external/Gym`
 submodule remains an upstream runtime dependency; this package does not use its
 baseline job shell script.
 
@@ -409,46 +409,10 @@ Dry runs do not stage code or submit jobs and redact credentials from printed
 payloads. The live allocation's selected instance types are kept in
 `experiments.py` as the single source of truth.
 
-## Prepare SFT releases
+## SFT releases
 
-The benchmark-neutral canonical schema, builder, and NeMo-Gym adapter remain in
-`sft`. Workplace-specific build specifications and their public commands
-live here:
-
-```bash
-uv run --group train python -m gyms.workplace_assistant.prepare sft \
-  --dataset workplace-all-v3
-
-uv run --group train python -m gyms.workplace_assistant.prepare sft \
-  --dataset workplace-26b-nonthinking-v3
-
-uv run --group train python -m gyms.workplace_assistant.prepare sft \
-  --dataset workplace-deepseek-e4b-thinking-v1
-```
-
-Build the new non-thinking Gemma-4 E4B releases from the same normalized trace
-pool with explicit prepared-token ceilings:
-
-```bash
-uv run --group train python -m gyms.workplace_assistant.prepare sft \
-  --dataset workplace-deepseek-e4b-thinking-v2-8k
-
-uv run --group train python -m gyms.workplace_assistant.prepare sft \
-  --dataset workplace-deepseek-e4b-thinking-v2-32k
-```
-
-Both releases apply reward and trace-validity filtering, assign prompt groups to
-train or validation once, remove teacher reasoning for tokenization, render the
-prompt profile selected by the dataset specification with the Gemma-4 E4B
-training template, and then apply the inclusive token ceiling. Consequently,
-`v2-8k` is a strict subset of
-`v2-32k`, and every shared record keeps the same ID and split. Raw rollout
-artifacts are never removed.
-
-Each retained row carries its prepared token and supervised-token counts. The
-manifest pins the tokenizer revision and chat-template hashes and records raw
-and retained length statistics plus every overlength exclusion. Releases are
-immutable; preparation refuses to replace an existing version directory.
+The named Workplace SFT releases and their specs live in
+[`sft/workplace_assistant`](../../sft/workplace_assistant/README.md).
 
 ## Artifact layout
 

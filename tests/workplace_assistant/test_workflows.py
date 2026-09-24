@@ -2353,9 +2353,11 @@ def test_job_payload_uses_shared_runner_and_redacts_decomposer_secrets() -> None
     assert redacted["env_variables"]["HTTPS_PROXY"] == "<redacted>"
 
 
-def test_named_sft_specs_are_gym_owned() -> None:
-    spec_root = Path(prepare_module.__file__).with_name("sft_specs")
-    assert set(prepare_module.SFT_SPECS) == {
+def test_named_sft_specs_live_with_the_workplace_sft_code() -> None:
+    from sft.workplace_assistant import prepare as sft_prepare_module
+
+    spec_root = Path(sft_prepare_module.__file__).with_name("specs")
+    assert set(sft_prepare_module.SFT_SPECS) == {
         "workplace-all-v3",
         "workplace-26b-nonthinking-v3",
         "workplace-deepseek-e4b-thinking-v1",
@@ -2364,5 +2366,6 @@ def test_named_sft_specs_are_gym_owned() -> None:
     }
     assert all(
         (spec_root / filename).is_file()
-        for filename in prepare_module.SFT_SPECS.values()
+        for filename in sft_prepare_module.SFT_SPECS.values()
     )
+    assert not hasattr(prepare_module, "SFT_SPECS")

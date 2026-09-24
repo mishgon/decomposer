@@ -21,7 +21,7 @@ Dataset releases are defined by strict, checked-in build specifications. Build
 the original all-subagent Workplace source pair with:
 
 ```bash
-uv run --group train python -m gyms.workplace_assistant.prepare sft \
+uv run --group train python -m sft.workplace_assistant.prepare \
   --dataset workplace-all-v3 \
   --output-root /home/sukhorukov/decomposer_artifacts/datasets/sft
 ```
@@ -29,7 +29,7 @@ uv run --group train python -m gyms.workplace_assistant.prepare sft \
 Build the 26B-A4B non-thinking source pair with:
 
 ```bash
-uv run --group train python -m gyms.workplace_assistant.prepare sft \
+uv run --group train python -m sft.workplace_assistant.prepare \
   --dataset workplace-26b-nonthinking-v3 \
   --output-root /home/sukhorukov/decomposer_artifacts/datasets/sft
 ```
@@ -362,9 +362,9 @@ truncation to repair an overlength conversation.
 Prepare both releases before selecting a v2 training experiment:
 
 ```bash
-uv run --group train python -m gyms.workplace_assistant.prepare sft \
+uv run --group train python -m sft.workplace_assistant.prepare \
   --dataset workplace-deepseek-e4b-thinking-v2-8k
-uv run --group train python -m gyms.workplace_assistant.prepare sft \
+uv run --group train python -m sft.workplace_assistant.prepare \
   --dataset workplace-deepseek-e4b-thinking-v2-32k
 ```
 

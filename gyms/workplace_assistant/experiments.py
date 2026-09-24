@@ -29,7 +29,6 @@ COMPONENT_VENV_ROOT = ARTIFACTS_ROOT / "venvs" / "workplace-assistant"
 UV_CACHE = ARTIFACTS_ROOT / "cache" / "uv"
 UV_BIN = ARTIFACTS_ROOT / "tools" / "uv"
 HF_HOME = ARTIFACTS_ROOT / "cache" / "huggingface"
-SFT_OUTPUT_ROOT = ARTIFACTS_ROOT / "datasets" / "sft"
 
 BASE_IMAGE = "cr.ai.cloud.ru/aicloud-base-images/py3.12-torch2.7.0:0.0.42"
 INSTANCE_TYPES_BY_NUM_GPUS = {
