@@ -145,6 +145,22 @@ to the manager. `worker_system_prompt: legacy` reproduces runs made before this
 with the earlier worker text; run identity records the setting, and older output
 directories count as `legacy`.
 
+Generation costs no simulated time on either side. ARE pauses its native agent's
+environment for each model call and resumes it with the reported generation time,
+which ARE's LiteLLM engine leaves at zero. With `simulated_time: frozen_turn` (the
+default), the proxy freezes the environment for each Decomposer turn, and the
+broker advances the clock only through tool calls: 1 ms before each call, so
+events keep unique timestamps in call order, plus the call's measured duration.
+`SystemApp__wait_for_notification` jumps the clock as in ARE and leaves it frozen
+(`gyms/gaia2/simulated_time.py`). Manager and worker latency, server load and
+concurrency therefore no longer move the clock toward the 1,800-second cap.
+Concurrent waits add up instead of overlapping; sidecars record every wait
+(`waits`) and each turn's clock (`simulated_clock`). The mode admits only
+scenarios with nothing scheduled during a turn: Execution and Search pass, while
+multi-turn, Time-tagged and noise scenarios are refused. `simulated_time:
+wall_clock` reproduces older runs, which run identity counts as `wall_clock`.
+Measure speed in separate runs at concurrency 1, not with the simulated clock.
+
 The registered experiments are:
 
 - `gemma4-e4b-sft-deepseek-e4b-v1-8k-non-thinking-gemma4-e4b-thinking`:
@@ -158,7 +174,8 @@ The registered experiments are:
 - `deepseek-v4-flash-0731-teacher-gaia2-ambiguity-policy-qwen35-4b-non-thinking`:
   a separately identified prompt-alignment ablation using the same manager and
   worker. It appends the short GAIA2 ambiguity policy to the manager prompt;
-  canonical DeepSeek results remain unchanged.
+  canonical DeepSeek results remain unchanged. Ambiguity scenarios have several
+  turns, so it keeps `simulated_time: wall_clock`.
 - `qwen36-35b-a3b-teacher-qwen35-4b-non-thinking`: the internal
   `Qwen/Qwen3.6-35B-A3B-FP8` teacher with the same local worker and teacher
   prompt. A credential-isolating loopback proxy normalizes the deployment's

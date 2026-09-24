@@ -17,7 +17,14 @@ from are.simulation.agents.agent_execution_result import AgentExecutionResult
 from are.simulation.agents.are_simulation_agent import RunnableARESimulationAgent
 from are.simulation.apps.agent_user_interface import AgentUserInterface
 
+from gyms.gaia2.simulated_time import (
+    FrozenTurnClock,
+    UnsupportedScenarioError,
+    frozen_turn_refusals,
+)
 from gyms.gaia2.worker_prompt import render_worker_system_prompt
+
+SIMULATED_TIME_MODES = ("frozen_turn", "wall_clock")
 
 
 class RemoteError(RuntimeError):
@@ -85,6 +92,10 @@ class DecomposerProxyAgent(RunnableARESimulationAgent):
         self.allow_uncollected_final = bool(
             config.get("allow_uncollected_final", False)
         )
+        # Configs written before the setting existed ran on the wall clock.
+        self.simulated_time = config.get("simulated_time") or "wall_clock"
+        if self.simulated_time not in SIMULATED_TIME_MODES:
+            raise ValueError(f"Unknown simulated_time: {self.simulated_time!r}")
         self.sidecar_root = config.get("sidecar_root")
         self.gaia2_revision = config.get("gaia2_revision") or os.environ.get(
             "GAIA2_GIT_SHA"
@@ -119,6 +130,17 @@ class DecomposerProxyAgent(RunnableARESimulationAgent):
                 )
             except RemoteError:
                 pass
+
+    def _unfreeze(self, clock: FrozenTurnClock | None) -> dict[str, Any] | None:
+        if clock is None:
+            return None
+        with self._session.lock:
+            return clock.unfreeze()
+
+    def _release_clock(self, clock: FrozenTurnClock | None) -> None:
+        if clock is not None:
+            with self._session.lock:
+                clock.release()
 
     def _broker_get(self, suffix: str, timeout: float = 30) -> dict[str, Any]:
         assert self._session is not None
@@ -156,7 +178,22 @@ class DecomposerProxyAgent(RunnableARESimulationAgent):
     ) -> AgentExecutionResult:
         if notification_system is None:
             raise RuntimeError("Decomposer proxy requires an ARE notification system.")
+        if self.simulated_time == "frozen_turn" and (
+            reasons := frozen_turn_refusals(scenario)
+        ):
+            raise UnsupportedScenarioError(
+                f"simulated_time=frozen_turn cannot run {scenario.scenario_id}: "
+                + "; ".join(reasons)
+            )
         self._session = self.broker.register(scenario, notification_system)
+        # Generation is free, as for ARE's native agent: the clock is frozen for
+        # each turn and moves only through tool calls (gyms/gaia2/simulated_time.py).
+        clock = (
+            FrozenTurnClock(self.env)
+            if self.simulated_time == "frozen_turn"
+            else None
+        )
+        self._session.clock = clock
         aui = next(
             app for app in scenario.apps or [] if isinstance(app, AgentUserInterface)
         )
@@ -199,6 +236,7 @@ class DecomposerProxyAgent(RunnableARESimulationAgent):
             "run_number": getattr(scenario, "run_number", None),
             "configuration": _redact(self.config),
             "worker_system_prompt_sha256": worker_system_prompt_sha256,
+            "simulated_time": self.simulated_time,
             "gaia2_revision": self.gaia2_revision,
             "decomposer_revision": self.decomposer_revision,
             "turns": [],
@@ -210,6 +248,9 @@ class DecomposerProxyAgent(RunnableARESimulationAgent):
             def watch_environment() -> None:
                 while not self._finished.wait(self.poll_interval):
                     if self.env.stop_event.is_set():
+                        # A stopped environment's event loop stays parked while
+                        # the turn holds the clock frozen.
+                        self._release_clock(clock)
                         self._cancel_remote()
                         return
 
@@ -240,60 +281,86 @@ class DecomposerProxyAgent(RunnableARESimulationAgent):
 
                 cursor = int(journal["next_cursor"])
                 started = time.monotonic()
+                clock_record: dict[str, Any] = {}
+                if clock is not None:
+                    with self._session.lock:
+                        clock.freeze()
                 try:
-                    response = _request(
-                        "POST",
-                        f"{self.service_url}/v1/episodes/{self._episode_id}/turn",
-                        {
-                            "notifications": notifications,
-                            "notification_cursor": cursor,
-                            "turn_number": turn_number,
-                        },
-                        timeout=self.request_timeout,
-                    )
-                    if failure := response.get("failure"):
-                        sidecar["turns"].append(
+                    try:
+                        response = _request(
+                            "POST",
+                            f"{self.service_url}/v1/episodes/{self._episode_id}/turn",
                             {
-                                "turn_number": turn_number,
                                 "notifications": notifications,
-                                "manager": response,
-                                "proxy_latency_seconds": time.monotonic() - started,
-                            }
+                                "notification_cursor": cursor,
+                                "turn_number": turn_number,
+                            },
+                            timeout=self.request_timeout,
                         )
-                        self._write_sidecar(scenario, sidecar)
-                        raise RemoteModelOverflowError(
-                            "Decomposer manager model overflow: "
-                            + json.dumps(failure, ensure_ascii=False)
+                        if failure := response.get("failure"):
+                            if clock is not None:
+                                clock_record["simulated_clock"] = self._unfreeze(clock)
+                            sidecar["turns"].append(
+                                {
+                                    "turn_number": turn_number,
+                                    "notifications": notifications,
+                                    "manager": response,
+                                    "proxy_latency_seconds": (
+                                        time.monotonic() - started
+                                    ),
+                                    **clock_record,
+                                }
+                            )
+                            self._write_sidecar(scenario, sidecar)
+                            raise RemoteModelOverflowError(
+                                "Decomposer manager model overflow: "
+                                + json.dumps(failure, ensure_ascii=False)
+                            )
+                    except Exception:
+                        self._cancel_remote()
+                        raise
+                    last_text = response.get("final_text")
+                    if not isinstance(last_text, str) or not last_text.strip():
+                        self._cancel_remote()
+                        raise RuntimeError(
+                            "Decomposer returned an empty final response."
                         )
-                except Exception:
-                    self._cancel_remote()
-                    raise
-                last_text = response.get("final_text")
-                if not isinstance(last_text, str) or not last_text.strip():
-                    self._cancel_remote()
-                    raise RuntimeError("Decomposer returned an empty final response.")
-                if self._uncollected_final_is_blocking(response):
-                    self._cancel_remote()
-                    raise RuntimeError(
-                        "Decomposer attempted to finish with uncollected subagents."
-                    )
+                    if self._uncollected_final_is_blocking(response):
+                        self._cancel_remote()
+                        raise RuntimeError(
+                            "Decomposer attempted to finish with uncollected subagents."
+                        )
 
-                # This is the sole path by which Decomposer ends an ARE turn.
-                send_tool(content=last_text)
+                    # This is the sole path by which Decomposer ends an ARE turn.
+                    # Under the session lock the final message is stamped after
+                    # every worker tool call, then the environment runs again.
+                    with self._session.lock:
+                        if clock is not None:
+                            clock.before_tool()
+                        send_tool(content=last_text)
+                        if clock is not None:
+                            clock_record["simulated_clock"] = self._unfreeze(clock)
+                finally:
+                    # Every exit path lets the environment run again.
+                    self._unfreeze(clock)
                 sidecar["turns"].append(
                     {
                         "turn_number": turn_number,
                         "notifications": notifications,
                         "manager": response,
                         "proxy_latency_seconds": time.monotonic() - started,
+                        **clock_record,
                     }
                 )
                 sidecar["tool_calls"] = self._session.trace
+                sidecar["waits"] = self._session.waits
                 self._write_sidecar(scenario, sidecar)
             return AgentExecutionResult(output=last_text, metadata=sidecar)
         finally:
             self._finished.set()
+            self._unfreeze(clock)
             self._cancel_remote()
             sidecar["tool_calls"] = self._session.trace
+            sidecar["waits"] = self._session.waits
             self._write_sidecar(scenario, sidecar)
             self.broker.unregister(self._session.session_id)
