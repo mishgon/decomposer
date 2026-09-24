@@ -80,6 +80,9 @@ class BrokerSession:
     lock: threading.RLock = field(default_factory=threading.RLock)
     journal: list[dict[str, Any]] = field(default_factory=list)
     trace: list[dict[str, Any]] = field(default_factory=list)
+    waits: list[dict[str, Any]] = field(default_factory=list)
+    # A FrozenTurnClock (gyms/gaia2/simulated_time.py) when the proxy freezes turns.
+    clock: Any | None = None
 
     def sanitize_error(self, tool_name: str, error: Exception) -> str:
         tool = self.tools.get(tool_name)
@@ -112,28 +115,52 @@ class BrokerSession:
             return self._notifications_after(cursor)
 
     def wait_for_notifications(
-        self, cursor: int, arguments: dict[str, Any]
+        self,
+        cursor: int,
+        arguments: dict[str, Any],
+        *,
+        consumer: str | None = None,
+        requested_at: float | None = None,
     ) -> dict[str, Any]:
         """Return unread entries, advancing native simulated time at most once."""
 
+        requested_at = time.time() if requested_at is None else requested_at
         with self.lock:
-            self.sync_notifications()
-            result = self._notifications_after(cursor)
-            if result["notifications"]:
-                return {**result, "native_wait_invoked": False}
-
-            if WAIT_FOR_NOTIFICATION_TOOL not in self.tools:
-                raise KeyError(WAIT_FOR_NOTIFICATION_TOOL)
-
-            # Keep the original bound AppTool invocation so ARE records the genuine
-            # SystemApp wait event. RLock makes the nested invocation safe while
-            # preserving one atomic drain/check/wait/drain operation.
-            self.invoke(WAIT_FOR_NOTIFICATION_TOOL, arguments)
-            self.sync_notifications()
-            return {
-                **self._notifications_after(cursor),
-                "native_wait_invoked": True,
+            # Wall-clock intervals of every wait show offline whether waits
+            # from different workers overlapped.
+            record: dict[str, Any] = {
+                "consumer": consumer,
+                "arguments": _jsonable(arguments),
+                "requested_at": requested_at,
+                "started_at": time.time(),
+                "simulated_time_before": self.notification_system.get_current_time(),
+                "native_wait_invoked": False,
             }
+            self.waits.append(record)
+            try:
+                self.sync_notifications()
+                result = self._notifications_after(cursor)
+                if result["notifications"]:
+                    return {**result, "native_wait_invoked": False}
+
+                if WAIT_FOR_NOTIFICATION_TOOL not in self.tools:
+                    raise KeyError(WAIT_FOR_NOTIFICATION_TOOL)
+
+                # Keep the original bound AppTool invocation so ARE records the
+                # genuine SystemApp wait event. RLock makes the nested invocation
+                # safe while preserving one atomic drain/check/wait/drain operation.
+                record["native_wait_invoked"] = True
+                self.invoke(WAIT_FOR_NOTIFICATION_TOOL, arguments)
+                self.sync_notifications()
+                return {
+                    **self._notifications_after(cursor),
+                    "native_wait_invoked": True,
+                }
+            finally:
+                record["finished_at"] = time.time()
+                record["simulated_time_after"] = (
+                    self.notification_system.get_current_time()
+                )
 
     def invoke(self, tool_name: str, arguments: dict[str, Any]) -> Any:
         with self.lock:
@@ -145,6 +172,8 @@ class BrokerSession:
                 "arguments": _jsonable(arguments),
                 "started_at": time.time(),
             }
+            if self.clock is not None:
+                record["simulated_time"] = self.clock.before_tool()
             try:
                 # Call the original bound AppTool exactly once.  Its decorators remain
                 # the only code responsible for mutation and native ARE event logging.
@@ -160,6 +189,12 @@ class BrokerSession:
                 raise
             finally:
                 record["latency_seconds"] = time.monotonic() - started
+                if self.clock is not None:
+                    self.clock.after_tool(
+                        record["latency_seconds"],
+                        started=record["simulated_time"],
+                        waited=tool_name == WAIT_FOR_NOTIFICATION_TOOL,
+                    )
                 self.trace.append(record)
 
 
@@ -276,6 +311,7 @@ class ToolStateBroker:
                     and parts[:2] == ["v1", "sessions"]
                     and parts[3:] == ["notifications", "wait"]
                 ):
+                    requested_at = time.time()
                     session = self._session(parts[2])
                     if session is None:
                         return
@@ -284,11 +320,17 @@ class ToolStateBroker:
                         value = json.loads(self.rfile.read(length) or b"{}")
                         cursor = value.get("cursor")
                         arguments = value.get("arguments", {})
+                        consumer = value.get("consumer")
                         if not isinstance(cursor, int) or isinstance(cursor, bool):
                             raise ValueError("cursor must be an integer")
                         if not isinstance(arguments, dict):
                             raise ValueError("arguments must be an object")
-                        result = session.wait_for_notifications(cursor, arguments)
+                        result = session.wait_for_notifications(
+                            cursor,
+                            arguments,
+                            consumer=consumer if isinstance(consumer, str) else None,
+                            requested_at=requested_at,
+                        )
                     except KeyError:
                         self._write(
                             HTTPStatus.NOT_FOUND,

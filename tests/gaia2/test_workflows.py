@@ -104,6 +104,7 @@ from gyms.gaia2.run import (
     aggregate_trace_manifest,
     archive_attempt,
     are_command,
+    check_simulated_time,
     decomposer_vllm_commands,
     langgraph_command,
     langgraph_runtime_paths,
@@ -1229,6 +1230,57 @@ def test_worker_system_prompt_reaches_the_proxy_and_resume_identity(
         encoding="utf-8",
     )
     validate_run_identity(marker, simple, require_complete=True)
+
+
+def test_simulated_time_reaches_the_proxy_and_resume_identity(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setattr("gyms.gaia2.run.git", lambda *_args: "commit")
+    repo_root = Path(__file__).resolve().parents[2]
+    assert DECOMPOSER_EXPERIMENT.simulated_time == "frozen_turn"
+    _, plugin_path = _runtime_configs(repo_root, tmp_path / "run", DECOMPOSER_EXPERIMENT)
+    plugin = json.loads(plugin_path.read_text(encoding="utf-8"))
+    assert plugin["simulated_time"] == "frozen_turn"
+
+    def identity(experiment):
+        return run_identity(
+            experiment,
+            domain="execution",
+            purpose="evaluation",
+            partition="test",
+            num_repeats=3,
+            concurrency=4,
+            limit=None,
+        )
+
+    frozen = identity(DECOMPOSER_EXPERIMENT)
+    wall_clock = identity(replace(DECOMPOSER_EXPERIMENT, simulated_time="wall_clock"))
+    assert frozen["simulated_time"] == "frozen_turn"
+    assert identity(SIMPLE_QWEN_EXPERIMENT)["simulated_time"] is None
+
+    # A Decomposer marker written before the setting existed ran on the wall
+    # clock: it resumes a wall-clock run and is refused for a frozen-turn one.
+    old_marker = {key: value for key, value in frozen.items() if key != "simulated_time"}
+    marker = tmp_path / ".eval_done.json"
+    marker.write_text(
+        json.dumps({"state": "complete", **old_marker}) + "\n", encoding="utf-8"
+    )
+    validate_run_identity(marker, wall_clock, require_complete=True)
+    with pytest.raises(ValueError, match="simulated_time"):
+        validate_run_identity(marker, frozen, require_complete=True)
+
+
+def test_frozen_turn_runs_only_on_single_turn_static_domains() -> None:
+    check_simulated_time(DECOMPOSER_EXPERIMENT, "execution")
+    check_simulated_time(DECOMPOSER_EXPERIMENT, "search")
+    with pytest.raises(ValueError, match="frozen_turn.*ambiguity"):
+        check_simulated_time(DECOMPOSER_EXPERIMENT, "ambiguity")
+    check_simulated_time(
+        replace(DECOMPOSER_EXPERIMENT, simulated_time="wall_clock"), "ambiguity"
+    )
+    check_simulated_time(SIMPLE_QWEN_EXPERIMENT, "ambiguity")
+    assert DEEPSEEK_QWEN_AMBIGUITY_POLICY_EXPERIMENT.simulated_time == "wall_clock"
+    check_simulated_time(DEEPSEEK_QWEN_AMBIGUITY_POLICY_EXPERIMENT, "ambiguity")
 
 
 def test_langgraph_runtime_is_private_and_disables_file_persistence(tmp_path) -> None:

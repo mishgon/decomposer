@@ -283,6 +283,14 @@ DecomposerPromptProfile = Literal["student", "teacher"]
 # "are_native": workers get ARE's native agent system prompt for the scenario
 # (gyms/gaia2/worker_prompt.py); "legacy": the worker text used before it.
 WorkerSystemPrompt = Literal["are_native", "legacy"]
+# "frozen_turn": ARE's clock is frozen during each Decomposer turn and moves only
+# through tool calls, so generation is free as for ARE's native agent
+# (gyms/gaia2/simulated_time.py); "wall_clock": the clock runs in real time, as
+# in runs made before the setting existed.
+SimulatedTime = Literal["frozen_turn", "wall_clock"]
+# Domains whose scenarios schedule nothing during a turn (checked per scenario by
+# gyms/gaia2/simulated_time.py:frozen_turn_refusals); Ambiguity has several turns.
+FROZEN_TURN_DOMAINS: tuple[Gaia2Domain, ...] = ("execution", "search")
 SimpleAgentBackend = Literal["local_vllm", "openrouter"]
 Purpose = Literal["evaluation", "trace-generation"]
 Partition = Literal["train", "test", "full"]
@@ -381,6 +389,7 @@ class DecomposerExperiment:
     prompt_profile: DecomposerPromptProfile = "student"
     manager_prompt_addendum_profile: Gaia2ManagerPromptAddendumProfile | None = None
     worker_system_prompt: WorkerSystemPrompt = "are_native"
+    simulated_time: SimulatedTime = "frozen_turn"
     num_gpus: int = 2
     manager_served_name: str = "decomposer/gemma4-e4b-sft-deepseek-e4b-v1-8k"
     worker_served_name: str = "google/gemma-4-E4B-it"
@@ -860,6 +869,8 @@ DEEPSEEK_QWEN_AMBIGUITY_POLICY_EXPERIMENT = replace(
         "qwen35-4b-non-thinking"
     ),
     manager_prompt_addendum_profile="gaia2-ambiguity",
+    # Ambiguity scenarios have several turns, which frozen_turn does not support.
+    simulated_time="wall_clock",
 )
 # Known upstream fault for every Qwen3.6 llm_proxy profile below: the Responses
 # deployment returns reasoning, but discards reasoning items that the harness

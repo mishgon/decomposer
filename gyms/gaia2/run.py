@@ -34,6 +34,7 @@ from gyms.gaia2.dataset import (  # noqa: E402
 from gyms.gaia2.experiments import (  # noqa: E402
     DOMAIN,
     DOMAINS,
+    FROZEN_TURN_DOMAINS,
     GAIA2_REVISION,
     JUDGE_MODEL,
     PARTITIONS,
@@ -260,6 +261,11 @@ def run_identity(
             if isinstance(experiment, DecomposerExperiment)
             else None
         ),
+        "simulated_time": (
+            experiment.simulated_time
+            if isinstance(experiment, DecomposerExperiment)
+            else None
+        ),
         "runtime_configuration": runtime_configuration(experiment),
     }
     if partition != "full":
@@ -295,6 +301,11 @@ def validate_run_identity(
     observed.setdefault(
         "worker_system_prompt",
         "legacy" if observed.get("kind") == "decomposer" else None,
+    )
+    # ... and ran on the wall clock.
+    observed.setdefault(
+        "simulated_time",
+        "wall_clock" if observed.get("kind") == "decomposer" else None,
     )
     existing_offset = observed.get("port_offset", 0)
     observed["port_offset"] = existing_offset
@@ -1474,6 +1485,7 @@ def _runtime_configs(
         ),
         "policy": "shared_serialized",
         "worker_system_prompt": experiment.worker_system_prompt,
+        "simulated_time": experiment.simulated_time,
         "request_timeout_seconds": 3500,
         "notification_poll_seconds": 0.1,
         "sidecar_root": str(directory / "decomposer_sidecars"),
@@ -1703,6 +1715,11 @@ def _dry_plan(
             if isinstance(experiment, DecomposerExperiment)
             else None
         ),
+        "simulated_time": (
+            experiment.simulated_time
+            if isinstance(experiment, DecomposerExperiment)
+            else None
+        ),
         "manager_parallel_tool_calls": (
             experiment.manager_parallel_tool_calls
             if isinstance(experiment, DecomposerExperiment)
@@ -1759,6 +1776,22 @@ def _dry_plan(
     return plan
 
 
+def check_simulated_time(experiment: Experiment, domain: str) -> None:
+    """Refuse frozen_turn on domains whose scenarios it cannot run."""
+
+    if (
+        isinstance(experiment, DecomposerExperiment)
+        and experiment.simulated_time == "frozen_turn"
+        and domain not in FROZEN_TURN_DOMAINS
+    ):
+        raise ValueError(
+            f"{experiment.name} uses simulated_time='frozen_turn', which supports "
+            f"only the {', '.join(FROZEN_TURN_DOMAINS)} domains, not {domain}; "
+            "set simulated_time='wall_clock' or extend "
+            "gyms/gaia2/simulated_time.py:frozen_turn_refusals"
+        )
+
+
 def execute_trace_generation(local_repo: Path, args: argparse.Namespace) -> int:
     spec = get_domain_spec(getattr(args, "domain", DOMAIN))
     if not spec.supports_trace_generation:
@@ -1769,6 +1802,7 @@ def execute_trace_generation(local_repo: Path, args: argparse.Namespace) -> int:
     )
     if not isinstance(experiment, DecomposerExperiment):
         raise ValueError("Gaia2 trace generation requires a Decomposer experiment")
+    check_simulated_time(experiment, spec.name)
     if args.partition != "train":
         raise ValueError(
             "Gaia2 trace generation is restricted to the pinned train partition"
@@ -2130,6 +2164,7 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
     experiment = select_prompt_profile(
         get_experiment(args.experiment), requested_prompt_profile
     )
+    check_simulated_time(experiment, spec.name)
     ports = Gaia2PortLayout(getattr(args, "port_offset", 0))
     ports.as_dict(experiment)
     visible_devices = selected_cuda_devices(experiment, args.cuda_visible_devices)

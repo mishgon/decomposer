@@ -321,6 +321,7 @@ def test_wait_adapter_never_moves_clock_back_and_preserves_native_event():
             session.token,
             {
                 "cursor": initial["next_cursor"],
+                "consumer": "worker-1",
                 "arguments": {"timeout": 30},
             },
         )
@@ -337,6 +338,15 @@ def test_wait_adapter_never_moves_clock_back_and_preserves_native_event():
         assert [entry["tool"] for entry in session.trace] == [
             "SystemApp__wait_for_notification"
         ]
+        # Without a frozen-turn clock the trace carries no simulated time.
+        assert "simulated_time" not in session.trace[0]
+        (wait,) = session.waits
+        assert wait["consumer"] == "worker-1"
+        assert wait["arguments"] == {"timeout": 30}
+        assert wait["native_wait_invoked"] is True
+        assert wait["requested_at"] <= wait["started_at"] <= wait["finished_at"]
+        assert wait["simulated_time_before"] <= before_wait + 1
+        assert wait["simulated_time_after"] >= future_time.timestamp()
     finally:
         broker.close()
 
@@ -403,6 +413,11 @@ def test_parallel_workers_at_same_cursor_advance_native_time_once():
         assert environment.time_manager.time() < future_time.timestamp() + 5
         assert environment.get_event_log_size() == 1
         assert len(session.trace) == 1
+        # Both requests are logged; only one of them waited in ARE.
+        assert sorted(wait["native_wait_invoked"] for wait in session.waits) == [
+            False,
+            True,
+        ]
     finally:
         broker.close()
 
