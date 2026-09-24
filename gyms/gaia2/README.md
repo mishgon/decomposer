@@ -129,6 +129,13 @@ HF_HOME=/home/sukhorukov/.cache/huggingface \
   --max-workers 8
 ```
 
+A Decomposer manager reads each turn exactly as ARE's own agent does: the new
+user messages as `[TASK]: \n<messages>\n`, and any environment notifications as
+a following `Environment notifications updates:` block. Nothing is added to the
+user turn, so the Decomposer and the simple agent see the same task text. The
+manager's final message is sent to the user through
+`AgentUserInterface__send_message_to_user`.
+
 The registered experiments are:
 
 - `gemma4-e4b-sft-deepseek-e4b-v1-8k-non-thinking-gemma4-e4b-thinking`:

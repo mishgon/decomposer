@@ -10,6 +10,7 @@ import time
 import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Any, TypedDict
 
@@ -29,6 +30,16 @@ from gyms.gaia2.model_overflow import (
     Gaia2ModelOverflowMiddleware,
 )
 from gyms.gaia2.prompts import compose_decomposer_system_prompt
+
+
+# ARE's own user-role templates (external/gaia2: agents/default_agent/base_agent.py
+# DEFAULT_STEP_2_MESSAGE "task" and "environment_notifications", and
+# steps/are_simulation.py format_notification). Pinned by tests/gaia2/test_service.py.
+ARE_TASK_TEMPLATE = "[TASK]: \n{content}\n"
+ARE_ENVIRONMENT_NOTIFICATIONS_TEMPLATE = (
+    "Environment notifications updates:\n***\n{content}\n***\n"
+)
+ARE_NOTIFICATION_TIME_FORMAT = "%Y-%m-%d %H:%M:%S"
 
 
 class EpisodeContext(TypedDict):
@@ -181,23 +192,53 @@ def _subagent_summary(state: dict[str, Any]) -> tuple[list[dict[str, Any]], list
     return summaries, outstanding
 
 
-def _notification_prompt(request: TurnRequest) -> str:
-    lines = [
-        f"GAIA2 scenario turn {request.turn_number}. New ARE notifications follow."
+def _turn_messages(request: TurnRequest) -> list[dict[str, str]]:
+    """The manager's input for one turn: the user-role text ARE gives its own agent.
+
+    ARE's agent runs `run(task=...)` on every wake-up, logging the new user
+    messages as one task (`are_simulation_main.py:389-414, 482-486`), and injects
+    environment notifications as a separate user-role update (`steps/are_simulation.py`).
+    Nothing else is added, so the Decomposer and the native baseline read the same
+    turn. Other notification types (e.g. the environment stop) are not rendered.
+    """
+    user_messages = [
+        str(notification.get("message", ""))
+        for notification in request.notifications
+        if notification.get("type") == "USER_MESSAGE"
     ]
-    for notification in request.notifications:
-        timestamp = notification.get("simulated_timestamp", "unknown time")
-        kind = notification.get("type", "notification")
-        message = notification.get("message", "")
-        lines.append(f"[{timestamp}] {kind}: {message}")
-        attachments = notification.get("attachments") or []
-        if attachments:
-            lines.append("Attachments: " + json.dumps(attachments, ensure_ascii=False))
-    lines.append(
-        "Delegate the work to subagents. Return exactly the text that should be sent "
-        "to the user for this turn. Wait for every run you started before answering."
-    )
-    return "\n\n".join(lines)
+    # ARE hands attachments to its agent as images; the manager gets them as
+    # JSON text. Execution and Search user messages carry none.
+    attachments = [
+        attachment
+        for notification in request.notifications
+        if notification.get("type") == "USER_MESSAGE"
+        for attachment in notification.get("attachments") or []
+    ]
+    content = "\n".join(user_messages)
+    if attachments:
+        content += "\nAttachments: " + json.dumps(attachments, ensure_ascii=False)
+    messages = [{"role": "user", "content": ARE_TASK_TEMPLATE.format(content=content)}]
+
+    environment_notifications = [
+        "["
+        + datetime.fromisoformat(notification["simulated_timestamp"]).strftime(
+            ARE_NOTIFICATION_TIME_FORMAT
+        )
+        + "] "
+        + str(notification.get("message", ""))
+        for notification in request.notifications
+        if notification.get("type") == "ENVIRONMENT_NOTIFICATION"
+    ]
+    if environment_notifications:
+        messages.append(
+            {
+                "role": "user",
+                "content": ARE_ENVIRONMENT_NOTIFICATIONS_TEMPLATE.format(
+                    content="\n".join(environment_notifications)
+                ),
+            }
+        )
+    return messages
 
 
 def create_app(config: dict[str, Any]) -> FastAPI:
@@ -318,9 +359,7 @@ def create_app(config: dict[str, Any]) -> FastAPI:
             raise HTTPException(409, "episode already has an active turn")
         episode.context["notification_cursor"] = request.notification_cursor
         before = time.monotonic()
-        input_value = {
-            "messages": [{"role": "user", "content": _notification_prompt(request)}]
-        }
+        input_value = {"messages": _turn_messages(request)}
         episode.task = asyncio.create_task(
             graph.ainvoke(
                 input_value,

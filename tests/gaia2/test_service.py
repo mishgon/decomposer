@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import ast
+import re
+from pathlib import Path
+
 import pytest
 
 pytest.importorskip("langchain_openai")
@@ -167,6 +171,10 @@ def test_episode_persists_thread_and_forwards_runtime_context(monkeypatch):
     )
     assert graph.calls[0][2]["scenario_id"] == "scenario"
     assert graph.calls[1][2]["notification_cursor"] == 2
+    # Each turn's input is exactly ARE's task text for that turn's user message.
+    assert graph.calls[1][0] == {
+        "messages": [{"role": "user", "content": "[TASK]: \nmessage-2\n"}]
+    }
 
 
 def test_uncollected_subagent_is_reported_as_outstanding():
@@ -437,3 +445,102 @@ def test_manager_model_rejects_non_boolean_parallel_tool_calls():
                 "parallel_tool_calls": "false",
             }
         )
+
+
+ARE_AGENT_DIR = (
+    Path(__file__).parents[2]
+    / "external"
+    / "gaia2"
+    / "are"
+    / "simulation"
+    / "agents"
+    / "default_agent"
+)
+AUI_MESSAGE = (
+    "Received at: 2026-01-01 09:00:00\nSender: User\n"
+    "Message: Send the Q3 report to Ana.\nAlready read: False"
+)
+
+
+def _notification(kind: str, message: str, timestamp: str = "2026-01-01T09:00:00+00:00"):
+    return {"type": kind, "message": message, "simulated_timestamp": timestamp}
+
+
+def _request(*notifications):
+    return service.TurnRequest(
+        notifications=list(notifications), notification_cursor=1, turn_number=3
+    )
+
+
+def test_turn_templates_match_ares_own_agent():
+    base_agent = ARE_AGENT_DIR / "base_agent.py"
+    steps = ARE_AGENT_DIR / "steps" / "are_simulation.py"
+    if not base_agent.is_file() or not steps.is_file():
+        pytest.skip("external/gaia2 is not checked out")
+    tree = ast.parse(base_agent.read_text(encoding="utf-8"))
+    (templates,) = [
+        dict(ast.literal_eval(node.value.args[0]))
+        for node in tree.body
+        if isinstance(node, ast.Assign)
+        and any(getattr(target, "id", None) == "DEFAULT_STEP_2_MESSAGE" for target in node.targets)
+    ]
+
+    assert service.ARE_TASK_TEMPLATE == templates["task"]
+    assert service.ARE_ENVIRONMENT_NOTIFICATIONS_TEMPLATE == templates["environment_notifications"]
+    (time_format,) = re.findall(
+        r"def format_notification.*?strftime\('([^']+)'\)",
+        steps.read_text(encoding="utf-8"),
+        flags=re.S,
+    )
+    assert service.ARE_NOTIFICATION_TIME_FORMAT == time_format
+
+
+def test_user_turn_is_ares_task_text_and_nothing_else():
+    messages = service._turn_messages(_request(_notification("USER_MESSAGE", AUI_MESSAGE)))
+
+    assert messages == [{"role": "user", "content": f"[TASK]: \n{AUI_MESSAGE}\n"}]
+    assert not re.search(r"GAIA2|Delegate|turn 3|subagent", messages[0]["content"])
+
+
+def test_several_user_messages_join_into_one_task():
+    messages = service._turn_messages(
+        _request(_notification("USER_MESSAGE", "first"), _notification("USER_MESSAGE", "second"))
+    )
+
+    assert messages == [{"role": "user", "content": "[TASK]: \nfirst\nsecond\n"}]
+
+
+def test_environment_notifications_follow_as_ares_update_block():
+    messages = service._turn_messages(
+        _request(
+            _notification("USER_MESSAGE", "task"),
+            _notification(
+                "ENVIRONMENT_NOTIFICATION",
+                "EmailClientV2: New email received from ana@example.com",
+                "2026-01-01T09:05:30+00:00",
+            ),
+            _notification("ENVIRONMENT_STOP", "stop"),
+        )
+    )
+
+    assert messages == [
+        {"role": "user", "content": "[TASK]: \ntask\n"},
+        {
+            "role": "user",
+            "content": (
+                "Environment notifications updates:\n***\n"
+                "[2026-01-01 09:05:30] EmailClientV2: New email received from ana@example.com"
+                "\n***\n"
+            ),
+        },
+    ]
+
+
+def test_environment_only_turn_keeps_ares_empty_task():
+    messages = service._turn_messages(
+        _request(_notification("ENVIRONMENT_NOTIFICATION", "Chats: New message"))
+    )
+
+    assert messages[0] == {"role": "user", "content": "[TASK]: \n\n"}
+    assert messages[1]["content"].startswith("Environment notifications updates:\n***\n[2026-01-01 09:00:00]")
+
