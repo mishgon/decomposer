@@ -56,8 +56,8 @@ async def episode(task, mode, attempt, root, args):
     client = get_client(url=args.worker_url)
     policy = model()
     if mode == "decomposer":
-        agent = create_decomposer_agent(policy,
-            [{"subagent_type_id": "researcher", "description": "Qwen3.5-4B researcher with offline Wiki-2018 search and access tools.",
+        agent = create_decomposer_agent(decomposer_model=policy,
+            subagent_types=[{"subagent_type_id": "researcher", "description": "Qwen3.5-4B researcher with offline Wiki-2018 search and access tools.",
               "assistant_id": "researcher", "url": args.worker_url}],
             checkpointer=checkpoint, middleware=[ModelLog("decomposer")],
             context_schema=Context, subagent_recursion_limit=410)
@@ -85,10 +85,11 @@ async def episode(task, mode, attempt, root, args):
         state = state or dict(snapshot.values)
         for run in state.get("subagent_runs", {}).values():
             try:
-                live = await asyncio.wait_for(client.runs.get(run["thread_id"], run["run_id"]), 30)
+                thread_id = state["subagents"][run["subagent_id"]]["thread_id"]
+                live = await asyncio.wait_for(client.runs.get(thread_id, run["run_id"]), 30)
                 if live["status"] in {"pending", "running"}:
-                    await asyncio.wait_for(client.runs.cancel(run["thread_id"], run["run_id"], wait=True), 30)
-                worker_state = await asyncio.wait_for(client.threads.get_state(run["thread_id"]), 30)
+                    await asyncio.wait_for(client.runs.cancel(thread_id, run["run_id"], wait=True), 30)
+                worker_state = await asyncio.wait_for(client.threads.get_state(thread_id), 30)
                 save(path / "subagents" / f"{run['run_id']}.json", worker_state)
             except Exception as exc:
                 result.setdefault("cleanup_errors", []).append(str(exc))

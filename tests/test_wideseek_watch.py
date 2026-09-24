@@ -16,8 +16,9 @@ class WatchTest(unittest.TestCase):
             cid = str(len(messages))
             messages.extend([{'type': 'ai', 'tool_calls': [{'id': cid, 'name': name}]},
                              {'type': 'tool', 'tool_call_id': cid, 'content': json.dumps(result)}])
-        call('spawn_subagent', {'subagent_run_id': 'a'})
-        call('spawn_subagent', {'subagent_run_id': 'b'})
+        call('new', {'subagent_id': 'worker'})
+        call('run', {'subagent_run_id': 'a'})
+        call('run', {'subagent_run_id': 'b'})
         call('wait', 'Timed out')  # No collected reports: neither worker is removed.
         call('spawn_subagent', {'subagent_run_id': 'c'})
         call('wait', [{'subagent_run_id': 'a'}, {'subagent_run_id': 'b'}])
