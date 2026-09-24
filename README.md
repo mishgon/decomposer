@@ -64,9 +64,11 @@ Ideas:
 
 - `src/decomposer/`: core Decomposer package. This should stay benchmark- and training-agnostic.
 - `examples/`: runnable examples of configuring and using Decomposer.
-- `gyms/`: environment-owned preparation, trace collection, local execution, and evaluation launchers.
-- `training/`: training and finetuning workflows.
-- `data/`: benchmark-neutral dataset schemas, builders, and adapters.
+- `gyms/<gym_name>/`: environment code for loading tasks, exposing tools, running Decomposer or another agent on all or some tasks, trace generation, and saving raw results.
+- `evals/<gym_name>/`: one-command evaluation on top of `gyms/<gym_name>` (run, then compute metrics), plus comparisons and trace statistics.
+- `sft/`: shared SFT code (dataset schema, builder and adapters; trainer, templates and configs). `sft/<gym_name>/` holds gym-specific trace preparation and release specs.
+- `opd/`: shared on-policy distillation code; `opd/<gym_name>/` holds per-gym loop configs.
+- `rl/<gym_name>/`: reinforcement learning on a gym (empty for now).
 - `artifacts/data/`: collected trajectories and episode workspaces ignored by git.
 - `artifacts/evals/`: evaluation results and aggregate metrics ignored by git.
 - `artifacts/training/`: model checkpoints and training logs ignored by git.
