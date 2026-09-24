@@ -12,7 +12,9 @@ from typing import Any
 
 from .base import AdapterReadResult
 from ..schema import (
+    DECOMPOSER_TOOL_NAMES,
     EXCLUSION_REASONS,
+    PARALLEL_CALL_NORMALIZATION_ATTRIBUTE,
     CanonicalOutcome,
     CanonicalRollout,
     CanonicalSource,
@@ -23,14 +25,15 @@ from ..schema import (
     canonical_json,
     normalize_subagent_type_ids,
     normalize_response_tools,
+    reject_legacy_tool_name,
     require_mapping,
-    sequentialize_parallel_spawn_calls,
+    sequentialize_parallel_calls,
     sha256_file,
     sha256_text,
     validate_decomposer_messages,
 )
 
-ADAPTER_VERSION = 4
+ADAPTER_VERSION = 5
 
 
 def _canonical_prompt_input(value: Any) -> str:
@@ -105,10 +108,11 @@ def _convert_tool_call(
     call_id = raw_tool_call.get("id")
     name = raw_tool_call.get("name")
     arguments = raw_tool_call.get("args")
+    reject_legacy_tool_name(name, f"Assistant message {message_index}")
     if (
         not isinstance(call_id, str)
         or not call_id
-        or name not in {"spawn_subagent", "wait"}
+        or name not in DECOMPOSER_TOOL_NAMES
         or not isinstance(arguments, Mapping)
     ):
         raise TraceValidationError(
@@ -135,10 +139,11 @@ def _convert_message(message: Mapping[str, Any], index: int) -> JsonObject:
     if message_type == "tool":
         call_id = message.get("tool_call_id")
         name = message.get("name")
+        reject_legacy_tool_name(name, f"Tool message {index}")
         if (
             not isinstance(call_id, str)
             or not call_id
-            or name not in {"spawn_subagent", "wait"}
+            or name not in DECOMPOSER_TOOL_NAMES
         ):
             raise TraceValidationError(
                 "excluded_invalid_tool_calls",
@@ -187,7 +192,7 @@ def _convert_message(message: Mapping[str, Any], index: int) -> JsonObject:
 
 def _convert_messages(
     messages: Any, system_prompt: str
-) -> tuple[list[JsonObject], int, int]:
+) -> tuple[list[JsonObject], int, int, int, int]:
     if not isinstance(messages, list) or not messages:
         raise TraceValidationError(
             "excluded_missing_final_state",
@@ -214,16 +219,16 @@ def _convert_messages(
         normalized,
         normalized_messages,
         normalized_calls,
-        dropped_wait_calls,
-        dropped_wait_turns,
-    ) = sequentialize_parallel_spawn_calls(converted)
+        dropped_calls,
+        dropped_turns,
+    ) = sequentialize_parallel_calls(converted)
     validate_decomposer_messages(normalized)
     return (
         normalized,
         normalized_messages,
         normalized_calls,
-        dropped_wait_calls,
-        dropped_wait_turns,
+        dropped_calls,
+        dropped_turns,
     )
 
 
@@ -393,8 +398,8 @@ def read_nemo_gym_source(
             f"candidate rollouts, found {candidate_rollouts}."
         )
     normalized_subagent_calls = 0
-    total_dropped_wait_calls = 0
-    total_dropped_wait_turns = 0
+    total_dropped_calls = 0
+    total_dropped_turns = 0
 
     with rollouts_path.open(encoding="utf-8") as file:
         for line_number, line in enumerate(file, start=1):
@@ -491,18 +496,20 @@ def read_nemo_gym_source(
                     messages,
                     normalized_messages,
                     normalized_calls,
-                    dropped_wait_calls,
-                    dropped_wait_turns,
+                    dropped_calls,
+                    dropped_turns,
                 ) = _convert_messages(final_state.get("messages"), system_prompt)
-                total_dropped_wait_calls += dropped_wait_calls
-                total_dropped_wait_turns += dropped_wait_turns
+                total_dropped_calls += dropped_calls
+                total_dropped_turns += dropped_turns
                 native_tools = normalize_response_tools(response.get("tools"))
                 normalized_type_calls = normalize_subagent_type_ids(
                     messages,
                     allowed_ids=canonical_subagent_type_ids,
                     aliases=source.subagent_type_aliases,
                 )
-                validate_decomposer_messages(messages)
+                validate_decomposer_messages(
+                    messages, subagent_type_ids=canonical_subagent_type_ids
+                )
                 tools = (
                     deepcopy(list(canonical_tools))
                     if canonical_tools is not None
@@ -558,7 +565,7 @@ def read_nemo_gym_source(
                             ),
                             **(
                                 {
-                                    "parallel_spawn_normalization": {
+                                    PARALLEL_CALL_NORMALIZATION_ATTRIBUTE: {
                                         "messages": normalized_messages,
                                         "tool_calls": normalized_calls,
                                     }
@@ -626,9 +633,9 @@ def read_nemo_gym_source(
                 "aliases": dict(sorted(source.subagent_type_aliases.items())),
                 "tool_calls": normalized_subagent_calls,
             },
-            "dropped_wait_calls": {
-                "tool_calls": total_dropped_wait_calls,
-                "assistant_turns": total_dropped_wait_turns,
+            "dropped_refused_calls": {
+                "tool_calls": total_dropped_calls,
+                "assistant_turns": total_dropped_turns,
             },
         },
         counts=counts,

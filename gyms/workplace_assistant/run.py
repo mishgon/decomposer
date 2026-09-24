@@ -30,7 +30,7 @@ import yaml
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from decomposer.prompts import (  # noqa: E402
+from decomposer.prompt_profiles import (  # noqa: E402
     DECOMPOSER_PROMPT_PROFILES,
     resolve_decomposer_system_prompt,
 )
@@ -588,17 +588,10 @@ def langgraph_command(
     experiment: DecomposerExperiment,
     ports: WorkplacePortLayout = DEFAULT_PORT_LAYOUT,
 ) -> tuple[list[str], Path]:
-    if ports.offset or experiment.subagent_graph in {"qwen35", "repository"}:
-        directory = local_repo / "gyms" / "workplace_assistant" / "subagents"
-    else:
-        directory = (
-            local_repo
-            / "external"
-            / "Gym"
-            / "responses_api_agents"
-            / "decomposer_agent"
-            / "subagents"
-        )
+    # Every subagent graph comes from this repository: since main's persistent-
+    # subagent integration, Gym's own subagent server registers only a Qwen3.5-4B
+    # graph, so "gym_gemma4" experiments get the equivalent Gemma graphs from here.
+    directory = local_repo / "gyms" / "workplace_assistant" / "subagents"
     return (
         [
             str(PROJECT_VENV / "bin" / "langgraph"),

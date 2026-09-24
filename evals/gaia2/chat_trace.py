@@ -7,8 +7,9 @@ environment records rather than only their results, because a chat view needs
 each call's timestamp, latency and payload.
 
 Manager messages carry no timestamps of their own. Every message is therefore
-anchored to something that does: a spawn to the created time of the run it
-returned, a wait to the last ended time among the runs it collected. Those are
+anchored to something that does: a run (or, in traces of the earlier core, a
+spawn) to the created time of the run it returned, a wait to the last ended
+time among the runs it collected. Those are
 *return* times, the same convention the timeline uses, so the two views share
 one clock by construction.
 """
@@ -130,7 +131,11 @@ def build(run_dir: Path, scenario: str, run: int) -> dict[str, Any]:
                 "bytes": full,
                 "matched": record is not None,
             })
-        report = (state.get("report") or {}).get("content") or ""
+        # Runs record a `response` string; traces of the earlier core a `report` dict.
+        response = state.get("response")
+        if response is None:
+            response = (state.get("report") or {}).get("content")
+        report = response or ""
         subagents.append({
             "n": number[run_id],
             "runId": run_id,
@@ -166,7 +171,7 @@ def build(run_dir: Path, scenario: str, run: int) -> dict[str, Any]:
         call = calls[0]
         result = messages[i + 1]["data"].get("content") if i + 1 < len(messages) else ""
         ids = _run_ids(str(result))
-        if call["name"] == "spawn_subagent":
+        if call["name"] in ("run", "spawn_subagent") and ids:
             run_id = ids[0]
             t = round(lifecycles[run_id].created - t0, 2)
             last_t = t
@@ -178,10 +183,12 @@ def build(run_dir: Path, scenario: str, run: int) -> dict[str, Any]:
             out_msgs.append({"role": "manager", "kind": "wait", "t": t, "endedAt": t,
                              "collected": [number[r] for r in ids], "tokens": tokens})
         else:
-            # A wait with nothing running returns an error and is not timed by
-            # anything. Its position is known, its instant is not.
+            # `new` and `fork` start nothing, and a wait with nothing running
+            # returns an error; none of them is timed by anything. Their position
+            # is known, their instant is not.
+            text = str(result) if call["name"] not in ("new", "fork") else f"{call['name']}: {result}"
             out_msgs.append({"role": "manager", "kind": "empty", "t": None,
-                             "text": str(result), "tokens": tokens})
+                             "text": text, "tokens": tokens})
 
     # A wait cannot return before it was issued, but the only clock on it is
     # when its subagent finished -- and a subagent can finish while the manager

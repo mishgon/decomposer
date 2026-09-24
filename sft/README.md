@@ -3,7 +3,26 @@
 This workflow converts valid Decomposer rollouts into tool-calling
 conversations and performs full-parameter SFT with TRL. The loss covers only
 Decomposer outputs. Benchmark prompts, tool definitions, tool responses, and
-subagent reports remain visible as context but receive label `-100`.
+subagent responses remain visible as context but receive label `-100`.
+
+Preparation accepts only trajectories of the current Decomposer core, whose
+manager uses the `new`, `fork`, `run`, and `wait` tools. Traces of the retired
+`spawn_subagent`/`wait` core are excluded with reason
+`excluded_legacy_tool_interface`; they are never converted.
+
+## Legacy specs and configs
+
+Every build specification in `sft/specs/`, `sft/gaia2/specs/` and
+`sft/workplace_assistant/specs/`, and every training config in `sft/configs/`,
+that predates the `new`/`fork`/`run`/`wait` core targets the retired
+`spawn_subagent`/`wait` core. Their
+datasets and checkpoints were built at `gaia2-eval` commit `2b1bda8`; rebuild
+or validate them only from that commit. The current pipeline rejects their
+source traces, and the `teacher` prompt profile now resolves to a different
+prompt, so their manifests no longer validate against
+`data.expected_system_prompt_profile: teacher`. The files stay in place as
+experiment records, and the release walkthroughs below describe those
+historical builds.
 
 ## Install
 
@@ -40,8 +59,12 @@ same split. The builder requires a clean Git worktree and refuses to replace an
 existing `<dataset-id>/<version>` directory.
 
 New build specifications choose `policy.system_prompt_profile: student` or
-`teacher`. The builder inserts that exact prompt before tokenization and records
-its profile and SHA-256 in the immutable manifest. Training configs may set
+`teacher`; a specification without a profile uses `student`. `teacher` is the
+core's orchestration prompt (`decomposer.prompts.DECOMPOSER_SYSTEM_PROMPT`),
+and `student` is the legacy one-line manager prompt
+(`decomposer.prompt_profiles.DECOMPOSER_STUDENT_SYSTEM_PROMPT`). The builder
+inserts that exact prompt before tokenization and records its profile and
+SHA-256 in the immutable manifest. Training configs may set
 `data.expected_system_prompt_profile` to fail if the selected release uses a
 different prompt. Hidden teacher reasoning remains controlled separately by
 `data.include_reasoning`.
@@ -317,13 +340,21 @@ Submit the full five-epoch run only after that smoke succeeds:
   --priority high
 ```
 
-NeMo-Gym adapter version 3 preserves valid parallel delegation turns. When a
-teacher emits several `spawn_subagent` calls in one message, preparation pairs
-each call with its result by call ID and writes ordered assistant/tool pairs
-with one call per assistant message. Shared visible content and hidden teacher
-reasoning are retained only on the first pair. The manifest records the number
-of traces, messages, and calls normalized this way. Mixed `wait`/spawn batches
-remain invalid because `wait` must be emitted alone.
+Canonical records keep one tool call per assistant message. When a teacher
+emits several calls in one message, preparation pairs each call with its result
+by call ID and writes ordered assistant/tool pairs. Shared visible content and
+hidden teacher reasoning are retained only on the first pair. Calls the harness
+refused without executing them are dropped together with their results: a
+`wait` sharing its message with any other call, a `fork` and `run` of the same
+subagent, and several `run` calls of the same subagent. They are recognized by
+the exact refusal text (`PARALLEL_WAIT_CALL_ERROR`,
+`PARALLEL_FORK_RUN_CALL_ERROR`, `PARALLEL_RUN_CALL_ERROR` in
+`decomposer.prompts`). A turn none of whose calls was executed is dropped
+entirely, including its text. Executed calls that failed, such as a `run` of an
+unknown subagent, keep their error results. Each record stores the
+sequentialized batches under the `parallel_call_normalization` attribute; the
+manifest totals them under `normalization`, and each source manifest counts
+dropped calls and turns under `dropped_refused_calls`.
 
 The historical adapter-v1 all-subagent source pair contains 2,497 rollouts.
 Canonical validation excludes 467 non-success rewards, 13 invalid tool-call

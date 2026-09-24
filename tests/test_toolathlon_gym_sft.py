@@ -20,35 +20,39 @@ from sft.schema import (
     SourceSpec,
     SplitSpec,
 )
-from decomposer.core import build_decomposer_chat_tools
-from decomposer.prompts import DECOMPOSER_SYSTEM_PROMPT
+from decomposer.chat_tools import build_decomposer_chat_tools
+from decomposer.prompt_profiles import DECOMPOSER_STUDENT_SYSTEM_PROMPT
+from decomposer.prompts import DECOMPOSER_SYSTEM_PROMPT, PARALLEL_WAIT_CALL_ERROR
 
 RUN_ID = "20260824T101524Z-203eac76"
 
-TOOLS = [
-    {
+
+def _chat_tool(name: str, *parameters: str) -> dict:
+    return {
         "type": "function",
         "function": {
-            "name": "spawn_subagent",
-            "description": "Spawn one Toolathlon subagent.",
+            "name": name,
+            "description": f"The Toolathlon {name} tool.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "subagent_type_id": {"type": "string"},
-                    "prompt": {"type": "string"},
+                    parameter: {"type": "string"} for parameter in parameters
                 },
-                "required": ["subagent_type_id", "prompt"],
+                **({"required": list(parameters)} if parameters else {}),
             },
         },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "wait",
-            "description": "Wait for Toolathlon subagent reports.",
-            "parameters": {"type": "object", "properties": {}},
-        },
-    },
+    }
+
+
+TOOLS = [
+    _chat_tool("new", "subagent_type_id"),
+    _chat_tool("fork", "subagent_id"),
+    _chat_tool("run", "subagent_id", "prompt"),
+    _chat_tool("wait"),
+]
+LEGACY_TOOLS = [
+    _chat_tool("spawn_subagent", "subagent_type_id", "prompt"),
+    _chat_tool("wait"),
 ]
 
 
@@ -103,23 +107,29 @@ def _trace(
         f"{RUN_ID}-{hashlib.sha256(task.encode()).hexdigest()[:8]}-r001-a{attempt:03d}"
     )
     prompt = f"Complete Toolathlon task {task}."
-    spawn_a = {
-        "name": "spawn_subagent",
-        "args": {"subagent_type_id": "worker", "prompt": "Do part A."},
-        "id": f"{episode_id}-spawn-a",
-        "type": "tool_call",
-    }
-    spawn_b = {
-        "name": "spawn_subagent",
-        "args": {"subagent_type_id": "worker", "prompt": "Do part B."},
-        "id": f"{episode_id}-spawn-b",
-        "type": "tool_call",
-    }
-    wait = {
-        "name": "wait",
-        "args": {},
-        "id": f"{episode_id}-wait",
-        "type": "tool_call",
+
+    def call(name: str, key: str, **arguments: str) -> dict:
+        return {
+            "name": name,
+            "args": arguments,
+            "id": f"{episode_id}-{key}",
+            "type": "tool_call",
+        }
+
+    new = call("new", "new", subagent_type_id="worker")
+    fork = call("fork", "fork", subagent_id="a")
+    run_a = call("run", "run-a", subagent_id="a", prompt="Do part A.")
+    run_b = call("run", "run-b", subagent_id="b", prompt="Do part B.")
+    early_wait = call("wait", "early-wait")
+    wait = call("wait", "wait")
+    subagents = {
+        subagent_id: {
+            "subagent_id": subagent_id,
+            "subagent_type_id": "worker",
+            "assistant_id": "worker",
+            "thread_id": subagent_id,
+        }
+        for subagent_id in ("a", "b")
     }
     trace = {
         "schema_version": 2,
@@ -134,25 +144,51 @@ def _trace(
         "tools": deepcopy(tools),
         "messages": [
             _human(prompt),
+            _ai("Create a worker.", calls=[new], reasoning="One worker first."),
+            _tool("new", new["id"], '{"subagent_id":"a"}'),
+            _ai("Copy it.", calls=[fork]),
+            _tool("fork", fork["id"], '{"subagent_id":"b"}'),
             _ai(
                 "Delegate both parts.",
-                calls=[spawn_a, spawn_b],
+                calls=[run_a, run_b, early_wait],
                 reasoning="The parts are independent.",
             ),
-            _tool("spawn_subagent", spawn_b["id"], '{"subagent_run_id":"b"}'),
-            _tool("spawn_subagent", spawn_a["id"], '{"subagent_run_id":"a"}'),
-            _ai("Wait for both.", calls=[wait], reasoning="Collect the reports."),
+            _tool("wait", early_wait["id"], PARALLEL_WAIT_CALL_ERROR),
+            _tool("run", run_b["id"], '{"subagent_run_id":"run-b"}'),
+            _tool("run", run_a["id"], '{"subagent_run_id":"run-a"}'),
+            _ai("Wait for both.", calls=[wait], reasoning="Collect the responses."),
             _tool(
                 "wait",
                 wait["id"],
-                '[{"subagent_run_id":"a","status":"success","content":"A"},'
-                '{"subagent_run_id":"b","status":"error","content":"retryable"}]',
+                '[{"subagent_id":"a","subagent_run_id":"run-a","status":"responded",'
+                '"response":"A","error":null},'
+                '{"subagent_id":"b","subagent_run_id":"run-b","status":"error",'
+                '"response":null,"error":"retryable"}]',
             ),
             _ai("The requested task is complete.", reasoning="Report the result."),
         ],
+        "subagents": subagents,
         "subagent_runs": {
-            "a": {"subagent_run_id": "a", "status": "success", "report": {}},
-            "b": {"subagent_run_id": "b", "status": "error", "report": {}},
+            "run-a": {
+                "subagent_run_id": "run-a",
+                "subagent_id": "a",
+                "run_id": "run-a",
+                "status": "responded",
+                "prompt": "Do part A.",
+                "response": "A",
+                "response_sequence_number": 0,
+                "error": None,
+            },
+            "run-b": {
+                "subagent_run_id": "run-b",
+                "subagent_id": "b",
+                "run_id": "run-b",
+                "status": "error",
+                "prompt": "Do part B.",
+                "response": None,
+                "response_sequence_number": 1,
+                "error": "retryable",
+            },
         },
     }
     runtime = {
@@ -353,21 +389,27 @@ def test_toolathlon_adapter_filters_and_normalizes_schema_v2_traces(
         "content": DECOMPOSER_SYSTEM_PROMPT,
     }
     assert record.tools == TOOLS
-    assert record.attributes["subagent_statuses"] == {"error": 1, "success": 1}
-    assert record.attributes["parallel_spawn_normalization"] == {
+    assert record.attributes["subagent_statuses"] == {"error": 1, "responded": 1}
+    assert record.attributes["parallel_call_normalization"] == {
         "messages": 1,
         "tool_calls": 2,
     }
-    spawn_messages = [
+    call_messages = [
         message
         for message in record.messages
-        if message.get("role") == "assistant"
-        and message.get("tool_calls")
-        and message["tool_calls"][0]["function"]["name"] == "spawn_subagent"
+        if message.get("role") == "assistant" and message.get("tool_calls")
     ]
-    assert len(spawn_messages) == 2
-    assert spawn_messages[0]["teacher_reasoning"] == "The parts are independent."
-    assert "teacher_reasoning" not in spawn_messages[1]
+    assert [
+        message["tool_calls"][0]["function"]["name"] for message in call_messages
+    ] == ["new", "fork", "run", "run", "wait"]
+    run_messages = call_messages[2:4]
+    assert run_messages[0]["teacher_reasoning"] == "The parts are independent."
+    assert "teacher_reasoning" not in run_messages[1]
+    assert PARALLEL_WAIT_CALL_ERROR not in json.dumps(record.messages)
+    assert result.source_manifest["dropped_refused_calls"] == {
+        "tool_calls": 1,
+        "assistant_turns": 0,
+    }
     assert result.source_manifest["paired_records"] == 3
     assert result.source_manifest["unpaired_trace_records"] == 1
     assert result.source_manifest["sidecar_failure_records"] == 1
@@ -386,6 +428,22 @@ def test_toolathlon_adapter_errors_on_missing_tools_in_strict_mode(
             SelectionSpec(invalid_policy="error"),
             system_prompt=DECOMPOSER_SYSTEM_PROMPT,
         )
+
+
+def test_toolathlon_adapter_excludes_legacy_spawn_subagent_traces(
+    tmp_path: Path,
+) -> None:
+    legacy = _trace("legacy", tools=LEGACY_TOOLS)
+    source = _source(tmp_path / "source", [_trace("current"), legacy])
+
+    result = read_toolathlon_gym_source(
+        _source_spec(source),
+        SelectionSpec(invalid_policy="exclude"),
+        system_prompt=DECOMPOSER_SYSTEM_PROMPT,
+    )
+
+    assert result.counts["eligible"] == 1
+    assert result.counts["excluded_legacy_tool_interface"] == 1
 
 
 def test_toolathlon_adapter_rejects_untracked_import_files(tmp_path: Path) -> None:
@@ -428,12 +486,14 @@ def test_canonical_builder_accepts_toolathlon_source(tmp_path: Path) -> None:
     assert {row["group_id"] for row in train}.isdisjoint(
         row["group_id"] for row in validation
     )
+    # Specs without a prompt profile default to the student prompt.
     assert all(
-        row["messages"][0]["content"] == DECOMPOSER_SYSTEM_PROMPT for row in train
+        row["messages"][0]["content"] == DECOMPOSER_STUDENT_SYSTEM_PROMPT
+        for row in train
     )
-    assert prepared.manifest["preparation"]["adapter_versions"] == {"toolathlon_gym": 4}
+    assert prepared.manifest["preparation"]["adapter_versions"] == {"toolathlon_gym": 7}
     assert prepared.manifest["normalization"] == {
-        "strategy": "parallel_spawn_calls_to_single_call_turns",
+        "strategy": "parallel_calls_to_single_call_turns",
         "traces": 10,
         "messages": 10,
         "tool_calls": 20,
@@ -478,7 +538,7 @@ def test_v2_legacy_toolathlon_keeps_all_rewards_and_normalizes_interface(
         trace.pop("tools")
         for message in trace["messages"]:
             for call in message.get("data", {}).get("tool_calls", []):
-                if call.get("name") == "spawn_subagent":
+                if call.get("name") == "new":
                     call["args"]["subagent_type_id"] = "external-worker"
     malformed_trace = episodes[-1][0]
     malformed_trace["messages"][1]["data"]["tool_calls"][0]["args"][
@@ -534,16 +594,16 @@ def test_v2_legacy_toolathlon_keeps_all_rewards_and_normalizes_interface(
     assert prepared.manifest["filtering"]["excluded_invalid_tool_calls"] == 1
     assert len({json.dumps(record["tools"], sort_keys=True) for record in records}) == 1
     for record in records:
-        spawn_ids = {
+        type_ids = {
             call["function"]["arguments"]["subagent_type_id"]
             for message in record["messages"]
             for call in message.get("tool_calls", [])
-            if call["function"]["name"] == "spawn_subagent"
+            if call["function"]["name"] == "new"
         }
-        assert spawn_ids == {"worker"}
+        assert type_ids == {"worker"}
     source_manifest = prepared.manifest["sources"][0]
     assert source_manifest["legacy_schema_traces"] == 3
-    assert source_manifest["subagent_type_normalization"]["tool_calls"] == 4
+    assert source_manifest["subagent_type_normalization"]["tool_calls"] == 2
     assert source_manifest["tool_schema_origin"] == "canonical_policy_interface"
 
 

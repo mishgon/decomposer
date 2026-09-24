@@ -30,13 +30,13 @@ def _tool(payload) -> dict:
 
 
 def _spawn(run_id: str) -> list[dict]:
-    return [_ai("spawn_subagent"), _tool({"subagent_run_id": run_id})]
+    return [_ai("run"), _tool({"subagent_run_id": run_id})]
 
 
 def _wait(*run_ids: str) -> list[dict]:
     return [
         _ai("wait"),
-        _tool([{"subagent_run_id": r, "status": "success"} for r in run_ids]),
+        _tool([{"subagent_run_id": r, "status": "responded"} for r in run_ids]),
     ]
 
 
@@ -49,6 +49,22 @@ def test_consecutive_spawns_are_the_only_source_of_parallelism():
     assert stats["spawn_bursts"] == [3]
     assert stats["max_reports_per_wait"] == 3
     assert stats["unclosed_at_end"] == 0
+
+
+def test_new_and_fork_start_no_runs_and_legacy_spawns_still_count():
+    messages = [
+        _ai("new"), _tool({"subagent_id": "s1"}),
+        _ai("fork"), _tool({"subagent_id": "s2"}),
+        *_spawn("a"),
+        _ai("spawn_subagent"), _tool({"subagent_run_id": "b"}),
+        *_wait("a", "b"),
+    ]
+
+    stats = structural_parallelism(messages)
+
+    assert stats["spawn_bursts"] == [2]
+    assert stats["max_outstanding"] == 2
+    assert stats["spawn_errors"] == 0
 
 
 def test_alternating_spawn_and_wait_never_batches():
@@ -72,7 +88,7 @@ def test_a_wait_that_collects_only_some_reports_leaves_the_rest_outstanding():
 
 
 def test_wait_with_nothing_running_is_counted_not_crashed():
-    messages = [_ai("wait"), {"type": "tool", "data": {"content": "No running subagents."}}]
+    messages = [_ai("wait"), {"type": "tool", "data": {"content": "No active runs remain."}}]
 
     stats = structural_parallelism(messages)
 

@@ -7,19 +7,20 @@ directory.
 Three sources are joined per rollout:
 
 * ``decomposer_sidecars/<scenario>__run<k>.json`` — the manager's own message
-  trace (with exact ``usage_metadata`` on every AI message), the spawn/wait
-  sequence, each subagent's prompt/report/tool-calls, the per-episode tool
+  trace (with exact ``usage_metadata`` on every AI message), the new/run/wait
+  sequence, each subagent run's prompt/response/tool-calls, the per-episode tool
   schemas, and every environment tool call with a wall-clock ``started_at``.
 * ``logs/langgraph_subagent.log`` — one line per subagent run carrying
   ``run_id``/``run_started_at``/``run_ended_at``/``run_wait_time_ms``.
-  ``spawn_subagent`` returns the LangGraph ``run_id`` as ``subagent_run_id``
-  (``src/decomposer/core.py``), so the join is exact.
+  ``run`` (``spawn_subagent`` in the earlier core) returns the LangGraph
+  ``run_id`` as ``subagent_run_id`` (``src/decomposer/core.py``), so the join is
+  exact.
 * ``logs/{manager,worker,policy,manager_worker}_vllm.log`` — periodic throughput
   samples, integrated to recover token volumes the traces do not record.
 
 Parallelism is measured twice on purpose. The manager cannot emit parallel tool
-calls, so concurrency exists only when it issues several ``spawn_subagent``
-calls before a ``wait``; the *structural* measure reads that intent off the
+calls, so concurrency exists only when it issues several ``run`` calls before a
+``wait``; the *structural* measure reads that intent off the
 message sequence. Whether the subagents then actually overlapped is a different
 question, answered by the *temporal* measure over their real intervals.
 """
@@ -59,8 +60,8 @@ _PREFIX_HIT = re.compile(r"Prefix cache hit rate: ([\d.]+)")
 # Above this the estimate is discarded rather than reported with false precision.
 MAX_TRUSTED_HIT_RATE = 0.98
 
-# `wait` returns this string rather than a report list when nothing is running.
-_NO_RUNNING = "No running subagents"
+# `wait` returns this string rather than a response list when nothing is running.
+_NO_RUNNING = "No active runs remain."
 
 
 # --------------------------------------------------------------------------
@@ -208,11 +209,13 @@ def _tool_name(message: dict[str, Any]) -> str | None:
 
 
 def structural_parallelism(messages: Sequence[dict[str, Any]]) -> dict[str, Any]:
-    """Replay the manager's spawn/wait sequence and track the outstanding set.
+    """Replay the manager's run/wait sequence and track the outstanding set.
 
-    Returns the depth reached after each spawn (how many subagents the manager
-    deliberately had in flight), how many reports each ``wait`` collected, and
-    the length of each unbroken run of spawns.
+    A "spawn" here is any call that starts a subagent run: ``run``, or
+    ``spawn_subagent`` in traces of the earlier core. Returns the depth reached
+    after each spawn (how many runs the manager deliberately had in flight), how
+    many responses each ``wait`` collected, and the length of each unbroken run
+    of spawns.
     """
     outstanding: set[str] = set()
     depths: list[int] = []
@@ -238,7 +241,7 @@ def structural_parallelism(messages: Sequence[dict[str, Any]]) -> dict[str, Any]
             except (ValueError, TypeError):
                 payload = None
 
-        if pending == "spawn_subagent":
+        if pending in ("run", "spawn_subagent"):
             if isinstance(payload, dict) and "subagent_run_id" in payload:
                 outstanding.add(payload["subagent_run_id"])
                 depths.append(len(outstanding))

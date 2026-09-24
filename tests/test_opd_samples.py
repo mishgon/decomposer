@@ -11,7 +11,7 @@ from opd.samples import build_samples, episode_samples, read_rollouts, read_samp
 def _turn_item(prompt: list[int], generated: list[int]) -> dict:
     return {
         "type": "function_call",
-        "name": "spawn_subagent",
+        "name": "run",
         "prompt_token_ids": prompt,
         # The Gym vLLM server reports ids as strings before pydantic coerces them.
         "generation_token_ids": [str(token) for token in generated],
@@ -25,7 +25,7 @@ def _row(turns: list[tuple[list[int], list[int]]], *, reward: float = 1.0, task:
     for prompt, generated in turns:
         output.append({"type": "message", "role": "assistant", "content": []})
         output.append(_turn_item(prompt, generated))
-        output.append({"type": "function_call_output", "output": "report"})
+        output.append({"type": "function_call_output", "output": "response"})
     return {"_ng_task_index": task_index, "_ng_rollout_index": rollout_index, "domain": task[0], "task_id": task[1],
             "reward": reward, "response": {"output": output}}
 

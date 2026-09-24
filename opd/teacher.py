@@ -180,8 +180,8 @@ async def _probe(endpoint: TeacherEndpoint, tokenizer: Any) -> dict[str, Any]:
         {"role": "system", "content": "You are a manager agent."},
         {"role": "user", "content": "Count the orders over $1,200 — 直接回答."},
         {"role": "assistant", "content": "", "tool_calls": [{"type": "function", "function": {
-            "name": "spawn_subagent",
-            "arguments": {"subagent_type_id": "subagent_non_thinking", "prompt": "List the orders."}}}]},
+            "name": "run",
+            "arguments": {"subagent_id": "a1b2c3", "prompt": "List the orders."}}}]},
     ]
     text = tokenizer.apply_chat_template(messages, tokenize=False, chat_template_kwargs={"enable_thinking": False})
     student_ids = tokenizer(text, add_special_tokens=False)["input_ids"]

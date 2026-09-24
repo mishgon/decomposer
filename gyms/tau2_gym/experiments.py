@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
-from decomposer.prompts import DECOMPOSER_PROMPT_PROFILES, DecomposerPromptProfile
+from decomposer.prompt_profiles import DECOMPOSER_PROMPT_PROFILES, DecomposerPromptProfile
 from gyms.qwen_sampling import (
     QWEN35_GENERAL_NON_THINKING,
     QWEN38_NON_THINKING,
@@ -36,7 +36,7 @@ OPENROUTER_API_KEY_ENV = "OPENROUTER_API_KEY_DECOMPOSER"
 LLM_PROXY_URL_ENV = "LLM_PROXY_URL"
 LLM_PROXY_API_KEY_ENV = "LLM_PROXY_MASTER_KEY"
 
-# The id and description the SFT releases stamp into spawn_subagent
+# The id and description the SFT releases stamp into the `new` tool's type table
 # (policy.subagent_types in sft/specs). Using them here too means the teacher,
 # the SFT data, student evaluation and OPD rollouts all see one tool schema.
 SUBAGENT_TYPE_ID = "subagent_non_thinking"

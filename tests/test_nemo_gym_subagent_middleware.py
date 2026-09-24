@@ -42,7 +42,7 @@ TOOLS = [
 ]
 
 
-def test_gemma_subagent_uses_exact_erroring_model_call_limit(monkeypatch) -> None:
+def test_qwen_subagent_uses_exact_erroring_model_call_limit(monkeypatch) -> None:
     captured: dict[str, Any] = {}
 
     def fake_create_agent(**kwargs: Any) -> object:
@@ -50,7 +50,7 @@ def test_gemma_subagent_uses_exact_erroring_model_call_limit(monkeypatch) -> Non
         return object()
 
     monkeypatch.setattr(graph, "create_agent", fake_create_agent)
-    graph._create_subagent(object())
+    graph.qwen_3_5_4b_non_thinking()
 
     limiter = next(
         item

@@ -16,7 +16,7 @@ from typing import Any
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from decomposer.prompts import DECOMPOSER_PROMPT_PROFILES  # noqa: E402
+from decomposer.prompt_profiles import DECOMPOSER_PROMPT_PROFILES  # noqa: E402
 
 from gyms.workplace_assistant.experiments import (  # noqa: E402
     ARTIFACTS_ROOT,

@@ -61,7 +61,7 @@ from gyms.gaia2.partition import (  # noqa: E402
 )
 from gyms.gaia2.prompts import compose_decomposer_system_prompt  # noqa: E402
 from gyms.gaia2.staging import git  # noqa: E402
-from decomposer.prompts import (  # noqa: E402
+from decomposer.prompt_profiles import (  # noqa: E402
     DECOMPOSER_PROMPT_PROFILES,
 )
 

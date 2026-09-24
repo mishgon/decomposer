@@ -10,9 +10,13 @@ from copy import deepcopy
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from decomposer.prompt_profiles import DECOMPOSER_PROMPT_PROFILES
+
 from ..adapters.base import AdapterReadResult
 from ..schema import (
+    DECOMPOSER_TOOL_NAMES,
     EXCLUSION_REASONS,
+    PARALLEL_CALL_NORMALIZATION_ATTRIBUTE,
     CanonicalOutcome,
     CanonicalRollout,
     CanonicalSource,
@@ -21,13 +25,16 @@ from ..schema import (
     SourceSpec,
     TraceValidationError,
     normalize_subagent_type_ids,
+    reject_legacy_tool_name,
     require_mapping,
-    sequentialize_parallel_spawn_calls,
+    sequentialize_parallel_calls,
     sha256_file,
     validate_decomposer_messages,
 )
 
-ADAPTER_VERSION = 2
+ADAPTER_VERSION = 3
+# Sources recorded before prompt profiles existed carry no profile.
+_ACCEPTED_PROMPT_PROFILES = frozenset({None, *DECOMPOSER_PROMPT_PROFILES})
 
 
 def _load_json(path: Path) -> JsonObject:
@@ -204,8 +211,10 @@ def _completed_marker(source_dir: Path, name: str) -> tuple[Path, JsonObject]:
         raise ValueError(f"GAIA2 source is not complete according to {path}")
     if marker.get("kind") not in {None, "decomposer"}:
         raise ValueError("GAIA2 completion marker is not a Decomposer run")
-    if marker.get("decomposer_system_prompt_profile") not in {None, "teacher"}:
-        raise ValueError("GAIA2 completion marker did not use the teacher prompt")
+    if marker.get("decomposer_system_prompt_profile") not in _ACCEPTED_PROMPT_PROFILES:
+        raise ValueError(
+            "GAIA2 completion marker names an unknown Decomposer prompt profile"
+        )
     return path, marker
 
 
@@ -431,10 +440,11 @@ def _convert_tool_call(raw: Mapping[str, Any], index: int) -> JsonObject:
     call_id = raw.get("id")
     name = raw.get("name")
     arguments = raw.get("args")
+    reject_legacy_tool_name(name, f"GAIA2 assistant message {index}")
     if (
         not isinstance(call_id, str)
         or not call_id
-        or name not in {"spawn_subagent", "wait"}
+        or name not in DECOMPOSER_TOOL_NAMES
         or not isinstance(arguments, Mapping)
     ):
         raise TraceValidationError(
@@ -459,10 +469,11 @@ def _convert_message(raw: Mapping[str, Any], index: int) -> JsonObject:
     if message_type == "tool":
         call_id = data.get("tool_call_id")
         name = data.get("name")
+        reject_legacy_tool_name(name, f"GAIA2 tool message {index}")
         if (
             not isinstance(call_id, str)
             or not call_id
-            or name not in {"spawn_subagent", "wait"}
+            or name not in DECOMPOSER_TOOL_NAMES
         ):
             raise TraceValidationError(
                 "excluded_invalid_tool_calls", f"GAIA2 tool message {index} is invalid"
@@ -509,7 +520,7 @@ def _convert_message(raw: Mapping[str, Any], index: int) -> JsonObject:
 
 def _messages_from_sidecar(
     sidecar: Mapping[str, Any], system_prompt: str
-) -> tuple[list[JsonObject], int, int]:
+) -> tuple[list[JsonObject], int, int, int, int]:
     turns = sidecar.get("turns")
     if not isinstance(turns, list) or len(turns) != 1:
         raise TraceValidationError(
@@ -540,16 +551,16 @@ def _messages_from_sidecar(
         normalized,
         normalized_messages,
         normalized_calls,
-        dropped_wait_calls,
-        dropped_wait_turns,
-    ) = sequentialize_parallel_spawn_calls(converted)
+        dropped_calls,
+        dropped_turns,
+    ) = sequentialize_parallel_calls(converted)
     validate_decomposer_messages(normalized)
     return (
         normalized,
         normalized_messages,
         normalized_calls,
-        dropped_wait_calls,
-        dropped_wait_turns,
+        dropped_calls,
+        dropped_turns,
     )
 
 
@@ -581,9 +592,13 @@ def _validate_sidecar_identity(
     configuration = require_mapping(
         sidecar.get("configuration"), "GAIA2 configuration", "excluded_invalid_metadata"
     )
-    if configuration.get("decomposer_system_prompt_profile") not in {None, "teacher"}:
+    if (
+        configuration.get("decomposer_system_prompt_profile")
+        not in _ACCEPTED_PROMPT_PROFILES
+    ):
         raise TraceValidationError(
-            "excluded_invalid_metadata", "GAIA2 source did not use the teacher prompt"
+            "excluded_invalid_metadata",
+            "GAIA2 source names an unknown Decomposer prompt profile",
         )
     models = require_mapping(
         configuration.get("model_configuration"),
@@ -697,11 +712,11 @@ def read_gaia2_source(
     counts = _empty_counts()
     records: list[CanonicalRollout] = []
     sidecar_files: dict[str, JsonObject] = {}
-    normalized_spawn_messages = 0
-    normalized_spawn_calls = 0
+    normalized_call_messages = 0
+    normalized_parallel_calls = 0
     normalized_subagent_calls = 0
-    total_dropped_wait_calls = 0
-    total_dropped_wait_turns = 0
+    total_dropped_calls = 0
+    total_dropped_turns = 0
     revisions: set[tuple[Any, Any]] = set()
     reward_counts: Counter[str] = Counter()
     sidecar_failure_records = 0
@@ -756,17 +771,19 @@ def read_gaia2_source(
                 messages,
                 normalized_messages,
                 normalized_calls,
-                dropped_wait_calls,
-                dropped_wait_turns,
+                dropped_calls,
+                dropped_turns,
             ) = _messages_from_sidecar(sidecar, system_prompt)
-            total_dropped_wait_calls += dropped_wait_calls
-            total_dropped_wait_turns += dropped_wait_turns
+            total_dropped_calls += dropped_calls
+            total_dropped_turns += dropped_turns
             normalized_type_calls = normalize_subagent_type_ids(
                 messages,
                 allowed_ids=canonical_subagent_type_ids,
                 aliases=source.subagent_type_aliases,
             )
-            validate_decomposer_messages(messages)
+            validate_decomposer_messages(
+                messages, subagent_type_ids=canonical_subagent_type_ids
+            )
             logical = int(row["logical_rollout_number"])
             scenario_id = str(row["scenario_id"])
             records.append(
@@ -811,7 +828,7 @@ def read_gaia2_source(
                         ),
                         **(
                             {
-                                "parallel_spawn_normalization": {
+                                PARALLEL_CALL_NORMALIZATION_ATTRIBUTE: {
                                     "messages": normalized_messages,
                                     "tool_calls": normalized_calls,
                                 }
@@ -825,8 +842,8 @@ def read_gaia2_source(
             counts["eligible"] += 1
             sidecar_files[relative] = _file_identity(sidecar_path)
             revisions.add((identity["decomposer_revision"], identity["gaia2_revision"]))
-            normalized_spawn_messages += normalized_messages
-            normalized_spawn_calls += normalized_calls
+            normalized_call_messages += normalized_messages
+            normalized_parallel_calls += normalized_calls
             normalized_subagent_calls += normalized_type_calls
         except (json.JSONDecodeError, TraceValidationError) as error:
             trace_error = (
@@ -878,17 +895,17 @@ def read_gaia2_source(
             },
             "eligible_revision_pairs": [list(pair) for pair in sorted(revisions)],
             "tool_schema_origin": "canonical_policy_interface",
-            "parallel_spawn_normalization": {
-                "messages": normalized_spawn_messages,
-                "tool_calls": normalized_spawn_calls,
+            PARALLEL_CALL_NORMALIZATION_ATTRIBUTE: {
+                "messages": normalized_call_messages,
+                "tool_calls": normalized_parallel_calls,
             },
             "subagent_type_normalization": {
                 "aliases": dict(sorted(source.subagent_type_aliases.items())),
                 "tool_calls": normalized_subagent_calls,
             },
-            "dropped_wait_calls": {
-                "tool_calls": total_dropped_wait_calls,
-                "assistant_turns": total_dropped_wait_turns,
+            "dropped_refused_calls": {
+                "tool_calls": total_dropped_calls,
+                "assistant_turns": total_dropped_turns,
             },
         },
         counts=counts,

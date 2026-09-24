@@ -14,14 +14,14 @@ def _payload() -> dict:
         "tools": [
             {
                 "type": "function",
-                "name": "spawn_subagent",
+                "name": "run",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "subagent_type_id": {"type": "string"},
+                        "subagent_id": {"type": "string"},
                         "prompt": {"type": "string"},
                     },
-                    "required": ["subagent_type_id", "prompt"],
+                    "required": ["subagent_id", "prompt"],
                     "additionalProperties": False,
                 },
             },
@@ -48,8 +48,8 @@ def test_qwen_xml_response_becomes_function_calls_and_keeps_reasoning() -> None:
                     {
                         "type": "output_text",
                         "text": (
-                            "\n<tool_call><function=spawn_subagent>"
-                            "<parameter=subagent_type_id>qwen</parameter>"
+                            "\n<tool_call><function=run>"
+                            "<parameter=subagent_id>s1</parameter>"
                             "<parameter=prompt>Find the report.</parameter>"
                             "</function></tool_call>"
                             "<tool_call><function=wait></function></tool_call>\n"
@@ -66,9 +66,9 @@ def test_qwen_xml_response_becomes_function_calls_and_keeps_reasoning() -> None:
 
     assert normalized["output"][0] == response["output"][0]
     calls = [item for item in normalized["output"] if item["type"] == "function_call"]
-    assert [item["name"] for item in calls] == ["spawn_subagent", "wait"]
+    assert [item["name"] for item in calls] == ["run", "wait"]
     assert json.loads(calls[0]["arguments"]) == {
-        "subagent_type_id": "qwen",
+        "subagent_id": "s1",
         "prompt": "Find the report.",
     }
     assert json.loads(calls[1]["arguments"]) == {}

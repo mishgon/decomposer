@@ -13,7 +13,9 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from ..schema import (
+    DECOMPOSER_TOOL_NAMES,
     EXCLUSION_REASONS,
+    PARALLEL_CALL_NORMALIZATION_ATTRIBUTE,
     CanonicalOutcome,
     CanonicalRollout,
     CanonicalSource,
@@ -23,7 +25,8 @@ from ..schema import (
     TraceValidationError,
     canonical_json,
     normalize_subagent_type_ids,
-    sequentialize_parallel_spawn_calls,
+    reject_legacy_tool_name,
+    sequentialize_parallel_calls,
     sha256_file,
     sha256_text,
     validate_chat_tools,
@@ -31,7 +34,7 @@ from ..schema import (
 )
 from .base import AdapterReadResult
 
-ADAPTER_VERSION = 6
+ADAPTER_VERSION = 7
 TRACE_SCHEMA_VERSION = 2
 IMPORT_SCHEMA_VERSION = 1
 TERMINAL_RUN_STATUSES = frozenset({"completed", "completed_with_errors"})
@@ -291,10 +294,11 @@ def _convert_tool_call(raw_call: Mapping[str, Any], message_index: int) -> JsonO
     call_id = raw_call.get("id")
     name = raw_call.get("name")
     arguments = raw_call.get("args")
+    reject_legacy_tool_name(name, f"Assistant message {message_index}")
     if (
         not isinstance(call_id, str)
         or not call_id
-        or name not in {"spawn_subagent", "wait"}
+        or name not in DECOMPOSER_TOOL_NAMES
         or not isinstance(arguments, Mapping)
     ):
         raise TraceValidationError(
@@ -331,10 +335,11 @@ def _convert_message(wrapper: Any, index: int) -> JsonObject:
     if message_type == "tool":
         call_id = message.get("tool_call_id")
         name = message.get("name")
+        reject_legacy_tool_name(name, f"Tool message {index}")
         if (
             not isinstance(call_id, str)
             or not call_id
-            or name not in {"spawn_subagent", "wait"}
+            or name not in DECOMPOSER_TOOL_NAMES
         ):
             raise TraceValidationError(
                 "excluded_invalid_tool_calls",
@@ -374,7 +379,7 @@ def _convert_message(wrapper: Any, index: int) -> JsonObject:
 
 def _convert_messages(
     messages: Any, system_prompt: str
-) -> tuple[list[JsonObject], int, int]:
+) -> tuple[list[JsonObject], int, int, int, int]:
     if not isinstance(messages, list) or not messages:
         raise TraceValidationError(
             "excluded_missing_final_state", "trace.messages must be a non-empty list."
@@ -387,16 +392,16 @@ def _convert_messages(
         normalized,
         normalized_messages,
         normalized_calls,
-        dropped_wait_calls,
-        dropped_wait_turns,
-    ) = sequentialize_parallel_spawn_calls(converted)
+        dropped_calls,
+        dropped_turns,
+    ) = sequentialize_parallel_calls(converted)
     validate_decomposer_messages(normalized)
     return (
         normalized,
         normalized_messages,
         normalized_calls,
-        dropped_wait_calls,
-        dropped_wait_turns,
+        dropped_calls,
+        dropped_turns,
     )
 
 
@@ -538,8 +543,8 @@ def read_toolathlon_gym_source(
     paired_records = 0
     tool_schema_hashes: set[str] = set()
     normalized_subagent_calls = 0
-    total_dropped_wait_calls = 0
-    total_dropped_wait_turns = 0
+    total_dropped_calls = 0
+    total_dropped_turns = 0
     legacy_schema_traces = 0
     quality_counts: Counter[str] = Counter()
     quality_schema_counts: Counter[str] = Counter()
@@ -712,17 +717,19 @@ def read_toolathlon_gym_source(
                 messages,
                 normalized_messages,
                 normalized_calls,
-                dropped_wait_calls,
-                dropped_wait_turns,
+                dropped_calls,
+                dropped_turns,
             ) = _convert_messages(trace.get("messages"), system_prompt)
-            total_dropped_wait_calls += dropped_wait_calls
-            total_dropped_wait_turns += dropped_wait_turns
+            total_dropped_calls += dropped_calls
+            total_dropped_turns += dropped_turns
             normalized_type_calls = normalize_subagent_type_ids(
                 messages,
                 allowed_ids=canonical_subagent_type_ids,
                 aliases=source.subagent_type_aliases,
             )
-            validate_decomposer_messages(messages)
+            validate_decomposer_messages(
+                messages, subagent_type_ids=canonical_subagent_type_ids
+            )
             tools = (
                 deepcopy(list(canonical_tools))
                 if canonical_tools is not None
@@ -788,7 +795,7 @@ def read_toolathlon_gym_source(
                 ),
             }
             if normalized_messages:
-                attributes["parallel_spawn_normalization"] = {
+                attributes[PARALLEL_CALL_NORMALIZATION_ATTRIBUTE] = {
                     "messages": normalized_messages,
                     "tool_calls": normalized_calls,
                 }
@@ -889,9 +896,9 @@ def read_toolathlon_gym_source(
                 "aliases": dict(sorted(source.subagent_type_aliases.items())),
                 "tool_calls": normalized_subagent_calls,
             },
-            "dropped_wait_calls": {
-                "tool_calls": total_dropped_wait_calls,
-                "assistant_turns": total_dropped_wait_turns,
+            "dropped_refused_calls": {
+                "tool_calls": total_dropped_calls,
+                "assistant_turns": total_dropped_turns,
             },
             "eligible_tool_schema_sha256s": sorted(tool_schema_hashes),
             "selection": selection.model_dump(

@@ -21,14 +21,15 @@ def test_gemma4_training_template_preserves_render_and_masks_assistant(
         {
             "type": "function",
             "function": {
-                "name": "spawn_subagent",
-                "description": "Spawn a subagent.",
+                "name": "run",
+                "description": "Run a subagent.",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "prompt": {"type": "string", "description": "Subtask."}
+                        "subagent_id": {"type": "string", "description": "Subagent."},
+                        "prompt": {"type": "string", "description": "Subtask."},
                     },
-                    "required": ["prompt"],
+                    "required": ["subagent_id", "prompt"],
                 },
             },
         }
@@ -41,8 +42,11 @@ def test_gemma4_training_template_preserves_render_and_masks_assistant(
                 "type": "function",
                 "id": "call-1",
                 "function": {
-                    "name": "spawn_subagent",
-                    "arguments": {"prompt": "ASSISTANT_TOOL_ARGUMENT"},
+                    "name": "run",
+                    "arguments": {
+                        "subagent_id": "a",
+                        "prompt": "ASSISTANT_TOOL_ARGUMENT",
+                    },
                 },
             }
         ],
@@ -57,8 +61,11 @@ def test_gemma4_training_template_preserves_render_and_masks_assistant(
                 "type": "function",
                 "id": "call-2",
                 "function": {
-                    "name": "spawn_subagent",
-                    "arguments": {"prompt": "SECOND_ASSISTANT_TOOL_ARGUMENT"},
+                    "name": "run",
+                    "arguments": {
+                        "subagent_id": "b",
+                        "prompt": "SECOND_ASSISTANT_TOOL_ARGUMENT",
+                    },
                 },
             }
         ],
@@ -69,14 +76,14 @@ def test_gemma4_training_template_preserves_render_and_masks_assistant(
         assistant_call,
         {
             "role": "tool",
-            "name": "spawn_subagent",
+            "name": "run",
             "tool_call_id": "call-1",
             "content": "TOOL_REPORT_SECRET",
         },
         second_assistant_call,
         {
             "role": "tool",
-            "name": "spawn_subagent",
+            "name": "run",
             "tool_call_id": "call-2",
             "content": "SECOND_TOOL_REPORT_SECRET",
         },

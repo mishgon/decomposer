@@ -6,10 +6,18 @@ from pathlib import Path
 import pytest
 
 from evals.common import METRICS_FILENAME, binary_pass_metrics
+from evals.tau2_gym import analyze_traces
 from evals.tau2_gym import metrics as metrics_module
 from evals.tau2_gym import run as eval_run
 from gyms.tau2_gym import run as runner
 from gyms.tau2_gym.experiments import EXPERIMENTS_BY_NAME
+
+
+def _call(call_id: str, name: str, arguments: dict, result) -> list[dict]:
+    return [
+        {"type": "function_call", "name": name, "call_id": call_id, "arguments": json.dumps(arguments)},
+        {"type": "function_call_output", "call_id": call_id, "output": json.dumps(result)},
+    ]
 
 
 def _row(task: int, repeat: int, reward: float, domain: str) -> dict:
@@ -21,9 +29,8 @@ def _row(task: int, repeat: int, reward: float, domain: str) -> dict:
         "task_id": f"{domain}-{task}",
         "response": {
             "output": [
-                {"type": "function_call", "name": "spawn_subagent", "call_id": "s1",
-                 "arguments": json.dumps({"subagent_type_id": "worker", "prompt": "do it"})},
-                {"type": "function_call_output", "call_id": "s1", "output": json.dumps({"subagent_run_id": "r1"})},
+                *_call("n1", "new", {"subagent_type_id": "worker"}, {"subagent_id": "a"}),
+                *_call("r1", "run", {"subagent_id": "a", "prompt": "do it"}, {"subagent_run_id": "ra"}),
                 {"type": "function_call", "name": "wait", "call_id": "w1", "arguments": "{}"},
             ]
         },
@@ -68,7 +75,49 @@ def test_metrics_agree_with_the_gym_run_summary(tmp_path):
     assert result["metrics"]["pass_at_1"] == marker["result"]["pass_rate"]
     assert result["by_domain"]["airline"]["pass_at_1"] == 0.5
     assert result["by_domain"]["retail"]["pass_pow_k"] == 1.0
-    assert result["decomposition"]["spawns_per_rollout"]["mean"] == 1.0
+    assert result["decomposition"]["runs_per_rollout"]["mean"] == 1.0
+    assert result["decomposition"]["subagents_per_rollout"]["mean"] == 1.0
+
+
+def test_trace_analysis_counts_parallel_runs_forks_and_reused_subagents():
+    wait = lambda call_id, run_ids: _call(  # noqa: E731
+        call_id, "wait", {}, [{"subagent_run_id": run_id, "status": "responded"} for run_id in run_ids]
+    )
+    row = {
+        "reward": 1.0,
+        "response": {"output": [
+            *_call("n1", "new", {"subagent_type_id": "worker"}, {"subagent_id": "a"}),
+            *_call("n2", "new", {"subagent_type_id": "worker"}, {"subagent_id": "b"}),
+            *_call("r1", "run", {"subagent_id": "a", "prompt": "x"}, {"subagent_run_id": "ra1"}),
+            *_call("r2", "run", {"subagent_id": "b", "prompt": "y"}, {"subagent_run_id": "rb1"}),
+            *wait("w1", ["ra1", "rb1"]),
+            *_call("f1", "fork", {"subagent_id": "a"}, {"subagent_id": "c"}),
+            *_call("r3", "run", {"subagent_id": "a", "prompt": "more"}, {"subagent_run_id": "ra2"}),
+            *wait("w2", ["ra2"]),
+        ]},
+    }
+
+    record = analyze_traces.analyse_rollout(row)
+
+    assert (record["n_new"], record["n_fork"], record["n_run"], record["n_wait"]) == (2, 1, 3, 2)
+    assert record["run_batches"] == [2, 1]
+    assert record["max_fanout"] == 2
+    assert record["reused_runs"] == 1
+    assert record["subagent_types"] == {"worker": 3}
+    assert record["responses_in_run_order"] is True
+
+
+def test_trace_analysis_still_reads_spawn_subagent_rollouts():
+    row = {"reward": 0.0, "response": {"output": [
+        *_call("s1", "spawn_subagent", {"subagent_type_id": "worker", "prompt": "x"}, {"subagent_run_id": "r1"}),
+        *_call("s2", "spawn_subagent", {"subagent_type_id": "worker", "prompt": "y"}, {"subagent_run_id": "r2"}),
+        *_call("w1", "wait", {}, [{"subagent_run_id": "r1"}, {"subagent_run_id": "r2"}]),
+    ]}}
+
+    record = analyze_traces.analyse_rollout(row)
+
+    assert (record["n_new"], record["n_run"], record["max_fanout"]) == (2, 2, 2)
+    assert record["subagent_types"] == {"worker": 2}
 
 
 def test_scoring_summary_separates_paths_and_counts_unreported_calls(tmp_path):

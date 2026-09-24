@@ -15,11 +15,10 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from langchain_core.messages import message_to_dict
+from langchain_core.messages import HumanMessage, message_to_dict
 from langchain_openrouter import ChatOpenRouter
 
 from decomposer.core import create_decomposer_agent
-from decomposer.prompts import DECOMPOSER_TEACHER_SYSTEM_PROMPT
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -28,7 +27,7 @@ DEFAULT_GYM_ARTIFACTS_DIR = REPO_ROOT / "artifacts" / "gyms" / "toolathlon_gym"
 DEFAULT_ARTIFACTS_DIR = DEFAULT_GYM_ARTIFACTS_DIR / "traces"
 DEFAULT_EVALS_DIR = DEFAULT_GYM_ARTIFACTS_DIR / "evals"
 DEFAULT_IMAGE = "decomposer-toolathlon:latest"
-DEFAULT_MODEL = "deepseek/deepseek-v4-flash-0731"
+DEFAULT_MODEL = "qwen/qwen3.8-flash"
 DEFAULT_SUBAGENT_MODEL = "google/gemma-4-26B-A4B-it"
 DEFAULT_SUBAGENT_PORT = 8023
 POSTGRES_IMAGE = "docker.io/library/postgres:15"
@@ -535,8 +534,10 @@ def main() -> None:
             decomposer_model=ChatOpenRouter(
                 model=args.model,
                 temperature=1.0,
-                top_p=1.0,
-                reasoning={"effort": "high"},
+                top_p=0.95,
+                presence_penalty=0.0,
+                reasoning={"effort": "low"},
+                model_kwargs={"top_k": 20, "min_p": 0.0, "repetition_penalty": 1.0},
             ),
             subagent_types=[
                 {
@@ -550,44 +551,50 @@ def main() -> None:
                 }
                 for subagent_type_id, assistant_id, model_description in SUBAGENT_TYPES
             ],
-            decomposer_system_prompt=DECOMPOSER_TEACHER_SYSTEM_PROMPT,
+            decomposer_recursion_limit=None,
+            subagent_recursion_limit=None,
         )
-        state = asyncio.run(
-            agent.ainvoke(
-                {
-                    "messages": [
-                        {
-                            "role": "user",
-                            "content": runtime["task_config"]["task_str"],
-                        }
-                    ]
-                },
-                config={"recursion_limit": 200},
+        state = {"messages": [HumanMessage(runtime["task_config"]["task_str"])]}
+
+        async def run_decomposer():
+            nonlocal state
+            async for state in agent.astream(state, stream_mode="values"):
+                pass
+
+        error = None
+        try:
+            asyncio.run(run_decomposer())
+        except Exception as exc:
+            error = {"type": type(exc).__name__, "message": str(exc)}
+            raise
+        finally:
+            (episode_dir / "trace.json").write_text(
+                json.dumps(
+                    {
+                        "episode_id": episode_id,
+                        "run_id": args.run_id,
+                        "task": args.task,
+                        "repetition": args.repetition,
+                        "attempt": args.attempt,
+                        "purpose": args.purpose,
+                        "decomposer_model": args.model,
+                        "subagent_model": args.subagent_model,
+                        "started_at": started_at,
+                        "finished_at": datetime.now(timezone.utc).isoformat(),
+                        "messages": [
+                            message_to_dict(message) for message in state["messages"]
+                        ],
+                        "subagents": state.get("subagents", {}),
+                        "subagent_runs": state.get("subagent_runs", {}),
+                        "error": error,
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                    default=str,
+                ),
+                encoding="utf-8",
             )
-        )
         messages = state["messages"]
-        (episode_dir / "trace.json").write_text(
-            json.dumps(
-                {
-                    "episode_id": episode_id,
-                    "run_id": args.run_id,
-                    "task": args.task,
-                    "repetition": args.repetition,
-                    "attempt": args.attempt,
-                    "purpose": args.purpose,
-                    "decomposer_model": args.model,
-                    "subagent_model": args.subagent_model,
-                    "started_at": started_at,
-                    "finished_at": datetime.now(timezone.utc).isoformat(),
-                    "messages": [message_to_dict(message) for message in messages],
-                    "subagent_runs": state.get("subagent_runs", {}),
-                },
-                indent=2,
-                ensure_ascii=False,
-                default=str,
-            ),
-            encoding="utf-8",
-        )
         answer = str(messages[-1].content)
         (episode_dir / "answer.txt").write_text(answer, encoding="utf-8")
 

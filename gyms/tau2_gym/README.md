@@ -93,7 +93,7 @@ config from it and writes it to `<run>/configuration/tau2_gym.yaml`.
 
 Every experiment exposes one subagent type, `subagent_non_thinking`, with the SFT
 releases' canonical description, so teacher traces, SFT data, student evals and OPD
-rollouts all see the same `spawn_subagent` schema.
+rollouts all see the same `new`/`fork`/`run`/`wait` schema.
 
 Remote Qwen managers go through `gyms.remote_model_proxy` on port 8144 with the
 `qwen3_xml` normaliser and the experiment's sampling as `--extra-body-json`. Gym's

@@ -8,11 +8,11 @@ from langchain.agents import create_agent
 from langchain.agents.middleware import ModelCallLimitMiddleware
 from langgraph.graph.state import CompiledStateGraph
 from responses_api_agents.decomposer_agent.subagents.graph import (
-    SYSTEM_PROMPT,
     NeMoGymSubagentMiddleware,
 )
 
 from decomposer.chat_vllm import ChatVLLM
+from decomposer.prompts import SUBAGENT_SYSTEM_PROMPT
 from gyms.qwen_sampling import qwen35_general_sampling
 
 REQUEST_TIMEOUT_SECONDS = 300.0
@@ -70,7 +70,7 @@ def _create_subagent(model: ChatVLLM) -> CompiledStateGraph:
                 exit_behavior="error",
             ),
         ],
-        system_prompt=SYSTEM_PROMPT,
+        system_prompt=SUBAGENT_SYSTEM_PROMPT,
     )
 
 

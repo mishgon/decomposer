@@ -17,21 +17,25 @@ from typing import Any
 
 import yaml
 
-from decomposer.core import build_decomposer_chat_tools
-from decomposer.prompts import resolve_decomposer_system_prompt
+from decomposer.chat_tools import build_decomposer_chat_tools
+from decomposer.prompt_profiles import resolve_decomposer_system_prompt
 
 from .adapters.registry import ADAPTER_VERSIONS, ADAPTERS
 from .schema import (
     CANONICAL_SCHEMA_VERSION,
     EXCLUSION_REASONS,
     MANIFEST_FORMAT_VERSION,
+    PARALLEL_CALL_NORMALIZATION_ATTRIBUTE,
+    PARALLEL_CALL_NORMALIZATION_STRATEGY,
     BuildSpec,
     CanonicalRollout,
     JsonObject,
     TokenizationSpec,
+    TraceValidationError,
     canonical_json,
     sha256_file,
     sha256_text,
+    validate_chat_tools,
 )
 
 _SELECTION_EXCLUSION_REASONS = frozenset(
@@ -196,19 +200,19 @@ def _record_category(record: CanonicalRollout) -> str:
     return category if isinstance(category, str) and category else "uncategorized"
 
 
-def _parallel_spawn_normalization_counts(
+def _parallel_call_normalization_counts(
     records: Sequence[CanonicalRollout],
 ) -> JsonObject:
     traces = 0
     messages = 0
     tool_calls = 0
     for record in records:
-        value = record.attributes.get("parallel_spawn_normalization")
+        value = record.attributes.get(PARALLEL_CALL_NORMALIZATION_ATTRIBUTE)
         if value is None:
             continue
         if not isinstance(value, Mapping):
             raise ValueError(
-                f"Rollout {record.id} has invalid parallel-spawn normalization metadata."
+                f"Rollout {record.id} has invalid parallel-call normalization metadata."
             )
         record_messages = value.get("messages")
         record_tool_calls = value.get("tool_calls")
@@ -221,7 +225,7 @@ def _parallel_spawn_normalization_counts(
             or record_tool_calls < 2 * record_messages
         ):
             raise ValueError(
-                f"Rollout {record.id} has invalid parallel-spawn normalization counts."
+                f"Rollout {record.id} has invalid parallel-call normalization counts."
             )
         traces += 1
         messages += record_messages
@@ -725,6 +729,12 @@ def prepare_dataset(
                 for subagent in spec.policy.subagent_types
             ]
         )
+        try:
+            validate_chat_tools(canonical_tools)
+        except TraceValidationError as error:
+            raise ValueError(
+                f"Decomposer core exposes an unsupported tool interface: {error}"
+            ) from error
     records: list[CanonicalRollout] = []
     source_manifests: list[JsonObject] = []
     counts_by_source: dict[str, Counter[str]] = {}
@@ -775,7 +785,7 @@ def prepare_dataset(
         counts["included"] = len(source_records)
         _assert_filter_counts(counts, source_id)
         source_manifest["counts"] = _serialized_counts(counts)
-        source_manifest["normalization"] = _parallel_spawn_normalization_counts(
+        source_manifest["normalization"] = _parallel_call_normalization_counts(
             source_records
         )
     if not retained:
@@ -918,8 +928,8 @@ def prepare_dataset(
             ),
         },
         "normalization": {
-            "strategy": "parallel_spawn_calls_to_single_call_turns",
-            **_parallel_spawn_normalization_counts(retained),
+            "strategy": PARALLEL_CALL_NORMALIZATION_STRATEGY,
+            **_parallel_call_normalization_counts(retained),
         },
         "split": split_manifest,
         "records": {

@@ -22,40 +22,55 @@ from sft.schema import (
     SourceSpec,
     SplitSpec,
     TokenizationSpec,
+    TraceValidationError,
+    canonical_json,
+    normalize_response_tools,
+    sequentialize_parallel_calls,
     sha256_text,
+    validate_chat_tools,
+    validate_decomposer_messages,
+)
+from decomposer.chat_tools import build_decomposer_chat_tools
+from decomposer.prompt_profiles import (
+    DECOMPOSER_STUDENT_SYSTEM_PROMPT,
+    resolve_decomposer_system_prompt,
 )
 from decomposer.prompts import (
     DECOMPOSER_SYSTEM_PROMPT,
-    DECOMPOSER_TEACHER_SYSTEM_PROMPT,
-    resolve_decomposer_system_prompt,
+    PARALLEL_FORK_RUN_CALL_ERROR,
+    PARALLEL_RUN_CALL_ERROR,
+    PARALLEL_WAIT_CALL_ERROR,
+    UNKNOWN_SUBAGENT_ERROR,
 )
 from sft.train import (
     _validate_dataset_system_prompt_profile,
     _validate_manifest,
 )
 
-TOOLS = [
-    {
-        "name": "spawn_subagent",
-        "description": "Spawn one subagent.",
+
+def _response_tool(name: str, *parameters: str) -> dict:
+    return {
+        "name": name,
+        "description": f"The {name} tool.",
         "parameters": {
             "type": "object",
-            "properties": {
-                "subagent_type_id": {"type": "string"},
-                "prompt": {"type": "string"},
-            },
-            "required": ["subagent_type_id", "prompt"],
+            "properties": {parameter: {"type": "string"} for parameter in parameters},
+            **({"required": list(parameters)} if parameters else {}),
         },
         "strict": False,
         "type": "function",
-    },
-    {
-        "name": "wait",
-        "description": "Wait for reports.",
-        "parameters": {"type": "object", "properties": {}},
-        "strict": False,
-        "type": "function",
-    },
+    }
+
+
+TOOLS = [
+    _response_tool("new", "subagent_type_id"),
+    _response_tool("fork", "subagent_id"),
+    _response_tool("run", "subagent_id", "prompt"),
+    _response_tool("wait"),
+]
+LEGACY_TOOLS = [
+    _response_tool("spawn_subagent", "subagent_type_id", "prompt"),
+    _response_tool("wait"),
 ]
 
 
@@ -96,6 +111,19 @@ def _ai(
     }
 
 
+def _call(name: str, call_id: str, **arguments: str) -> dict:
+    return {"name": name, "args": arguments, "id": call_id}
+
+
+def _result(name: str, call_id: str, content: object) -> dict:
+    return {
+        "type": "tool",
+        "content": content if isinstance(content, str) else json.dumps(content),
+        "tool_call_id": call_id,
+        "name": name,
+    }
+
+
 def _rollout(
     task_index: int,
     *,
@@ -103,8 +131,13 @@ def _rollout(
     reward: float = 1.0,
     prompt_task_index: int | None = None,
 ) -> dict:
-    spawn_id = f"spawn-{task_index}-{rollout_index}"
-    wait_id = f"wait-{task_index}-{rollout_index}"
+    """A new -> run -> wait -> final-answer Decomposer trajectory."""
+    suffix = f"{task_index}-{rollout_index}"
+    new_id = f"new-{suffix}"
+    run_id = f"run-{suffix}"
+    wait_id = f"wait-{suffix}"
+    subagent_id = f"subagent-{task_index}"
+    subagent_run_id = f"subagent-run-{task_index}"
     prompt_task_index = task_index if prompt_task_index is None else prompt_task_index
     return {
         "agent_ref": {"type": "responses_api_agents", "name": "decomposer"},
@@ -120,48 +153,77 @@ def _rollout(
                 _ai(
                     "",
                     reasoning=f"Delegate task {task_index}.",
+                    tool_calls=[_call("new", new_id, subagent_type_id="small")],
+                ),
+                _result("new", new_id, {"subagent_id": subagent_id}),
+                _ai(
+                    "",
+                    reasoning="Run it.",
                     tool_calls=[
-                        {
-                            "name": "spawn_subagent",
-                            "args": {
-                                "subagent_type_id": "small",
-                                "prompt": f"Do task {task_index}.",
-                            },
-                            "id": spawn_id,
-                        }
+                        _call(
+                            "run",
+                            run_id,
+                            subagent_id=subagent_id,
+                            prompt=f"Do task {task_index}.",
+                        )
                     ],
                 ),
-                {
-                    "type": "tool",
-                    "content": json.dumps({"subagent_run_id": f"run-{task_index}"}),
-                    "tool_call_id": spawn_id,
-                    "name": "spawn_subagent",
-                },
+                _result("run", run_id, {"subagent_run_id": subagent_run_id}),
                 _ai(
                     "",
                     reasoning="Wait.",
-                    tool_calls=[{"name": "wait", "args": {}, "id": wait_id}],
+                    tool_calls=[_call("wait", wait_id)],
                 ),
-                {
-                    "type": "tool",
-                    "content": json.dumps(
-                        [
-                            {
-                                "subagent_run_id": f"run-{task_index}",
-                                "status": "success",
-                                "content": "Done.",
-                            }
-                        ]
-                    ),
-                    "tool_call_id": wait_id,
-                    "name": "wait",
-                },
+                _result(
+                    "wait",
+                    wait_id,
+                    [
+                        {
+                            "subagent_id": subagent_id,
+                            "subagent_run_id": subagent_run_id,
+                            "status": "responded",
+                            "response": "Done.",
+                            "error": None,
+                        }
+                    ],
+                ),
                 _ai("The task is complete.", reasoning="Report success."),
             ]
         },
         "_ng_task_index": task_index,
         "_ng_rollout_index": rollout_index,
     }
+
+
+def _legacy_rollout(task_index: int) -> dict:
+    """A spawn_subagent/wait trajectory of the retired Decomposer core."""
+    rollout = _rollout(task_index)
+    spawn_id = f"spawn-{task_index}"
+    wait_id = f"wait-{task_index}"
+    rollout["response"]["tools"] = deepcopy(LEGACY_TOOLS)
+    rollout["final_state"]["messages"] = [
+        rollout["final_state"]["messages"][0],
+        _ai(
+            "",
+            tool_calls=[
+                _call(
+                    "spawn_subagent",
+                    spawn_id,
+                    subagent_type_id="small",
+                    prompt=f"Do task {task_index}.",
+                )
+            ],
+        ),
+        _result("spawn_subagent", spawn_id, {"subagent_run_id": "run"}),
+        _ai("", tool_calls=[_call("wait", wait_id)]),
+        _result(
+            "wait",
+            wait_id,
+            [{"subagent_run_id": "run", "status": "success", "content": "Done."}],
+        ),
+        _ai("The task is complete."),
+    ]
+    return rollout
 
 
 def _materialized(
@@ -343,13 +405,23 @@ def test_prepare_groups_teacher_variants_and_writes_manifest_v3(tmp_path: Path) 
 
     example = train[0]
     assert example["messages"][0]["role"] == "system"
-    assert example["messages"][0]["content"] == DECOMPOSER_SYSTEM_PROMPT
-    assert example["messages"][0]["content"] != DECOMPOSER_TEACHER_SYSTEM_PROMPT
+    assert example["messages"][0]["content"] == DECOMPOSER_STUDENT_SYSTEM_PROMPT
+    assert example["messages"][0]["content"] != DECOMPOSER_SYSTEM_PROMPT
     assert example["messages"][1]["role"] == "user"
     assert example["messages"][-1]["teacher_reasoning"] == "Report success."
-    assert example["tools"][0]["function"]["name"] == "spawn_subagent"
+    assert [
+        message["tool_calls"][0]["function"]["name"]
+        for message in example["messages"]
+        if message.get("tool_calls")
+    ] == ["new", "run", "wait"]
+    assert [tool["function"]["name"] for tool in example["tools"]] == [
+        "new",
+        "fork",
+        "run",
+        "wait",
+    ]
     assert example["source"]["adapter"] == "nemo_gym"
-    assert example["source"]["adapter_version"] == 3
+    assert example["source"]["adapter_version"] == 5
     assert example["source"]["benchmark"] == "workplace_assistant"
     assert example["outcome"]["success"] is True
     for filename in ("train.jsonl", "validation.jsonl"):
@@ -425,10 +497,10 @@ def test_teacher_prompt_profile_is_materialized_and_training_validated(
     validation = _read_jsonl(prepared.validation_path)
     assert prepared.manifest["policy"]["system_prompt_profile"] == "teacher"
     assert prepared.manifest["policy"]["system_prompt_sha256"] == sha256_text(
-        DECOMPOSER_TEACHER_SYSTEM_PROMPT
+        DECOMPOSER_SYSTEM_PROMPT
     )
     assert all(
-        record["messages"][0]["content"] == DECOMPOSER_TEACHER_SYSTEM_PROMPT
+        record["messages"][0]["content"] == DECOMPOSER_SYSTEM_PROMPT
         for record in [*train, *validation]
     )
     runtime = _validate_dataset_system_prompt_profile(
@@ -439,7 +511,7 @@ def test_teacher_prompt_profile_is_materialized_and_training_validated(
     )
     assert runtime == {
         "profile": "teacher",
-        "sha256": sha256_text(DECOMPOSER_TEACHER_SYSTEM_PROMPT),
+        "sha256": sha256_text(DECOMPOSER_SYSTEM_PROMPT),
     }
     with pytest.raises(ValueError, match="does not match"):
         _validate_dataset_system_prompt_profile(
@@ -451,10 +523,10 @@ def test_teacher_prompt_profile_is_materialized_and_training_validated(
 
 
 def test_prompt_profile_resolver_and_legacy_policy_are_strict() -> None:
-    assert resolve_decomposer_system_prompt("student") == DECOMPOSER_SYSTEM_PROMPT
     assert (
-        resolve_decomposer_system_prompt("teacher") == DECOMPOSER_TEACHER_SYSTEM_PROMPT
+        resolve_decomposer_system_prompt("student") == DECOMPOSER_STUDENT_SYSTEM_PROMPT
     )
+    assert resolve_decomposer_system_prompt("teacher") == DECOMPOSER_SYSTEM_PROMPT
     assert (
         PolicySpec(
             id="legacy", system_prompt="decomposer_default"
@@ -560,94 +632,294 @@ def test_versioned_token_limits_produce_stable_strict_subset(
 
 
 @pytest.mark.parametrize("call_count", [2, 3, 7])
-def test_prepare_sequentializes_parallel_spawn_calls(
+def test_prepare_sequentializes_parallel_calls(
     tmp_path: Path, call_count: int
 ) -> None:
     rollout = _rollout(0)
     messages = rollout["final_state"]["messages"]
-    first_call = messages[1]["tool_calls"][0]
-    calls = [
-        first_call,
-        *[
-            {
-                "name": "spawn_subagent",
-                "args": {
-                    "subagent_type_id": "small",
-                    "prompt": f"Do independent subtask {index}.",
-                },
-                "id": f"spawn-{index}",
-            }
-            for index in range(2, call_count + 1)
-        ],
+    new_calls = [
+        _call("new", f"new-{index}", subagent_type_id="small")
+        for index in range(1, call_count + 1)
     ]
-    messages[1] = _ai(
-        "Delegate these in parallel.",
-        reasoning="These subtasks are independent.",
-        tool_calls=calls,
-    )
-    first_result = messages[2]
-    results = [
-        first_result,
-        *[
-            {
-                "type": "tool",
-                "content": json.dumps({"subagent_run_id": f"run-{index}"}),
-                "tool_call_id": f"spawn-{index}",
-                "name": "spawn_subagent",
-            }
-            for index in range(2, call_count + 1)
-        ],
+    run_calls = [
+        _call(
+            "run",
+            f"run-{index}",
+            subagent_id=f"subagent-{index}",
+            prompt=f"Do independent subtask {index}.",
+        )
+        for index in range(1, call_count + 1)
     ]
     # Exercise ID-based matching: native results need not use call order.
-    messages[2:3] = list(reversed(results))
+    messages[1:5] = [
+        _ai(
+            "Create the subagents.",
+            reasoning="These subtasks are independent.",
+            tool_calls=new_calls,
+        ),
+        *reversed(
+            [
+                _result("new", call["id"], {"subagent_id": f"subagent-{index}"})
+                for index, call in enumerate(new_calls, start=1)
+            ]
+        ),
+        _ai("Run them in parallel.", reasoning="Start all.", tool_calls=run_calls),
+        *reversed(
+            [
+                _result("run", call["id"], {"subagent_run_id": f"sr-{index}"})
+                for index, call in enumerate(run_calls, start=1)
+            ]
+        ),
+    ]
 
     source = _source(tmp_path, "teacher", [rollout], [_materialized(0)])
     prepared = _prepare_fixture_dataset([source], tmp_path / "prepared")
     records = _read_jsonl(prepared.train_path) + _read_jsonl(prepared.validation_path)
     assert len(records) == 1
     record = records[0]
-    spawn_assistant_indices = [
+    call_indices = [
         index
         for index, message in enumerate(record["messages"])
-        if message["role"] == "assistant"
-        and message.get("tool_calls")
-        and message["tool_calls"][0]["function"]["name"] == "spawn_subagent"
+        if message["role"] == "assistant" and message.get("tool_calls")
     ]
-    assert len(spawn_assistant_indices) == call_count
-    spawn_messages = [record["messages"][index] for index in spawn_assistant_indices]
-    expected_ids = [call["id"] for call in calls]
+    call_messages = [record["messages"][index] for index in call_indices]
+    expected_ids = [call["id"] for call in [*new_calls, *run_calls]] + ["wait-0-0"]
     assert [
-        message["tool_calls"][0]["id"] for message in spawn_messages
+        message["tool_calls"][0]["id"] for message in call_messages
     ] == expected_ids
     assert [
-        record["messages"][index + 1]["tool_call_id"]
-        for index in spawn_assistant_indices
+        record["messages"][index + 1]["tool_call_id"] for index in call_indices
     ] == expected_ids
-    assert spawn_messages[0]["content"] == "Delegate these in parallel."
-    assert spawn_messages[0]["teacher_reasoning"] == ("These subtasks are independent.")
-    assert [message["content"] for message in spawn_messages[1:]] == [""] * (
-        call_count - 1
-    )
-    assert all("teacher_reasoning" not in message for message in spawn_messages[1:])
-    assert record["attributes"]["parallel_spawn_normalization"] == {
-        "messages": 1,
-        "tool_calls": call_count,
+    new_messages = call_messages[:call_count]
+    run_messages = call_messages[call_count : 2 * call_count]
+    assert new_messages[0]["content"] == "Create the subagents."
+    assert new_messages[0]["teacher_reasoning"] == "These subtasks are independent."
+    assert run_messages[0]["content"] == "Run them in parallel."
+    assert run_messages[0]["teacher_reasoning"] == "Start all."
+    for batch in (new_messages, run_messages):
+        assert [message["content"] for message in batch[1:]] == [""] * (
+            call_count - 1
+        )
+        assert all("teacher_reasoning" not in message for message in batch[1:])
+    assert record["attributes"]["parallel_call_normalization"] == {
+        "messages": 2,
+        "tool_calls": 2 * call_count,
     }
 
-    assert prepared.manifest["preparation"]["adapter_versions"]["nemo_gym"] == 3
+    assert prepared.manifest["preparation"]["adapter_versions"]["nemo_gym"] == 5
     assert prepared.manifest["normalization"] == {
-        "strategy": "parallel_spawn_calls_to_single_call_turns",
+        "strategy": "parallel_calls_to_single_call_turns",
         "traces": 1,
-        "messages": 1,
-        "tool_calls": call_count,
+        "messages": 2,
+        "tool_calls": 2 * call_count,
     }
     assert prepared.manifest["sources"][0]["normalization"] == {
         "traces": 1,
-        "messages": 1,
-        "tool_calls": call_count,
+        "messages": 2,
+        "tool_calls": 2 * call_count,
+    }
+    assert prepared.manifest["sources"][0]["dropped_refused_calls"] == {
+        "tool_calls": 0,
+        "assistant_turns": 0,
     }
     assert prepared.manifest["filtering"]["included"] == 1
     assert prepared.manifest["filtering"]["excluded_multiple_tool_calls"] == 0
+
+
+def _chat_call(name: str, call_id: str, **arguments: str) -> dict:
+    return {
+        "type": "function",
+        "id": call_id,
+        "function": {"name": name, "arguments": arguments},
+    }
+
+
+def _chat_result(name: str, call_id: str, content: str) -> dict:
+    return {"role": "tool", "content": content, "tool_call_id": call_id, "name": name}
+
+
+def _chat_turn(content: str, *calls: dict, reasoning: str | None = None) -> dict:
+    return {
+        "role": "assistant",
+        "content": content,
+        "tool_calls": list(calls),
+        "teacher_reasoning": reasoning,
+    }
+
+
+def test_sequentializer_drops_refused_calls_and_splits_legal_batches() -> None:
+    legal = [
+        _chat_call("new", "new-a", subagent_type_id="small"),
+        _chat_call("fork", "fork-b", subagent_id="b"),
+        _chat_call("run", "run-c", subagent_id="c", prompt="Do C."),
+    ]
+    mixed = [
+        _chat_call("run", "run-a1", subagent_id="a", prompt="First."),
+        _chat_call("run", "run-d", subagent_id="d", prompt="Do D."),
+        _chat_call("fork", "fork-e", subagent_id="e"),
+        _chat_call("run", "run-a2", subagent_id="a", prompt="Second."),
+        _chat_call("run", "run-e", subagent_id="e", prompt="Do E."),
+        _chat_call("run", "run-x", subagent_id="x", prompt="Do X."),
+        _chat_call("wait", "wait-mixed"),
+    ]
+    unknown_x = UNKNOWN_SUBAGENT_ERROR.format(subagent_id="x")
+    messages = [
+        {"role": "system", "content": "System."},
+        {"role": "user", "content": "Task."},
+        _chat_turn("Plan.", *legal, reasoning="Independent."),
+        # Results arrive in any order and are paired by call ID.
+        _chat_result("run", "run-c", '{"subagent_run_id": "sr-c"}'),
+        _chat_result("new", "new-a", '{"subagent_id": "a"}'),
+        _chat_result("fork", "fork-b", '{"subagent_id": "b2"}'),
+        _chat_turn("Go.", *mixed, reasoning="Start."),
+        # The harness answers refused calls first, then executes the rest.
+        _chat_result("run", "run-a1", PARALLEL_RUN_CALL_ERROR),
+        _chat_result("fork", "fork-e", PARALLEL_FORK_RUN_CALL_ERROR),
+        _chat_result("run", "run-a2", PARALLEL_RUN_CALL_ERROR),
+        _chat_result("run", "run-e", PARALLEL_FORK_RUN_CALL_ERROR),
+        _chat_result("wait", "wait-mixed", PARALLEL_WAIT_CALL_ERROR),
+        _chat_result("run", "run-x", unknown_x),
+        _chat_result("run", "run-d", '{"subagent_run_id": "sr-d"}'),
+        _chat_turn(
+            "Retry A twice.",
+            _chat_call("run", "retry-1", subagent_id="a", prompt="First."),
+            _chat_call("run", "retry-2", subagent_id="a", prompt="Second."),
+        ),
+        _chat_result("run", "retry-1", PARALLEL_RUN_CALL_ERROR),
+        _chat_result("run", "retry-2", PARALLEL_RUN_CALL_ERROR),
+        _chat_turn(
+            "Summary truncated mid-sen",
+            _chat_call("wait", "stray-1"),
+            _chat_call("wait", "stray-2"),
+        ),
+        _chat_result("wait", "stray-1", PARALLEL_WAIT_CALL_ERROR),
+        _chat_result("wait", "stray-2", PARALLEL_WAIT_CALL_ERROR),
+        _chat_turn("", _chat_call("wait", "wait-1")),
+        _chat_result("wait", "wait-1", "[]"),
+        _chat_turn("Done."),
+    ]
+
+    normalized, batches, calls, dropped_calls, dropped_turns = (
+        sequentialize_parallel_calls(deepcopy(messages))
+    )
+
+    assert (batches, calls, dropped_calls, dropped_turns) == (2, 5, 9, 2)
+    turns = [message for message in normalized if message["role"] == "assistant"]
+    assert [
+        [call["id"] for call in message["tool_calls"]] for message in turns
+    ] == [["new-a"], ["fork-b"], ["run-c"], ["run-d"], ["run-x"], ["wait-1"], []]
+    assert [message["content"] for message in turns] == [
+        "Plan.",
+        "",
+        "",
+        "Go.",
+        "",
+        "",
+        "Done.",
+    ]
+    assert [message.get("teacher_reasoning") for message in turns[:5]] == [
+        "Independent.",
+        None,
+        None,
+        "Start.",
+        None,
+    ]
+    assert "teacher_reasoning" not in turns[1]
+    assert "teacher_reasoning" not in turns[4]
+    # Every surviving call is immediately followed by its own result; executed
+    # calls that failed keep their error result.
+    for index, message in enumerate(normalized):
+        if message["role"] == "assistant" and message["tool_calls"]:
+            call_id = message["tool_calls"][0]["id"]
+            assert normalized[index + 1]["tool_call_id"] == call_id
+    assert _chat_result("run", "run-x", unknown_x) in normalized
+    refusals = {
+        PARALLEL_WAIT_CALL_ERROR,
+        PARALLEL_RUN_CALL_ERROR,
+        PARALLEL_FORK_RUN_CALL_ERROR,
+    }
+    assert not any(message.get("content") in refusals for message in normalized)
+    validate_decomposer_messages(
+        normalized, subagent_type_ids=frozenset({"small"})
+    )
+
+
+def test_sequentializer_keeps_single_calls_and_requires_every_result() -> None:
+    single = [
+        {"role": "system", "content": "System."},
+        {"role": "user", "content": "Task."},
+        _chat_turn("", _chat_call("wait", "wait-1")),
+        _chat_result("wait", "wait-1", "No active runs remain."),
+        _chat_turn("Done."),
+    ]
+    assert sequentialize_parallel_calls(deepcopy(single)) == (single, 0, 0, 0, 0)
+
+    missing = [
+        *single[:2],
+        _chat_turn(
+            "",
+            _chat_call("new", "new-a", subagent_type_id="small"),
+            _chat_call("wait", "wait-1"),
+        ),
+        _chat_result("new", "new-a", '{"subagent_id": "a"}'),
+        _chat_turn("Done."),
+    ]
+    with pytest.raises(TraceValidationError, match="exactly one matching tool result"):
+        sequentialize_parallel_calls(missing)
+
+
+def test_prepare_drops_refused_calls_with_their_results(tmp_path: Path) -> None:
+    rollout = _rollout(0)
+    messages = rollout["final_state"]["messages"]
+    run_call = messages[3]["tool_calls"][0]
+    first_run = {**run_call, "id": "refused-run"}
+    second_run = _call(
+        "run", "refused-again", subagent_id="subagent-0", prompt="Do it again."
+    )
+    stray_wait = _call("wait", "stray-wait")
+    extra_new = _call("new", "new-extra", subagent_type_id="small")
+    # Insert two refused batches before the executed run turn: one keeps an
+    # executed `new`, the other holds nothing but refused waits.
+    messages[3:3] = [
+        _ai(
+            "Run it twice.",
+            reasoning="Run.",
+            tool_calls=[first_run, second_run, stray_wait, extra_new],
+        ),
+        _result("run", first_run["id"], PARALLEL_RUN_CALL_ERROR),
+        _result("run", second_run["id"], PARALLEL_RUN_CALL_ERROR),
+        _result("wait", stray_wait["id"], PARALLEL_WAIT_CALL_ERROR),
+        _result("new", extra_new["id"], {"subagent_id": "subagent-extra"}),
+        _ai(
+            "Summary truncated",
+            tool_calls=[_call("wait", "stray-1"), _call("wait", "stray-2")],
+        ),
+        _result("wait", "stray-1", PARALLEL_WAIT_CALL_ERROR),
+        _result("wait", "stray-2", PARALLEL_WAIT_CALL_ERROR),
+    ]
+
+    source = _source(tmp_path, "teacher", [rollout], [_materialized(0)])
+    prepared = _prepare_fixture_dataset([source], tmp_path / "prepared")
+    records = _read_jsonl(prepared.train_path) + _read_jsonl(prepared.validation_path)
+    assert len(records) == 1
+    call_turns = [
+        message for message in records[0]["messages"] if message.get("tool_calls")
+    ]
+    assert [message["tool_calls"][0]["id"] for message in call_turns] == [
+        "new-0-0",
+        "new-extra",
+        "run-0-0",
+        "wait-0-0",
+    ]
+    assert call_turns[1]["content"] == "Run it twice."
+    assert call_turns[1]["teacher_reasoning"] == "Run."
+    assert "Summary truncated" not in json.dumps(records[0]["messages"])
+    assert "parallel_call_normalization" not in records[0]["attributes"]
+    assert prepared.manifest["sources"][0]["dropped_refused_calls"] == {
+        "tool_calls": 5,
+        "assistant_turns": 1,
+    }
+    assert prepared.manifest["normalization"]["traces"] == 0
 
 
 def test_prepare_is_reproducible(tmp_path: Path) -> None:
@@ -879,6 +1151,8 @@ def test_prepare_excludes_malformed_successful_traces_by_reason(tmp_path: Path) 
     rollouts[6]["responses_create_params"]["input"] = _input(999)
     rollouts[7]["response"]["tools"][0]["name"] = "other"
     rollouts[8]["reward"] = 0.0
+    rollouts.append(_legacy_rollout(9))
+    materialized.append(_materialized(9))
     source = _source(tmp_path, "teacher", rollouts, materialized)
     with (source / "rollouts.jsonl").open("a", encoding="utf-8") as file:
         file.write("{not json}\n")
@@ -895,6 +1169,131 @@ def test_prepare_excludes_malformed_successful_traces_by_reason(tmp_path: Path) 
     assert filtering["excluded_invalid_tool_schema"] == 1
     assert filtering["excluded_reward"] == 1
     assert filtering["excluded_invalid_json"] == 1
+    assert filtering["excluded_legacy_tool_interface"] == 1
+
+
+def test_schema_rejects_legacy_spawn_subagent_traces() -> None:
+    def reason(function: Callable[[], object]) -> str:
+        with pytest.raises(TraceValidationError) as error:
+            function()
+        return error.value.reason
+
+    legacy_chat_tools = [
+        {
+            "type": "function",
+            "function": {
+                key: tool[key] for key in ("name", "description", "parameters")
+            },
+        }
+        for tool in LEGACY_TOOLS
+    ]
+    spawn = {
+        "type": "function",
+        "id": "spawn-1",
+        "function": {
+            "name": "spawn_subagent",
+            "arguments": {"subagent_type_id": "small", "prompt": "Do it."},
+        },
+    }
+    legacy_messages = [
+        {"role": "system", "content": "System."},
+        {"role": "user", "content": "Task."},
+        {"role": "assistant", "content": "", "tool_calls": [spawn]},
+        {
+            "role": "tool",
+            "content": '{"subagent_run_id": "run"}',
+            "tool_call_id": "spawn-1",
+            "name": "spawn_subagent",
+        },
+        {"role": "assistant", "content": "Done.", "tool_calls": []},
+    ]
+    parallel_legacy = deepcopy(legacy_messages)
+    parallel_legacy[2]["tool_calls"].append({**spawn, "id": "spawn-2"})
+    parallel_legacy.insert(4, {**legacy_messages[3], "tool_call_id": "spawn-2"})
+
+    legacy = "excluded_legacy_tool_interface"
+    assert reason(lambda: normalize_response_tools(deepcopy(LEGACY_TOOLS))) == legacy
+    assert reason(lambda: validate_chat_tools(legacy_chat_tools)) == legacy
+    assert reason(lambda: validate_decomposer_messages(legacy_messages)) == legacy
+    assert reason(lambda: sequentialize_parallel_calls(parallel_legacy)) == legacy
+    # A tool set missing fork/run is structurally invalid, not legacy.
+    assert (
+        reason(lambda: normalize_response_tools(deepcopy(TOOLS[:1] + TOOLS[3:])))
+        == "excluded_invalid_tool_schema"
+    )
+    assert [
+        tool["function"]["name"] for tool in normalize_response_tools(deepcopy(TOOLS))
+    ] == ["new", "fork", "run", "wait"]
+
+
+def test_builder_canonical_tools_are_exactly_new_fork_run_wait(
+    tmp_path: Path,
+) -> None:
+    source = _source(
+        tmp_path,
+        "teacher",
+        [_rollout(index) for index in range(4)],
+        [_materialized(index) for index in range(4)],
+    )
+    subagent_type = {"id": "small", "description": "Fixture subagent."}
+    spec = BuildSpec(
+        spec_version=2,
+        dataset=DatasetIdentity(id="canonical-tools", version="v1"),
+        policy=PolicySpec(
+            id="decomposer-default",
+            system_prompt_profile="teacher",
+            subagent_types=(subagent_type,),
+        ),
+        sources=(
+            SourceSpec(
+                id="teacher",
+                adapter="nemo_gym",
+                path=source,
+                benchmark="workplace_assistant",
+                environment="workplace",
+                partition="train",
+                teacher="teacher",
+                expected_native_rollouts=4,
+                expected_candidates=4,
+            ),
+        ),
+        selection=SelectionSpec(),
+        split=SplitSpec(strategy="prompt_fixed", validation_fraction=0.25, seed=42),
+    )
+    prepared = prepare_dataset(
+        LoadedBuildSpec(path=tmp_path / "spec.yaml", sha256="4" * 64, spec=spec),
+        tmp_path / "datasets",
+        git_revision="test-revision",
+        require_clean_git=False,
+    )
+    expected = build_decomposer_chat_tools(
+        [
+            {
+                "subagent_type_id": "small",
+                "description": "Fixture subagent.",
+                "assistant_id": "small",
+            }
+        ]
+    )
+    assert [tool["function"]["name"] for tool in expected] == [
+        "new",
+        "fork",
+        "run",
+        "wait",
+    ]
+    records = _read_jsonl(prepared.train_path) + _read_jsonl(prepared.validation_path)
+    assert len(records) == 4
+    assert all(record["tools"] == expected for record in records)
+    assert all(
+        record["messages"][0]["content"] == DECOMPOSER_SYSTEM_PROMPT
+        for record in records
+    )
+    assert prepared.manifest["sources"][0]["tool_schema_origin"] == (
+        "canonical_policy_interface"
+    )
+    assert prepared.manifest["content"]["tool_schema_sha256"] == sha256_text(
+        canonical_json(expected)
+    )
 
 
 def test_invalid_policy_error_reports_source_line(tmp_path: Path) -> None:
@@ -1152,16 +1551,24 @@ def test_prepare_refuses_overwrite_and_bad_materialized_source(tmp_path: Path) -
         ),
         (
             lambda rollout: rollout["final_state"]["messages"][1]["tool_calls"].append(
-                {
-                    "name": "spawn_subagent",
-                    "args": {
-                        "subagent_type_id": "small",
-                        "prompt": "Missing result.",
-                    },
-                    "id": "missing-result",
-                }
+                _call(
+                    "run",
+                    "missing-result",
+                    subagent_id="subagent-0",
+                    prompt="Missing result.",
+                )
             ),
             "exactly one matching tool result",
+        ),
+        (
+            lambda rollout: rollout["final_state"]["messages"][3]["tool_calls"][
+                0
+            ]["args"].update({"prompt": " "}),
+            "non-empty prompt",
+        ),
+        (
+            lambda rollout: rollout.update(_legacy_rollout(0)),
+            "retired 'spawn_subagent' tool",
         ),
     ],
 )

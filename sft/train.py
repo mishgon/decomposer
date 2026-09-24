@@ -36,7 +36,7 @@ from .schema import (
     MANIFEST_FORMAT_VERSION,
     sha256_text,
 )
-from decomposer.prompts import (
+from decomposer.prompt_profiles import (
     DECOMPOSER_PROMPT_PROFILES,
     resolve_decomposer_system_prompt,
 )
