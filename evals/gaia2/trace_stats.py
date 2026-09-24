@@ -690,7 +690,20 @@ def _manager_config(sidecar: Path, role: str = "manager") -> dict[str, Any]:
     return config.get(role) or {}
 
 
-def analyse_decomposer_run(run_dir: Path, limit: int | None = None) -> dict[str, Any]:
+def _tokenizer_path(local: str | None, override: str | None, role: str) -> str:
+    """A model's local tokenizer, or the override for a model served remotely."""
+
+    path = local or override
+    if path is None:
+        raise ValueError(
+            f"the {role} has no local checkpoint (served remotely); pass --tokenizer"
+        )
+    return path
+
+
+def analyse_decomposer_run(
+    run_dir: Path, limit: int | None = None, tokenizer: str | None = None
+) -> dict[str, Any]:
     """Aggregate one decomposer run directory."""
     status = json.loads((run_dir / "run_status.json").read_text())
     year = datetime.fromisoformat(status["finished_at"]).year
@@ -704,7 +717,9 @@ def analyse_decomposer_run(run_dir: Path, limit: int | None = None) -> dict[str,
     # the two without this factor overstates tokens by the sampling ratio.
     sampled = len(sidecars) / len(population)
 
-    tokens = TokenCounter(_worker_model_path(sidecars[0]))
+    tokens = TokenCounter(
+        _tokenizer_path(_worker_model_path(sidecars[0]), tokenizer, "worker")
+    )
     manager_backend = _manager_config(sidecars[0]).get("backend")
     system_prompt_tokens = tokens.count(_subagent_system_prompt())
     schema_cache: dict[str, int] = {}
@@ -717,6 +732,9 @@ def analyse_decomposer_run(run_dir: Path, limit: int | None = None) -> dict[str,
     worker_log = run_dir / "logs" / "worker_vllm.log"
     shared_log = run_dir / "logs" / "manager_worker_vllm.log"
     manager_log = run_dir / "logs" / "manager_vllm.log"
+    # A worker served through the LLM proxy leaves no vLLM log: its tokens are
+    # then only the reconstruction floor below, and its output is unmeasured.
+    worker_measured = worker_log.exists() or shared_log.exists()
     worker = parse_vllm_throughput(
         worker_log if worker_log.exists() else shared_log, year
     )
@@ -812,8 +830,14 @@ def analyse_decomposer_run(run_dir: Path, limit: int | None = None) -> dict[str,
     manager_input_total = sum(r["manager_input_tokens"] for r in rollouts)
     floor_each = _mean([r["subagent_input_floor_tokens"] for r in rollouts])
     summary["tokens"] = {
-        "method": "subagent totals measured from the worker vLLM log, calibrated "
-        "on the manager's exact usage; the reconstruction is a floor",
+        "method": (
+            "subagent totals measured from the worker vLLM log, calibrated "
+            "on the manager's exact usage; the reconstruction is a floor"
+            if worker_measured
+            else "remote worker without a vLLM log: subagent input is the "
+            "reconstruction floor and subagent output is not measured (0)"
+        ),
+        "worker_measured": worker_measured,
         "sampled_fraction": round(sampled, 4),
         "integral_calibration": round(calibration, 4),
         # "none" means the manager ran on a remote API: there is no local log to
@@ -845,11 +869,13 @@ def _subagent_system_prompt() -> str:
     return SUBAGENT_SYSTEM_PROMPT
 
 
-def analyse_simple_run(run_dir: Path, limit: int | None = None) -> dict[str, Any]:
+def analyse_simple_run(
+    run_dir: Path, limit: int | None = None, tokenizer: str | None = None
+) -> dict[str, Any]:
     """Aggregate one direct-ReAct baseline run from its lite traces."""
     status = json.loads((run_dir / "run_status.json").read_text())
     year = datetime.fromisoformat(status["finished_at"]).year
-    model_path = _simple_model_path(status)
+    model_path = _tokenizer_path(_simple_model_path(status), tokenizer, "policy")
     tokens = TokenCounter(model_path)
 
     population = sorted((run_dir / "lite").glob("*.json"))
@@ -1221,10 +1247,12 @@ def resolve_run(
     return candidates[0] if len(candidates) == 1 else None
 
 
-def analyse(run_dir: Path, limit: int | None = None) -> dict[str, Any]:
+def analyse(
+    run_dir: Path, limit: int | None = None, tokenizer: str | None = None
+) -> dict[str, Any]:
     if (run_dir / "decomposer_sidecars").is_dir():
-        return analyse_decomposer_run(run_dir, limit=limit)
-    return analyse_simple_run(run_dir, limit=limit)
+        return analyse_decomposer_run(run_dir, limit=limit, tokenizer=tokenizer)
+    return analyse_simple_run(run_dir, limit=limit, tokenizer=tokenizer)
 
 
 def main() -> int:
@@ -1236,6 +1264,11 @@ def main() -> int:
     parser.add_argument("--worker", choices=WORKERS, action="append")
     parser.add_argument("--run-dir", type=Path, help="analyse one directory directly")
     parser.add_argument("--limit", type=int, help="only the first N rollouts (smoke)")
+    parser.add_argument(
+        "--tokenizer",
+        help="tokenizer for a worker or policy served remotely (LLM proxy), "
+        "e.g. the local Qwen3.5-4B snapshot for Qwen/Qwen3.5-4B-unlooped",
+    )
     parser.add_argument(
         "--results-root",
         type=Path,
@@ -1260,7 +1293,7 @@ def main() -> int:
 
     for system, worker, domain, run_dir in jobs:
         print(f"  [run ] {domain:<9} {system:<22} {worker:<8} {run_dir.name}")
-        result = analyse(run_dir, limit=args.limit)
+        result = analyse(run_dir, limit=args.limit, tokenizer=args.tokenizer)
         target = args.out / domain
         target.mkdir(parents=True, exist_ok=True)
         (target / f"{run_dir.name}.json").write_text(

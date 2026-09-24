@@ -9,6 +9,9 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
+from evals.gaia2 import trace_stats
 from evals.gaia2.trace_stats import (
     Lifecycle,
     SYSTEMS,
@@ -258,3 +261,12 @@ def test_deepseek_runs_resolve_by_their_own_name(tmp_path):
 
 def test_every_system_the_report_names_has_a_resolver():
     assert "DeepSeek teacher" in SYSTEMS
+
+
+def test_a_remotely_served_model_needs_an_explicit_tokenizer():
+    assert trace_stats._tokenizer_path("/local/worker", "/override", "worker") == (
+        "/local/worker"
+    )
+    assert trace_stats._tokenizer_path(None, "/qwen35-4b", "worker") == "/qwen35-4b"
+    with pytest.raises(ValueError, match="pass --tokenizer"):
+        trace_stats._tokenizer_path(None, None, "policy")
