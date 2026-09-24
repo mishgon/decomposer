@@ -60,4 +60,6 @@ def teacher_generation_config(model: str) -> dict:
     }
     if "qwen3.8-flash-next" in model.lower():
         settings.update(reasoning_effort="low", presence_penalty=0.0)
+        # lmrouter's LiteLLM gateway otherwise rejects this OpenAI parameter for Qwen.
+        settings["extra_body"]["allowed_openai_params"] = ["reasoning_effort"]
     return settings

@@ -38,6 +38,7 @@ def test_flash_next_teacher_sends_explicit_low_reasoning():
     assert payload["extra_body"] == {
         "top_k": 20, "min_p": 0.0, "repetition_penalty": 1.0,
         "include_reasoning": True, "chat_template_kwargs": {"enable_thinking": True},
+        "allowed_openai_params": ["reasoning_effort"],
     }
     assert model.preserve_reasoning is True
     assert "max_tokens" not in payload
