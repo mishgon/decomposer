@@ -351,14 +351,21 @@ def stop_vllm(process: subprocess.Popen[bytes] | None) -> None:
         return
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("task")
+def create_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Run raw Toolathlon Gym episodes.")
+    parser.add_argument("task", nargs="?")
+    parser.add_argument("--tasks", nargs="+")
+    parser.add_argument("--all", action="store_true")
+    parser.add_argument("--harness", choices=("react", "decomposer"), default="decomposer")
+    parser.add_argument("--concurrency", type=int, default=1)
+    parser.add_argument("-n", "--repetitions", type=int, default=1)
+    parser.add_argument("--output-dir", type=Path, default=DEFAULT_GYM_ARTIFACTS_DIR / "raw")
+    parser.add_argument("--episode-timeout", type=float, default=3300)
     parser.add_argument("--episode-id", help=argparse.SUPPRESS)
     parser.add_argument("--run-id", help=argparse.SUPPRESS)
     parser.add_argument("--repetition", type=int, help=argparse.SUPPRESS)
     parser.add_argument("--attempt", type=int, help=argparse.SUPPRESS)
-    parser.add_argument("--purpose", choices=("trace-generation",), required=True)
+    parser.add_argument("--purpose", default="raw", help=argparse.SUPPRESS)
     parser.add_argument("--model", default=DEFAULT_MODEL)
     parser.add_argument("--subagent-model", default=DEFAULT_SUBAGENT_MODEL)
     parser.add_argument("--subagent-api-model", default=DEFAULT_SUBAGENT_API_MODEL)
@@ -378,7 +385,11 @@ def main() -> None:
     parser.add_argument("--n-jobs-per-worker", type=int, default=1000)
     parser.add_argument("--agent-timeout", type=float, default=2700)
     parser.add_argument("--container-lock-file", type=Path, help=argparse.SUPPRESS)
-    args = parser.parse_args()
+    return parser
+
+
+def run_episode(args) -> None:
+    parser = create_parser()
     if args.n_jobs_per_worker < 1:
         parser.error("--n-jobs-per-worker must be at least 1")
     if args.agent_timeout <= 0:
@@ -402,7 +413,7 @@ def main() -> None:
         os.environ.setdefault("VLLM_API_KEY", llm_proxy_key or "")
         if not os.environ["VLLM_API_KEY"]:
             raise RuntimeError("Hosted subagents require VLLM_API_KEY or LLM_PROXY_MASTER_KEY")
-    if decomposer_vllm_url:
+    if args.harness == "react" or decomposer_vllm_url:
         pass
     elif llm_proxy_url:
         if not llm_proxy_key:
@@ -640,7 +651,7 @@ def main() -> None:
         container_lock_held = False
 
         runtime = json.loads((episode_dir / "runtime.json").read_text(encoding="utf-8"))
-        print("Running Decomposer...", flush=True)
+        print(f"Running {args.harness}...", flush=True)
         checkpointer = InMemorySaver()
         openrouter_provider = os.environ.get("DECOMPOSER_OPENROUTER_PROVIDER")
         reasoning_effort = os.environ.get(
@@ -666,7 +677,10 @@ def main() -> None:
             if reasoning_effort in {"none", "off", "disabled"}
             else {"effort": reasoning_effort}
         )
-        if decomposer_vllm_url:
+        if args.harness == "react":
+            decomposer_model = None
+            teacher_backend = "subagent"
+        elif decomposer_vllm_url:
             decomposer_model = ChatVLLM(
                 model=args.model,
                 base_url=decomposer_vllm_url,
@@ -733,74 +747,43 @@ def main() -> None:
                 ),
             )
             teacher_backend = "openrouter"
-        agent = create_decomposer_agent(
-            decomposer_model=decomposer_model,
-            subagent_types=[{
-                "subagent_type_id": SUBAGENT_TYPE_ID,
-                "description": (
-                    f"Tool-calling agent based on {args.subagent_api_model} in "
-                    "non-thinking mode. Has access to all the available tools."
-                ),
-                "assistant_id": SUBAGENT_TYPE_ID,
-                "url": subagent_url,
-            }],
-            checkpointer=checkpointer,
-            subagent_recursion_limit=410,
-        )
-        agent_config = {
-            "recursion_limit": 410,
-            "configurable": {"thread_id": episode_id},
-        }
-        agent_error: str | None = None
-        agent_exception: BaseException | None = None
-        try:
-            state = asyncio.run(
-                asyncio.wait_for(
-                    agent.ainvoke(
-                        {
-                            "messages": [
-                                {
-                                    "role": "user",
-                                    "content": runtime["task_config"]["task_str"],
-                                }
-                            ]
-                        },
-                        config=agent_config,
-                    ),
-                    timeout=args.agent_timeout,
-                )
-            )
-        except BaseException as error:
-            agent_exception = error
-            agent_error = repr(error)
-            try:
-                snapshot = asyncio.run(agent.aget_state(agent_config))
-                state = dict(snapshot.values)
-            except BaseException:
-                state = {}
+        agent, agent_config = make_agent(args.harness, decomposer_model, subagent_url,
+                                        args.subagent_api_model, episode_id, checkpointer)
+        state, agent_exception = asyncio.run(invoke_and_capture(
+            agent,
+            {"messages": [{"role": "user", "content": runtime["task_config"]["task_str"]}]},
+            agent_config,
+            args.agent_timeout,
+        ))
+        agent_error = repr(agent_exception) if agent_exception is not None else None
         messages = state.get("messages", [])
-        serialized_messages = [message_to_dict(message) for message in messages]
+        serialized_messages = serialize_messages(messages)
         subagent_runs = state.get("subagent_runs", {})
         subagents = state.get("subagents", {})
         usage = build_usage_summary(serialized_messages, subagent_runs, subagents)
+        if args.harness == "react":
+            usage["react"] = usage.pop("decomposer")
         (episode_dir / "trace.json").write_text(
             json.dumps(
                 {
                     "episode_id": episode_id,
+                    "thread_id": agent_config["configurable"]["thread_id"],
                     "run_id": args.run_id,
                     "task": args.task,
                     "repetition": args.repetition,
                     "attempt": args.attempt,
                     "purpose": args.purpose,
-                    "decomposer_model": args.model,
+                    "harness": args.harness,
+                    "model": args.model if args.harness == "decomposer" else args.subagent_api_model,
+                    "decomposer_model": args.model if args.harness == "decomposer" else None,
                     "teacher_backend": teacher_backend,
                     "openrouter_provider": openrouter_provider,
-                    "reasoning_effort": reasoning_effort,
+                    "reasoning_effort": reasoning_effort if args.harness == "decomposer" else "none",
                     "decomposer_generation_config": {
                         "temperature": 1.0,
                         "top_p": 0.95,
                         "reasoning": reasoning,
-                    },
+                    } if args.harness == "decomposer" else None,
                     "decomposer_max_tokens": decomposer_max_tokens,
                     "request_timeout_seconds": request_timeout_seconds,
                     "openrouter_max_retries": openrouter_max_retries,
@@ -825,11 +808,12 @@ def main() -> None:
             json.dumps(usage, indent=2, ensure_ascii=False),
             encoding="utf-8",
         )
-        answer = str(messages[-1].content) if messages else ""
+        last = serialized_messages[-1] if serialized_messages else {}
+        answer = str(last.get("data", last).get("content", ""))
         (episode_dir / "answer.txt").write_text(answer, encoding="utf-8")
 
         if agent_exception is not None:
-            raise RuntimeError(f"Decomposer agent loop failed: {agent_error}") from agent_exception
+            raise RuntimeError(f"Agent loop failed: {agent_error}") from agent_exception
 
         print("Running native evaluation...", flush=True)
         config = runtime["task_config"]
@@ -878,7 +862,9 @@ def main() -> None:
             evaluation = {
                 "episode_id": episode_id,
                 "task": args.task,
-                "pass": completed.returncode == 0,
+                "pass": completed.returncode == 0 and agent_exception is None,
+                "native_pass": completed.returncode == 0,
+                "agent_error": agent_error,
                 "returncode": completed.returncode,
                 "native_result": native_result,
                 "stdout": completed.stdout,
@@ -913,24 +899,52 @@ def main() -> None:
             stop_vllm(vllm_process)
 
 
-if __name__ == "__main__":
-    import batch
 
-    signal.signal(signal.SIGTERM, _handle_termination)
-    if batch.wants_batch(sys.argv[1:]):
-        batch.main(
-            sys.argv[1:],
-            repo_root=REPO_ROOT,
-            toolathlon_root=TOOLATHLON_ROOT,
-            default_artifacts_dir=DEFAULT_GYM_ARTIFACTS_DIR,
-            default_image=DEFAULT_IMAGE,
-            default_model=DEFAULT_MODEL,
-            default_subagent_model=DEFAULT_SUBAGENT_MODEL,
-            default_subagent_api_model=DEFAULT_SUBAGENT_API_MODEL,
-            default_subagent_port=DEFAULT_SUBAGENT_PORT,
-            start_vllm=start_vllm,
-            stop_vllm=stop_vllm,
-            docker=_docker,
+def make_agent(harness, model, url, subagent_model, episode_id, checkpointer):
+    thread_id = str(uuid.uuid5(uuid.NAMESPACE_URL, episode_id))
+    config = {"recursion_limit": 410, "configurable": {"thread_id": thread_id}}
+    if harness == "decomposer":
+        agent = create_decomposer_agent(
+            decomposer_model=model,
+            subagent_types=[{
+                "subagent_type_id": SUBAGENT_TYPE_ID,
+                "description": f"{subagent_model} non-thinking agent with all task tools.",
+                "assistant_id": SUBAGENT_TYPE_ID, "url": url,
+            }],
+            checkpointer=checkpointer, subagent_recursion_limit=410,
         )
-    else:
-        main()
+        return agent, config
+    from langgraph.pregel.remote import RemoteGraph
+    from langgraph_sdk import get_sync_client
+    with get_sync_client(url=url) as client:
+        client.threads.create(thread_id=thread_id)
+    return RemoteGraph(SUBAGENT_TYPE_ID, url=url), config
+
+
+def serialize_messages(messages):
+    return [message if isinstance(message, dict) else message_to_dict(message) for message in messages]
+
+
+async def invoke_and_capture(agent, inputs, config, timeout):
+    """Capture partial state in the same event loop as the model clients."""
+    try:
+        return await asyncio.wait_for(agent.ainvoke(inputs, config=config), timeout), None
+    except BaseException as error:
+        try:
+            state = dict((await agent.aget_state(config)).values)
+        except BaseException:
+            state = {}
+        return state, error
+
+
+def main(argv=None):
+    args = create_parser().parse_args(argv)
+    if args.episode_id:
+        return run_episode(args)
+    from gyms.toolathlon_gym.parallel import run
+    return run(args)
+
+
+if __name__ == "__main__":
+    signal.signal(signal.SIGTERM, _handle_termination)
+    main()

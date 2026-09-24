@@ -9,7 +9,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from gyms.toolathlon_gym.mlspace_experiments import (
+from sft.toolathlon_gym.inference.mlspace_experiments import (
     INSTANCE_TYPES_BY_NUM_GPUS,
     collect_experiments,
 )
@@ -99,7 +99,7 @@ def main() -> int:
         command = [
             str(MLSPACE_PYTHON),
             "-m",
-            "gyms.toolathlon_gym.mlspace_serve",
+            "sft.toolathlon_gym.inference.mlspace_serve",
             "--gpu-count",
             str(experiment.num_gpus),
             "--remote-port-start",

@@ -43,6 +43,11 @@ def subagent_server(tmp_path):
             cwd=tmp_path,
             env={
                 **os.environ,
+                "PYTHONPATH": os.pathsep.join([
+                    str(Path(__file__).resolve().parents[1] / "src"),
+                    str(Path(__file__).resolve().parents[1]),
+                    os.environ.get("PYTHONPATH", ""),
+                ]),
                 "LANGGRAPH_CLI_NO_ANALYTICS": "1",
 
                 "LANGSMITH_TRACING": "false",

@@ -17,10 +17,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
-try:
-    from . import adaptive_scheduler
-except ImportError:  # Executed through gyms/toolathlon_gym/run.py.
-    import adaptive_scheduler
+from . import scheduler as adaptive_scheduler
+from gyms.toolathlon_gym.parallel import execute
 
 
 SCHEMA_VERSION = 1
@@ -223,7 +221,7 @@ def parse_args(argv: Sequence[str], defaults: dict[str, Any]) -> argparse.Namesp
     selection.add_argument("--tasks", nargs="+", metavar="TASK")
     parser.add_argument("--resume", metavar="RUN_ID")
     parser.add_argument("-n", "--repetitions", type=int, default=1)
-    parser.add_argument("--purpose", choices=("trace-generation",), required=True)
+    parser.add_argument("--purpose", choices=("trace-generation",), default="trace-generation")
     parser.add_argument("--model", default=defaults["model"])
     parser.add_argument("--subagent-model", default=defaults["subagent_model"])
     parser.add_argument(
@@ -567,39 +565,10 @@ def execute_episode(
         "status": "running", "task": task, "repetition": repetition,
         "attempt": attempt, "command": command, "started_at": started_at,
     })
-    with (attempt_dir / "runner.stdout.log").open("wb") as stdout, (
-        attempt_dir / "runner.stderr.log"
-    ).open("wb") as stderr:
-        process = subprocess.Popen(command, stdout=stdout, stderr=stderr)
-        timed_out = False
-        try:
-            while True:
-                try:
-                    returncode = process.wait(timeout=0.5)
-                    break
-                except subprocess.TimeoutExpired:
-                    if time.monotonic() - started >= getattr(
-                        args, "episode_timeout", 2400
-                    ):
-                        timed_out = True
-                        process.send_signal(signal.SIGINT)
-                        try:
-                            returncode = process.wait(timeout=120)
-                        except subprocess.TimeoutExpired:
-                            process.kill()
-                            returncode = process.wait()
-                        break
-                    if stop_event is not None and stop_event.is_set():
-                        raise KeyboardInterrupt("batch interrupted")
-        except BaseException:
-            if process.poll() is None:
-                process.send_signal(signal.SIGINT)
-                try:
-                    process.wait(timeout=120)
-                except subprocess.TimeoutExpired:
-                    process.kill()
-                    process.wait()
-            raise
+    returncode, timed_out = execute(
+        command, attempt_dir, getattr(args, "episode_timeout", 3300),
+        stop_event if stop_event is not None else threading.Event(),
+    )
 
     artifact_dir = root / "traces" / task / episode_id
     evaluation_path = root / "evals" / task / episode_id / "result.json"

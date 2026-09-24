@@ -10,7 +10,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from gyms.toolathlon_gym import batch, mlspace_serve, run, usage
+from gyms.toolathlon_gym import run, usage
+from sft.toolathlon_gym import collection as batch
+from sft.toolathlon_gym.inference import mlspace_serve
 from gyms.toolathlon_gym.subagents.model_config import generation_config
 
 
@@ -161,11 +163,11 @@ def test_postgres_environment_uses_container_ip_instead_of_dns(monkeypatch) -> N
     assert environment["PGDATABASE"] == "toolathlon_gym"
 
 
-def test_main_requires_explicit_trace_generation_purpose(monkeypatch) -> None:
-    monkeypatch.setattr(sys, "argv", ["run.py", "example"])
-
-    with pytest.raises(SystemExit):
-        run.main()
+def test_raw_runner_has_no_collection_policy() -> None:
+    args = run.create_parser().parse_args(["example", "--harness", "react"])
+    assert args.purpose == "raw"
+    assert args.harness == "react"
+    assert not hasattr(args, "adaptive")
 
 
 def test_main_rejects_path_traversal(monkeypatch) -> None:
@@ -175,7 +177,7 @@ def test_main_rejects_path_traversal(monkeypatch) -> None:
         ["run.py", "../finalpool", "--purpose", "trace-generation"],
     )
 
-    with pytest.raises(ValueError, match="Unknown Toolathlon task"):
+    with pytest.raises(ValueError, match="Tasks must be unique"):
         run.main()
 
 
@@ -695,6 +697,9 @@ def test_execute_episode_maps_deterministic_trace_and_eval_paths(
 
     class FakeProcess:
         def wait(self, timeout=None):
+            return 0
+
+        def poll(self):
             return 0
 
     popen_calls = []

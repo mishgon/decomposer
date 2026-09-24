@@ -2,7 +2,7 @@ import json
 import subprocess
 from pathlib import Path
 
-from gyms.toolathlon_gym import adaptive_scheduler as scheduler, batch
+from sft.toolathlon_gym import scheduler, collection as batch
 
 
 def evaluation(tmp_path: Path, name: str, value: dict) -> str:
