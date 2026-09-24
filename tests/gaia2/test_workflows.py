@@ -2310,6 +2310,29 @@ def test_result_validation_checks_partition_coverage_and_logical_runs(tmp_path) 
         )
 
 
+def test_single_repeat_results_have_no_run_numbers(tmp_path) -> None:
+    # ARE omits run_number when it runs each scenario once (--num-repeats 1).
+    output = tmp_path / "output"
+    output.mkdir()
+    rows = [
+        {"task_id": scenario_id, "score": 1.0, "metadata": {"status": "success"}}
+        for scenario_id in ("a", "b")
+    ]
+    (output / "output.jsonl").write_text(
+        "".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8"
+    )
+
+    metrics = validate_result(
+        output, num_repeats=1, limit=None, scenario_count=2, scenario_ids=("a", "b")
+    )
+    assert metrics["passed_rollouts"] == 2
+    # With several repeats a missing run number is still an error.
+    with pytest.raises(ValueError, match="rollout records"):
+        validate_result(
+            output, num_repeats=3, limit=None, scenario_count=2, scenario_ids=("a", "b")
+        )
+
+
 def test_mlspace_payload_uses_registry_gpu_type_and_redactable_judge_key(
     tmp_path,
 ) -> None:

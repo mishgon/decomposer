@@ -1228,6 +1228,9 @@ def validate_result(
             task_id = str(row.get("task_id"))
             metadata = row.get("metadata") or {}
             run_number = metadata.get("run_number")
+            if run_number is None and num_repeats == 1:
+                # ARE records no run number when it runs each scenario once.
+                run_number = 1
             if isinstance(run_number, bool) or not isinstance(run_number, int):
                 raise ValueError("GAIA2 rollout run_number must be an integer")
             if run_number in observed_runs[task_id]:
