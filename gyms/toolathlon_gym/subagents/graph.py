@@ -6,6 +6,7 @@ from decomposer.chat_vllm import ChatVLLM
 from langchain.agents import create_agent
 from langgraph.graph.state import CompiledStateGraph
 from model_logging import durable_model_call_log
+from model_config import generation_config
 from webapp import get_tools, truncate_mcp_tool_output
 
 
@@ -31,15 +32,6 @@ def _create_subagent(
     *,
     thinking: bool,
 ) -> CompiledStateGraph:
-    extra_body = {"top_k": 64}
-    if not thinking:
-        extra_body.update(
-            {
-                "reasoning_effort": "none",
-                "chat_template_kwargs": {"enable_thinking": False},
-            }
-        )
-
     base_url = os.environ.get(
         base_url_env,
         f"http://host.docker.internal:{default_port}/v1",
@@ -48,8 +40,6 @@ def _create_subagent(
         model=model_id,
         base_url=base_url,
         api_key=os.environ.get("VLLM_API_KEY", "EMPTY"),
-        temperature=1.0,
-        top_p=0.95,
         timeout=REQUEST_TIMEOUT_SECONDS,
         max_retries=REQUEST_MAX_RETRIES,
         http_async_client=httpx.AsyncClient(
@@ -57,8 +47,7 @@ def _create_subagent(
         ),
         disable_streaming=True,
         use_responses_api=False,
-        preserve_reasoning=thinking,
-        extra_body=extra_body,
+        **generation_config(model_id, thinking=thinking),
     )
     return create_agent(
         model=model,
@@ -144,6 +133,6 @@ def qwen_3_5_4b_non_thinking() -> CompiledStateGraph:
     return _create_subagent(
         "Qwen/Qwen3.5-4B",
         "QWEN_3_5_4B_BASE_URL",
-        8030,
+        8024,
         thinking=False,
     )

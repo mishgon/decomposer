@@ -646,7 +646,6 @@ dependencies = [
     { name = "matplotlib" },
     { name = "pydantic" },
     { name = "typing-extensions" },
-    { name = "vllm" },
 ]
 
 [package.dev-dependencies]
@@ -661,6 +660,7 @@ dev = [
     { name = "torch" },
     { name = "torchaudio" },
     { name = "torchvision" },
+    { name = "vllm" },
 ]
 
 [package.metadata]
@@ -674,7 +674,6 @@ requires-dist = [
     { name = "matplotlib", specifier = ">=3.11.1" },
     { name = "pydantic", specifier = ">=2.11,<3" },
     { name = "typing-extensions", specifier = ">=4.12,<5" },
-    { name = "vllm", url = "https://github.com/vllm-project/vllm/releases/download/v0.24.0/vllm-0.24.0%2Bcu129-cp38-abi3-manylinux_2_28_x86_64.whl" },
 ]
 
 [package.metadata.requires-dev]
@@ -689,6 +688,7 @@ dev = [
     { name = "torch", specifier = "==2.11.0", index = "https://download.pytorch.org/whl/cu129" },
     { name = "torchaudio", specifier = "==2.11.0", index = "https://download.pytorch.org/whl/cu129" },
     { name = "torchvision", specifier = "==0.26.0", index = "https://download.pytorch.org/whl/cu129" },
+    { name = "vllm", url = "https://github.com/vllm-project/vllm/releases/download/v0.24.0/vllm-0.24.0%2Bcu129-cp38-abi3-manylinux_2_28_x86_64.whl" },
 ]
 
 [[package]]

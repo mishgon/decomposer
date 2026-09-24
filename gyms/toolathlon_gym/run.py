@@ -22,12 +22,13 @@ from langgraph.checkpoint.memory import InMemorySaver
 
 from decomposer.chat_vllm import ChatVLLM
 from decomposer.core import create_decomposer_agent
-from decomposer.prompts import DECOMPOSER_TEACHER_SYSTEM_PROMPT
 
 try:
     from .usage import build_usage_summary
+    from .subagents.model_config import generation_config
 except ImportError:  # Executed directly as a script.
     from usage import build_usage_summary
+    from subagents.model_config import generation_config
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -735,7 +736,6 @@ def main() -> None:
                 "assistant_id": SUBAGENT_TYPE_ID,
                 "url": subagent_url,
             }],
-            decomposer_system_prompt=DECOMPOSER_TEACHER_SYSTEM_PROMPT,
             checkpointer=checkpointer,
             subagent_recursion_limit=410,
         )
@@ -773,7 +773,8 @@ def main() -> None:
         messages = state.get("messages", [])
         serialized_messages = [message_to_dict(message) for message in messages]
         subagent_runs = state.get("subagent_runs", {})
-        usage = build_usage_summary(serialized_messages, subagent_runs)
+        subagents = state.get("subagents", {})
+        usage = build_usage_summary(serialized_messages, subagent_runs, subagents)
         (episode_dir / "trace.json").write_text(
             json.dumps(
                 {
@@ -797,18 +798,12 @@ def main() -> None:
                     "openrouter_max_retries": openrouter_max_retries,
                     "subagent_model": args.subagent_model,
                     "subagent_api_model": args.subagent_api_model,
-                    "subagent_generation_config": {
-                        "temperature": 1.0,
-                        "top_p": 0.95,
-                        "top_k": 64,
-                        "reasoning_effort": "none",
-                        "chat_template_kwargs": {"enable_thinking": False},
-                        "preserve_reasoning": False,
-                    },
+                    "subagent_generation_config": generation_config(args.subagent_api_model),
                     "started_at": started_at,
                     "finished_at": datetime.now(timezone.utc).isoformat(),
                     "agent_error": agent_error,
                     "messages": serialized_messages,
+                    "subagents": subagents,
                     "subagent_runs": subagent_runs,
                 },
                 indent=2,

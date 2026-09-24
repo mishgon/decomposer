@@ -6,6 +6,13 @@ The host runner owns one supervised vLLM process for a batch. Task containers
 reuse it and do not pay a per-example model cold start.
 The configured Gemma4-26B-A4B subagent runs in non-thinking mode.
 
+The collector uses upstream's persistent-subagent interface: `new`, `fork`,
+`run`, and `wait`. Start a new collection run after this migration; checkpoints
+trained on the former `spawn_subagent` interface are not compatible. Traces save
+the `subagents` registry and per-run `subagent_runs` messages, including model
+usage. Reusing or forking a subagent does not duplicate earlier messages in its
+new run's usage totals. Historical artifacts remain unchanged.
+
 ## Image layout
 
 The adapter image extends `toolathlon-pack:latest`, preserving Toolathlon's

@@ -165,6 +165,9 @@ def test_decomposer_reuses_worker_conversation(subagent_server) -> None:
             assert new_run["response"] == json.dumps(expected)
             assert new_run["error"] is None
             assert new_run["response_sequence_number"] == turn
+            assert [m["type"] for m in new_run["messages"]] == ["human", "ai", "tool", "ai"]
+            assert new_run["messages"][0]["content"] == prompts[turn]
+            assert new_run["messages"][-1]["content"] == new_run["response"]
             previous_runs = runs
 
 
@@ -235,6 +238,9 @@ def test_fork_preserves_history_and_branches_independently(subagent_server, asyn
             run = command.update["subagent_runs"][run_id]
             assert run["status"] == "responded"
             assert json.loads(run["response"]) == ["Remember 42.", prompt]
+            assert len(run["messages"]) == 4
+            assert run["messages"][0]["content"] == prompt
+            assert run["messages"][-1]["content"] == run["response"]
             assert run["tool_calls"] == [{
                 "id": "echo_2", "name": "echo", "args": {"text": prompt},
             }]

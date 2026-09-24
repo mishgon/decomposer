@@ -11,6 +11,26 @@ from types import SimpleNamespace
 import pytest
 
 from gyms.toolathlon_gym import batch, mlspace_serve, run, usage
+from gyms.toolathlon_gym.subagents.model_config import generation_config
+
+
+def test_qwen_settings_preserve_upstream_profile() -> None:
+    settings = generation_config("Qwen/Qwen3.5-4B")
+    assert settings["temperature"] == 0.7
+    assert settings["top_p"] == 0.8
+    assert settings["presence_penalty"] == 1.5
+    assert settings["extra_body"]["top_k"] == 20
+    assert "reasoning_effort" not in settings["extra_body"]
+    assert settings["extra_body"]["chat_template_kwargs"] == {"enable_thinking": False}
+
+
+def test_gemma_settings_preserve_collection_profile() -> None:
+    settings = generation_config("google/gemma-4-26B-A4B-it")
+    assert settings["temperature"] == 1.0
+    assert settings["top_p"] == 0.95
+    assert settings["extra_body"]["top_k"] == 64
+    assert settings["extra_body"]["reasoning_effort"] == "none"
+    assert settings["preserve_reasoning"] is False
 
 
 def test_configured_subagents_are_registered() -> None:
@@ -214,13 +234,15 @@ def test_usage_summary_separates_teacher_and_subagents() -> None:
         [message(100, 10, cache=40, reasoning=3)],
         {
             "sub-1": {
-                "subagent_type_id": "qwen",
-                "status": "success",
+                "subagent_id": "worker-1",
+                "status": "responded",
                 "messages": [message(20, 5)],
             }
         },
+        {"worker-1": {"subagent_type_id": "qwen"}},
     )
 
+    assert summary["subagents"]["sub-1"]["subagent_type_id"] == "qwen"
     assert summary["decomposer"]["total_tokens"] == 110
     assert summary["subagents"]["sub-1"]["total_tokens"] == 25
     assert summary["totals"]["total_tokens"] == 135

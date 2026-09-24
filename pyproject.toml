@@ -14,7 +14,6 @@ dependencies = [
     "matplotlib>=3.11.1",
     "pydantic>=2.11,<3",
     "typing-extensions>=4.12,<5",
-    "vllm>=0.24,<0.25",
 ]
 
 [build-system]
@@ -54,4 +53,5 @@ dev = [
     "torch==2.11.0",
     "torchaudio==2.11.0",
     "torchvision==0.26.0",
+    "vllm==0.24.0",
 ]
