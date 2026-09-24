@@ -75,11 +75,20 @@ class Recovery(unittest.IsolatedAsyncioTestCase):
                                       response=httpx.Response(404))
         client.runs.cancel = AsyncMock(side_effect=error)
         client.runs.list = AsyncMock(return_value=[])
-        await cancel_subagents(client, {"a": {"thread_id": "t", "run_id": "r"}})
+        await cancel_subagents(client, {"a": {"subagent_id": "s", "run_id": "r"}}, {"s": {"thread_id": "t"}})
         self.assertEqual(client.runs.list.await_count, 2)
         client.runs.list.return_value = [{"status": "running"}]
         with self.assertRaises(httpx.HTTPStatusError):
-            await cancel_subagents(client, {"a": {"thread_id": "t", "run_id": "r"}})
+            await cancel_subagents(client, {"a": {"subagent_id": "s", "run_id": "r"}}, {"s": {"thread_id": "t"}})
+
+    async def test_responded_run_does_not_cancel_reused_worker(self):
+        client = Mock()
+        client.runs.cancel = AsyncMock()
+        await cancel_subagents(client, {
+            "old": {"subagent_id": "s", "run_id": "old", "response_sequence_number": 0},
+            "new": {"subagent_id": "s", "run_id": "new"},
+        }, {"s": {"thread_id": "t"}})
+        client.runs.cancel.assert_awaited_once_with("t", "new", wait=True)
 
 
 if __name__ == "__main__":
