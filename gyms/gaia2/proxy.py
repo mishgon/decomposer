@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import threading
@@ -15,6 +16,8 @@ from typing import Any
 from are.simulation.agents.agent_execution_result import AgentExecutionResult
 from are.simulation.agents.are_simulation_agent import RunnableARESimulationAgent
 from are.simulation.apps.agent_user_interface import AgentUserInterface
+
+from gyms.gaia2.worker_prompt import render_worker_system_prompt
 
 
 class RemoteError(RuntimeError):
@@ -172,6 +175,17 @@ class DecomposerProxyAgent(RunnableARESimulationAgent):
             "run_number": getattr(scenario, "run_number", None),
             "notification_cursor": 0,
         }
+        worker_system_prompt_sha256 = None
+        if self.config.get("worker_system_prompt") == "are_native":
+            # Workers act in the environment as ARE's native agent does, so they get
+            # its system prompt for this scenario (see gyms/gaia2/worker_prompt.py).
+            worker_system_prompt = render_worker_system_prompt(
+                scenario, notification_system
+            )
+            context["worker_system_prompt"] = worker_system_prompt
+            worker_system_prompt_sha256 = hashlib.sha256(
+                worker_system_prompt.encode("utf-8")
+            ).hexdigest()
         created = _request(
             "POST",
             f"{self.service_url}/v1/episodes",
@@ -184,6 +198,7 @@ class DecomposerProxyAgent(RunnableARESimulationAgent):
             "scenario_id": scenario.scenario_id,
             "run_number": getattr(scenario, "run_number", None),
             "configuration": _redact(self.config),
+            "worker_system_prompt_sha256": worker_system_prompt_sha256,
             "gaia2_revision": self.gaia2_revision,
             "decomposer_revision": self.decomposer_revision,
             "turns": [],

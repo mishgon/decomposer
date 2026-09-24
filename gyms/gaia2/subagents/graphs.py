@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Any, TypedDict
+from typing import Any, NotRequired, TypedDict
 
 import httpx
 from langchain.agents import create_agent
@@ -21,6 +21,7 @@ from gyms.gaia2.model_overflow import (
     ExactModelCallLimitMiddleware,
     Gaia2ModelOverflowMiddleware,
 )
+from gyms.gaia2.worker_prompt import LEGACY_WORKER_SYSTEM_PROMPT
 
 HIDDEN_AUI_TOOLS = frozenset(
     {
@@ -64,6 +65,7 @@ class EpisodeContext(TypedDict):
     scenario_id: str
     run_number: int | None
     notification_cursor: int
+    worker_system_prompt: NotRequired[str]
 
 
 def _serialize_tool_result(result: Any) -> str:
@@ -289,15 +291,12 @@ async def run_subagent(
 ) -> dict[str, Any]:
     context = runtime.context
     tools = _worker_tools(context, consumer=f"subagent-{id(state)}")
-    system_prompt = os.environ.get(
-        "GAIA2_SUBAGENT_SYSTEM_PROMPT",
-        (
-            "You are a GAIA2 worker. Solve the delegated subtask using the supplied "
-            "ARE tools. State is shared between workers and tool calls are serialized. "
-            "Never call the user-interface final-response tool; report findings and "
-            "actions back to the manager. SystemApp__wait_for_notification is the "
-            "canonical way to advance simulated time."
-        ),
+    # ARE's native system prompt, rendered by the proxy for this scenario; runs
+    # configured with `worker_system_prompt: legacy` get the earlier worker text.
+    system_prompt = (
+        context.get("worker_system_prompt")
+        or os.environ.get("GAIA2_SUBAGENT_SYSTEM_PROMPT")
+        or LEGACY_WORKER_SYSTEM_PROMPT
     )
     max_model_calls = _max_model_calls()
     middleware: list[AgentMiddleware] = [

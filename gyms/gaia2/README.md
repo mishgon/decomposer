@@ -136,6 +136,15 @@ user turn, so the Decomposer and the simple agent see the same task text. The
 manager's final message is sent to the user through
 `AgentUserInterface__send_message_to_user`.
 
+The workers act in the environment, so they get the system prompt ARE's native
+agent gets for the same scenario (environment rules, notification policy,
+today's date), rendered by the proxy with ARE's own code
+(`gyms/gaia2/worker_prompt.py`). Only the paragraph telling the agent to answer
+through `send_message_to_user` is replaced: a worker's final message goes back
+to the manager. `worker_system_prompt: legacy` reproduces runs made before this
+with the earlier worker text; run identity records the setting, and older output
+directories count as `legacy`.
+
 The registered experiments are:
 
 - `gemma4-e4b-sft-deepseek-e4b-v1-8k-non-thinking-gemma4-e4b-thinking`:

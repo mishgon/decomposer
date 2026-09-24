@@ -544,3 +544,15 @@ def test_environment_only_turn_keeps_ares_empty_task():
     assert messages[0] == {"role": "user", "content": "[TASK]: \n\n"}
     assert messages[1]["content"].startswith("Environment notifications updates:\n***\n[2026-01-01 09:00:00]")
 
+
+
+def test_public_context_records_only_a_hash_of_the_worker_prompt():
+    context = {**_context(), "worker_system_prompt": "ARE native prompt"}
+
+    public = service._public_context(context)
+
+    assert "worker_system_prompt" not in public
+    assert public["worker_system_prompt_sha256"] == (
+        __import__("hashlib").sha256(b"ARE native prompt").hexdigest()
+    )
+    assert "worker_system_prompt_sha256" not in service._public_context(_context())

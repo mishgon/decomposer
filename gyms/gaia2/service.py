@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import json
 import os
 import time
@@ -12,7 +13,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, TypedDict
+from typing import Any, NotRequired, TypedDict
 
 import uvicorn
 from fastapi import FastAPI, HTTPException
@@ -50,6 +51,8 @@ class EpisodeContext(TypedDict):
     scenario_id: str
     run_number: int | None
     notification_cursor: int
+    # ARE's native system prompt for the workers, rendered by the proxy per scenario.
+    worker_system_prompt: NotRequired[str]
 
 
 class CreateEpisodeRequest(BaseModel):
@@ -150,7 +153,7 @@ def _decomposer_system_prompt(config: dict[str, Any]) -> str:
 
 
 def _public_context(context: EpisodeContext) -> dict[str, Any]:
-    return {
+    public = {
         "tool_schemas": context["tool_schemas"],
         "broker_url": context["broker_url"],
         "session_token": "<redacted>",
@@ -159,6 +162,12 @@ def _public_context(context: EpisodeContext) -> dict[str, Any]:
         "run_number": context["run_number"],
         "notification_cursor": context["notification_cursor"],
     }
+    worker_system_prompt = context.get("worker_system_prompt")
+    if worker_system_prompt is not None:
+        public["worker_system_prompt_sha256"] = hashlib.sha256(
+            worker_system_prompt.encode("utf-8")
+        ).hexdigest()
+    return public
 
 
 def _subagent_summary(state: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
