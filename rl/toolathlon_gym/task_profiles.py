@@ -87,7 +87,7 @@ def main():
     if args.prepare:
         pool_path = ROOT / "task_pools" / f"{args.profile}.json"
         count = len(json.loads(pool_path.read_text())["tasks"])
-        subprocess.run([sys.executable, "-m", "training.rl.toolathlon_gym.prepare_pilot",
+        subprocess.run([sys.executable, "-m", "rl.toolathlon_gym.prepare_pilot",
                         "--output", str(args.prepare), "--task-pool", str(pool_path),
                         "--train-tasks", str(count), "--evaluate-training-tasks",
                         "--groups-per-task", str(args.groups_per_task)], check=True)

@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
-from gyms.toolathlon_gym.evaluate_sft import run
+from evals.toolathlon_gym.evaluate_sft import run
 
 
 class Resume(unittest.IsolatedAsyncioTestCase):
@@ -19,8 +19,8 @@ class Resume(unittest.IsolatedAsyncioTestCase):
                 subagent_url="https://router/v1", subagent_model="Qwen/Qwen3.5-4B",
                 subagent_host=None, min_free_gb=0, episode_timeout=10)
             call = AsyncMock(return_value={"status": "completed", "passed": False})
-            with patch("gyms.toolathlon_gym.evaluate_sft.episode", call), patch(
-                "gyms.toolathlon_gym.evaluate_sft.subprocess.check_output", side_effect=["revision", temporary]
+            with patch("evals.toolathlon_gym.evaluate_sft.episode", call), patch(
+                "evals.toolathlon_gym.evaluate_sft.subprocess.check_output", side_effect=["revision", temporary]
             ), patch.dict("os.environ", {"VLLM_API_KEY": "test"}):
                 await run(args)
             actual = json.loads((output / "manifest.json").read_text())

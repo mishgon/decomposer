@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-cd "$(dirname "$0")/../../.."
+cd "$(dirname "$0")/../.."
 export CUDA_VISIBLE_DEVICES="${SUBAGENT_GPU:-1}"
 export TOKENIZERS_PARALLELISM=false
 export PATH="$PWD/.venv-rl/bin:/usr/local/cuda/bin:$PATH"

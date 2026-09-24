@@ -57,13 +57,13 @@ Proposed files, with one clear responsibility each:
 
 | File | Responsibility |
 | --- | --- |
-| `training/rl/toolathlon_gym/README.md` | Exact setup, smoke, train, resume and export commands |
-| `training/rl/toolathlon_gym/setup.sh` | Reproducible isolated training environment and explicit required patches |
-| `training/rl/toolathlon_gym/train.sh` | One direct veRL command and resolved configuration capture |
-| `training/rl/toolathlon_gym/config.yaml` | One visible GRPO recipe, model paths, budgets and resource allocation |
-| `training/rl/toolathlon_gym/agent_loop.yaml` | Register the Decomposer AgentLoop |
-| `training/rl/toolathlon_gym/agent_loop.py` | veRL generation, raw token accounting, response masks, reward return |
-| `training/rl/toolathlon_gym/prepare_data.py` | Stable task IDs and task-level train/validation split |
+| `rl/toolathlon_gym/README.md` | Exact setup, smoke, train, resume and export commands |
+| `rl/toolathlon_gym/setup.sh` | Reproducible isolated training environment and explicit required patches |
+| `rl/toolathlon_gym/train.sh` | One direct veRL command and resolved configuration capture |
+| `rl/toolathlon_gym/config.yaml` | One visible GRPO recipe, model paths, budgets and resource allocation |
+| `rl/toolathlon_gym/agent_loop.yaml` | Register the Decomposer AgentLoop |
+| `rl/toolathlon_gym/agent_loop.py` | veRL generation, raw token accounting, response masks, reward return |
+| `rl/toolathlon_gym/prepare_data.py` | Stable task IDs and task-level train/validation split |
 | `gyms/toolathlon_gym/episode.py` | Reusable start, native score, stop lifecycle extracted from current runner |
 
 Use veRL's existing checkpoint/resume/export facilities where verified. Add a small export helper only if the tested stack needs it. Avoid an experiment registry, MLSpace launch framework, adaptive collection scheduler or a new generic OCC framework in the initial implementation.

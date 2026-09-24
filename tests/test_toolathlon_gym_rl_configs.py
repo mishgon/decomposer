@@ -11,7 +11,7 @@ from omegaconf import OmegaConf
 
 
 ROOT = Path(__file__).resolve().parents[1]
-CONFIGS = ROOT / "training/rl/toolathlon_gym"
+CONFIGS = ROOT / "rl/toolathlon_gym"
 
 
 class RecipeTests(unittest.TestCase):

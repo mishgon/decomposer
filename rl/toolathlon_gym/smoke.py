@@ -11,7 +11,7 @@ from types import SimpleNamespace
 from openai import AsyncOpenAI
 from transformers import AutoTokenizer
 
-from training.rl.toolathlon_gym.agent_loop import ToolathlonAgentLoop
+from rl.toolathlon_gym.agent_loop import ToolathlonAgentLoop
 
 
 class FrozenServer:

@@ -1,6 +1,6 @@
 import unittest
 
-from training.rl.toolathlon_gym.report import summarize
+from rl.toolathlon_gym.report import summarize
 
 
 def episode(task, reward, step=0, source="validation"):

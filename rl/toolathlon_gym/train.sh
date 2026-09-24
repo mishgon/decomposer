@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-cd "$(dirname "$0")/../../.."
+cd "$(dirname "$0")/../.."
 case "${1:-}" in
     full|cold-start|smoke) export RL_CONFIG="$1"; shift ;;
     *) echo "Usage: $0 {full|cold-start|smoke} [Hydra overrides...]" >&2; exit 2 ;;
@@ -9,9 +9,9 @@ esac
 : "${RL_ARTIFACTS:?Set RL_ARTIFACTS to the run directory}"
 test -f "$RL_DATA/train.parquet"
 test -f "$RL_DATA/evaluation.parquet"
-.venv-rl/bin/python -m training.rl.toolathlon_gym.task_profiles --check-data "$RL_DATA" --profile "$RL_CONFIG"
+.venv-rl/bin/python -m rl.toolathlon_gym.task_profiles --check-data "$RL_DATA" --profile "$RL_CONFIG"
 export RL_EPISODE_TIMEOUT="${RL_EPISODE_TIMEOUT:-2700}"
-source training/rl/toolathlon_gym/router.sh
+source rl/toolathlon_gym/router.sh
 export RL_ROOT="$PWD"
 export MODEL_CHECKPOINT_LINK="${MODEL_PATH:-$HOME/models/decomposer-4b-sft}"
 export MODEL_PATH
@@ -52,16 +52,16 @@ if [ -d "$checkpoint_root" ]; then
     export RAY_TMPDIR="${RAY_TMPDIR:-$(readlink -f "$checkpoint_root")/ray-tmp}"
     mkdir -p "$RAY_TMPDIR"
 fi
-.venv-rl/bin/python -m training.rl.toolathlon_gym.record_run --pid "$$" --directory "$RL_ARTIFACTS" "$@"
+.venv-rl/bin/python -m rl.toolathlon_gym.record_run --pid "$$" --directory "$RL_ARTIFACTS" "$@"
 exec > >(tee -a "$RL_ARTIFACTS/trainer.log") 2>&1
 finish() {
-    .venv-rl/bin/python -m training.rl.toolathlon_gym.throughput_cleanup "$RL_ARTIFACTS" || true
-    .venv-rl/bin/python -m training.rl.toolathlon_gym.report \
+    .venv-rl/bin/python -m rl.toolathlon_gym.throughput_cleanup "$RL_ARTIFACTS" || true
+    .venv-rl/bin/python -m rl.toolathlon_gym.report \
         --run "$RL_ARTIFACTS" --data "$RL_DATA" || true
-    .venv-rl/bin/python -m training.rl.toolathlon_gym.select_checkpoints --run "$RL_ARTIFACTS" || true
+    .venv-rl/bin/python -m rl.toolathlon_gym.select_checkpoints --run "$RL_ARTIFACTS" || true
 }
 trap finish EXIT
 .venv-rl/bin/python -m "$trainer_module" \
-    --config-path "${RL_CONFIG_DIR:-$PWD/training/rl/toolathlon_gym}" --config-name "$RL_CONFIG" \
+    --config-path "${RL_CONFIG_DIR:-$PWD/rl/toolathlon_gym}" --config-name "$RL_CONFIG" \
     'hydra.searchpath=[pkg://verl.trainer.config]' \
     "trainer.experiment_name=$(basename "$RL_ARTIFACTS")" "$@"

@@ -77,7 +77,7 @@ actor_rollout_ref:
         additional_config:
           gdn_prefill_backend: triton
     agent:
-      agent_loop_config_path: ${oc.env:RL_ROOT}/training/rl/toolathlon_gym/agent_loop.yaml
+      agent_loop_config_path: ${oc.env:RL_ROOT}/rl/toolathlon_gym/agent_loop.yaml
       default_agent_loop: toolathlon_decomposer
       num_workers: 2
     val_kwargs:

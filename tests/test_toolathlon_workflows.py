@@ -8,8 +8,8 @@ from langgraph.checkpoint.memory import InMemorySaver
 
 from gyms.toolathlon_gym import parallel, run as gym
 from evals.toolathlon_gym.summary import summarize
-from fixtures.conversation_subagent import ConversationTestModel
-from test_subagent_server import subagent_server
+from tests.fixtures.conversation_subagent import ConversationTestModel
+from tests.test_subagent_server import subagent_server
 
 
 @pytest.mark.parametrize("harness", ["react", "decomposer"])

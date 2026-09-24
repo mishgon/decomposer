@@ -14,7 +14,7 @@ trainer:
 
 async_training:
   concurrent_samples_per_replica: 2
-  teacher_manager_class: training.opd.toolathlon_gym.manager.HostedTeacherManager
+  teacher_manager_class: opd.toolathlon_gym.manager.HostedTeacherManager
 
 distillation:
   enabled: true

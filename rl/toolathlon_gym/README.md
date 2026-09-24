@@ -1,5 +1,14 @@
 # Toolathlon Gym RL
 
+RL lives in `rl/toolathlon_gym`; OPD lives in `opd/toolathlon_gym` and
+reuses this recipe and environment adapter. Shared task lifecycle code lives in
+`gyms/toolathlon_gym`. The resumable SFT-checkpoint evaluator is
+`python -m evals.toolathlon_gym.evaluate_sft`.
+
+The folder move does not change training settings or artifact locations. Update
+external shell aliases to the new launcher paths before starting a new run.
+Existing checkpoints and manifests are not rewritten.
+
 Three experiment configs, one fully async recipe and launcher:
 
 | Config | Task pool | Schedule |
@@ -25,7 +34,7 @@ scores; the >=0.9 threshold selects tasks, not training rewards.
 From the repository root on Hertz-2, prepare a dataset (no GPU needed):
 
 ```bash
-.venv-rl/bin/python -m training.rl.toolathlon_gym.task_profiles \
+.venv-rl/bin/python -m rl.toolathlon_gym.task_profiles \
   --profile smoke --prepare artifacts/training/toolathlon_gym/smoke-data-v2
 ```
 
@@ -39,7 +48,7 @@ Choose a free policy GPU and a fresh run directory:
 ```bash
 RL_DATA="$PWD/artifacts/training/toolathlon_gym/smoke-data-v2" \
 RL_ARTIFACTS="$PWD/artifacts/training/toolathlon_gym/smoke-01" \
-POLICY_GPU=2 ROLLOUT_GPU=3 bash training/rl/toolathlon_gym/train.sh smoke \
+POLICY_GPU=2 ROLLOUT_GPU=3 bash rl/toolathlon_gym/train.sh smoke \
   ray_kwargs.ray_init.num_cpus=64
 ```
 
@@ -123,7 +132,7 @@ The generation batch size is one task group, so no task rows are dropped.
 
 ## Infrastructure and outputs
 
-One-time setup: `bash training/rl/toolathlon_gym/setup.sh`, then:
+One-time setup: `bash rl/toolathlon_gym/setup.sh`, then:
 
 ```bash
 podman build -f gyms/toolathlon_gym/Dockerfile -t decomposer-toolathlon:latest .

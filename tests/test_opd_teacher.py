@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import Mock
 
-from training.opd.toolathlon_gym.teacher import aligned_logprobs
+from opd.toolathlon_gym.teacher import aligned_logprobs
 
 
 class TeacherTests(unittest.TestCase):

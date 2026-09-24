@@ -15,7 +15,7 @@ from verl.experimental.agent_loop.agent_loop import AgentLoopBase, AgentLoopOutp
 from decomposer.core import create_decomposer_agent
 from gyms.toolathlon_gym.episode import Episode
 from gyms.toolathlon_gym.cancel import cancel_subagents
-from training.rl.toolathlon_gym.policy import PolicyTokens, RolloutBudgetExceeded, VerlChatModel
+from rl.toolathlon_gym.policy import PolicyTokens, RolloutBudgetExceeded, VerlChatModel
 
 
 @register("toolathlon_decomposer")

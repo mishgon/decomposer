@@ -14,8 +14,8 @@ from types import SimpleNamespace
 import urllib.request
 
 from transformers import AutoTokenizer
-from training.rl.toolathlon_gym.agent_loop import ToolathlonAgentLoop
-from training.rl.toolathlon_gym.smoke import FrozenServer
+from rl.toolathlon_gym.agent_loop import ToolathlonAgentLoop
+from rl.toolathlon_gym.smoke import FrozenServer
 
 
 def save(path, value):
@@ -146,7 +146,7 @@ if __name__ == "__main__":
     parser.add_argument("--concurrency", type=int, choices=[40, 60, 80, 120, 194, 200, 300, 400, 500], required=True)
     parser.add_argument("--repetitions", type=int, choices=[1, 5], default=5)
     parser.add_argument("--all-tasks", action="store_true", help="Use distinct tasks from full Gym, one attempt each")
-    parser.add_argument("--pool", type=Path, default=Path("training/rl/toolathlon_gym/rl_task_pool.json"))
+    parser.add_argument("--pool", type=Path, default=Path("rl/toolathlon_gym/rl_task_pool.json"))
     parser.add_argument("--url", default="http://127.0.0.1:8026/v1")
     parser.add_argument("--model", default="decomposer-4b-sft")
     parser.add_argument("--gpu", type=int, default=2)

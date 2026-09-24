@@ -37,7 +37,7 @@ def main():
                 "revision": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
                 "policy_gpu": os.environ.get("CUDA_VISIBLE_DEVICES"), "overrides": overrides}
     (args.directory / "run.json").write_text(json.dumps(metadata, indent=2))
-    diff = subprocess.check_output(["git", "diff", "HEAD", "--", "training/rl/toolathlon_gym", "training/opd/toolathlon_gym",
+    diff = subprocess.check_output(["git", "diff", "HEAD", "--", "rl/toolathlon_gym", "opd/toolathlon_gym",
                                     "gyms/toolathlon_gym", "src/decomposer"], text=True)
     (args.directory / "source.diff").write_text(diff)
 

@@ -1,6 +1,6 @@
 import unittest
 
-from training.rl.toolathlon_gym.watch import (duration, estimate_eta, planned_evaluations, trend,
+from rl.toolathlon_gym.watch import (duration, estimate_eta, planned_evaluations, trend,
                                           manifest_files, run_plan, task_coverage)
 
 

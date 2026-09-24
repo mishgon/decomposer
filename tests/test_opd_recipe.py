@@ -18,7 +18,7 @@ class RecipeTests(unittest.TestCase):
         env = {'RL_ROOT': str(ROOT), 'RL_DATA': '/tmp/data', 'RL_ARTIFACTS': '/tmp/run',
                'MODEL_PATH': '/tmp/student', 'OPD_TEACHER_MODEL': 'teacher'}
         with patch.dict(os.environ, env), initialize_config_dir(
-                config_dir=str(ROOT / 'training/opd/toolathlon_gym'), version_base=None):
+                config_dir=str(ROOT / 'opd/toolathlon_gym'), version_base=None):
             config = compose(config_name=name, overrides=['hydra.searchpath=[pkg://verl.trainer.config]',
                                                           'trainer.experiment_name=recipe-test'])
             OmegaConf.resolve(config)
@@ -54,7 +54,7 @@ class RecipeTests(unittest.TestCase):
         self.assertLess(logits.grad[3].item(), 0.)
 
     def test_teacher_manager_routing_matches_verl(self):
-        from training.opd.toolathlon_gym.manager import HostedTeacherManager
+        from opd.toolathlon_gym.manager import HostedTeacherManager
         from verl.experimental.teacher_loop.teacher_manager import AsyncTeacherLLMServerManager
         config = self.config('smoke')
         clients = HostedTeacherManager(config).get_client()
@@ -64,11 +64,11 @@ class RecipeTests(unittest.TestCase):
 
 class ClientTests(unittest.IsolatedAsyncioTestCase):
     async def test_teacher_alignment_matches_verl_next_token_convention(self):
-        from training.opd.toolathlon_gym.manager import HostedTeacherClient
+        from opd.toolathlon_gym.manager import HostedTeacherClient
         client = HostedTeacherClient('/unused')
         client.tokenizer = object()
         with patch.dict(os.environ, {'RL_ARTIFACTS': '/tmp/opd-test'}), patch(
-                'training.opd.toolathlon_gym.manager.score', AsyncMock(return_value=[0., -.3, -.7])):
+                'opd.toolathlon_gym.manager.score', AsyncMock(return_value=[0., -.3, -.7])):
             result = await client.generate('test', [10, 11, 12], {'prompt_logprobs': 0})
         self.assertEqual(result.extra_fields['prompt_ids'], [[11], [12], [0]])
         self.assertEqual(result.extra_fields['prompt_logprobs'], [[-.3], [-.7], [0.]])
