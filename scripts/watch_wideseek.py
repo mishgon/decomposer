@@ -28,7 +28,7 @@ def subagent_counts(messages):
             result = json.loads(message.get('content', ''))
         except (ValueError, TypeError):
             continue
-        if name == 'spawn_subagent' and isinstance(result, dict) and result.get('subagent_run_id'):
+        if name in {'run', 'spawn_subagent'} and isinstance(result, dict) and result.get('subagent_run_id'):
             worker = result['subagent_run_id']
             spawned.add(worker)
             active.add(worker)
