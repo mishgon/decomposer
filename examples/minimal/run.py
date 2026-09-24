@@ -1,9 +1,8 @@
-import os
 import asyncio
 import logging
 from pathlib import Path
 
-from langchain_openai import ChatOpenAI
+from langchain_openrouter import ChatOpenRouter
 
 from decomposer.core import create_decomposer_agent
 from render_messages import render_decomposer_messages
@@ -12,29 +11,18 @@ logging.basicConfig(level=logging.INFO)
 
 
 async def main() -> None:
-    model = ChatOpenAI(
-        model="Qwen/Qwen3.6-35B-A3B-FP8",
-        base_url=os.environ["LLM_PROXY_URL"],
-        api_key=os.environ["LLM_PROXY_MASTER_KEY"],
-        temperature=1.0,
-        top_p=0.95,
-        presence_penalty=1.5,
-        max_tokens=16384,
-        use_responses_api=False,
-        extra_body={
-            "top_k": 20,
-            "min_p": 0.0,
-            "repetition_penalty": 1.0,
-            "chat_template_kwargs": {"enable_thinking": True},
-        },
-    )
     decomposer_agent = create_decomposer_agent(
-        decomposer_model=model,
+        decomposer_model=ChatOpenRouter(
+            model="deepseek/deepseek-v4-flash-0731",
+            temperature=1.0,
+            top_p=0.95,
+            reasoning={"effort": "max"},
+        ),
         subagent_types=[
             {
-                "subagent_type_id": "qwen3_6_35b_a3b_fp8_thinking",
-                "description": "Qwen3.6-35B-A3B-FP8 with thinking enabled, without tools.",
-                "assistant_id": "qwen3_6_35b_a3b_fp8_thinking",
+                "subagent_type_id": "qwen_3_5_4b_non_thinking",
+                "description": "Qwen3.5-4B with thinking disabled, without tools.",
+                "assistant_id": "qwen_3_5_4b_non_thinking",
                 "url": "http://127.0.0.1:2024",
             }
         ],
@@ -45,24 +33,16 @@ async def main() -> None:
                 {
                     "role": "user",
                     "content": (
-                        "An online service handles 10,000,000 requests per month and "
-                        "expects traffic to grow by 40%. It must choose the lowest-cost "
-                        "hosting plan that meets all requirements both now and after "
-                        "the growth: availability of at least 99.95%, p95 latency of at "
-                        "most 150 ms, and monthly cost of at most $5,200. Plan A has a "
-                        "$2,500 fixed monthly cost, costs $0.12 per 1,000 requests, has "
-                        "99.97% availability, and 110 ms p95 latency. Plan B has a "
-                        "$1,500 fixed monthly cost, costs $0.25 per 1,000 requests, has "
-                        "99.99% availability, and 135 ms p95 latency. Plan C has a "
-                        "$1,000 fixed monthly cost, costs $0.08 per 1,000 requests, has "
-                        "99.90% availability, and 90 ms p95 latency. Calculate the "
-                        "current and forecast monthly costs for every plan, assess every "
-                        "requirement, and recommend a plan. For the recommended plan, "
-                        "also determine the largest increase in its per-1,000-request "
-                        "price it could absorb at forecast traffic before either exceeding "
-                        "the budget or becoming more expensive than another plan that "
-                        "meets all requirements. Identify which limit binds. Show the "
-                        "calculations and summarize the result in a concise table."
+                        "Create a beginner quiz with three sections: Python, SQL, and "
+                        "machine learning. Each section must contain three multiple-choice "
+                        "questions: one conceptual question, one question about a short "
+                        "code snippet or concrete example, and one question about a "
+                        "common mistake.\n\n"
+                        "Each question must have exactly four options, one correct "
+                        "answer, and a one-sentence explanation. Keep each section "
+                        "under 300 words. Use self-contained examples, require no "
+                        "external resources, and finish with the complete quiz and "
+                        "answer key."
                     ),
                 }
             ]

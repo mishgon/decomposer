@@ -2,28 +2,46 @@
 
 ## Goal
 
-The goal of this project is to build an agent, called Decomposer, that solves tasks exclusively by decomposing them into subtasks and delegating them to subagents. Decomposer is based on a small language model trained with RL to optimize the quality, cost and speed of the whole system. Big dream is to build a real product: Decomposer orchestrating a pull of subagents based on [frontier open-weight models optimized for local usage](https://unsloth.ai/docs/models).
+Build Decomposer, an agent that orchestrates other agents to solve tasks faster, at lower cost, and with higher quality by:
+
+- Parallelizing work across multiple agents.
+- Routing tasks to cheaper models according to task difficulty.
+- Reducing each agent's context.
+- Handling subagent errors.
+
+We aim to demonstrate improvements in speed, cost, and task-solving quality over standalone agents on Gaia2, Toolathlon, BrowseComp, and WideSearch.
 
 ## Methodology
 
-At a high level, idea is similar to [Sakana Fugu](https://arxiv.org/abs/2606.21228), however, there are substantial differences. Sakana's Conductor model does not work in a ReAct loop. It produces a static decomposition once, subagents complete the subtasks and the last subagent's response is returned as the output. On the contrary, our Decomposer agent works in a standard tool-calling loop with two tools: `spawn_subagent` (spawns a new subagent and delegates a subtask to it) and `wait` (waits for subagents' reports). This enables a dynamic, adaptive decomposition. You could check out our design choices and implementation details in `src/decomposer/core.py` and `src/decomposer/core.py`.
+Decomposer uses a minimal harness: a standard tool-calling loop with four tools for orchestrating subagents:
+
+- `new(subagent_type_id) -> subagent_id`: creates a subagent of the specified type with an empty conversation history.
+- `fork(subagent_id) -> subagent_id`: creates a subagent of the same type with a copy of the source conversation and state. Subsequent conversations are independent; the external environment remains shared.
+- `run(subagent_id, prompt) -> subagent_run_id`: starts a run of an existing subagent and immediately returns its run ID. The same subagent can run multiple times, retaining its conversation history across runs.
+- `wait() -> [...]`: waits for at least one new run to finish and returns all newly available subagent responses since the previous `wait` call. Each result includes the run status and any error. Waiting is bounded by a timeout.
+
+This loop enables fully asynchronous orchestration and execution: Decomposer can launch newly unblocked subtasks without waiting for unrelated subagent runs to finish. It can also adapt its decomposition as subagent results arrive. See `src/decomposer/core.py` for the implementation.
+
+We plan to train the orchestration model in two stages:
+
+1. Off-policy distillation of a carefully prompted LLM into a smaller model.
+2. Reinforcement learning that optimizes final task-solving quality, speed, and cost.
 
 ## Get started
 
-The minimal example runs Decomposer with GLM-5.2 through OpenRouter and one
-Qwen3.6-35B-A3B-FP8 subagent through a local vLLM and LangGraph server. From
-the repository root, install the development environment and start vLLM:
+The minimal example runs Decomposer with DeepSeek V4 Flash 0731 through OpenRouter and
+Qwen3.5-4B non-thinking workers through local vLLM and LangGraph servers.
+From the repository root, install the development environment and start vLLM:
 
 ```bash
 uv sync
-scripts/vllm_serve_qwen3_6_35b_a3b_fp8.sh
+scripts/vllm/serve_qwen_3_5_4b.sh
 ```
 
 With `OPENROUTER_API_KEY` set, start the subagent server in another terminal:
 
 ```bash
-cd examples/minimal
-uv run langgraph dev --no-browser
+scripts/subagents/serve.sh
 ```
 
 Then run Decomposer from the repository root:
@@ -35,32 +53,25 @@ uv run python examples/minimal/run.py
 The final answer is printed and the complete message history is saved to
 `examples/minimal/messages.md`. See `examples/minimal/README.md` for details.
 
-## Plan
-
-The current plan is:
-- [x] Use NeMo-Gym (installed as a git submodule under `external/Gym`) as a framework for Decomposer's evaluation and traces collection on different environments. See our integration of the Decomposer agent into NeMo-Gym framework in `external/Gym/responses_api_agents/decomposer_agent`.
-- [ ] Run Decomposer agent based on Qwen3.6-35B-A3B-FP8 or Gemma-4-26B-A4B-IT with subagents based on Gemma-4-E2B (thinking / non-thinking), LFM2.5-1.2B-Instruct and LFM2.5-1.2B-Thinking (4 subagent types in total) on Reasoning Gym, and Calendar envs. Set thinking subagents’ thinking budget to 8192 tokens; do not set one for Decomposer. Do not employ Qwen3.5-2B-based subagent because it overthinks heavily.
-- [ ] Work on the Decomposer's system prompt and few-shot examples in order to achieve reasonable traces on the *train* splits.
-- [ ] Evaluate on the *train* splits in comparison to baselines based on individual subagents' models.
-- [ ] Collect traces and run SFT of Qwen3.5-0.8B / 2B / 4B on them. Evaluate resulting Decomposer-0.8B / 2B / 4B on *test* splits.
-- [ ] Further train Decomposer-0.8B / 2B / 4B with RL and compare with SFT checkpoints.
-- [ ] At some moment, start scaling to larger models and harder benchmarks. Run Decomposer agent based on Qwen3.6-35B-A3B-FP8 or Gemma-4-26B-A4B-IT with subagents based on Qwen3.6-35B-A3B-FP8 (thinking / non-thinking), Gemma-4-26B-A4B-IT (thinking / non-thinking) (4 subagent types in total) on GPQA-Diamond, BrowseComp and Finance Sec Search envs.
-
 ## Repo structure
 
 - `src/decomposer/`: core Decomposer package. This should stay benchmark- and training-agnostic.
 - `examples/`: runnable examples of configuring and using Decomposer.
-- `evals/`: evaluation runners and benchmark-specific adapters.
-- `training/`: training and finetuning workflows.
-- `data/`: source code for preparing datasets used by training or evals.
-- `artifacts/`: downloaded data, saved model checkpoints, training logs and evaluation metrics ignored by git.
+- `gyms/<gym_name>/`: reusable environment code for loading tasks, exposing tools, running a ReAct agent or Decomposer on one task or several tasks in parallel, and native result checking.
+- `evals/<gym_name>/`: scripts for evaluating agents on all tasks in an environment, aggregating metrics, and saving traces for error analysis.
+- `sft/<gym_name>/`: code for SFT traces collection on a gym. Shared SFT training code lives alongside these directories in `sft/`.
+- `opd/<gym_name>/`: code for on-policy distillation (OPD) on a gym.
+- `rl/<gym_name>/`: code for reinforcement learning (RL) on a gym.
 - `external/`: third-party repositories, submodules, or vendored code.
 - `tests/`: lightweight checks for reusable code and harness utilities.
 - `docs/`: design notes, experiment notes, and persistent documentation.
 
+Evaluation and training workflows reuse `gyms/<gym_name>/`.
+
 ## Development setup
 
-Clone `decomposer` repo with `Gym` as submodule and switch to the required branches in both `decomposer` and `Gym`:
+Clone `decomposer` with its submodules and switch to the required branches in `decomposer` and `Gym`:
+
 ```
 git clone --recurse-submodules git@github.com:mishgon/decomposer.git
 
@@ -69,6 +80,7 @@ git -C external/Gym switch <Gym-branch-name>
 ```
 
 The root project and Gym intentionally use separate environments and locks; do not combine them into a uv workspace:
+
 ```bash
 # Decomposer package: root .venv and uv.lock
 uv sync

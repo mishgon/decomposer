@@ -1,3 +1,6 @@
 [submodule "external/Gym"]
 	path = external/Gym
 	url = https://gitlab.2a2i.org/optimal-cognitive-core/Gym.git
+[submodule "external/toolathlon_gym"]
+	path = external/toolathlon_gym
+	url = https://github.com/eigent-ai/toolathlon_gym

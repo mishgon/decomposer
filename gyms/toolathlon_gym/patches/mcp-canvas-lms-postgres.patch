@@ -1,0 +1,23 @@
+diff --git a/src/client.ts b/src/client.ts
+--- a/src/client.ts
++++ b/src/client.ts
+@@ -1,6 +1,7 @@
+ // src/client.ts
+ 
+ import axios, { AxiosInstance, AxiosError } from 'axios';
++import { PgCanvasRouter } from './pg-canvas-router.js';
+ import { 
+   CanvasCourse, 
+   CanvasAssignment,
+@@ -54,6 +55,11 @@ export class CanvasClient {
+     this.maxRetries = options?.maxRetries ?? 3;
+     this.retryDelay = options?.retryDelay ?? 1000;
+ 
++    if (process.env.PG_HOST) {
++      this.client = new PgCanvasRouter() as unknown as AxiosInstance;
++      return;
++    }
++
+     this.client = axios.create({
+       baseURL: this.baseURL,
+       headers: {

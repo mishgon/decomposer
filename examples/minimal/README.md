@@ -1,22 +1,21 @@
 # Minimal example
 
 This example runs Decomposer directly and exposes one general-purpose subagent
-through a local LangGraph server. Decomposer uses GLM-5.2 through OpenRouter;
-the subagent uses Qwen3.6-35B-A3B-FP8 through a local vLLM server.
+through a local LangGraph server. Decomposer uses DeepSeek V4 Flash 0731 through OpenRouter;
+the subagent uses Qwen3.5-4B with thinking disabled through a local vLLM server.
 
 Set `OPENROUTER_API_KEY` in the environment before running the example.
 
 From the repository root, start vLLM for the subagent:
 
 ```bash
-scripts/vllm_serve_qwen3_6_35b_a3b_fp8.sh
+scripts/vllm/serve_qwen_3_5_4b.sh
 ```
 
-In another terminal, start the subagent server:
+In another terminal, start the subagent server from the repository root:
 
 ```bash
-cd examples/minimal
-uv run langgraph dev --no-browser
+scripts/subagents/serve.sh
 ```
 
 Then run Decomposer from the repository root:
