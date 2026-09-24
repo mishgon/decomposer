@@ -1,0 +1,6 @@
+# Refresh application code on an existing, validated Toolathlon runtime image.
+# Pass a pinned image ID; this does not install or change dependencies.
+ARG RUNTIME_IMAGE
+FROM ${RUNTIME_IMAGE}
+COPY src/decomposer /opt/subagents/lib/python3.12/site-packages/decomposer
+COPY gyms/toolathlon_gym /opt/decomposer/gyms/toolathlon_gym

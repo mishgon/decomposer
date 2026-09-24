@@ -25,10 +25,10 @@ from decomposer.core import create_decomposer_agent
 
 try:
     from .usage import build_usage_summary
-    from .subagents.model_config import generation_config
+    from .subagents.model_config import generation_config, model_http_client
 except ImportError:  # Executed directly as a script.
     from usage import build_usage_summary
-    from subagents.model_config import generation_config
+    from subagents.model_config import generation_config, model_http_client
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -426,6 +426,17 @@ def run_episode(args) -> None:
             "LLM_PROXY_MASTER_KEY for the Decomposer model"
         )
 
+    proxy_mount = []
+    proxy_socket = os.environ.get("LLM_PROXY_UNIX_SOCKET")
+    if proxy_socket:
+        socket_path = Path(proxy_socket).resolve()
+        if not socket_path.is_socket():
+            raise RuntimeError(f"Model proxy socket is missing: {socket_path}")
+        if not args.subagent_base_url:
+            raise ValueError("A model proxy socket requires hosted subagents")
+        proxy_mount = ["--volume", f"{socket_path.parent}:/run/model-proxy:ro",
+                       "--env", f"LLM_PROXY_UNIX_SOCKET=/run/model-proxy/{socket_path.name}"]
+
     _docker("image", "inspect", args.image)
 
     episode_id = args.episode_id or (
@@ -596,6 +607,7 @@ def run_episode(args) -> None:
                 + (args.subagent_base_url or f"http://host.docker.internal:{args.subagent_port}/v1")
             ),
             "--env", "VLLM_API_KEY",
+            *proxy_mount,
             *postgres_env,
             "--volume",
             f"{episode_dir.resolve()}:/artifacts/data",
@@ -704,6 +716,7 @@ def run_episode(args) -> None:
             decomposer_model = ChatVLLM(
                 model=args.model,
                 base_url=llm_proxy_url,
+                http_async_client=model_http_client(),
                 api_key=llm_proxy_key,
                 temperature=1.0,
                 top_p=0.95,
@@ -713,7 +726,7 @@ def run_episode(args) -> None:
                 disable_streaming=True,
                 use_responses_api=False,
                 preserve_reasoning=True,
-                parse_qwen_xml_tool_calls=True,
+                parse_qwen_xml_tool_calls=os.environ.get("DECOMPOSER_PARSE_QWEN_XML", "1") == "1",
                 extra_body={
                     "top_k": 20,
                     "min_p": 0.0,
@@ -777,6 +790,8 @@ def run_episode(args) -> None:
                     "model": args.model if args.harness == "decomposer" else args.subagent_api_model,
                     "decomposer_model": args.model if args.harness == "decomposer" else None,
                     "teacher_backend": teacher_backend,
+                    "model_proxy_unix_socket": proxy_socket,
+                    "parse_qwen_xml_tool_calls": os.environ.get("DECOMPOSER_PARSE_QWEN_XML", "1") == "1",
                     "openrouter_provider": openrouter_provider,
                     "reasoning_effort": reasoning_effort if args.harness == "decomposer" else "none",
                     "decomposer_generation_config": {

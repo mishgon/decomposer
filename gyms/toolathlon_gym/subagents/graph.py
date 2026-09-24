@@ -1,12 +1,11 @@
 import os
 
-import httpx
 from decomposer.prompts import SUBAGENT_SYSTEM_PROMPT
 from decomposer.chat_vllm import ChatVLLM
 from langchain.agents import create_agent
 from langgraph.graph.state import CompiledStateGraph
 from model_logging import durable_model_call_log
-from model_config import generation_config
+from model_config import generation_config, model_http_client
 from webapp import get_tools, truncate_mcp_tool_output
 
 
@@ -42,9 +41,7 @@ def _create_subagent(
         api_key=os.environ.get("VLLM_API_KEY", "EMPTY"),
         timeout=REQUEST_TIMEOUT_SECONDS,
         max_retries=REQUEST_MAX_RETRIES,
-        http_async_client=httpx.AsyncClient(
-            limits=httpx.Limits(max_keepalive_connections=0)
-        ),
+        http_async_client=model_http_client(),
         disable_streaming=True,
         use_responses_api=False,
         **generation_config(model_id, thinking=thinking),

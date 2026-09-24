@@ -1,5 +1,20 @@
 """Generation settings shared by subagents and trace metadata."""
 
+import os
+
+import httpx
+
+
+def model_http_client() -> httpx.AsyncClient:
+    """Optional private socket route; the URL still controls TLS verification."""
+    socket = os.environ.get("LLM_PROXY_UNIX_SOCKET")
+    limits = httpx.Limits(max_keepalive_connections=0)
+    return httpx.AsyncClient(
+        transport=httpx.AsyncHTTPTransport(uds=socket, limits=limits) if socket else None,
+        limits=limits,
+        trust_env=not bool(socket),
+    )
+
 
 def generation_config(model: str, *, thinking: bool = False) -> dict:
     if "qwen3.5" in model.lower() and not thinking:

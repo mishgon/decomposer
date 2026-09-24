@@ -23,6 +23,39 @@ No local GPU server is started for hosted workers. Add
 `--subagent-host hostname:IP` if containers need an explicit DNS mapping.
 Infrastructure-specific inference launchers are isolated under `inference/`.
 
+### Private Router Tunnel
+
+When inference is reachable only through an SSH tunnel, expose its loopback
+listener as a private Unix socket:
+
+```bash
+python -m sft.toolathlon_gym.inference.socket_relay \
+  --socket "$HOME/.local/share/lmrouter-relay/router.sock" --port 18443
+```
+
+Set `LLM_PROXY_UNIX_SOCKET` to that path. The runner mounts its directory
+read-only into task containers. HTTP clients still use the original HTTPS URL
+and verify its certificate; the relay never decrypts traffic or stores keys.
+The directory should contain only the relay socket. Run the relay separately
+from collection and keep it alive when resuming.
+
+`collect_hosted.sh` selects Flash Next thinking and Qwen4B-unlooped non-thinking
+with native tool calling. It loads credentials from `LMROUTER_ENV` and requires
+a validated `COLLECTION_IMAGE` plus `LLM_PROXY_UNIX_SOCKET`. Example:
+
+```bash
+bash sft/toolathlon_gym/collect_hosted.sh --all --adaptive -n 1 --concurrency 8
+```
+
+This profile disables the legacy XML workaround and OpenRouter fallback.
+`DECOMPOSER_PARSE_QWEN_XML=0` selects native tool calling in the generic runner;
+the compatibility default remains unchanged for older deployments.
+
+`inference/Dockerfile.refresh` can refresh application code on a pinned,
+previously validated Python 3.12 runtime image without downloading dependencies.
+It preserves that image's system packages and task-service patches. Record both
+the base image ID and the resulting image ID when using it.
+
 ## Coverage Policy
 
 Each wave launches one attempt per task with no qualifying trace. A native pass
