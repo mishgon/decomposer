@@ -2175,17 +2175,6 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
             raise RuntimeError("HTTPS_PROXY or https_proxy is required for OpenRouter")
     check_judge(judge_endpoint, judge_key)
 
-    comparison_baselines: list[dict[str, Any]] | None = None
-    if (
-        spec.name == "execution"
-        and args.partition == "test"
-        and args.limit is None
-        and args.num_repeats == 3
-    ):
-        from gyms.gaia2.comparison import collect_baseline_summaries
-
-        comparison_baselines = collect_baseline_summaries()
-
     archived = archive_attempt(directory) if directory.exists() else None
     directory.mkdir(parents=True, exist_ok=True)
     logs = directory / "logs"
@@ -2375,17 +2364,6 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
             scenario_ids=all_scenario_ids,
         )
         atomic_json(directory / "metrics.json", metrics)
-        if comparison_baselines is not None:
-            from gyms.gaia2.comparison import build_heldout_comparison
-
-            comparison = build_heldout_comparison(
-                experiment,
-                directory,
-                baselines=comparison_baselines,
-            )
-            comparison_path = directory / "comparison.json"
-            atomic_json(comparison_path, comparison)
-            status["comparison_report"] = str(comparison_path)
         gpu_metadata = (
             subprocess.run(
                 [

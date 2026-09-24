@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from gyms.gaia2.comparison import summarize_result
+from evals.gaia2.comparison import summarize_result
 from gyms.gaia2.experiments import SIMPLE_EXPERIMENT
 
 

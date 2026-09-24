@@ -49,6 +49,9 @@ from gyms.gaia2.run import (  # noqa: E402
 )
 from gyms.gaia2.staging import git, stage_revision  # noqa: E402
 
+# The script each MLSpace job runs, relative to the staged repository. evals submits
+# its own entrypoint, which runs this one and then computes metrics.
+RUNNER_ENTRYPOINT = ("gyms", "gaia2", "run.py")
 _TAG_RE = re.compile(r"[#@]\S+")
 _AUTHOR_RE = re.compile(r"[A-Za-z0-9_.-]+")
 _PROXY_ENV_VARIABLES = (
@@ -160,10 +163,11 @@ def build_job_script(
     rollout_offset: int = 0,
     prompt_profile: str | None = None,
     domain: Gaia2Domain = DOMAIN,
+    entrypoint: Sequence[str] = RUNNER_ENTRYPOINT,
 ) -> str:
     command = [
         str(PROJECT_VENV / "bin" / "python"),
-        str(staged_workdir / "gyms" / "gaia2" / "run.py"),
+        str(staged_workdir.joinpath(*entrypoint)),
         "--workdir",
         str(staged_workdir),
         "--experiment",
@@ -218,6 +222,7 @@ def build_payload(
     rollout_offset: int = 0,
     prompt_profile: str | None = None,
     domain: Gaia2Domain = DOMAIN,
+    entrypoint: Sequence[str] = RUNNER_ENTRYPOINT,
 ) -> dict[str, Any]:
     if experiment.num_gpus == 0:
         raise ValueError(
@@ -250,6 +255,7 @@ def build_payload(
             rollout_offset=rollout_offset,
             prompt_profile=prompt_profile,
             domain=domain,
+            entrypoint=entrypoint,
         ),
         "job_desc": build_job_desc(
             experiment,
@@ -337,7 +343,12 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: Sequence[str] | None = None) -> int:
+def main(
+    argv: Sequence[str] | None = None,
+    *,
+    entrypoint: Sequence[str] = RUNNER_ENTRYPOINT,
+) -> int:
+    """Submit runs; `entrypoint` is the repo-relative script each job executes."""
     parser = build_parser()
     args = parser.parse_args(argv)
     spec = get_domain_spec(args.domain)
@@ -505,6 +516,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             rollout_offset=args.rollout_offset,
             prompt_profile=args.prompt_profile,
             domain=spec.name,
+            entrypoint=entrypoint,
         )
         payload["region"] = options["region"]
         if normalize_job_desc(payload["job_desc"]) in in_progress:

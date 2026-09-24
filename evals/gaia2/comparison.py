@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -189,6 +189,17 @@ def summarize_result(
             "pass_pow_3": pass_pow_n,
         },
     }
+
+
+def applies(marker: Mapping[str, Any]) -> bool:
+    """Whether a finished run is a full held-out execution evaluation this comparison covers."""
+    return (
+        marker.get("purpose", "evaluation") == "evaluation"
+        and marker.get("domain", "execution") == "execution"
+        and marker.get("partition") == "test"
+        and marker.get("limit") is None
+        and marker.get("num_repeats") == COMPARISON_NUM_REPEATS
+    )
 
 
 def collect_baseline_summaries() -> list[dict[str, Any]]:

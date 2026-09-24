@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 
-from gyms.gaia2.trace_stats import (
+from evals.gaia2.trace_stats import (
     Lifecycle,
     SYSTEMS,
     resolve_run,
@@ -211,7 +211,7 @@ def test_reasoning_and_cached_tokens_are_kept_when_the_provider_reports_them():
     # A remote reasoning API fills in detail a local non-thinking vLLM omits:
     # on DeepSeek roughly half the output is reasoning and most of the input is
     # served from the provider's cache, which is the whole cost story for it.
-    from gyms.gaia2.trace_stats import structural_parallelism
+    from evals.gaia2.trace_stats import structural_parallelism
 
     message = _usage(
         input_tokens=2629,

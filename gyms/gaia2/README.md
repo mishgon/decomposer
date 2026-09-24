@@ -236,6 +236,12 @@ truncated tool call. A simple-agent or manager overflow makes that rollout a
 recorded failure; a subagent overflow is returned to the manager as an error
 report. Subsequent benchmark rollouts still run normally.
 
+The commands below run the gym directly. For an evaluation with metrics in one
+command, use `python -m evals.gaia2.run` with the same flags: it runs this
+runner and then writes `eval_metrics.json` (pass@1/@k/^k) into the run
+directory. `python -m evals.gaia2.run --metrics-only <run_dir>` recomputes them
+for a finished run.
+
 ```bash
 # Decomposer, three attempts per scenario.
 .venv/bin/python -m gyms.gaia2.run \
@@ -425,6 +431,9 @@ a systemic failure and does not create `.eval_done.json`.
 
 ## Submit MLSpace jobs
 
+`python -m evals.gaia2.submit` takes the same flags as the launcher below for
+evaluations; each job then runs `evals/gaia2/run.py` and computes metrics too.
+
 ```bash
 /home/sukhorukov/.venv-mls/bin/python \
   -m gyms.gaia2.run_eval \
@@ -493,7 +502,8 @@ nothing.
 Held-out evaluation uses `--purpose evaluation --partition test`. It runs only
 the 50 scenarios from universes 25, 26, and 28 and writes under the pinned
 split namespace without changing the existing full-validation result paths.
-For an n=3 complete test run, `comparison.json` reuses and checksum-pins the
+For an n=3 complete test run evaluated through `evals.gaia2.run`,
+`comparison.json` reuses and checksum-pins the
 held-out rows from the completed full-validation baselines; it does not rerun
 or rejudge them.
 

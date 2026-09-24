@@ -24,7 +24,7 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from gyms.gaia2.trace_stats import (  # noqa: E402
+from evals.gaia2.trace_stats import (  # noqa: E402
     Lifecycle,
     _outcomes,
     parse_langgraph_log,
