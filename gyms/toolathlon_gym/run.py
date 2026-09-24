@@ -25,10 +25,10 @@ from decomposer.core import create_decomposer_agent
 
 try:
     from .usage import build_usage_summary
-    from .subagents.model_config import generation_config, model_http_client
+    from .subagents.model_config import generation_config, model_http_client, teacher_generation_config
 except ImportError:  # Executed directly as a script.
     from usage import build_usage_summary
-    from subagents.model_config import generation_config, model_http_client
+    from subagents.model_config import generation_config, model_http_client, teacher_generation_config
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -731,27 +731,19 @@ def run_episode(args) -> None:
             )
             teacher_backend = "vllm"
         elif llm_proxy_url:
+            teacher_settings = teacher_generation_config(args.model)
             decomposer_model = ChatVLLM(
                 model=args.model,
                 base_url=llm_proxy_url,
                 http_async_client=model_http_client(),
                 api_key=llm_proxy_key,
-                temperature=1.0,
-                top_p=0.95,
+                **teacher_settings,
                 **max_tokens_kwargs,
                 timeout=request_timeout_seconds,
                 max_retries=openrouter_max_retries,
                 disable_streaming=True,
                 use_responses_api=False,
-                preserve_reasoning=True,
                 parse_qwen_xml_tool_calls=os.environ.get("DECOMPOSER_PARSE_QWEN_XML", "1") == "1",
-                extra_body={
-                    "top_k": 20,
-                    "min_p": 0.0,
-                    "repetition_penalty": 1.0,
-                    "include_reasoning": True,
-                    "chat_template_kwargs": {"enable_thinking": True},
-                },
             )
             teacher_backend = "llm_proxy"
         else:
@@ -811,8 +803,11 @@ def run_episode(args) -> None:
                     "model_proxy_unix_socket": proxy_socket,
                     "parse_qwen_xml_tool_calls": os.environ.get("DECOMPOSER_PARSE_QWEN_XML", "1") == "1",
                     "openrouter_provider": openrouter_provider,
-                    "reasoning_effort": reasoning_effort if args.harness == "decomposer" else "none",
-                    "decomposer_generation_config": {
+                    "reasoning_effort": (
+                        teacher_settings.get("reasoning_effort") if teacher_backend == "llm_proxy"
+                        else reasoning_effort if teacher_backend == "openrouter" else None
+                    ),
+                    "decomposer_generation_config": teacher_settings if teacher_backend == "llm_proxy" else {
                         "temperature": 1.0,
                         "top_p": 0.95,
                         "reasoning": reasoning,

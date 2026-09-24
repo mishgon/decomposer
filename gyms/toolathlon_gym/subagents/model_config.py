@@ -43,3 +43,21 @@ def generation_config(model: str, *, thinking: bool = False) -> dict:
         "preserve_reasoning": thinking,
         "extra_body": extra_body,
     }
+
+
+def teacher_generation_config(model: str) -> dict:
+    settings = {
+        "temperature": 1.0,
+        "top_p": 0.95,
+        "preserve_reasoning": True,
+        "extra_body": {
+            "top_k": 20,
+            "min_p": 0.0,
+            "repetition_penalty": 1.0,
+            "include_reasoning": True,
+            "chat_template_kwargs": {"enable_thinking": True},
+        },
+    }
+    if "qwen3.8-flash-next" in model.lower():
+        settings.update(reasoning_effort="low", presence_penalty=0.0)
+    return settings

@@ -12,7 +12,7 @@ import pytest
 
 from gyms.toolathlon_gym import run, usage
 from sft.toolathlon_gym import collection as batch
-from gyms.toolathlon_gym.subagents.model_config import generation_config
+from gyms.toolathlon_gym.subagents.model_config import generation_config, teacher_generation_config
 
 
 def test_qwen_settings_preserve_upstream_profile() -> None:
@@ -23,6 +23,24 @@ def test_qwen_settings_preserve_upstream_profile() -> None:
     assert settings["extra_body"]["top_k"] == 20
     assert "reasoning_effort" not in settings["extra_body"]
     assert settings["extra_body"]["chat_template_kwargs"] == {"enable_thinking": False}
+
+
+def test_flash_next_teacher_sends_explicit_low_reasoning():
+    from decomposer.chat_vllm import ChatVLLM
+    settings = teacher_generation_config("Qwen/Qwen3.8-Flash-Next-NVFP4")
+    model = ChatVLLM(model="Qwen/Qwen3.8-Flash-Next-NVFP4",
+                    api_key="test", base_url="https://router.test/v1", **settings)
+    payload = model._get_request_payload("test")
+    assert payload["reasoning_effort"] == "low"
+    assert payload["temperature"] == 1.0
+    assert payload["top_p"] == .95
+    assert payload["presence_penalty"] == 0.0
+    assert payload["extra_body"] == {
+        "top_k": 20, "min_p": 0.0, "repetition_penalty": 1.0,
+        "include_reasoning": True, "chat_template_kwargs": {"enable_thinking": True},
+    }
+    assert model.preserve_reasoning is True
+    assert "max_tokens" not in payload
 
 
 def test_gemma_settings_preserve_collection_profile() -> None:

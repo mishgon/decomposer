@@ -39,7 +39,7 @@ and verify its certificate; the relay never decrypts traffic or stores keys.
 The directory should contain only the relay socket. Run the relay separately
 from collection and keep it alive when resuming.
 
-`collect_hosted.sh` selects Flash Next thinking and Qwen4B-unlooped non-thinking
+`collect_hosted.sh` selects Flash Next low-thinking and Qwen4B-unlooped non-thinking
 with native tool calling. It loads credentials from `LMROUTER_ENV` and requires
 a validated `COLLECTION_IMAGE` plus `LLM_PROXY_UNIX_SOCKET`. Example:
 
