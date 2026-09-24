@@ -51,8 +51,8 @@ class ToolathlonAgentLoop(AgentLoopBase):
                               response_budget=self.rollout_config.response_length,
                               log_path=directory / "policy_calls.jsonl")
         agent = create_decomposer_agent(
-            VerlChatModel(tokens=tokens),
-            [{"subagent_type_id": "configured_non_thinking",
+            decomposer_model=VerlChatModel(tokens=tokens),
+            subagent_types=[{"subagent_type_id": "configured_non_thinking",
               "description": "Qwen3.5-4B non-thinking agent with all task tools.",
               "assistant_id": "configured_non_thinking", "url": episode.url}],
             subagent_recursion_limit=410, checkpointer=InMemorySaver())
@@ -73,7 +73,7 @@ class ToolathlonAgentLoop(AgentLoopBase):
             # Freeze unfinished subagents before native scoring of partial state.
             from langgraph_sdk import get_client
             client = get_client(url=episode.url)
-            await cancel_subagents(client, state.get("subagent_runs", {}))
+            await cancel_subagents(client, state.get("subagent_runs", {}), state.get("subagents", {}))
             try:
                 evaluation = await asyncio.to_thread(episode.score)
             except Exception:
@@ -96,6 +96,7 @@ class ToolathlonAgentLoop(AgentLoopBase):
                      "elapsed_seconds": time.time() - started, "stop_reason": stop_reason,
                      "messages": [message_to_dict(m) for m in state.get("messages", [])],
                      "subagent_runs": state.get("subagent_runs", {}),
+                     "subagents": state.get("subagents", {}),
                      "policy_calls": tokens.calls, "prompt_ids": tokens.prompt_ids,
                      "response_ids": tokens.response_ids, "response_mask": tokens.mask,
                      "response_logprobs": tokens.logprobs, "weight_versions": tokens.extra}
