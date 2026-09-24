@@ -23,7 +23,7 @@ def main(args):
             state.update(active=name, pending=state['pending'][1:])
             save(root / 'sequence.json', state)
             with (root / f'{name}.log').open('x') as log:
-                result = subprocess.run([sys.executable, '-m', 'gyms.wideseek.run',
+                result = subprocess.run([sys.executable, '-m', 'evals.wideseek.run',
                     '--mode', mode, '--output', str(root / name), '--limit', str(args.limit),
                     '-n', str(args.n), '--concurrency', str(args.concurrency)], stdout=log, stderr=subprocess.STDOUT)
             if result.returncode:
