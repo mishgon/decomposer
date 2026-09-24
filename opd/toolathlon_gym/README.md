@@ -24,7 +24,7 @@ Set `OPD_TEACHER_URL` to the OpenAI-compatible `/v1` endpoint,
 `OPD_TEACHER_HOST=hostname:address` overrides DNS while preserving TLS verification.
 
 ```bash
-python -m training.opd.toolathlon_gym.teacher \
+python -m opd.toolathlon_gym.teacher \
   --trace /path/to/episode/trace.json \
   --tokenizer /path/to/decomposer-4b-sft \
   --output artifacts/training/toolathlon_gym_opd/preflight/teacher-score.json
@@ -48,20 +48,20 @@ hook changes no behavior unless the OPD config enables it. No teacher GPU is
 allocated: the client uses lmrouter.
 
 ```bash
-bash training/opd/toolathlon_gym/setup.sh
+bash opd/toolathlon_gym/setup.sh
 export POLICY_GPU=0 ROLLOUT_GPU=1  # choose two actually free GPUs
 export MODEL_PATH=/path/to/decomposer-4b-sft
 export RL_GYM_IMAGE=your-verified-gym-image-id
 export RL_DATA="$PWD/artifacts/training/toolathlon_gym_opd/smoke-data"
 export RL_ARTIFACTS="$PWD/artifacts/training/toolathlon_gym_opd/smoke"
 export RAY_TMPDIR=/path/to/short/ray-temp
-bash training/opd/toolathlon_gym/train.sh smoke
+bash opd/toolathlon_gym/train.sh smoke
 ```
 
 Monitor the latest OPD run separately from RL:
 
 ```bash
-bash training/opd/toolathlon_gym/watch-opd.sh
+bash opd/toolathlon_gym/watch-opd.sh
 # Add --once for a single snapshot, or --run /path/to/run for a specific run.
 ```
 
@@ -78,7 +78,7 @@ Future smoke datasets use observed partial rewards (historical means 0.371 and
 prepare a new dataset directory rather than overwriting or reusing the old pool.
 
 Both configs share the optimizer/model/harness recipe by linking `rl_recipe.yaml`
-to `training/rl/toolathlon_gym/full.yaml`. They differ only in experiment name
+to `rl/toolathlon_gym/full.yaml`. They differ only in experiment name
 and selected task pool. Shared settings include all-linear LoRA 32/64,
 learning rate 1.5e-5, two optimizer passes, sequence-mean/token-mean aggregation,
 45-minute episodes, checkpointing every update and evaluation every eight

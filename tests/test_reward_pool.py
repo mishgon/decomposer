@@ -1,4 +1,4 @@
-from training.rl.toolathlon_gym.prepare_reward_pool import build_pool
+from rl.toolathlon_gym.prepare_reward_pool import build_pool
 
 
 def test_pool_boundaries_and_infrastructure():
