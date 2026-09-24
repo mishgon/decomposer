@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from training.sft.qwen35_fast_runtime import (
+from sft.qwen35_fast_runtime import (
     EXPECTED_RUNTIME,
     HF_FA2_IMPLEMENTATION,
     PROFILE_NAME,

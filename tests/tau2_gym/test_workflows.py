@@ -31,7 +31,7 @@ def test_experiment_names_are_unique_and_pools_exist() -> None:
 def test_subagent_schema_matches_the_sft_releases() -> None:
     """Teacher traces, SFT data, evals and OPD must share one spawn_subagent schema."""
     spec = yaml.safe_load(
-        (REPO_ROOT / "data/sft/specs/decomposer_mixed_deepseek_qwen35_4b_nonthinking_v5_32k_student.yaml").read_text()
+        (REPO_ROOT / "sft/specs/decomposer_mixed_deepseek_qwen35_4b_nonthinking_v5_32k_student.yaml").read_text()
     )
     (subagent,) = spec["policy"]["subagent_types"]
     assert subagent == {"id": SUBAGENT_TYPE_ID, "description": SUBAGENT_DESCRIPTION}

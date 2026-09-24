@@ -5,16 +5,16 @@ from types import SimpleNamespace
 import pytest
 from transformers import GenerationConfig
 
-from training.sft.model_support import (
+from sft.model_support import (
     build_training_template,
     tokenization_profile_for_model_config,
     validate_reasoning_policy,
 )
-from training.sft.qwen35_template import (
+from sft.qwen35_template import (
     UnsupportedQwen35TemplateError,
     build_qwen35_training_template,
 )
-from training.sft.train import _configure_qwen35_generation
+from sft.train import _configure_qwen35_generation
 
 
 @pytest.mark.integration

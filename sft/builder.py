@@ -102,7 +102,7 @@ def load_build_spec(path: str | Path) -> LoadedBuildSpec:
 
 
 def _git_revision(*, require_clean: bool) -> str:
-    repository = Path(__file__).resolve().parents[2]
+    repository = Path(__file__).resolve().parents[1]
     try:
         revision = subprocess.run(
             ["git", "rev-parse", "HEAD"],
@@ -482,7 +482,7 @@ def _load_tokenization_runtime(
 ) -> tuple[Any, str, JsonObject]:
     from transformers import AutoTokenizer
 
-    from training.sft.model_support import build_training_template
+    from .model_support import build_training_template
 
     tokenizer = AutoTokenizer.from_pretrained(
         spec.tokenizer,
@@ -520,7 +520,7 @@ def _tokenize_and_filter_split(
     tokenizer: Any,
     training_template: str,
 ) -> tuple[list[CanonicalRollout], JsonObject]:
-    from training.sft.preprocessing import (
+    from .preprocessing import (
         PREPARED_TOKENIZATION_ATTRIBUTE,
         configure_example,
         tokenization_stats,

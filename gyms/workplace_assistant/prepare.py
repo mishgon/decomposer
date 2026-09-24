@@ -529,7 +529,7 @@ def prepare_eval(args: argparse.Namespace) -> int:
 
 
 def prepare_sft(args: argparse.Namespace) -> int:
-    from data.sft import prepare_dataset
+    from sft.builder import prepare_dataset
 
     spec = Path(__file__).with_name("sft_specs") / SFT_SPECS[args.dataset]
     prepared = prepare_dataset(spec, args.output_root)

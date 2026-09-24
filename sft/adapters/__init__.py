@@ -7,8 +7,8 @@ from typing import Protocol
 
 from ..schema import JsonObject, SelectionSpec, SourceSpec
 from .base import AdapterReadResult
-from .gaia2 import ADAPTER_VERSION as GAIA2_ADAPTER_VERSION
-from .gaia2 import read_gaia2_source
+from ..gaia2.adapter import ADAPTER_VERSION as GAIA2_ADAPTER_VERSION
+from ..gaia2.adapter import read_gaia2_source
 from .nemo_gym import ADAPTER_VERSION as NEMO_GYM_ADAPTER_VERSION
 from .nemo_gym import read_nemo_gym_source
 from .toolathlon_gym import ADAPTER_VERSION as TOOLATHLON_GYM_ADAPTER_VERSION

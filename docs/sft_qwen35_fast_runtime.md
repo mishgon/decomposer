@@ -42,7 +42,7 @@ workers:
 ```bash
 uv sync --locked --group train
 
-.venv/bin/python -m training.sft.prepare_qwen35_fast_runtime \
+.venv/bin/python -m sft.prepare_qwen35_fast_runtime \
   --cuda-home /home/jovyan/decomposer-artifacts/toolchains/cuda-12.9.86 \
   --hf-cache-dir /home/sukhorukov/.cache/huggingface \
   --max-jobs 4
@@ -62,7 +62,7 @@ overlay because FLA rejects Triton 3.4-3.6 on H100 for correctness.
 Verify an existing bundle without rebuilding it:
 
 ```bash
-.venv/bin/python -m training.sft.prepare_qwen35_fast_runtime --verify-only
+.venv/bin/python -m sft.prepare_qwen35_fast_runtime --verify-only
 ```
 
 Bundle creation refuses to overwrite an existing directory. A version change
@@ -84,8 +84,8 @@ DECOMPOSER_SFT_RUNTIME_BUNDLE=/home/jovyan/decomposer-artifacts/kernels/sft/qwen
 TRITON_CACHE_DIR=/home/jovyan/decomposer-artifacts/cache/triton/sft/local-qwen35-fast-smoke \
 PYTHONPATH=/home/jovyan/decomposer-artifacts/kernels/sft/qwen35-hf-fa2-fla-v1/triton:/home/jovyan/decomposer-artifacts/kernels/sft/qwen35-hf-fa2-fla-v1/causal:$PWD/src:$PWD \
 .venv/bin/torchrun --standalone --nproc-per-node=4 \
-  -m training.sft.train \
-  --config training/sft/configs/qwen35_4b_nonthinking_mixed_v3_gaia2_execution_110_n7_teacher_prompt_filtered_32k_hf_fa2_fla_b8_smoke_4gpu.yaml \
+  -m sft.train \
+  --config sft/configs/qwen35_4b_nonthinking_mixed_v3_gaia2_execution_110_n7_teacher_prompt_filtered_32k_hf_fa2_fla_b8_smoke_4gpu.yaml \
   --output-dir /home/jovyan/decomposer-artifacts/training/sft/local-qwen35-fast-smoke \
   --benchmark
 ```
@@ -105,11 +105,11 @@ Dry-run the two exact payloads:
 
 ```bash
 /home/sukhorukov/.venv-mls/bin/python \
-  -m training.sft.run_train_jobs --dry --sanity-check --priority high \
+  -m sft.run_train_jobs --dry --sanity-check --priority high \
   --filter hf-fa2-fla-b8-smoke-4gpu
 
 /home/sukhorukov/.venv-mls/bin/python \
-  -m training.sft.run_train_jobs --dry --priority high \
+  -m sft.run_train_jobs --dry --priority high \
   --filter hf-fa2-fla-b8-full-4gpu
 ```
 

@@ -7,7 +7,7 @@ import torch
 from safetensors import safe_open
 from safetensors.torch import save_file
 
-from training.sft.vllm_compat import create_vllm_compat_export
+from sft.vllm_compat import create_vllm_compat_export
 
 
 def test_vllm_compat_adds_identity_norms_for_shared_kv_layers(

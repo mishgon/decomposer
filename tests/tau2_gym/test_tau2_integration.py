@@ -82,7 +82,7 @@ def test_export_rows_satisfy_the_gym_and_sft_contracts(tmp_path: Path, capsys: p
     assert summary["skipped"] == {}
     for row in rows:
         assert row["agent_ref"] == {"type": "responses_api_agents", "name": "decomposer"}
-        # Required on every materialized input by data/sft/adapters/nemo_gym.py.
+        # Required on every materialized input by sft/adapters/nemo_gym.py.
         assert row["category"] == row["domain"]
         assert row["environment_name"] == "tau2_gym"
         system, user = row["responses_create_params"]["input"]

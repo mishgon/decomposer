@@ -35,7 +35,7 @@ LLM_PROXY_URL_ENV = "LLM_PROXY_URL"
 LLM_PROXY_API_KEY_ENV = "LLM_PROXY_MASTER_KEY"
 
 # The id and description the SFT releases stamp into spawn_subagent
-# (policy.subagent_types in data/sft/specs). Using them here too means the teacher,
+# (policy.subagent_types in sft/specs). Using them here too means the teacher,
 # the SFT data, student evaluation and OPD rollouts all see one tool schema.
 SUBAGENT_TYPE_ID = "subagent_non_thinking"
 SUBAGENT_DESCRIPTION = "General-purpose tool-calling agent with access to the environment tools."
@@ -97,7 +97,7 @@ class Tau2Experiment:
             if self.manager_reasoning_mode == "service_default":
                 raise ValueError(f"{self.name}: {self.manager_backend} needs an explicit reasoning mode")
         if local and self.manager_reasoning_mode != "non_thinking":
-            # The SFT/OPD student is trained non-thinking only (training/sft/model_support.py).
+            # The SFT/OPD student is trained non-thinking only (sft/model_support.py).
             raise ValueError(f"{self.name}: a local manager must be non_thinking")
         for name in ("concurrency", "manager_max_model_calls", "subagent_recursion_limit"):
             if getattr(self, name) < 1:

@@ -7,7 +7,7 @@
 One pass over the round's samples (each sample is used once, batch size one per
 device). The forward computes logits only at the positions that predict generated
 manager tokens (`logits_to_keep` with an index tensor), so a 64k-token context never
-materialises [T, 248k] logits. FSDP settings follow training/sft; weights are kept
+materialises [T, 248k] logits. FSDP settings follow sft; weights are kept
 in fp32 with bf16 compute because OPD learning rates are small enough that bf16
 master weights would round most updates away. The export is fp32 for the same
 reason: the next round starts from it, and vLLM serves it with --dtype bfloat16.
@@ -29,7 +29,7 @@ from typing import Any
 
 # Qwen3.5's gated-delta layers run on flash-linear-attention. Its tilelang backward
 # does not compile on Hertz-2 (the cu13 nvcc lacks <cuda/atomic>); the Triton kernels
-# are what the SFT jobs use too (training/sft/run_train_jobs.py exports this).
+# are what the SFT jobs use too (sft/run_train_jobs.py exports this).
 os.environ.setdefault("FLA_TILELANG", "0")
 
 import torch  # noqa: E402
@@ -46,7 +46,7 @@ from transformers import (  # noqa: E402
 )
 
 from training.opd.loss import OPDLossConfig, opd_token_loss, selected_logprobs  # noqa: E402
-from training.sft.train import (  # noqa: E402
+from sft.train import (  # noqa: E402
     _configure_sdpa_backends,
     _is_rank_zero,
     _save_final_configuration,

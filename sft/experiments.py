@@ -30,19 +30,19 @@ def sft_experiments() -> list[ExperimentConfig]:
     return [
         ExperimentConfig(
             name="gemma4-e2b-smoke-native",
-            config_path="training/sft/configs/gemma4_e2b_smoke.yaml",
+            config_path="sft/configs/gemma4_e2b_smoke.yaml",
             description="Gemma-4 E2B SFT smoke (native kernels)",
         ),
         ExperimentConfig(
             name="gemma4-e2b-smoke-liger",
-            config_path="training/sft/configs/gemma4_e2b_smoke.yaml",
+            config_path="sft/configs/gemma4_e2b_smoke.yaml",
             description="Gemma-4 E2B SFT smoke (Liger kernels)",
             use_liger_kernel=True,
         ),
         ExperimentConfig(
             name="gemma4-e2b-nonthinking-4gpu-liger-workplace-26b-v3",
             config_path=(
-                "training/sft/configs/"
+                "sft/configs/"
                 "gemma4_e2b_nonthinking_4gpu_liger_workplace_26b_v3.yaml"
             ),
             description=(
@@ -57,7 +57,7 @@ def sft_experiments() -> list[ExperimentConfig]:
         ExperimentConfig(
             name="gemma4-e4b-nonthinking-4gpu-liger-workplace-26b-v3",
             config_path=(
-                "training/sft/configs/"
+                "sft/configs/"
                 "gemma4_e4b_nonthinking_4gpu_liger_workplace_26b_v3.yaml"
             ),
             description=(
@@ -72,7 +72,7 @@ def sft_experiments() -> list[ExperimentConfig]:
         ExperimentConfig(
             name=("gemma4-e4b-nonthinking-deepseek-e4b-v1-8k-smoke-4gpu"),
             config_path=(
-                "training/sft/configs/"
+                "sft/configs/"
                 "gemma4_e4b_nonthinking_4gpu_liger_workplace_"
                 "deepseek_e4b_v1_8k_smoke.yaml"
             ),
@@ -88,7 +88,7 @@ def sft_experiments() -> list[ExperimentConfig]:
         ExperimentConfig(
             name=("gemma4-e4b-nonthinking-deepseek-e4b-v1-8k-full-4gpu"),
             config_path=(
-                "training/sft/configs/"
+                "sft/configs/"
                 "gemma4_e4b_nonthinking_4gpu_liger_workplace_"
                 "deepseek_e4b_v1_8k.yaml"
             ),
@@ -104,7 +104,7 @@ def sft_experiments() -> list[ExperimentConfig]:
         ExperimentConfig(
             name=("gemma4-e4b-nonthinking-deepseek-e4b-v2-8k-smoke-4gpu"),
             config_path=(
-                "training/sft/configs/"
+                "sft/configs/"
                 "gemma4_e4b_nonthinking_4gpu_liger_workplace_"
                 "deepseek_e4b_v2_8k_smoke.yaml"
             ),
@@ -120,7 +120,7 @@ def sft_experiments() -> list[ExperimentConfig]:
         ExperimentConfig(
             name=("gemma4-e4b-nonthinking-deepseek-e4b-v2-8k-full-4gpu"),
             config_path=(
-                "training/sft/configs/"
+                "sft/configs/"
                 "gemma4_e4b_nonthinking_4gpu_liger_workplace_"
                 "deepseek_e4b_v2_8k.yaml"
             ),
@@ -136,7 +136,7 @@ def sft_experiments() -> list[ExperimentConfig]:
         ExperimentConfig(
             name=("gemma4-e4b-nonthinking-deepseek-e4b-v2-32k-full-4gpu"),
             config_path=(
-                "training/sft/configs/"
+                "sft/configs/"
                 "gemma4_e4b_nonthinking_4gpu_liger_workplace_"
                 "deepseek_e4b_v2_32k.yaml"
             ),
@@ -152,7 +152,7 @@ def sft_experiments() -> list[ExperimentConfig]:
         ExperimentConfig(
             name="qwen35-4b-nonthinking-mixed-v1-32k-smoke-4gpu",
             config_path=(
-                "training/sft/configs/"
+                "sft/configs/"
                 "qwen35_4b_nonthinking_mixed_v1_32k_smoke_4gpu.yaml"
             ),
             description=(
@@ -166,7 +166,7 @@ def sft_experiments() -> list[ExperimentConfig]:
         ExperimentConfig(
             name=("qwen35-4b-nonthinking-mixed-v1-final-493c24c4-404-32k-full-4gpu"),
             config_path=(
-                "training/sft/configs/qwen35_4b_nonthinking_mixed_v1_32k_full_4gpu.yaml"
+                "sft/configs/qwen35_4b_nonthinking_mixed_v1_32k_full_4gpu.yaml"
             ),
             description=(
                 "Qwen3.5-4B Decomposer SFT "
@@ -183,7 +183,7 @@ def sft_experiments() -> list[ExperimentConfig]:
                 "filtered-pass-qgt90-32k-full-4gpu"
             ),
             config_path=(
-                "training/sft/configs/"
+                "sft/configs/"
                 "qwen35_4b_nonthinking_mixed_v1_filtered_pass_quality_"
                 "32k_full_4gpu.yaml"
             ),
@@ -202,7 +202,7 @@ def sft_experiments() -> list[ExperimentConfig]:
                 "filtered-32k-full-4gpu"
             ),
             config_path=(
-                "training/sft/configs/qwen35_4b_nonthinking_mixed_v2_"
+                "sft/configs/qwen35_4b_nonthinking_mixed_v2_"
                 "gaia2_execution_110_n3_filtered_32k_full_4gpu.yaml"
             ),
             description=(
@@ -221,7 +221,7 @@ def sft_experiments() -> list[ExperimentConfig]:
                 "teacher-prompt-filtered-32k-full-4gpu"
             ),
             config_path=(
-                "training/sft/configs/qwen35_4b_nonthinking_mixed_v3_"
+                "sft/configs/qwen35_4b_nonthinking_mixed_v3_"
                 "gaia2_execution_110_n7_teacher_prompt_filtered_32k_full_4gpu.yaml"
             ),
             description=(
@@ -240,7 +240,7 @@ def sft_experiments() -> list[ExperimentConfig]:
                 "teacher-prompt-filtered-32k-hf-fa2-fla-b8-smoke-4gpu"
             ),
             config_path=(
-                "training/sft/configs/qwen35_4b_nonthinking_mixed_v3_"
+                "sft/configs/qwen35_4b_nonthinking_mixed_v3_"
                 "gaia2_execution_110_n7_teacher_prompt_filtered_32k_"
                 "hf_fa2_fla_b8_smoke_4gpu.yaml"
             ),
@@ -261,7 +261,7 @@ def sft_experiments() -> list[ExperimentConfig]:
                 "teacher-prompt-filtered-32k-hf-fa2-fla-b8-full-4gpu"
             ),
             config_path=(
-                "training/sft/configs/qwen35_4b_nonthinking_mixed_v3_"
+                "sft/configs/qwen35_4b_nonthinking_mixed_v3_"
                 "gaia2_execution_110_n7_teacher_prompt_filtered_32k_"
                 "hf_fa2_fla_b8_full_4gpu.yaml"
             ),
@@ -281,7 +281,7 @@ def sft_experiments() -> list[ExperimentConfig]:
                 "teacher-prompt-filtered-32k-hf-fa2-fla-b8-e8-full-4gpu"
             ),
             config_path=(
-                "training/sft/configs/qwen35_4b_nonthinking_toolathlon_only_"
+                "sft/configs/qwen35_4b_nonthinking_toolathlon_only_"
                 "v1_493c24c4_teacher_prompt_filtered_32k_hf_fa2_fla_b8_"
                 "e8_full_4gpu.yaml"
             ),
@@ -301,7 +301,7 @@ def sft_experiments() -> list[ExperimentConfig]:
                 "teacher-prompt-r1-balanced-32k-hf-fa2-fla-b8-e24-full-4gpu"
             ),
             config_path=(
-                "training/sft/configs/qwen35_4b_nonthinking_gaia2_execution_"
+                "sft/configs/qwen35_4b_nonthinking_gaia2_execution_"
                 "only_v1_110_n10_teacher_prompt_r1_balanced_32k_hf_fa2_fla_"
                 "b8_e24_full_4gpu.yaml"
             ),
@@ -319,7 +319,7 @@ def sft_experiments() -> list[ExperimentConfig]:
         ExperimentConfig(
             name=("qwen35-4b-nonthinking-mixed-v1-partial-3983f605-327-32k-smoke-4gpu"),
             config_path=(
-                "training/sft/configs/qwen35_4b_nonthinking_mixed_"
+                "sft/configs/qwen35_4b_nonthinking_mixed_"
                 "v1_partial_3983f605_327_32k_smoke_4gpu.yaml"
             ),
             description=(
@@ -333,7 +333,7 @@ def sft_experiments() -> list[ExperimentConfig]:
         ExperimentConfig(
             name=("qwen35-4b-nonthinking-mixed-v1-partial-3983f605-327-32k-full-4gpu"),
             config_path=(
-                "training/sft/configs/qwen35_4b_nonthinking_mixed_"
+                "sft/configs/qwen35_4b_nonthinking_mixed_"
                 "v1_partial_3983f605_327_32k_full_4gpu.yaml"
             ),
             description=(
@@ -348,7 +348,7 @@ def sft_experiments() -> list[ExperimentConfig]:
         ExperimentConfig(
             name="qwen35-4b-nonthinking-workplace-v1-1444-32k-full-4gpu",
             config_path=(
-                "training/sft/configs/"
+                "sft/configs/"
                 "qwen35_4b_nonthinking_workplace_v1_1444_32k_full_4gpu.yaml"
             ),
             description=(
@@ -362,7 +362,7 @@ def sft_experiments() -> list[ExperimentConfig]:
         ExperimentConfig(
             name="qwen35-4b-nonthinking-workplace-v1-3765-32k-full-4gpu",
             config_path=(
-                "training/sft/configs/"
+                "sft/configs/"
                 "qwen35_4b_nonthinking_workplace_v1_3765_32k_full_4gpu.yaml"
             ),
             description=(
@@ -401,7 +401,7 @@ def build_train_command(
         "--standalone",
         f"--nproc-per-node={experiment.num_gpus}",
         "-m",
-        "training.sft.train",
+        "sft.train",
         "--config",
         str(workdir / experiment.config_path),
         "--output-dir",

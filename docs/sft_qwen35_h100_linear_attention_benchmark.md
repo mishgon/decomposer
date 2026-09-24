@@ -47,7 +47,7 @@ committed.
 - Repository commit before the uncommitted benchmark helpers:
   `35dfc10bfb7f9fe87fb1da0efa80b85f60e1d176`.
 - Configuration:
-  `training/sft/configs/qwen35_4b_nonthinking_mixed_v3_gaia2_execution_110_n7_teacher_prompt_filtered_32k_full_4gpu.yaml`.
+  `sft/configs/qwen35_4b_nonthinking_mixed_v3_gaia2_execution_110_n7_teacher_prompt_filtered_32k_full_4gpu.yaml`.
 - Configuration SHA-256:
   `19502d70f7d7e00ebb284ec96ba429324bfba60d7cdc1435c98790fd9bbf3059`.
 - Model: `Qwen/Qwen3.5-4B`, revision
@@ -105,8 +105,8 @@ FLA_TILELANG=0 \
 TRITON_CACHE_DIR=/absolute/artifact/cache \
 PYTHONPATH=/absolute/triton371:/absolute/causal:/absolute/fla:$PWD \
 .venv/bin/torchrun --standalone --nproc-per-node=4 \
-  -m training.sft.train \
-  --config training/sft/configs/qwen35_4b_nonthinking_mixed_v3_gaia2_execution_110_n7_teacher_prompt_filtered_32k_full_4gpu.yaml \
+  -m sft.train \
+  --config sft/configs/qwen35_4b_nonthinking_mixed_v3_gaia2_execution_110_n7_teacher_prompt_filtered_32k_full_4gpu.yaml \
   --benchmark \
   --per-device-train-batch-size 1 \
   --global-batch-size 4 \
@@ -254,7 +254,7 @@ remaining difference is not residual compilation noise.
 
 ## Uncommitted benchmark support
 
-`training/sft/train.py` currently contains uncommitted benchmark helpers from
+`sft/train.py` currently contains uncommitted benchmark helpers from
 this and the preceding FlashAttention-2 experiment:
 
 - batch, attention-backend, longest/stratified selection, and length-grouping
@@ -272,12 +272,12 @@ changes have been committed.
 
 ## Verification
 
-- `uv run --with-requirements training/sft/requirements-mlspace.txt pytest -q
+- `uv run --with-requirements sft/requirements-mlspace.txt pytest -q
   tests/test_*sft*.py`: 158 passed, with two pre-existing multiprocessing/fork
   deprecation warnings.
 - The targeted selector, runtime-provenance, and Transformers 5.14 sampler API
   tests: 4 passed.
-- `python -m py_compile training/sft/train.py tests/test_sft_jobs.py`: passed.
+- `python -m py_compile sft/train.py tests/test_sft_jobs.py`: passed.
 - `git diff --check`: passed.
 - Final `nvidia-smi`: all eight GPUs at 0 MiB and 0% utilization; no training
   or `torchrun` process remained.

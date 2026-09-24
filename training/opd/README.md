@@ -3,7 +3,7 @@
 Distils a teacher manager into the Qwen3.5-4B Decomposer manager on the student's
 own rollouts. The student samples a trajectory, the teacher scores every token the
 student generated, and the student moves towards the teacher on exactly the states
-it visits. Off-policy distillation (SFT on teacher traces) lives in `training/sft`;
+it visits. Off-policy distillation (SFT on teacher traces) lives in `sft`;
 OPD starts from an SFT checkpoint, which narrows the teacher-student gap first. That
 gap is what capped tau2-gym's 27B -> 4B OPD.
 

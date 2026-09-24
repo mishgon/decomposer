@@ -10,10 +10,10 @@ import yaml
 from datasets import Dataset
 from pydantic import ValidationError
 
-from data.sft import builder as builder_module
-from data.sft.builder import LoadedBuildSpec, load_build_spec, prepare_dataset
-from data.sft.derive_source_view import derive_source_view
-from data.sft.schema import (
+from sft import builder as builder_module
+from sft.builder import LoadedBuildSpec, load_build_spec, prepare_dataset
+from sft.derive_source_view import derive_source_view
+from sft.schema import (
     EXCLUSION_REASONS,
     BuildSpec,
     DatasetIdentity,
@@ -29,7 +29,7 @@ from decomposer.prompts import (
     DECOMPOSER_TEACHER_SYSTEM_PROMPT,
     resolve_decomposer_system_prompt,
 )
-from training.sft.train import (
+from sft.train import (
     _validate_dataset_system_prompt_profile,
     _validate_manifest,
 )
@@ -1180,7 +1180,7 @@ def test_strict_tool_call_validation_in_error_mode(
 def test_qwen35_workplace_partial_spec_is_pinned_and_success_only() -> None:
     loaded = load_build_spec(
         Path(
-            "data/sft/specs/"
+            "sft/workplace_assistant/specs/"
             "decomposer_workplace_deepseek_qwen35_4b_nonthinking_"
             "v1_1444_32k.yaml"
         )
@@ -1209,7 +1209,7 @@ def test_qwen35_workplace_partial_spec_is_pinned_and_success_only() -> None:
 def test_qwen35_workplace_full_spec_is_pinned_and_success_only() -> None:
     loaded = load_build_spec(
         Path(
-            "data/sft/specs/"
+            "sft/workplace_assistant/specs/"
             "decomposer_workplace_deepseek_qwen35_4b_nonthinking_"
             "v1_3765_32k.yaml"
         )
@@ -1238,7 +1238,7 @@ def test_qwen35_workplace_full_spec_is_pinned_and_success_only() -> None:
 def test_qwen35_mixed_spec_pins_all_reward_sources_and_sampling() -> None:
     spec = load_build_spec(
         Path(
-            "data/sft/specs/decomposer_mixed_deepseek_qwen35_4b_nonthinking_v1_32k.yaml"
+            "sft/specs/decomposer_mixed_deepseek_qwen35_4b_nonthinking_v1_32k.yaml"
         )
     ).spec
     assert spec.spec_version == 2
@@ -1267,7 +1267,7 @@ def test_qwen35_mixed_spec_pins_all_reward_sources_and_sampling() -> None:
 def test_qwen35_filtered_mixed_spec_uses_source_specific_selection() -> None:
     spec = load_build_spec(
         Path(
-            "data/sft/specs/"
+            "sft/specs/"
             "decomposer_mixed_deepseek_qwen35_4b_nonthinking_"
             "v1_filtered_pass_quality_32k.yaml"
         )
@@ -1296,7 +1296,7 @@ def test_qwen35_filtered_mixed_spec_uses_source_specific_selection() -> None:
 def test_qwen35_n7_mixed_spec_pins_teacher_prompt_and_exact_gaia_grid() -> None:
     spec = load_build_spec(
         Path(
-            "data/sft/specs/"
+            "sft/specs/"
             "decomposer_mixed_deepseek_qwen35_4b_nonthinking_v3_"
             "gaia2_execution_110_n7_teacher_prompt_filtered_32k.yaml"
         )
@@ -1316,7 +1316,7 @@ def test_qwen35_n7_mixed_spec_pins_teacher_prompt_and_exact_gaia_grid() -> None:
 def test_qwen35_gaia2_execution_n10_spec_pins_balanced_task_split() -> None:
     spec = load_build_spec(
         Path(
-            "data/sft/specs/"
+            "sft/gaia2/specs/"
             "decomposer_gaia2_execution_deepseek_qwen35_4b_nonthinking_"
             "v1_110_n10_teacher_prompt_r1_balanced_32k.yaml"
         )
@@ -1349,7 +1349,7 @@ def test_qwen35_gaia2_execution_n10_spec_pins_balanced_task_split() -> None:
     assert "sft_snapshots" in last_seven.path.parts
 
     split_path = Path(
-        "data/sft/split_manifests/"
+        "sft/gaia2/split_manifests/"
         "qwen35-gaia2-execution-110-n10-balanced-90-10.json"
     )
     split = json.loads(split_path.read_text(encoding="utf-8"))
@@ -1378,7 +1378,7 @@ def test_qwen35_gaia2_execution_n10_spec_pins_balanced_task_split() -> None:
 def test_qwen35_partial_mixed_spec_pins_snapshot_cardinality() -> None:
     spec = load_build_spec(
         Path(
-            "data/sft/specs/decomposer_mixed_deepseek_qwen35_4b_"
+            "sft/specs/decomposer_mixed_deepseek_qwen35_4b_"
             "nonthinking_v1_partial_3983f605_327_32k.yaml"
         )
     ).spec
@@ -1392,3 +1392,21 @@ def test_qwen35_partial_mixed_spec_pins_snapshot_cardinality() -> None:
     assert toolathlon.require_completed_run is False
     assert spec.tokenization is not None
     assert spec.tokenization.max_tokens == 32768
+
+
+SFT_SPEC_PATHS = sorted(Path(__file__).resolve().parents[1].glob("sft/**/specs/*.yaml"))
+
+
+def test_sft_specs_live_under_sft():
+    assert SFT_SPEC_PATHS
+
+
+@pytest.mark.parametrize("spec_path", SFT_SPEC_PATHS, ids=lambda path: path.name)
+def test_every_sft_spec_loads_and_its_manifests_exist(spec_path):
+    loaded = load_build_spec(spec_path)
+
+    if loaded.spec.split.manifest is not None:
+        assert loaded.spec.split.manifest.is_file()
+    for source in loaded.spec.sources:
+        if source.gaia2 is not None:
+            assert source.gaia2.split_manifest.is_file()

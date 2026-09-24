@@ -6,14 +6,14 @@ from typing import Any
 import pytest
 import torch
 
-from training.sft import clearml_logging
-from training.sft.clearml_logging import (
+from sft import clearml_logging
+from sft.clearml_logging import (
     SeparatePlotsClearMLCallback,
     clearml_scalars,
     global_weight_l2_norm,
     validate_weight_norm_interval,
 )
-from training.sft.train import _build_trainer_callbacks
+from sft.train import _build_trainer_callbacks
 
 
 class _RecordingLogger:

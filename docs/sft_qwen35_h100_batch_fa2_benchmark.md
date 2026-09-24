@@ -22,7 +22,7 @@ modes.
 - Repository commit before the uncommitted benchmark helpers:
   `35dfc10bfb7f9fe87fb1da0efa80b85f60e1d176`.
 - Configuration:
-  `training/sft/configs/qwen35_4b_nonthinking_mixed_v3_gaia2_execution_110_n7_teacher_prompt_filtered_32k_full_4gpu.yaml`.
+  `sft/configs/qwen35_4b_nonthinking_mixed_v3_gaia2_execution_110_n7_teacher_prompt_filtered_32k_full_4gpu.yaml`.
 - Configuration SHA-256:
   `19502d70f7d7e00ebb284ec96ba429324bfba60d7cdc1435c98790fd9bbf3059`.
 - Model: `Qwen/Qwen3.5-4B`, revision
@@ -60,8 +60,8 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 \
 PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
 TOKENIZERS_PARALLELISM=false \
 .venv/bin/torchrun --standalone --nproc-per-node=4 \
-  -m training.sft.train \
-  --config training/sft/configs/qwen35_4b_nonthinking_mixed_v3_gaia2_execution_110_n7_teacher_prompt_filtered_32k_full_4gpu.yaml \
+  -m sft.train \
+  --config sft/configs/qwen35_4b_nonthinking_mixed_v3_gaia2_execution_110_n7_teacher_prompt_filtered_32k_full_4gpu.yaml \
   --benchmark \
   --per-device-train-batch-size 1 \
   --global-batch-size 4 \
@@ -142,7 +142,7 @@ benchmark.
 6. Running `pytest` directly from `.venv` failed at collection because `mls` is
    intentionally installed by the MLSpace requirements layer rather than the
    base training environment. Tests were run with
-   `uv run --with-requirements training/sft/requirements-mlspace.txt pytest ...`.
+   `uv run --with-requirements sft/requirements-mlspace.txt pytest ...`.
 7. `rg` and `jq` are not installed on this host. Diagnostic log inspection used
    `grep`, `sed`, and `awk`; no benchmark behavior was affected.
 8. `torchrun` printed harmless IPv6 socket warnings on startup. Distributed
@@ -151,7 +151,7 @@ benchmark.
 
 ## Uncommitted benchmark support
 
-`training/sft/train.py` currently has uncommitted, benchmark-only CLI overrides
+`sft/train.py` currently has uncommitted, benchmark-only CLI overrides
 for batch size, attention implementation, longest-example selection, and
 environment/length-stratified selection. Benchmark mode disables evaluation,
 checkpointing, ClearML, and final export, resets CUDA peak counters immediately
@@ -163,9 +163,9 @@ changes and this report are intentionally uncommitted pending review.
 
 ## Verification
 
-- `uv run --with-requirements training/sft/requirements-mlspace.txt pytest -q tests/test_*sft*.py`:
+- `uv run --with-requirements sft/requirements-mlspace.txt pytest -q tests/test_*sft*.py`:
   155 passed, with two pre-existing multiprocessing/fork deprecation warnings.
-- `python -m py_compile training/sft/train.py tests/test_sft_jobs.py`: passed.
+- `python -m py_compile sft/train.py tests/test_sft_jobs.py`: passed.
 - `git diff --check`: passed.
 - Final `nvidia-smi`: all eight GPUs at 0 MiB and 0% utilization; no training
   or `torchrun` process remained.

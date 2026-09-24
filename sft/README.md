@@ -54,7 +54,7 @@ failed episodes with no trace/result pair. Import only that run into a
 hash-namespaced immutable location:
 
 ```bash
-.venv/bin/python -m data.sft.import_toolathlon \
+.venv/bin/python -m sft.import_toolathlon \
   --archive /home/sukhorukov/traces_full.tar.gz \
   --archive-prefix matrosov/decomposer-qwen/artifacts/gyms/toolathlon_gym \
   --run-id 20260826T122838Z-84ae95f3 \
@@ -66,8 +66,8 @@ Build the immutable mixed release after committing the preparation code and
 specification:
 
 ```bash
-HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 .venv/bin/python -m data.sft.prepare \
-  --spec data/sft/specs/decomposer_mixed_deepseek_qwen35_4b_nonthinking_v1_32k.yaml \
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 .venv/bin/python -m sft.prepare \
+  --spec sft/specs/decomposer_mixed_deepseek_qwen35_4b_nonthinking_v1_32k.yaml \
   --output-root /home/sukhorukov/decomposer_artifacts/datasets/sft \
   --source toolathlon-deepseek-v4-flash-0731-qwen35-4b-nonthinking-n1=/home/sukhorukov/decomposer_artifacts/evaluation/data/toolathlon_gym/imports/snapshots/493c24c4/20260826T122838Z-84ae95f3
 ```
@@ -90,7 +90,7 @@ high priority:
 
 ```bash
 /home/sukhorukov/.venv-mls/bin/python \
-  -m training.sft.run_train_jobs \
+  -m sft.run_train_jobs \
   --filter qwen35-4b-nonthinking-mixed-v1-final-493c24c4-404-32k-full-4gpu \
   --priority high
 ```
@@ -110,8 +110,8 @@ and `passed / (passed + failed)`.
 Build the separate immutable release from a clean committed checkout:
 
 ```bash
-HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 .venv/bin/python -m data.sft.prepare \
-  --spec data/sft/specs/decomposer_mixed_deepseek_qwen35_4b_nonthinking_v1_filtered_pass_quality_32k.yaml \
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 .venv/bin/python -m sft.prepare \
+  --spec sft/specs/decomposer_mixed_deepseek_qwen35_4b_nonthinking_v1_filtered_pass_quality_32k.yaml \
   --output-root /home/sukhorukov/decomposer_artifacts/datasets/sft \
   --source toolathlon-deepseek-v4-flash-0731-qwen35-4b-nonthinking-n1=/home/sukhorukov/decomposer_artifacts/evaluation/data/toolathlon_gym/imports/snapshots/493c24c4/20260826T122838Z-84ae95f3
 ```
@@ -130,7 +130,7 @@ high priority:
 
 ```bash
 /home/sukhorukov/.venv-mls/bin/python \
-  -m training.sft.run_train_jobs \
+  -m sft.run_train_jobs \
   --filter qwen35-4b-nonthinking-mixed-v1-final-493c24c4-404-filtered-pass-qgt90-32k-full-4gpu \
   --priority high
 ```
@@ -153,8 +153,8 @@ splits.
 Build the release from a clean committed checkout:
 
 ```bash
-HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 .venv/bin/python -m data.sft.prepare \
-  --spec data/sft/specs/decomposer_mixed_deepseek_qwen35_4b_nonthinking_v2_gaia2_execution_110_n3_filtered_32k.yaml \
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 .venv/bin/python -m sft.prepare \
+  --spec sft/specs/decomposer_mixed_deepseek_qwen35_4b_nonthinking_v2_gaia2_execution_110_n3_filtered_32k.yaml \
   --output-root /home/sukhorukov/decomposer_artifacts/datasets/sft
 ```
 
@@ -169,7 +169,7 @@ Submit the base Qwen3.5-4B run on four GPUs at high priority:
 
 ```bash
 /home/sukhorukov/.venv-mls/bin/python \
-  -m training.sft.run_train_jobs \
+  -m sft.run_train_jobs \
   --filter qwen35-4b-nonthinking-mixed-v2-493c24c4-gaia2-110-n3-filtered-32k-full-4gpu \
   --priority high
 ```
@@ -196,8 +196,8 @@ and 208 GAIA2 records.
 Build the release with the explicit teacher prompt from a clean checkout:
 
 ```bash
-HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 .venv/bin/python -m data.sft.prepare \
-  --spec data/sft/specs/decomposer_mixed_deepseek_qwen35_4b_nonthinking_v3_gaia2_execution_110_n7_teacher_prompt_filtered_32k.yaml \
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 .venv/bin/python -m sft.prepare \
+  --spec sft/specs/decomposer_mixed_deepseek_qwen35_4b_nonthinking_v3_gaia2_execution_110_n7_teacher_prompt_filtered_32k.yaml \
   --output-root /home/sukhorukov/decomposer_artifacts/datasets/sft
 ```
 
@@ -205,7 +205,7 @@ Submit the stable SDPA, global-batch-4 run from the base Qwen3.5-4B checkpoint:
 
 ```bash
 /home/sukhorukov/.venv-mls/bin/python \
-  -m training.sft.run_train_jobs \
+  -m sft.run_train_jobs \
   --filter qwen35-4b-nonthinking-mixed-v3-493c24c4-gaia2-110-n7-teacher-prompt-filtered-32k-full-4gpu \
   --priority high
 ```
@@ -226,7 +226,7 @@ runtime at high priority:
 
 ```bash
 /home/sukhorukov/.venv-mls/bin/python \
-  -m training.sft.run_train_jobs \
+  -m sft.run_train_jobs \
   --filter qwen35-4b-nonthinking-toolathlon-only-v1-493c24c4-teacher-prompt-filtered-32k-hf-fa2-fla-b8-e8-full-4gpu \
   --priority high
 ```
@@ -244,8 +244,8 @@ The validation tasks are selected deterministically to land on the exact
 Build the immutable teacher-prompt release from a clean checkout:
 
 ```bash
-HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 .venv/bin/python -m data.sft.prepare \
-  --spec data/sft/specs/decomposer_gaia2_execution_deepseek_qwen35_4b_nonthinking_v1_110_n10_teacher_prompt_r1_balanced_32k.yaml \
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 .venv/bin/python -m sft.prepare \
+  --spec sft/gaia2/specs/decomposer_gaia2_execution_deepseek_qwen35_4b_nonthinking_v1_110_n10_teacher_prompt_r1_balanced_32k.yaml \
   --output-root /home/sukhorukov/decomposer_artifacts/datasets/sft
 ```
 
@@ -253,7 +253,7 @@ Submit the four-H100 accelerated run at high priority:
 
 ```bash
 /home/sukhorukov/.venv-mls/bin/python \
-  -m training.sft.run_train_jobs \
+  -m sft.run_train_jobs \
   --filter qwen35-4b-nonthinking-gaia2-execution-only-v1-110-n10-teacher-prompt-r1-balanced-32k-hf-fa2-fla-b8-e24-full-4gpu \
   --priority high
 ```
@@ -275,7 +275,7 @@ complete. Import it into a hash-namespaced location so that a later completed
 archive for the same run ID cannot collide with it:
 
 ```bash
-.venv/bin/python -m data.sft.import_toolathlon \
+.venv/bin/python -m sft.import_toolathlon \
   --archive /home/sukhorukov/traces.tar.gz \
   --archive-prefix matrosov/decomposer-qwen/artifacts/gyms/toolathlon_gym \
   --run-id 20260826T122838Z-84ae95f3 \
@@ -286,8 +286,8 @@ archive for the same run ID cannot collide with it:
 After committing the preparation implementation, build the release:
 
 ```bash
-HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 .venv/bin/python -m data.sft.prepare \
-  --spec data/sft/specs/decomposer_mixed_deepseek_qwen35_4b_nonthinking_v1_partial_3983f605_327_32k.yaml \
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 .venv/bin/python -m sft.prepare \
+  --spec sft/specs/decomposer_mixed_deepseek_qwen35_4b_nonthinking_v1_partial_3983f605_327_32k.yaml \
   --output-root /home/sukhorukov/decomposer_artifacts/datasets/sft \
   --source toolathlon-deepseek-v4-flash-0731-qwen35-4b-nonthinking-n1=/home/sukhorukov/decomposer_artifacts/evaluation/data/toolathlon_gym/imports/snapshots/3983f605/20260826T122838Z-84ae95f3
 ```
@@ -302,7 +302,7 @@ Run the longest-trace, one-step smoke at high priority before the full job:
 
 ```bash
 /home/sukhorukov/.venv-mls/bin/python \
-  -m training.sft.run_train_jobs \
+  -m sft.run_train_jobs \
   --sanity-check \
   --filter qwen35-4b-nonthinking-mixed-v1-partial-3983f605-327-32k-smoke-4gpu \
   --priority high
@@ -312,7 +312,7 @@ Submit the full five-epoch run only after that smoke succeeds:
 
 ```bash
 /home/sukhorukov/.venv-mls/bin/python \
-  -m training.sft.run_train_jobs \
+  -m sft.run_train_jobs \
   --filter qwen35-4b-nonthinking-mixed-v1-partial-3983f605-327-32k-full-4gpu \
   --priority high
 ```
@@ -371,12 +371,12 @@ uv run --group train python -m gyms.workplace_assistant.prepare sft \
 The default v2 run remains 8K. Its smoke and full MLSpace experiments are:
 
 ```bash
-uv run --with-requirements training/sft/requirements-mlspace.txt \
-  python -m training.sft.run_train_jobs --sanity-check \
+uv run --with-requirements sft/requirements-mlspace.txt \
+  python -m sft.run_train_jobs --sanity-check \
   --filter gemma4-e4b-nonthinking-deepseek-e4b-v2-8k-smoke-4gpu
 
-uv run --with-requirements training/sft/requirements-mlspace.txt \
-  python -m training.sft.run_train_jobs \
+uv run --with-requirements sft/requirements-mlspace.txt \
+  python -m sft.run_train_jobs \
   --filter gemma4-e4b-nonthinking-deepseek-e4b-v2-8k-full-4gpu
 ```
 
@@ -398,8 +398,8 @@ Four-GPU E2B with fused CE and global batch eight:
 ```bash
 CUDA_VISIBLE_DEVICES=0,1,2,3 uv run --group train \
   torchrun --standalone --nproc-per-node=4 \
-  -m training.sft.train \
-  --config training/sft/configs/gemma4_e2b_nonthinking_4gpu_liger_workplace_26b_v3.yaml
+  -m sft.train \
+  --config sft/configs/gemma4_e2b_nonthinking_4gpu_liger_workplace_26b_v3.yaml
 ```
 
 Four-GPU E4B with fused CE and global batch four:
@@ -407,16 +407,16 @@ Four-GPU E4B with fused CE and global batch four:
 ```bash
 CUDA_VISIBLE_DEVICES=0,1,2,3 uv run --group train \
   torchrun --standalone --nproc-per-node=4 \
-  -m training.sft.train \
-  --config training/sft/configs/gemma4_e4b_nonthinking_4gpu_liger_workplace_26b_v3.yaml
+  -m sft.train \
+  --config sft/configs/gemma4_e4b_nonthinking_4gpu_liger_workplace_26b_v3.yaml
 ```
 
 For the 8K DeepSeek/E4B v1 run, first launch the one-step smoke experiment into
 the separate sanity artifact root:
 
 ```bash
-uv run --with-requirements training/sft/requirements-mlspace.txt \
-  python -m training.sft.run_train_jobs \
+uv run --with-requirements sft/requirements-mlspace.txt \
+  python -m sft.run_train_jobs \
   --sanity-check \
   --filter gemma4-e4b-nonthinking-deepseek-e4b-v1-8k-smoke-4gpu
 ```
@@ -424,8 +424,8 @@ uv run --with-requirements training/sft/requirements-mlspace.txt \
 After the smoke run succeeds, launch the full experiment:
 
 ```bash
-uv run --with-requirements training/sft/requirements-mlspace.txt \
-  python -m training.sft.run_train_jobs \
+uv run --with-requirements sft/requirements-mlspace.txt \
+  python -m sft.run_train_jobs \
   --filter gemma4-e4b-nonthinking-deepseek-e4b-v1-8k-full-4gpu
 ```
 
@@ -439,8 +439,8 @@ checkpoint.
 The retained full-run configs are:
 
 ```text
-training/sft/configs/gemma4_e2b_nonthinking_4gpu_liger_workplace_26b_v3.yaml
-training/sft/configs/gemma4_e4b_nonthinking_4gpu_liger_workplace_26b_v3.yaml
+sft/configs/gemma4_e2b_nonthinking_4gpu_liger_workplace_26b_v3.yaml
+sft/configs/gemma4_e4b_nonthinking_4gpu_liger_workplace_26b_v3.yaml
 ```
 
 Both configs use unquantized full-parameter training, BF16, FSDP2 with
@@ -491,8 +491,8 @@ directory and a 65,536-token context:
 ```bash
 CUDA_VISIBLE_DEVICES=0,1,2,3 uv run --group train \
   torchrun --standalone --nproc-per-node=4 \
-  -m training.sft.train \
-  --config training/sft/configs/gemma4_e2b_nonthinking_4gpu_liger_workplace_26b_v3.yaml \
+  -m sft.train \
+  --config sft/configs/gemma4_e2b_nonthinking_4gpu_liger_workplace_26b_v3.yaml \
   --include-reasoning \
   --max-length 65536 \
   --output-dir /home/sukhorukov/decomposer_artifacts/training/sft/checkpoints/gemma4-e2b-thinking
@@ -519,7 +519,7 @@ but vLLM 0.24 still requires those parameters during checkpoint validation.
 Create a zero-copy compatibility view for vLLM without changing `final/`:
 
 ```bash
-uv run --group train python -m training.sft.vllm_compat \
+uv run --group train python -m sft.vllm_compat \
   --source /path/to/run/final \
   --output /path/to/run/final-vllm
 ```
@@ -571,8 +571,8 @@ and exports a full checkpoint:
 ```bash
 CUDA_VISIBLE_DEVICES=0,1 uv run --group train \
   torchrun --standalone --nproc-per-node=2 \
-  -m training.sft.train \
-  --config training/sft/configs/gemma4_e2b_smoke.yaml
+  -m sft.train \
+  --config sft/configs/gemma4_e2b_smoke.yaml
 ```
 
 ## MLSpace jobs
@@ -584,24 +584,24 @@ The stable artifact path is a symlink into shared NFS:
   -> /home/sukhorukov/decomposer_artifacts
 ```
 
-Training outputs live under `training/sft/jobs/`, sanity outputs under
-`training/sft/jobs_sanity/`, staged clean Git snapshots under `code/`, and
+Training outputs live under `sft/jobs/`, sanity outputs under
+`sft/jobs_sanity/`, staged clean Git snapshots under `code/`, and
 shared training environments under `venvs/sft/<uv-lock-hash>/`. The launcher
 syncs only the base and `train` dependency group. It does not require `nvcc`;
 Gemma-4 Liger experiments use the pinned Python wheel and Triton JIT.
 
-Experiments are registered in `training.sft.experiments`. The `mls` submitter is
+Experiments are registered in `sft.experiments`. The `mls` submitter is
 kept in an isolated environment because its Click 8.1.8 pin conflicts with the
 Hugging Face stack's Click 8.4.2 requirement. Preview every payload without
 staging code, creating persistent environments, or submitting jobs:
 
 ```bash
 uv run --no-project \
-  --with-requirements training/sft/requirements-mlspace.txt \
-  python -m training.sft.run_train_jobs --dry
+  --with-requirements sft/requirements-mlspace.txt \
+  python -m sft.run_train_jobs --dry
 uv run --no-project \
-  --with-requirements training/sft/requirements-mlspace.txt \
-  python -m training.sft.run_eval --dry
+  --with-requirements sft/requirements-mlspace.txt \
+  python -m sft.run_eval --dry
 ```
 
 Resume an incomplete run only by explicit request. The launcher selects the
@@ -609,8 +609,8 @@ highest numeric `checkpoint-N` that has a completed `trainer_state.json`:
 
 ```bash
 uv run --no-project \
-  --with-requirements training/sft/requirements-mlspace.txt \
-  python -m training.sft.run_train_jobs \
+  --with-requirements sft/requirements-mlspace.txt \
+  python -m sft.run_train_jobs \
   --filter gemma4-e2b-nonthinking --resume-latest
 ```
 

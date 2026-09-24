@@ -5,7 +5,7 @@ from types import ModuleType, SimpleNamespace
 
 import pytest
 
-from training.sft.liger import (
+from sft.liger import (
     configure_liger_for_model,
     liger_compatible_loss_type,
     liger_patch_strategy,

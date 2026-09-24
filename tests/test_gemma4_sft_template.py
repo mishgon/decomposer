@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from training.sft.gemma4_template import (
+from sft.gemma4_template import (
     UnsupportedGemma4TemplateError,
     build_gemma4_training_template,
 )

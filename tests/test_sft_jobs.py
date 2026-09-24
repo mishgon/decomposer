@@ -12,23 +12,23 @@ import yaml
 from datasets import Dataset
 from transformers import GenerationConfig
 
-from training.sft import train as train_module
+from sft import train as train_module
 
-from training.sft.experiments import (
+from sft.experiments import (
     INSTANCE_TYPES_BY_NUM_GPUS,
     build_train_command,
     collect_experiments,
     has_experiment_artifacts,
     has_training_artifacts,
 )
-from training.sft.run_train_jobs import (
+from sft.run_train_jobs import (
     _archive_output_dir,
     _build_job_script,
     _latest_checkpoint,
     _require_latest_checkpoint,
     _validate_clearml_config,
 )
-from training.sft.train import (
+from sft.train import (
     _apply_overlength_policy,
     _attention_backend_runtime,
     _benchmark_sample_manifest,
@@ -48,7 +48,7 @@ from training.sft.train import (
     _summarize_trainer_state,
     _validate_prepared_tokenization,
 )
-from training.sft.qwen35_fast_runtime import (
+from sft.qwen35_fast_runtime import (
     EXPECTED_RUNTIME,
     HF_FA2_IMPLEMENTATION,
     PROFILE_NAME as QWEN35_FAST_PROFILE,
@@ -264,7 +264,7 @@ def test_build_train_command_uses_torchrun_and_explicit_liger_mode() -> None:
         liger, workdir="/staged", output_dir="/artifacts/liger"
     )
     assert native_command[:3] == ["torchrun", "--standalone", "--nproc-per-node=2"]
-    assert "/staged/training/sft/configs/gemma4_e2b_smoke.yaml" in native_command
+    assert "/staged/sft/configs/gemma4_e2b_smoke.yaml" in native_command
     assert "--clearml" in native_command
     assert "--no-use-liger-kernel" in native_command
     assert "--use-liger-kernel" in liger_command
@@ -1044,7 +1044,7 @@ def test_sft_configs_have_clearml_project_and_model_tags(
     config_name: str,
     model_tag: str,
 ) -> None:
-    config_path = Path("training/sft/configs") / config_name
+    config_path = Path("sft/configs") / config_name
     config = yaml.safe_load(config_path.read_text())
     clearml = config["clearml"]
     assert clearml["project"] == "decomposer"
@@ -1054,7 +1054,7 @@ def test_sft_configs_have_clearml_project_and_model_tags(
 
 def test_smoke_config_evaluates_clearml_metrics_after_one_step() -> None:
     config = yaml.safe_load(
-        Path("training/sft/configs/gemma4_e2b_smoke.yaml").read_text()
+        Path("sft/configs/gemma4_e2b_smoke.yaml").read_text()
     )
     assert config["training"]["max_steps"] == 1
     assert config["training"]["eval_strategy"] == "steps"
@@ -1064,7 +1064,7 @@ def test_smoke_config_evaluates_clearml_metrics_after_one_step() -> None:
 
 
 def test_e4b_deepseek_v1_8k_configs_are_oom_safe_and_non_thinking() -> None:
-    root = Path("training/sft/configs")
+    root = Path("sft/configs")
     filenames = (
         "gemma4_e4b_nonthinking_4gpu_liger_workplace_deepseek_e4b_v1_8k_smoke.yaml",
         "gemma4_e4b_nonthinking_4gpu_liger_workplace_deepseek_e4b_v1_8k.yaml",
@@ -1109,7 +1109,7 @@ def test_e4b_deepseek_v1_8k_configs_are_oom_safe_and_non_thinking() -> None:
 
 
 def test_e4b_deepseek_v2_configs_require_matching_prepared_releases() -> None:
-    root = Path("training/sft/configs")
+    root = Path("sft/configs")
     variants = {
         "deepseek_e4b_v2_8k.yaml": ("v2-8k", 8192),
         "deepseek_e4b_v2_8k_smoke.yaml": ("v2-8k", 8192),
@@ -1185,7 +1185,7 @@ def test_workplace_26b_v3_configs_use_cleaned_data_and_32k_exclusion(
     gradient_accumulation_steps: int,
     learning_rate: float,
 ) -> None:
-    config = yaml.safe_load((Path("training/sft/configs") / config_name).read_text())
+    config = yaml.safe_load((Path("sft/configs") / config_name).read_text())
     data = config["data"]
     training = config["training"]
     assert (
@@ -1223,7 +1223,7 @@ def test_workplace_26b_v3_configs_use_cleaned_data_and_32k_exclusion(
 def test_qwen35_workplace_partial_config_is_pinned_and_uses_full_recipe() -> None:
     config = yaml.safe_load(
         Path(
-            "training/sft/configs/"
+            "sft/configs/"
             "qwen35_4b_nonthinking_workplace_v1_1444_32k_full_4gpu.yaml"
         ).read_text()
     )
@@ -1269,7 +1269,7 @@ def test_qwen35_workplace_partial_config_is_pinned_and_uses_full_recipe() -> Non
 def test_qwen35_workplace_full_config_is_pinned_and_uses_full_recipe() -> None:
     config = yaml.safe_load(
         Path(
-            "training/sft/configs/"
+            "sft/configs/"
             "qwen35_4b_nonthinking_workplace_v1_3765_32k_full_4gpu.yaml"
         ).read_text()
     )
@@ -1327,7 +1327,7 @@ def test_qwen35_workplace_full_config_is_pinned_and_uses_full_recipe() -> None:
     ],
 )
 def test_qwen35_mixed_configs_pin_model_revision(config_name: str) -> None:
-    config = yaml.safe_load((Path("training/sft/configs") / config_name).read_text())
+    config = yaml.safe_load((Path("sft/configs") / config_name).read_text())
     assert config["model"] == {
         "name_or_path": "Qwen/Qwen3.5-4B",
         "revision": "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a",
@@ -1340,7 +1340,7 @@ def test_qwen35_mixed_configs_pin_model_revision(config_name: str) -> None:
 def test_qwen35_final_mixed_config_pins_release_and_patience_one() -> None:
     config = yaml.safe_load(
         Path(
-            "training/sft/configs/qwen35_4b_nonthinking_mixed_v1_32k_full_4gpu.yaml"
+            "sft/configs/qwen35_4b_nonthinking_mixed_v1_32k_full_4gpu.yaml"
         ).read_text()
     )
     release = (
@@ -1366,7 +1366,7 @@ def test_qwen35_final_mixed_config_pins_release_and_patience_one() -> None:
 def test_qwen35_filtered_mixed_config_pins_release_and_experiment() -> None:
     config = yaml.safe_load(
         Path(
-            "training/sft/configs/"
+            "sft/configs/"
             "qwen35_4b_nonthinking_mixed_v1_filtered_pass_quality_"
             "32k_full_4gpu.yaml"
         ).read_text()
@@ -1400,7 +1400,7 @@ def test_qwen35_filtered_mixed_config_pins_release_and_experiment() -> None:
 def test_qwen35_gaia2_mixed_config_uses_base_four_gpus_and_patience_two() -> None:
     config = yaml.safe_load(
         Path(
-            "training/sft/configs/"
+            "sft/configs/"
             "qwen35_4b_nonthinking_mixed_v2_gaia2_execution_110_n3_"
             "filtered_32k_full_4gpu.yaml"
         ).read_text()
@@ -1436,7 +1436,7 @@ def test_qwen35_gaia2_mixed_config_uses_base_four_gpus_and_patience_two() -> Non
 def test_qwen35_gaia2_n7_teacher_prompt_config_is_isolated_and_stable() -> None:
     config = yaml.safe_load(
         Path(
-            "training/sft/configs/"
+            "sft/configs/"
             "qwen35_4b_nonthinking_mixed_v3_gaia2_execution_110_n7_"
             "teacher_prompt_filtered_32k_full_4gpu.yaml"
         ).read_text()
@@ -1461,7 +1461,7 @@ def test_qwen35_gaia2_n7_teacher_prompt_config_is_isolated_and_stable() -> None:
 
 
 def test_qwen35_gaia2_n7_fast_configs_are_distinct_and_pinned() -> None:
-    config_dir = Path("training/sft/configs")
+    config_dir = Path("sft/configs")
     prefix = (
         "qwen35_4b_nonthinking_mixed_v3_gaia2_execution_110_n7_"
         "teacher_prompt_filtered_32k_hf_fa2_fla_b8_"
@@ -1504,7 +1504,7 @@ def test_qwen35_gaia2_n7_fast_configs_are_distinct_and_pinned() -> None:
 def test_qwen35_toolathlon_only_fast_config_is_isolated_and_pinned() -> None:
     config = yaml.safe_load(
         Path(
-            "training/sft/configs/"
+            "sft/configs/"
             "qwen35_4b_nonthinking_toolathlon_only_v1_493c24c4_"
             "teacher_prompt_filtered_32k_hf_fa2_fla_b8_e8_full_4gpu.yaml"
         ).read_text()
@@ -1550,7 +1550,7 @@ def test_qwen35_toolathlon_only_fast_config_is_isolated_and_pinned() -> None:
 def test_qwen35_gaia2_execution_only_fast_config_is_isolated_and_pinned() -> None:
     config = yaml.safe_load(
         Path(
-            "training/sft/configs/"
+            "sft/configs/"
             "qwen35_4b_nonthinking_gaia2_execution_only_v1_110_n10_"
             "teacher_prompt_r1_balanced_32k_hf_fa2_fla_b8_e24_full_4gpu.yaml"
         ).read_text()
@@ -1598,7 +1598,7 @@ def test_qwen35_gaia2_execution_only_fast_config_is_isolated_and_pinned() -> Non
 
 
 def test_qwen35_partial_mixed_configs_use_snapshot_release_and_32k_recipe() -> None:
-    config_dir = Path("training/sft/configs")
+    config_dir = Path("sft/configs")
     release = (
         "datasets/sft/decomposer-mixed-deepseek-qwen35-4b-nonthinking/"
         "v1-partial-3983f605-327-32k"

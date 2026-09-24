@@ -9,10 +9,10 @@ from pathlib import Path
 
 import pytest
 
-from data.sft.adapters.toolathlon_gym import read_toolathlon_gym_source
-from data.sft.builder import LoadedBuildSpec, prepare_dataset
-from data.sft.import_toolathlon import import_archive, sha256_file
-from data.sft.schema import (
+from sft.adapters.toolathlon_gym import read_toolathlon_gym_source
+from sft.builder import LoadedBuildSpec, prepare_dataset
+from sft.import_toolathlon import import_archive, sha256_file
+from sft.schema import (
     BuildSpec,
     DatasetIdentity,
     PolicySpec,

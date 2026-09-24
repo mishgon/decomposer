@@ -30,8 +30,8 @@ from transformers import (
 )
 from trl import SFTConfig, SFTTrainer
 
-from data.sft.builder import compute_dataset_fingerprint
-from data.sft.schema import (
+from .builder import compute_dataset_fingerprint
+from .schema import (
     CANONICAL_SCHEMA_VERSION,
     MANIFEST_FORMAT_VERSION,
     sha256_text,

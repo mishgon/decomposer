@@ -6,9 +6,9 @@ from pathlib import Path
 
 import pytest
 
-from data.sft.adapters.gaia2 import read_gaia2_source
-from data.sft.builder import load_build_spec
-from data.sft.schema import SelectionSpec, SourceSpec
+from sft.gaia2.adapter import read_gaia2_source
+from sft.builder import load_build_spec
+from sft.schema import SelectionSpec, SourceSpec
 from decomposer.core import build_decomposer_chat_tools
 from decomposer.prompts import DECOMPOSER_SYSTEM_PROMPT
 
@@ -348,7 +348,7 @@ def test_gaia2_trace_manifest_requires_terminal_full_grid(tmp_path: Path) -> Non
 
 def test_gaia2_mixed_spec_and_split_pin_future_task_membership() -> None:
     spec = load_build_spec(
-        "data/sft/specs/"
+        "sft/specs/"
         "decomposer_mixed_deepseek_qwen35_4b_nonthinking_"
         "v2_gaia2_execution_110_n3_filtered_32k.yaml"
     ).spec

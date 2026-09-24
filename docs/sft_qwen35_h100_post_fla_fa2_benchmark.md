@@ -60,7 +60,7 @@ uncommitted.
 - Repository commit before the uncommitted benchmark helpers:
   `35dfc10bfb7f9fe87fb1da0efa80b85f60e1d176`.
 - Configuration:
-  `training/sft/configs/qwen35_4b_nonthinking_mixed_v3_gaia2_execution_110_n7_teacher_prompt_filtered_32k_full_4gpu.yaml`.
+  `sft/configs/qwen35_4b_nonthinking_mixed_v3_gaia2_execution_110_n7_teacher_prompt_filtered_32k_full_4gpu.yaml`.
 - Configuration SHA-256:
   `19502d70f7d7e00ebb284ec96ba429324bfba60d7cdc1435c98790fd9bbf3059`.
 - Model: `Qwen/Qwen3.5-4B`, revision
@@ -133,8 +133,8 @@ FLA_TILELANG=0 \
 TRITON_CACHE_DIR=/absolute/populated/cache \
 PYTHONPATH=/absolute/triton371:/absolute/causal:/absolute/fla:$PWD \
 .venv/bin/torchrun --standalone --nproc-per-node=4 \
-  -m training.sft.train \
-  --config training/sft/configs/qwen35_4b_nonthinking_mixed_v3_gaia2_execution_110_n7_teacher_prompt_filtered_32k_full_4gpu.yaml \
+  -m sft.train \
+  --config sft/configs/qwen35_4b_nonthinking_mixed_v3_gaia2_execution_110_n7_teacher_prompt_filtered_32k_full_4gpu.yaml \
   --benchmark \
   --per-device-train-batch-size 1 \
   --global-batch-size 4 \
@@ -245,7 +245,7 @@ batch-3 OOM requested another 5.18 GiB, no batch-3 attempt was made.
 
 ## Uncommitted benchmark support
 
-`training/sft/train.py` contains the still-uncommitted benchmark CLI and
+`sft/train.py` contains the still-uncommitted benchmark CLI and
 runtime helpers from this and the preceding batch/FLA experiments. This rerun
 adds exact full-attention backend provenance to `benchmark_summary.json`,
 including package versions, callable identities, file sizes, and hashes.
@@ -257,9 +257,9 @@ No production configuration or dependency file was changed.
 ## Verification
 
 - `CUDA_VISIBLE_DEVICES='' uv run --with-requirements
-  training/sft/requirements-mlspace.txt pytest -q tests/test_*sft*.py`: 159
+  sft/requirements-mlspace.txt pytest -q tests/test_*sft*.py`: 159
   passed, with two pre-existing multiprocessing/fork deprecation warnings.
-- `python -m py_compile training/sft/train.py tests/test_sft_jobs.py`: passed.
+- `python -m py_compile sft/train.py tests/test_sft_jobs.py`: passed.
 - `git diff --check`: passed.
 - All 15 GPU training runs, the numerical smoke test, and the native build
   completed successfully. Batch 3 was intentionally skipped by the memory

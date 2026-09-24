@@ -384,7 +384,7 @@ evaluate the tuned non-thinking manager and vanilla thinking E4B subagent on
 dedicated GPUs:
 
 ```bash
-uv run --group train python -m training.sft.vllm_compat \
+uv run --group train python -m sft.vllm_compat \
   --source /home/sukhorukov/decomposer_artifacts/training/sft/jobs/gemma4-e4b-nonthinking-deepseek-e4b-v1-8k-full-4gpu/final \
   --output /home/sukhorukov/decomposer_artifacts/training/sft/jobs/gemma4-e4b-nonthinking-deepseek-e4b-v1-8k-full-4gpu/final-vllm
 
@@ -412,7 +412,7 @@ payloads. The live allocation's selected instance types are kept in
 ## Prepare SFT releases
 
 The benchmark-neutral canonical schema, builder, and NeMo-Gym adapter remain in
-`data.sft`. Workplace-specific build specifications and their public commands
+`sft`. Workplace-specific build specifications and their public commands
 live here:
 
 ```bash

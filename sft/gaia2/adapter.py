@@ -10,7 +10,7 @@ from copy import deepcopy
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from .base import AdapterReadResult
+from ..adapters.base import AdapterReadResult
 from ..schema import (
     EXCLUSION_REASONS,
     CanonicalOutcome,
