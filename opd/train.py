@@ -1,7 +1,7 @@
 """Train one OPD round on teacher-scored samples and export the next checkpoint.
 
-    torchrun --nproc-per-node 3 -m training.opd.train \
-        --config training/opd/configs/train_qwen35_4b_3gpu.yaml \
+    torchrun --nproc-per-node 3 -m opd.train \
+        --config opd/configs/train_qwen35_4b_3gpu.yaml \
         --init <checkpoint> --samples ROUND/scored.jsonl --output-dir ROUND/train
 
 One pass over the round's samples (each sample is used once, batch size one per
@@ -45,7 +45,7 @@ from transformers import (  # noqa: E402
     TrainingArguments,
 )
 
-from training.opd.loss import OPDLossConfig, opd_token_loss, selected_logprobs  # noqa: E402
+from opd.loss import OPDLossConfig, opd_token_loss, selected_logprobs  # noqa: E402
 from sft.train import (  # noqa: E402
     _configure_sdpa_backends,
     _is_rank_zero,

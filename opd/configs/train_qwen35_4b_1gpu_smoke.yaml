@@ -1,6 +1,6 @@
 # Smoke variant of train_qwen35_4b_3gpu.yaml: one GPU, four samples per step.
 model:
-  # fp32 master weights, bf16 compute: see training/opd/train.py.
+  # fp32 master weights, bf16 compute: see opd/train.py.
   dtype: float32
   attn_implementation: sdpa
 

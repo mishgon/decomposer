@@ -8,8 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from training.opd.samples import Sample, write_samples
-from training.opd.teacher import TeacherEndpoint, TeacherError, score_file, token_logprobs
+from opd.samples import Sample, write_samples
+from opd.teacher import TeacherEndpoint, TeacherError, score_file, token_logprobs
 
 
 def _response(ids: list[int], *, echo: list[int] | None = None, key_offset: int = 0) -> dict:

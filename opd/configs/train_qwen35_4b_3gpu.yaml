@@ -1,7 +1,7 @@
 # One OPD round of the Qwen3.5-4B manager on three H200s (GPUs 0-4 on Hertz-2 are
 # usually someone else's). FSDP settings follow the SFT configs.
 model:
-  # fp32 master weights, bf16 compute: see training/opd/train.py.
+  # fp32 master weights, bf16 compute: see opd/train.py.
   dtype: float32
   attn_implementation: sdpa
 

@@ -6,8 +6,8 @@ student token is read from vLLM's `prompt_logprobs` on the student's exact token
 LLM proxy passes both through; `return_token_ids` makes it echo the ids it scored,
 which is checked against the request. Any vLLM-compatible base URL works.
 
-    python -m training.opd.teacher probe --model Qwen/Qwen3.8-Flash-Next-NVFP4
-    python -m training.opd.teacher score ROUND/samples.jsonl --output ROUND/scored.jsonl --model ...
+    python -m opd.teacher probe --model Qwen/Qwen3.8-Flash-Next-NVFP4
+    python -m opd.teacher score ROUND/samples.jsonl --output ROUND/scored.jsonl --model ...
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ from typing import Any
 
 import httpx
 
-from training.opd.samples import Sample, read_samples
+from opd.samples import Sample, read_samples
 
 DEFAULT_BASE_URL_ENV = "LLM_PROXY_URL"
 DEFAULT_API_KEY_ENV = "LLM_PROXY_MASTER_KEY"

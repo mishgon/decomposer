@@ -5,10 +5,10 @@ from pathlib import Path
 import yaml
 
 from gyms.tau2_gym.task_pools import load_pool
-from training.opd import loop
+from opd import loop
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-CONFIG = REPO_ROOT / "training/opd/configs/tau2_qwen35_4b.yaml"
+CONFIG = REPO_ROOT / "opd/tau2_gym/configs/tau2_qwen35_4b.yaml"
 
 
 def test_task_sampling_is_deterministic_fresh_per_round_and_inside_the_pool() -> None:

@@ -14,7 +14,7 @@ chat template re-rendered history (tool-call arguments, reasoning stripping) and
 turn becomes its own sample. Only generated manager tokens are trained; subagent
 reports, tool outputs and harness nudges are context.
 
-    python -m training.opd.samples ROUND/rollouts/rollouts.jsonl --output ROUND/samples.jsonl
+    python -m opd.samples ROUND/rollouts/rollouts.jsonl --output ROUND/samples.jsonl
 """
 
 from __future__ import annotations

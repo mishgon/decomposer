@@ -11,6 +11,13 @@ The teacher is `Qwen/Qwen3.8-Flash-Next-NVFP4` on the shared LLM proxy. Token-le
 OPD needs the same tokenizer as the student; `teacher.py probe` checks this, along
 with token-id scoring, before anything runs.
 
+## Layout
+
+- `opd/*.py`: the shared loop, sample builder, teacher scorer, loss and trainer.
+- `opd/configs/`: trainer (torchrun) configs.
+- `opd/<gym>/configs/`: loop configs for one gym. Only `opd/tau2_gym/` has any so far; the
+  other `opd/<gym>/` directories are placeholders.
+
 ## One round
 
 ```
@@ -29,9 +36,9 @@ and the loop refuses rollouts that were not produced by the round's checkpoint.
 
 ```bash
 source ~/.secrets/decomposer.env
-.venv/bin/python -m training.opd.teacher probe --model Qwen/Qwen3.8-Flash-Next-NVFP4
-.venv/bin/python -m training.opd.loop --config training/opd/configs/tau2_qwen35_4b.yaml --dry
-.venv/bin/python -m training.opd.loop --config training/opd/configs/tau2_qwen35_4b.yaml
+.venv/bin/python -m opd.teacher probe --model Qwen/Qwen3.8-Flash-Next-NVFP4
+.venv/bin/python -m opd.loop --config opd/tau2_gym/configs/tau2_qwen35_4b.yaml --dry
+.venv/bin/python -m opd.loop --config opd/tau2_gym/configs/tau2_qwen35_4b.yaml
 ```
 
 `tau2_qwen35_4b_smoke.yaml` runs one round of four tasks entirely on one GPU.

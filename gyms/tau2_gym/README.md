@@ -118,7 +118,7 @@ source ~/.secrets/decomposer.env      # LLM_PROXY_* (and OPENROUTER_API_KEY_DECO
 .venv/bin/python gyms/tau2_gym/run.py --experiment qwen35_4b_sft_mixed_v3_student \
   --tasks-per-domain 5 --num-repeats 3 --manager-gpu 6
 
-# OPD rollouts from a round's checkpoint (what training/opd drives)
+# OPD rollouts from a round's checkpoint (what opd/ drives)
 .venv/bin/python gyms/tau2_gym/run.py --experiment opd_rollout --manager-checkpoint <dir> \
   --manager-gpu 5 --output-dir <round>/rollouts
 ```

@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 import torch
 
-from training.opd.loss import OPDLossConfig, opd_token_loss, selected_logprobs
+from opd.loss import OPDLossConfig, opd_token_loss, selected_logprobs
 
 
 def _inputs(logprobs, behavior, teacher, weight=None, reward=None):

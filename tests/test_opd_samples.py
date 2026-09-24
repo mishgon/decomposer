@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from training.opd.samples import build_samples, episode_samples, read_rollouts, read_samples, write_samples
+from opd.samples import build_samples, episode_samples, read_rollouts, read_samples, write_samples
 
 
 def _turn_item(prompt: list[int], generated: list[int]) -> dict:

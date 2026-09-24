@@ -4,17 +4,17 @@ Each round, from checkpoint_r:
   1. sample `tasks_per_round` tasks from the pool (deterministic in seed and round);
   2. roll out with gyms/tau2_gym/run.py --experiment opd_rollout, which serves
      checkpoint_r in vLLM and records token ids and behaviour log-probs;
-  3. build samples (training/opd/samples.py);
-  4. score them with the teacher (training/opd/teacher.py);
-  5. train one pass and export checkpoint_{r+1} (training/opd/train.py, torchrun);
+  3. build samples (opd/samples.py);
+  4. score them with the teacher (opd/teacher.py);
+  5. train one pass and export checkpoint_{r+1} (opd/train.py, torchrun);
   6. every `eval.every` rounds, evaluate checkpoint_{r+1} on the held-out pool.
 
 Every step writes a marker, so an interrupted loop resumes where it stopped. The
 steps only communicate through files in `<root>/<name>/round_NNN/`; an online
 trainer can later replace this driver without changing them.
 
-    python -m training.opd.loop --config training/opd/configs/tau2_qwen35_4b.yaml --dry
-    python -m training.opd.loop --config training/opd/configs/tau2_qwen35_4b.yaml
+    python -m opd.loop --config opd/tau2_gym/configs/tau2_qwen35_4b.yaml --dry
+    python -m opd.loop --config opd/tau2_gym/configs/tau2_qwen35_4b.yaml
 """
 
 from __future__ import annotations
@@ -36,10 +36,10 @@ import yaml
 
 from gyms.tau2_gym.run import checkpoint_fingerprint
 from gyms.tau2_gym.task_pools import TaskKey, load_pool
-from training.opd.samples import build_samples, read_rollouts, write_samples
-from training.opd.teacher import TeacherEndpoint, score_file
+from opd.samples import build_samples, read_rollouts, write_samples
+from opd.teacher import TeacherEndpoint, score_file
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = Path(__file__).resolve().parents[1]
 PROJECT_PYTHON = REPO_ROOT / ".venv" / "bin" / "python"
 TAU2_RUN = REPO_ROOT / "gyms" / "tau2_gym" / "run.py"
 
@@ -138,7 +138,7 @@ def train_command(config: dict[str, Any], paths: RoundPaths, checkpoint: Path, r
         str(REPO_ROOT / ".venv" / "bin" / "torchrun"),
         f"--nproc-per-node={len(gpus)}",
         f"--master-port={train.get('master_port', 29517)}",
-        "-m", "training.opd.train",
+        "-m", "opd.train",
         "--config", str(REPO_ROOT / train["config"]),
         "--init", str(checkpoint),
         "--samples", str(paths.scored),
