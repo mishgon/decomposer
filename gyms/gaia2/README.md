@@ -193,6 +193,15 @@ The registered experiments are:
   manager reasoning, but the upstream Responses deployment discards reasoning
   items replayed by the harness. It is therefore a capture-only diagnostic,
   not a clean comparison with full-replay DeepSeek or local Gemma.
+- `qwen38-flash-thinking-low-teacher-qwen35-4b-unlooped-non-thinking`: both
+  actors on the LLM proxy, so the run uses no GPU. The manager is
+  `Qwen/Qwen3.8-Flash-Next-NVFP4` with the teacher prompt, thinking at
+  `reasoning.effort=low` (the Responses API ignores `chat_template_kwargs`), and
+  temperature 1.0, top_p 0.95, top_k 20, min_p 0, presence and repetition
+  penalty 0 and 1. The workers are the proxy's `Qwen/Qwen3.5-4B-unlooped`,
+  non-thinking, with temperature 0.6, top_p 0.95, top_k 20, a 8192-token
+  completion cap and the server's default penalties. Each actor is reached
+  through its own loopback proxy, as tau2's subagents are.
 - `gemma4-26b-a4b-thinking-gemma4-e4b-thinking-text-defaults`: local thinking
   Gemma-4-26B-A4B manager and thinking Gemma-4-E4B worker using Gemma's
   `temperature=1.0`, `top_p=0.95`, `top_k=64` preset and the student prompt.
@@ -251,6 +260,12 @@ The registered experiments are:
 - `deepseek-v4-flash-0731`: remote OpenRouter DeepSeek simple agent with high
   reasoning. The runner starts only a credential-isolating loopback proxy and
   does not allocate a GPU.
+- `qwen35-4b-unlooped-non-thinking-simple`: ARE's native agent on the unlooped
+  Qwen3.5-4B worker above, with the same sampling and cap, through a loopback
+  proxy to the LLM proxy and without a GPU.
+
+Runs that use the LLM proxy for a manager, worker or simple agent first check
+that the proxy serves every model they need, the judge included.
 
 All GAIA2 experiments use the same per-actor budget: a simple agent may make
 80 actual policy-model invocations, while a Decomposer manager and each of its
@@ -260,9 +275,10 @@ aggregate-compute limit: spawning multiple subagents can make Decomposer's
 episode total larger. Budget exhaustion is recorded as a failed rollout and
 does not stop the remaining evaluation.
 
-Simple agents, managers, and subagents do not set an explicit per-response
-token limit; output length is controlled by the model server or provider and
-remains bounded by its finite context. Input-context overflow and provider
+Apart from the unlooped Qwen3.5-4B pair (8192 tokens), simple agents, managers,
+and subagents do not set an explicit per-response token limit; output length is
+controlled by the model server or provider and remains bounded by its finite
+context. Input-context overflow and provider
 output truncation are terminal for only the affected actor (`fail_actor_v1`):
 the harness does not retry an impossible request, compact history, or execute a
 truncated tool call. A simple-agent or manager overflow makes that rollout a
@@ -315,6 +331,13 @@ report. Subsequent benchmark rollouts still run normally.
   --num-repeats 3 \
   --concurrency 16 \
   --cuda-visible-devices 0
+
+# Qwen3.8 manager and unlooped Qwen3.5-4B workers, all on the LLM proxy.
+# No CUDA flag.
+.venv/bin/python -m gyms.gaia2.run \
+  --experiment qwen38-flash-thinking-low-teacher-qwen35-4b-unlooped-non-thinking \
+  --domain search \
+  --num-repeats 1
 
 # Simple-agent one-scenario smoke.
 .venv/bin/python -m gyms.gaia2.run \

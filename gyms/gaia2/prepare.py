@@ -155,13 +155,8 @@ def validate_checkpoint(
 
 def experiment_models(experiment: Experiment, *, full_hashes: bool) -> dict[str, Any]:
     if isinstance(experiment, SimpleExperiment):
-        if experiment.requires_openrouter:
-            return {
-                "policy": {
-                    "backend": experiment.backend,
-                    "model": experiment.served_name,
-                }
-            }
+        if not experiment.requires_local_model:
+            return {"policy": experiment.remote_policy_record}
         if experiment.checkpoint is None:
             raise ValueError("Local simple agent requires checkpoint")
         return {
@@ -169,9 +164,14 @@ def experiment_models(experiment: Experiment, *, full_hashes: bool) -> dict[str,
                 experiment.checkpoint, full_hashes=full_hashes
             )
         }
-    worker = validate_checkpoint(
-        experiment.worker_checkpoint, full_hashes=full_hashes
-    )
+    if experiment.requires_local_worker:
+        if experiment.worker_checkpoint is None:
+            raise ValueError("Local worker requires worker_checkpoint")
+        worker = validate_checkpoint(
+            experiment.worker_checkpoint, full_hashes=full_hashes
+        )
+    else:
+        worker = experiment.remote_worker_record
     models = {"worker": worker}
     if experiment.requires_local_manager:
         if experiment.manager_checkpoint is None:
@@ -184,21 +184,7 @@ def experiment_models(experiment: Experiment, *, full_hashes: bool) -> dict[str,
             )
         )
     else:
-        models["manager"] = {
-            "backend": experiment.manager_backend,
-            "model": experiment.manager_served_name,
-            **(
-                {
-                    "upstream_url_env": experiment.manager_upstream_url_env,
-                    "api_key_env": experiment.manager_api_key_env,
-                    "response_tool_parser": experiment.manager_response_tool_parser,
-                    "reasoning_mode": experiment.manager_reasoning_mode,
-                    "verify_tls": experiment.manager_verify_tls,
-                }
-                if experiment.requires_llm_proxy
-                else {}
-            ),
-        }
+        models["manager"] = experiment.remote_manager_record
     return models
 
 
@@ -306,8 +292,11 @@ def prepare_eval(args: argparse.Namespace) -> int:
     }
     required_tools = {"python"}
     if any(
-        isinstance(item, DecomposerExperiment)
-        or (isinstance(item, SimpleExperiment) and not item.requires_openrouter)
+        (
+            isinstance(item, DecomposerExperiment)
+            and (item.requires_local_manager or item.requires_local_worker)
+        )
+        or (isinstance(item, SimpleExperiment) and item.requires_local_model)
         for item in experiments
     ):
         required_tools.add("vllm")

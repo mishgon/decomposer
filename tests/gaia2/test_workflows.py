@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shlex
 from argparse import Namespace
 from dataclasses import replace
 from hashlib import sha256
@@ -64,6 +65,9 @@ from gyms.gaia2.experiments import (
     QWEN36_THINKING_TEXT_DEFAULTS_DECOMPOSER_EXPERIMENT,
     QWEN36_TEXT_DEFAULTS_DECOMPOSER_EXPERIMENT,
     QWEN35_4B_TEXT_DEFAULTS_SIMPLE_EXPERIMENT,
+    QWEN38_LOW_QWEN35_UNLOOPED_EXPERIMENT,
+    SIMPLE_QWEN35_UNLOOPED_EXPERIMENT,
+    WorkerSampling,
     SEARCH_DOMAIN,
     SCENARIO_COUNT,
     SIMPLE_DEEPSEEK_EXPERIMENT,
@@ -121,6 +125,10 @@ from gyms.gaia2.run import (
     select_prompt_profile,
     subagent_environment,
     execute_trace_generation,
+    check_judge,
+    llm_proxy_models,
+    remote_worker_proxy_command,
+    simple_llm_proxy_command,
     validate_trace_round,
     validate_result,
     validate_run_identity,
@@ -589,6 +597,8 @@ def test_experiment_registry_contains_local_and_openrouter_profiles() -> None:
         QWEN35_BASE_TEACHER_E4B_DECOMPOSER_EXPERIMENT,
         QWEN35_BASE_26B_A4B_DECOMPOSER_EXPERIMENT,
         QWEN35_BASE_TEACHER_26B_A4B_DECOMPOSER_EXPERIMENT,
+        QWEN38_LOW_QWEN35_UNLOOPED_EXPERIMENT,
+        SIMPLE_QWEN35_UNLOOPED_EXPERIMENT,
     ]
     assert BASE_IMAGE.endswith("py3.12-torch2.7.0:0.0.42")
     assert INSTANCE_TYPES_BY_NUM_GPUS == {
@@ -615,6 +625,249 @@ def test_experiment_registry_contains_local_and_openrouter_profiles() -> None:
             QWEN36_THINKING_TEXT_DEFAULTS_DECOMPOSER_EXPERIMENT,
         )
     )
+
+
+def test_qwen38_low_manager_and_unlooped_worker_run_on_the_llm_proxy(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setattr("gyms.gaia2.run.git", lambda *_args: "commit")
+    experiment = QWEN38_LOW_QWEN35_UNLOOPED_EXPERIMENT
+    repo_root = Path(__file__).resolve().parents[2]
+    assert experiment.num_gpus == 0
+    assert experiment.worker_checkpoint is None
+    assert experiment.manager_served_name == "Qwen/Qwen3.8-Flash-Next-NVFP4"
+    assert experiment.worker_served_name == "Qwen/Qwen3.5-4B-unlooped"
+    assert experiment.prompt_profile == "teacher"
+
+    # The manager's sampling reaches the proxy server-side, reasoning effort included.
+    assert experiment.remote_manager_extra_body == {
+        "temperature": 1.0,
+        "top_p": 0.95,
+        "top_k": 20,
+        "min_p": 0.0,
+        "presence_penalty": 0.0,
+        "repetition_penalty": 1.0,
+        "include_reasoning": True,
+        "chat_template_kwargs": {"enable_thinking": True, "preserve_thinking": True},
+        "reasoning": {"effort": "low"},
+    }
+    manager_proxy = remote_manager_proxy_command(experiment)
+    assert json.loads(manager_proxy[manager_proxy.index("--extra-body-json") + 1])[
+        "reasoning"
+    ] == {"effort": "low"}
+
+    # No local model server; the worker reaches the proxy through a loopback.
+    assert decomposer_vllm_commands(experiment) == (None, None)
+    worker_proxy = remote_worker_proxy_command(experiment)
+    assert "gyms.remote_model_proxy" in worker_proxy
+    assert worker_proxy[worker_proxy.index("--port") + 1] == "8077"
+    assert worker_proxy[worker_proxy.index("--upstream-url-env") + 1] == "LLM_PROXY_URL"
+    assert worker_proxy[worker_proxy.index("--api-key-env") + 1] == "LLM_PROXY_MASTER_KEY"
+    assert "--no-verify-tls" in worker_proxy
+    assert "--extra-body-json" not in worker_proxy
+    assert "--response-tool-parser" not in worker_proxy
+
+    environment = subagent_environment(experiment)
+    assert environment["GAIA2_SUBAGENT_ENDPOINT"] == "http://127.0.0.1:8077/v1"
+    assert environment["GAIA2_SUBAGENT_MODEL"] == "Qwen/Qwen3.5-4B-unlooped"
+    assert environment["GAIA2_SUBAGENT_THINKING"] == "0"
+    assert (
+        environment["GAIA2_SUBAGENT_TEMPERATURE"],
+        environment["GAIA2_SUBAGENT_TOP_P"],
+        environment["GAIA2_SUBAGENT_TOP_K"],
+        environment["GAIA2_SUBAGENT_MAX_COMPLETION_TOKENS"],
+    ) == ("0.6", "0.95", "20", "8192")
+    for unset in ("MIN_P", "PRESENCE_PENALTY", "REPETITION_PENALTY"):
+        assert f"GAIA2_SUBAGENT_{unset}" not in environment
+
+    configuration = runtime_configuration(experiment)
+    assert configuration["manager"]["reasoning_effort"] == "low"
+    assert configuration["subagent"]["backend"] == "llm_proxy"
+    assert configuration["subagent"]["model"] == "Qwen/Qwen3.5-4B-unlooped"
+    assert configuration["subagent"]["sampling"] == {
+        "temperature": 0.6,
+        "top_p": 0.95,
+        "top_k": 20,
+    }
+    assert configuration["subagent"]["max_completion_tokens"] == 8192
+    # The manager stays uncapped.
+    assert configuration["max_completion_tokens"] is None
+
+    _, plugin_path = _runtime_configs(repo_root, tmp_path / "result", experiment)
+    plugin = json.loads(plugin_path.read_text(encoding="utf-8"))
+    subagent = plugin["model_configuration"]["subagent"]
+    assert subagent["backend"] == "llm_proxy"
+    assert "path" not in subagent
+    assert plugin["model_configuration"]["manager"]["reasoning_effort"] == "low"
+
+    plan = _dry_plan(
+        repo_root,
+        experiment,
+        tmp_path / "result",
+        (),
+        1,
+        3,
+        purpose="evaluation",
+        partition="full",
+        concurrency=16,
+        domain="search",
+    )
+    assert plan["gpu_assignments"] == {}
+    proxies = [
+        shlex.split(service)
+        for service in plan["services"]
+        if "gyms.remote_model_proxy" in service
+    ]
+    assert [service[service.index("--port") + 1] for service in proxies] == [
+        "8076",
+        "8077",
+    ]
+    assert llm_proxy_models(experiment) == (
+        "nvidia/Llama-3.3-70B-Instruct-FP8",
+        "Qwen/Qwen3.8-Flash-Next-NVFP4",
+        "Qwen/Qwen3.5-4B-unlooped",
+    )
+
+
+def test_simple_unlooped_baseline_uses_the_workers_model_and_sampling() -> None:
+    experiment = SIMPLE_QWEN35_UNLOOPED_EXPERIMENT
+    worker = QWEN38_LOW_QWEN35_UNLOOPED_EXPERIMENT
+    assert experiment.num_gpus == 0
+    assert experiment.served_name == worker.worker_served_name
+    assert experiment.thinking is worker.worker_thinking is False
+    assert simple_sampling_parameters(experiment) == {
+        "temperature": 0.6,
+        "top_p": 0.95,
+        "top_k": 20,
+        "max_tokens": 8192,
+    }
+    command = simple_llm_proxy_command(experiment)
+    assert command[command.index("--port") + 1] == "8078"
+    assert "--extra-body-json" not in command
+    assert "--no-verify-tls" in command
+    are = are_command(
+        experiment,
+        benchmark=Path("/are-benchmark"),
+        dataset_root=Path("/data"),
+        output=Path("/out"),
+        judge_endpoint="<judge>",
+        num_repeats=1,
+        limit=None,
+        plugin_config=None,
+    )
+    assert are[are.index("--endpoint") + 1] == "http://127.0.0.1:8078/v1"
+    assert are[are.index("--model") + 1] == "openai/Qwen/Qwen3.5-4B-unlooped"
+    assert runtime_configuration(experiment)["policy"] == {
+        "backend": "llm_proxy",
+        "model": "Qwen/Qwen3.5-4B-unlooped",
+    }
+    assert llm_proxy_models(experiment)[1:] == ("Qwen/Qwen3.5-4B-unlooped",)
+
+
+def test_local_experiments_keep_their_identity_and_gpu_rules() -> None:
+    # Remote-only keys never appear for local actors, so old markers stay valid.
+    configuration = runtime_configuration(DEEPSEEK_QWEN_EXPERIMENT)
+    assert set(configuration["subagent"]) == {
+        "thinking",
+        "language_model_only",
+        "max_model_calls",
+        "recursion_limit",
+    }
+    assert "reasoning_effort" not in configuration["manager"]
+    assert "policy" not in runtime_configuration(SIMPLE_QWEN_EXPERIMENT)
+    assert "reasoning" not in QWEN36_THINKING_TEXT_DEFAULTS_DECOMPOSER_EXPERIMENT.remote_manager_extra_body
+    assert llm_proxy_models(DEEPSEEK_QWEN_EXPERIMENT) == (
+        "nvidia/Llama-3.3-70B-Instruct-FP8",
+    )
+
+    with pytest.raises(ValueError, match="requires 0 GPU"):
+        replace(QWEN38_LOW_QWEN35_UNLOOPED_EXPERIMENT, num_gpus=1)
+    with pytest.raises(ValueError, match="llm_proxy worker has no checkpoint"):
+        replace(
+            QWEN38_LOW_QWEN35_UNLOOPED_EXPERIMENT,
+            worker_checkpoint=DEEPSEEK_QWEN_EXPERIMENT.worker_checkpoint,
+        )
+    with pytest.raises(ValueError, match="remote worker fields"):
+        replace(DEEPSEEK_QWEN_EXPERIMENT, worker_upstream_url_env="LLM_PROXY_URL")
+    with pytest.raises(ValueError, match="manager_reasoning_effort"):
+        replace(QWEN36_QWEN_EXPERIMENT, manager_reasoning_effort="low")
+    with pytest.raises(ValueError, match="at least 1"):
+        replace(
+            QWEN38_LOW_QWEN35_UNLOOPED_EXPERIMENT,
+            worker_sampling=WorkerSampling(0.6, 0.95, 20, max_completion_tokens=0),
+        )
+    with pytest.raises(ValueError, match="upstream_url_env"):
+        replace(SIMPLE_QWEN35_UNLOOPED_EXPERIMENT, upstream_url_env=None)
+
+
+def test_remote_models_are_prepared_without_checkpoints() -> None:
+    decomposer = prepare.experiment_models(
+        QWEN38_LOW_QWEN35_UNLOOPED_EXPERIMENT, full_hashes=False
+    )
+    assert decomposer == {
+        "worker": {
+            "backend": "llm_proxy",
+            "model": "Qwen/Qwen3.5-4B-unlooped",
+            "upstream_url_env": "LLM_PROXY_URL",
+            "api_key_env": "LLM_PROXY_MASTER_KEY",
+            "verify_tls": False,
+        },
+        "manager": {
+            "backend": "llm_proxy",
+            "model": "Qwen/Qwen3.8-Flash-Next-NVFP4",
+            "upstream_url_env": "LLM_PROXY_URL",
+            "api_key_env": "LLM_PROXY_MASTER_KEY",
+            "response_tool_parser": "qwen3_xml",
+            "reasoning_mode": "thinking",
+            "verify_tls": False,
+            "reasoning_effort": "low",
+        },
+    }
+    assert prepare.experiment_models(
+        SIMPLE_QWEN35_UNLOOPED_EXPERIMENT, full_hashes=False
+    ) == {
+        "policy": {
+            "backend": "llm_proxy",
+            "model": "Qwen/Qwen3.5-4B-unlooped",
+            "upstream_url_env": "LLM_PROXY_URL",
+            "api_key_env": "LLM_PROXY_MASTER_KEY",
+            "verify_tls": False,
+        }
+    }
+
+
+def test_llm_proxy_check_requires_every_model(monkeypatch) -> None:
+    class Response:
+        status = 200
+
+        def __init__(self, body):
+            self._body = body
+
+        def read(self):
+            return self._body
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+    served = {"data": [{"id": "judge"}, {"id": "Qwen/Qwen3.5-4B-unlooped"}]}
+
+    class Opener:
+        def open(self, request, timeout):
+            return Response(json.dumps(served).encode())
+
+    monkeypatch.setattr(
+        "gyms.gaia2.run.urllib.request.build_opener", lambda *_args: Opener()
+    )
+    check_judge("https://proxy.invalid/v1", "key")
+    check_judge("https://proxy.invalid/v1", "key", ("judge", "Qwen/Qwen3.5-4B-unlooped"))
+    with pytest.raises(RuntimeError, match="does not serve: Qwen/Qwen3.8") as error:
+        check_judge(
+            "https://proxy.invalid/v1", "key", ("judge", "Qwen/Qwen3.8-Flash-Next-NVFP4")
+        )
+    assert "proxy.invalid" not in str(error.value)
 
 
 def test_qwen36_teacher_uses_internal_proxy_and_existing_worker(tmp_path) -> None:
@@ -1035,7 +1288,12 @@ def test_text_default_simple_profiles_use_provider_output_length() -> None:
 
 def test_all_gaia2_profiles_use_standardized_actor_budgets() -> None:
     for experiment in ALL_EXPERIMENTS:
-        assert experiment.max_completion_tokens is None
+        # The unlooped Qwen3.5-4B pair caps that model's completions at 8192
+        # tokens on both sides, as chosen for it; every other profile is uncapped.
+        expected_cap = (
+            8192 if experiment is SIMPLE_QWEN35_UNLOOPED_EXPERIMENT else None
+        )
+        assert experiment.max_completion_tokens == expected_cap
         if isinstance(experiment, SimpleExperiment):
             assert experiment.max_model_calls == 80
             assert simple_agent_environment(experiment) == {
