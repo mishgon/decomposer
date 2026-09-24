@@ -65,7 +65,7 @@ async def episode(args, task, repetition, directory):
                         parse_qwen_xml_tool_calls=True, disable_streaming=True,
                         extra_body={"top_k": 20, "min_p": 0.0, "repetition_penalty": 1.0,
                                     "chat_template_kwargs": {"enable_thinking": False}})
-        agent = create_decomposer_agent(model, [{"subagent_type_id": "configured_non_thinking",
+        agent = create_decomposer_agent(decomposer_model=model, subagent_types=[{"subagent_type_id": "configured_non_thinking",
             "description": "Qwen3.5-4B non-thinking agent with all task tools.",
             "assistant_id": "configured_non_thinking", "url": env.url}],
             subagent_recursion_limit=410, checkpointer=InMemorySaver())
@@ -78,7 +78,7 @@ async def episode(args, task, repetition, directory):
             result["stop_reason"] = type(error).__name__
         finally:
             state = dict((await agent.aget_state(config)).values)
-        await cancel_subagents(get_client(url=env.url), state.get("subagent_runs", {}))
+        await cancel_subagents(get_client(url=env.url), state.get("subagent_runs", {}), state.get("subagents", {}))
         evaluation = await asyncio.to_thread(env.score, require_partial=False)
         result.update(status="completed", passed=result["stop_reason"] == "finished" and evaluation["pass"],
                       partial_score=evaluation["reward"])
@@ -87,7 +87,8 @@ async def episode(args, task, repetition, directory):
     finally:
         if directory.exists():
             save(directory / "trace.json", {"task": task, "messages": [message_to_dict(m)
-                 for m in state.get("messages", [])], "subagent_runs": state.get("subagent_runs", {})})
+                 for m in state.get("messages", [])], "subagent_runs": state.get("subagent_runs", {}),
+                 "subagents": state.get("subagents", {})})
             await asyncio.to_thread(env.close)
         result["elapsed_seconds"] = time.time() - started
     return result
