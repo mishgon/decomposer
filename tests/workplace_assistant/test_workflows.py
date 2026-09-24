@@ -9,7 +9,7 @@ import pytest
 import yaml
 
 from gyms.workplace_assistant import experiments, run_eval
-from gyms.workplace_assistant import migrate_call_limit_artifacts as migration_module
+from evals.workplace_assistant import migrate_call_limit_artifacts as migration_module
 from gyms.workplace_assistant import prepare as prepare_module
 from gyms.workplace_assistant import run as run_module
 from gyms.workplace_assistant.experiments import (

@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from gyms.workplace_assistant import comparison
+from evals.workplace_assistant import comparison
 from gyms.workplace_assistant import experiments
 
 

@@ -1792,20 +1792,6 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
                 rollout_path=rollout_path,
                 limit=args.limit,
             )
-            if (
-                experiment.name == "qwen36-35b-a3b-teacher-qwen35-4b-non-thinking"
-                and purpose == "trace-generation"
-                and args.split == "validation"
-                and args.num_repeats == 3
-                and args.limit is None
-            ):
-                from gyms.workplace_assistant.comparison import (
-                    build_teacher_comparison,
-                )
-
-                comparison_path = directory / "comparison.json"
-                atomic_json(comparison_path, build_teacher_comparison(directory))
-                status["comparison_report"] = str(comparison_path)
             gpu_metadata = (
                 subprocess.run(
                     [

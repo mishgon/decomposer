@@ -45,6 +45,9 @@ from gyms.workplace_assistant.run import (
     validate_preparation,
 )  # noqa: E402
 
+# The script each MLSpace job runs, relative to the staged repository. evals submits
+# its own entrypoint, which runs this one and then computes metrics.
+RUNNER_ENTRYPOINT = ("gyms", "workplace_assistant", "run.py")
 _TAG_RE = re.compile(r"[#@]\S+")
 _AUTHOR_RE = re.compile(r"[A-Za-z0-9_.-]+")
 _PROXY_ENV_VARIABLES = (
@@ -170,10 +173,11 @@ def build_job_script(
     force: bool,
     concurrency: int | None = None,
     prompt_profile: str | None = None,
+    entrypoint: Sequence[str] = RUNNER_ENTRYPOINT,
 ) -> str:
     command = [
         str(PROJECT_VENV / "bin" / "python"),
-        str(staged_workdir / "gyms" / "workplace_assistant" / "run.py"),
+        str(staged_workdir.joinpath(*entrypoint)),
         "--workdir",
         str(staged_workdir),
         "--experiment",
@@ -213,6 +217,7 @@ def build_payload(
     llm_proxy_environment: Mapping[str, str] | None = None,
     concurrency: int | None = None,
     prompt_profile: str | None = None,
+    entrypoint: Sequence[str] = RUNNER_ENTRYPOINT,
 ) -> dict[str, Any]:
     env_variables = {
         "WORKDIR": str(staged_workdir),
@@ -238,6 +243,7 @@ def build_payload(
             force=force,
             concurrency=concurrency,
             prompt_profile=prompt_profile,
+            entrypoint=entrypoint,
         ),
         "job_desc": build_job_desc(
             experiment,
@@ -303,7 +309,12 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: Sequence[str] | None = None) -> int:
+def main(
+    argv: Sequence[str] | None = None,
+    *,
+    entrypoint: Sequence[str] = RUNNER_ENTRYPOINT,
+) -> int:
+    """Submit runs; `entrypoint` is the repo-relative script each job executes."""
     parser = build_parser()
     args = parser.parse_args(argv)
     if not args.experiment and not args.filter:
@@ -460,6 +471,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             llm_proxy_environment=llm_proxy_environment,
             concurrency=args.concurrency,
             prompt_profile=args.prompt_profile,
+            entrypoint=entrypoint,
         )
         payload["region"] = options["region"]
         if normalize_job_desc(payload["job_desc"]) in in_progress:

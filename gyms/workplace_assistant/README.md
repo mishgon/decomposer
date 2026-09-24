@@ -114,8 +114,9 @@ HTTPS_PROXY=... \
 # Qwen3.6-35B-A3B teacher comparison on the complete validation split.
 # The loopback proxy converts the deployment's native Qwen XML tool calls into
 # Responses API function-call items; reasoning is enabled at the deployment's
-# service-default effort, and the local worker remains Qwen3.5-4B.
-.venv/bin/python -m gyms.workplace_assistant.run \
+# service-default effort, and the local worker remains Qwen3.5-4B. evals runs the
+# gym runner and then writes eval_metrics.json and the checksum-pinned comparison.json.
+.venv/bin/python -m evals.workplace_assistant.run \
   --purpose trace-generation \
   --experiment qwen36-35b-a3b-teacher-qwen35-4b-non-thinking \
   --split validation \
@@ -124,7 +125,7 @@ HTTPS_PROXY=... \
   --cuda-visible-devices 0
 
 # Matched explicit-thinking Qwen3.6 manager comparison.
-.venv/bin/python -m gyms.workplace_assistant.run \
+.venv/bin/python -m evals.workplace_assistant.run \
   --purpose evaluation \
   --experiment qwen36-35b-a3b-thinking-teacher-qwen35-4b-non-thinking-text-defaults \
   --split validation \
@@ -228,8 +229,9 @@ $MLSPY -m gyms.workplace_assistant.run_eval \
   --author-name sukhorukov \
   --dry
 
-# Submit the matched n=3 Qwen3.6 teacher comparison.
-$MLSPY -m gyms.workplace_assistant.run_eval \
+# Submit the matched n=3 Qwen3.6 teacher comparison; evals.workplace_assistant.submit
+# takes the same flags, but each job also computes metrics and the comparison.
+$MLSPY -m evals.workplace_assistant.submit \
   --purpose trace-generation \
   --experiment qwen36-35b-a3b-teacher-qwen35-4b-non-thinking \
   --split validation \
@@ -262,8 +264,8 @@ metric bytes. The command is a dry run by default and refuses to overwrite any
 destination:
 
 ```bash
-.venv/bin/python -m gyms.workplace_assistant.migrate_call_limit_artifacts
-.venv/bin/python -m gyms.workplace_assistant.migrate_call_limit_artifacts --apply
+.venv/bin/python -m evals.workplace_assistant.migrate_call_limit_artifacts
+.venv/bin/python -m evals.workplace_assistant.migrate_call_limit_artifacts --apply
 ```
 
 The applied migration writes a checksum manifest beside the validation result

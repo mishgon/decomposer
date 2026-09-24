@@ -135,6 +135,17 @@ def _summary(
     )
 
 
+def applies(marker: Mapping[str, Any]) -> bool:
+    """Whether a finished run is the candidate teacher run this comparison covers."""
+    return (
+        marker.get("experiment") == CANDIDATE_EXPERIMENT
+        and marker.get("purpose") == "trace-generation"
+        and marker.get("split") == COMPARISON_SPLIT
+        and marker.get("num_repeats") == COMPARISON_NUM_REPEATS
+        and marker.get("limit") is None
+    )
+
+
 def build_teacher_comparison(candidate_directory: Path) -> dict[str, Any]:
     baseline_experiment = get_experiment(BASELINE_EXPERIMENT)
     baseline_directory = output_dir(
