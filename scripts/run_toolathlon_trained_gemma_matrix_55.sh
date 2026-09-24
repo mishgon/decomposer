@@ -16,7 +16,7 @@ run_bench() {
     --model "$decomposer_model" \
     --decomposer-provider vllm \
     --decomposer-base-url http://127.0.0.1:8040/v1 \
-    --decomposer-prompt teacher \
+    --decomposer-prompt upstream \
     --no-decomposer-thinking \
     --subagent-provider vllm \
     --subagent-model "$subagent_model" \

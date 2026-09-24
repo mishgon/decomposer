@@ -23,10 +23,7 @@ from pathlib import Path
 
 from langchain_core.messages import message_to_dict
 from decomposer.core import create_decomposer_agent
-from decomposer.prompts import (
-    DECOMPOSER_SYSTEM_PROMPT,
-    DECOMPOSER_TEACHER_SYSTEM_PROMPT,
-)
+from decomposer.prompts import DECOMPOSER_SYSTEM_PROMPT
 
 try:
     from .subagents.openrouter_compat import create_openrouter_model
@@ -97,10 +94,7 @@ AGENT_SYSTEM_PROMPT_MODES = ("toolathlon", "generic")
 SIMPLE_AGENT_IMPLEMENTATIONS = ("toolathlon", "langgraph")
 SUBAGENT_PROVIDERS = ("vllm", "openrouter")
 DECOMPOSER_PROVIDERS = ("openrouter", "vllm", "lmrouter")
-DECOMPOSER_PROMPTS = {
-    "student": DECOMPOSER_SYSTEM_PROMPT,
-    "teacher": DECOMPOSER_TEACHER_SYSTEM_PROMPT,
-}
+DECOMPOSER_PROMPTS = {"upstream": DECOMPOSER_SYSTEM_PROMPT}
 # Untracked, user-provided files that the benchmark copies from its host
 # checkout into the task container at run time.
 USER_CONFIG_FILES = (
@@ -1619,8 +1613,8 @@ def main() -> None:
     parser.add_argument(
         "--decomposer-prompt",
         choices=tuple(DECOMPOSER_PROMPTS),
-        default="teacher",
-        help="System prompt used by the decomposer model (default: teacher).",
+        default="upstream",
+        help="Use the upstream persistent-subagent orchestration prompt.",
     )
     parser.add_argument(
         "--decomposer-thinking",
@@ -2313,9 +2307,6 @@ def main() -> None:
                             )
                         )
                     ],
-                    decomposer_system_prompt=DECOMPOSER_PROMPTS[
-                        args.decomposer_prompt
-                    ],
                     # LangGraph counts model and tool nodes separately. Match
                     # the allowance used by the direct/simple agent so a
                     # delegated Qwen run gets args.max_steps actual turns.
@@ -2383,7 +2374,7 @@ def main() -> None:
                 "native_key_stats": native_trajectory.get("key_stats", {}),
             }
             if native_trajectory is not None
-            else build_usage_summary(serialized_messages, subagent_runs)
+            else build_usage_summary(serialized_messages, subagent_runs, agent_state.get("subagents", {}))
         )
 
         (episode_dir / "trace.json").write_text(
@@ -2442,6 +2433,7 @@ def main() -> None:
                     "agent_error": agent_error,
                     "messages": serialized_messages,
                     "subagent_runs": subagent_runs,
+                    "subagents": agent_state.get("subagents", {}),
                     "usage": usage,
                 },
                 indent=2,

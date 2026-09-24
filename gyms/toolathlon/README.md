@@ -201,7 +201,7 @@ enabled:
 ```bash
 uv run python gyms/toolathlon/run.py --tasks finalpool/find-alita-paper \
   --purpose evaluation --agent-mode decomposer \
-  --decomposer-provider lmrouter --decomposer-prompt teacher \
+  --decomposer-provider lmrouter --decomposer-prompt upstream \
   --model Qwen/Qwen3.6-35B-A3B-FP8 \
   --subagent-provider vllm --subagent-gpu 0 \
   --vllm-data-parallel-size 1

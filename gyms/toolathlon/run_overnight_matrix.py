@@ -179,7 +179,7 @@ def main() -> None:
             batch_command(
                 "--agent-mode", "decomposer",
                 "--decomposer-provider", "lmrouter",
-                "--decomposer-prompt", "teacher",
+                "--decomposer-prompt", "upstream",
                 "--model", "Qwen/Qwen3.6-35B-A3B-FP8",
                 "--subagent-model", str(QWEN_4B_DIR),
             ),

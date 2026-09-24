@@ -417,12 +417,8 @@ def test_all_local_subagent_graphs_receive_configured_vllm_url() -> None:
     }
 
 
-def test_decomposer_prompt_modes_select_student_and_teacher_prompts() -> None:
-    assert run.DECOMPOSER_PROMPTS["student"] == run.DECOMPOSER_SYSTEM_PROMPT
-    assert (
-        run.DECOMPOSER_PROMPTS["teacher"]
-        == run.DECOMPOSER_TEACHER_SYSTEM_PROMPT
-    )
+def test_decomposer_uses_upstream_prompt() -> None:
+    assert run.DECOMPOSER_PROMPTS == {"upstream": run.DECOMPOSER_SYSTEM_PROMPT}
 
 
 def test_agent_failure_keeps_artifact_grade_out_of_official_score() -> None:
@@ -1985,7 +1981,7 @@ def test_episode_command_passes_docker_socket(tmp_path) -> None:
     args = SimpleNamespace(
         purpose="evaluation",
         agent_mode="simple",
-        decomposer_prompt="student",
+        decomposer_prompt="upstream",
         model="model",
         subagent_model="subagent-model",
         subagent_port=8030,
@@ -2009,7 +2005,7 @@ def test_episode_command_passes_docker_socket(tmp_path) -> None:
     assert command[command.index("--agent-mode") + 1] == "simple"
     assert command[command.index("--agent-system-prompt") + 1] == "toolathlon"
     assert command[command.index("--max-tool-output-chars") + 1] == "100000"
-    assert command[command.index("--decomposer-prompt") + 1] == "student"
+    assert command[command.index("--decomposer-prompt") + 1] == "upstream"
 
     args.container_slots = 2
     slotted = batch.episode_command(

@@ -330,9 +330,9 @@ def parse_args(argv: Sequence[str], defaults: dict[str, Any]) -> argparse.Namesp
     )
     parser.add_argument(
         "--decomposer-prompt",
-        choices=("student", "teacher"),
-        default="teacher",
-        help="System prompt used by the decomposer model (default: teacher).",
+        choices=("upstream",),
+        default="upstream",
+        help="Use the upstream persistent-subagent orchestration prompt.",
     )
     parser.add_argument(
         "--decomposer-thinking",
@@ -803,7 +803,7 @@ def episode_command(
         "--decomposer-provider", getattr(args, "decomposer_provider", "openrouter"),
         "--decomposer-base-url",
         getattr(args, "decomposer_base_url", "http://127.0.0.1:8040/v1"),
-        "--decomposer-prompt", getattr(args, "decomposer_prompt", "teacher"),
+        "--decomposer-prompt", getattr(args, "decomposer_prompt", "upstream"),
         (
             "--decomposer-thinking"
             if getattr(args, "decomposer_thinking", True)
@@ -1103,7 +1103,7 @@ def main(
             elif name == "decomposer_base_url" and name not in manifest["config"]:
                 setattr(args, name, "http://127.0.0.1:8040/v1")
             elif name == "decomposer_prompt" and name not in manifest["config"]:
-                setattr(args, name, "teacher")
+                setattr(args, name, "upstream")
             elif name == "decomposer_thinking" and name not in manifest["config"]:
                 setattr(args, name, True)
             elif name == "subagent_ports" and name not in manifest["config"]:

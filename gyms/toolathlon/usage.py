@@ -66,11 +66,15 @@ def summarize_messages(messages: Iterable[dict[str, Any]]) -> dict[str, Any]:
 def build_usage_summary(
     decomposer_messages: list[dict[str, Any]],
     subagent_runs: dict[str, dict[str, Any]],
+    agents: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     decomposer = summarize_messages(decomposer_messages)
     subagents = {
         run_id: {
-            "subagent_type_id": run.get("subagent_type_id"),
+            "subagent_id": run.get("subagent_id"),
+            "subagent_type_id": (agents or {}).get(
+                run.get("subagent_id"), {}
+            ).get("subagent_type_id", run.get("subagent_type_id")),
             "status": run.get("status"),
             **summarize_messages(run.get("messages") or []),
         }
