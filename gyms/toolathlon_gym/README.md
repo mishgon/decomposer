@@ -40,8 +40,13 @@ gets a new run ID with:
 - `evals/<task>/<episode>/result.json`: native evaluator output.
 - `logs/<task>/<repetition>/`: process stdout and stderr.
 
-An interrupted/model-failed episode retains partial messages and logs. Missing
-native scores remain missing; the Gym does not invent an aggregate score.
+An agent timeout/model failure retains partial messages and runs native evaluation
+before cleanup. Its diagnostic score does not turn the attempt into a success.
+A hard process kill or infrastructure failure can still prevent evaluation.
+Missing native scores remain missing; the Gym does not invent an aggregate score.
+Container inspection artifacts contain only allowlisted lifecycle fields, never
+the environment or command arguments. Older artifacts may contain credentials;
+sanitize them before sharing.
 
 ## Build
 

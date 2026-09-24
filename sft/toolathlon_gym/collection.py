@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import concurrent.futures
+import fcntl
 import hashlib
 import json
 import os
@@ -13,6 +14,7 @@ import threading
 import time
 import traceback
 import uuid
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Sequence
@@ -634,6 +636,21 @@ def next_attempt(run_dir: Path, episode: dict[str, Any]) -> tuple[int, bool]:
             continue
         if number in known:
             continue
+        try:
+            saved = json.loads((path / "attempt.json").read_text())
+        except (OSError, ValueError):
+            saved = None
+        if (
+            isinstance(saved, dict)
+            and saved.get("attempt") == number
+            and saved.get("status") in {"completed", "failed"}
+        ):
+            saved.pop("command", None)
+            episode["attempts"].append(saved)
+            episode.update(saved)
+            known.add(number)
+            changed = True
+            continue
         recovered = {
             "attempt": number,
             "status": "failed",
@@ -674,6 +691,20 @@ def failure(attempt: int, error: BaseException, started_at: str | None) -> dict[
     }
 
 
+@contextmanager
+def run_lock(run_dir: Path):
+    """One collector owns a run; the OS releases the lock even after a crash."""
+    with (run_dir / "collector.lock").open("a") as lock:
+        try:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as error:
+            raise RuntimeError(f"Run is already active: {run_dir.name}") from error
+        try:
+            yield
+        finally:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+
+
 def main(
     argv: Sequence[str],
     *,
@@ -701,7 +732,20 @@ def main(
     root = args.gym_artifacts_dir.resolve()
     if args.resume:
         validate_run_id(args.resume)
-        run_dir = root / "runs" / args.resume
+    run_dir = root / "runs" / (args.resume or new_run_id())
+    if not args.resume:
+        run_dir.mkdir(parents=True, exist_ok=False)
+    with run_lock(run_dir):
+        return _run_collection(
+            args, run_dir, repo_root=repo_root, toolathlon_root=toolathlon_root,
+            start_vllm=start_vllm, stop_vllm=stop_vllm, docker=docker,
+        )
+
+
+def _run_collection(args, run_dir, *, repo_root, toolathlon_root,
+                    start_vllm, stop_vllm, docker):
+    root = args.gym_artifacts_dir.resolve()
+    if args.resume:
         manifest = load_manifest(run_dir)
         if args.purpose != manifest["config"]["purpose"]:
             raise ValueError("Resume purpose does not match the manifest")
@@ -731,8 +775,6 @@ def main(
         tasks = select_tasks(
             toolathlon_root / "tasks" / "finalpool", args.all, args.tasks
         )
-        run_dir = root / "runs" / new_run_id()
-        run_dir.mkdir(parents=True, exist_ok=False)
         manifest = create_manifest(run_dir.name, tasks, args.repetitions, args)
         save_manifest(run_dir, manifest)
         append_event(run_dir, "run_created", tasks=tasks, repetitions=args.repetitions)

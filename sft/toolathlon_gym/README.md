@@ -59,7 +59,10 @@ the base image ID and the resulting image ID when using it.
 ## Coverage Policy
 
 Each wave launches one attempt per task with no qualifying trace. A native pass
-or partial score strictly above 0.90 qualifies. After six unsuccessful launches,
+or partial score strictly above 0.90 qualifies, provided the agent finished.
+Scores from agent errors/timeouts are diagnostic only. Check-marker logs without
+a successful evaluator exit or explicit totals remain unscored.
+After six unsuccessful launches,
 a task is culled; tasks with unparseable evaluations are protected from culling.
 Once coverage is exhausted, the scheduler balances retained tasks toward four
 qualifying traces. This is bounded for scored zero-success tasks, not a fixed
@@ -84,3 +87,7 @@ PYTHONPATH=src:. python -m sft.toolathlon_gym.run --resume RUN_ID --adaptive
 For an existing artifact root, also pass `--gym-artifacts-dir PATH`.
 Completed attempts are not repeated on resume. Do not mix pre-migration
 `spawn_subagent` traces and new-harness traces under a new collection identity.
+
+A run lock rejects a second collector for the same run ID. After a crash, resume
+recovers saved `attempt.json` records before scheduling work. Do not delete the
+lock file: the OS releases its lock when the collector exits.

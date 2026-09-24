@@ -12,7 +12,6 @@ import pytest
 
 from gyms.toolathlon_gym import run, usage
 from sft.toolathlon_gym import collection as batch
-from sft.toolathlon_gym.inference import mlspace_serve
 from gyms.toolathlon_gym.subagents.model_config import generation_config
 
 
@@ -296,6 +295,15 @@ def test_batch_repetitions_and_resume_skip_completed(tmp_path, monkeypatch) -> N
 
     def fake_execute_episode(args, **kwargs):
         episode_calls.append(kwargs)
+        if len(episode_calls) == 1:
+            manifest_path = artifacts / "runs/test-run/manifest.json"
+            before = manifest_path.read_bytes()
+            with pytest.raises(RuntimeError, match="already active"):
+                batch.main([
+                    "--resume", "test-run", "--purpose", "trace-generation",
+                    "--gym-artifacts-dir", str(artifacts),
+                ], **common)
+            assert manifest_path.read_bytes() == before
         task = kwargs["episode"]["task"]
         repetition = kwargs["episode"]["repetition"]
         attempt = kwargs["attempt"]
@@ -555,46 +563,6 @@ def test_batch_distributes_episodes_across_external_vllm_ports(
     assert manifest["config"]["subagent_ports"] == [18100, 18101, 18102]
 
 
-def test_mlspace_serve_builds_one_replica_and_reverse_forward_per_gpu() -> None:
-    args = SimpleNamespace(
-        model="/models/gemma",
-        max_model_len=65536,
-        gpu_memory_utilization=0.9,
-        ssh_key=Path("/secrets/key"),
-        known_hosts=Path("/secrets/known_hosts"),
-        hertz_port=44444,
-        gpu_count=2,
-        remote_port_start=18108,
-        local_port_start=8023,
-        hertz_user="matrosov",
-        hertz_host="135.106.169.8",
-    )
-
-    vllm = mlspace_serve.vllm_command(args, 8024)
-    tunnel = mlspace_serve.tunnel_command(args)
-
-    assert vllm[vllm.index("--served-model-name") + 1] == mlspace_serve.SERVED_MODEL
-    assert vllm[vllm.index("--default-chat-template-kwargs") + 1] == (
-        '{"enable_thinking":false}'
-    )
-    forwards = [
-        tunnel[index + 1]
-        for index, value in enumerate(tunnel)
-        if value == "-R"
-    ]
-    assert forwards == [
-        "127.0.0.1:18108:127.0.0.1:8023",
-        "127.0.0.1:18109:127.0.0.1:8024",
-    ]
-
-
-def test_mlspace_wait_fails_immediately_when_vllm_exits() -> None:
-    process = SimpleNamespace(poll=lambda: 1, returncode=1)
-
-    with pytest.raises(RuntimeError, match="vLLM exited with code 1"):
-        mlspace_serve.wait_for_model(8023, mlspace_serve.SERVED_MODEL, 30, process)
-
-
 def test_cleanup_continues_when_log_capture_fails(tmp_path, monkeypatch) -> None:
     calls = []
 
@@ -681,6 +649,102 @@ def test_reconcile_preserves_attempt_left_by_abrupt_exit(tmp_path) -> None:
 def test_resume_run_id_must_be_one_path_component() -> None:
     with pytest.raises(ValueError, match="Invalid run ID"):
         batch.validate_run_id("../outside")
+
+
+@pytest.mark.parametrize("status", ["completed", "failed"])
+def test_recovery_reads_saved_attempt_before_retrying(tmp_path, status):
+    directory = tmp_path / "attempts/alpha/rep-001/attempt-001"
+    directory.mkdir(parents=True)
+    saved = {"attempt": 1, "status": status, "score": status == "completed",
+             "evaluation_path": "/saved/result.json", "error": None}
+    (directory / "attempt.json").write_text(json.dumps(saved))
+    episode = {"task": "alpha", "repetition": 1, "status": "running", "attempts": []}
+    assert batch.next_attempt(tmp_path, episode) == (2, True)
+    assert episode["attempts"] == [saved]
+    assert episode["status"] == status
+    assert episode["evaluation_path"] == saved["evaluation_path"]
+    assert batch.next_attempt(tmp_path, episode) == (2, False)
+
+
+def test_run_lock_released_on_exception(tmp_path):
+    with pytest.raises(ValueError):
+        with batch.run_lock(tmp_path):
+            raise ValueError("crash")
+    with batch.run_lock(tmp_path):
+        pass
+
+
+def test_cleanup_inspection_never_saves_container_secrets(tmp_path, monkeypatch):
+    secret = "test-secret-do-not-export"
+    inspect = [{"Id": "id", "Name": "task", "Image": "sha256:test",
+                "State": {"Status": "exited", "ExitCode": 1, "Error": secret},
+                "Config": {"Env": [f"VLLM_API_KEY={secret}"]}, "Args": [secret]}]
+    def docker(*args, **kwargs):
+        return subprocess.CompletedProcess(args, 0,
+            json.dumps(inspect) if args[0] == "inspect" else "", "")
+    monkeypatch.setattr(run, "_docker", docker)
+    run._cleanup_episode(episode_dir=tmp_path, task_container="task",
+                         pg_container="postgres", network="net")
+    for path in tmp_path.iterdir():
+        assert secret not in path.read_text()
+    state = json.loads((tmp_path / "task.inspect.json").read_text())[0]
+    assert state["State"]["ExitCode"] == 1
+    assert "Config" not in state
+
+
+@pytest.mark.parametrize("error", [None, TimeoutError("deadline"), RuntimeError("model failed")])
+def test_agent_failure_is_evaluated_before_cleanup(tmp_path, monkeypatch, error):
+    from contextlib import nullcontext
+    root = tmp_path / "gym"
+    (root / "tasks/finalpool/alpha").mkdir(parents=True)
+    monkeypatch.setattr(run, "TOOLATHLON_ROOT", root)
+    monkeypatch.setenv("VLLM_API_KEY", "fixture")
+    monkeypatch.delenv("LLM_PROXY_UNIX_SOCKET", raising=False)
+    args = run.create_parser().parse_args([
+        "alpha", "--harness", "react", "--episode-id", "fixture",
+        "--subagent-base-url", "https://router.test/v1",
+        "--artifacts-dir", str(tmp_path / "traces"),
+        "--evals-dir", str(tmp_path / "evals"),
+    ])
+    evaluated = []
+    result_path = tmp_path / "evals/alpha/fixture/result.json"
+    def docker(*command, **kwargs):
+        output = ""
+        if command[0] == "inspect":
+            output = "healthy" if "--format" in command else "[]"
+        elif "/proc/1/comm" in command:
+            output = "postgres"
+        elif "--tuples-only" in command:
+            output = "t"
+        elif command[0] == "port":
+            output = "127.0.0.1:12345"
+        elif command[0] == "run" and "127.0.0.1::2024" in command:
+            runtime = {"task_config": {"task_str": "fixture", "agent_workspace": "/work",
+                "launch_time": None, "evaluation": {"evaluation_command": "evaluate",
+                                                     "groundtruth_workspace": None}}}
+            (tmp_path / "traces/alpha/fixture/runtime.json").write_text(json.dumps(runtime))
+        elif "--res_log_file" in command:
+            evaluated.append(True)
+        elif "/tmp/decomposer-evaluation.json" in command:
+            output = '{"passed": 10, "total": 10}'
+        elif command[0] == "rm":
+            assert result_path.is_file()
+        return subprocess.CompletedProcess(command, 0, output, "")
+    monkeypatch.setattr(run, "_docker", docker)
+    monkeypatch.setattr(run, "_postgres_environment", lambda container: {})
+    monkeypatch.setattr(run.urllib.request, "urlopen",
+                        lambda *a, **kw: nullcontext(SimpleNamespace(status=200)))
+    monkeypatch.setattr(run, "make_agent", lambda *a: (None, {"configurable": {"thread_id": "t"}}))
+    async def invoke(*a):
+        return {"messages": []}, error
+    monkeypatch.setattr(run, "invoke_and_capture", invoke)
+    with pytest.raises(RuntimeError, match="Agent loop failed") if error else nullcontext():
+        run.run_episode(args)
+    assert evaluated == [True]
+    result = json.loads(result_path.read_text())
+    assert result["native_pass"] is True
+    assert result["pass"] is (error is None)
+    assert result["agent_error"] == (repr(error) if error else None)
 
 
 def test_execute_episode_maps_deterministic_trace_and_eval_paths(

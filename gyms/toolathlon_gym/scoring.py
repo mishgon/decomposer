@@ -70,6 +70,11 @@ def extract_partial_score(evaluation: dict[str, Any]) -> PartialScore | None:
             if passed + failed > 0:
                 return PartialScore(passed, passed + failed, "stdout_pass_fail")
 
+    # A failed evaluator may have crashed after its first passing check. Without
+    # an explicit total above, its log cannot establish the score denominator.
+    if evaluation.get("returncode") != 0:
+        return None
+
     # Some native evaluators only emit one line per check. Keep this fallback
     # deliberately narrow: bracketed check markers and standalone status lines
     # are unambiguous, while arbitrary occurrences of words like "error" are not.

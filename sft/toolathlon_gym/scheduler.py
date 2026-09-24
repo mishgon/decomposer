@@ -17,8 +17,11 @@ class LaunchOutcome:
     task: str
     strict_pass: bool
     partial_score: PartialScore | None
+    agent_finished: bool = True
 
     def qualifies(self, threshold: float) -> bool:
+        if not self.agent_finished:
+            return False
         if self.strict_pass:
             return True
         return (
@@ -41,6 +44,7 @@ def load_launch_outcome(task: str, evaluation_path: str | None) -> LaunchOutcome
         task=task,
         strict_pass=evaluation.get("pass") is True,
         partial_score=extract_partial_score(evaluation),
+        agent_finished=not evaluation.get("agent_error"),
     )
 
 

@@ -50,16 +50,46 @@ def test_extract_partial_score_supports_native_and_common_stdout() -> None:
 def test_extract_partial_score_has_narrow_marker_fallback() -> None:
     markers = scheduler.extract_partial_score(
         {
+            "returncode": 0,
             "native_result": None,
             "stdout": "[PASS] file exists\n[OK] sheet exists\n[FAIL] wrong row",
         }
     )
     status_lines = scheduler.extract_partial_score(
-        {"native_result": None, "stdout": "Checking one\nPASS\nChecking two\nFAIL"}
+        {"returncode": 0, "native_result": None,
+         "stdout": "Checking one\nPASS\nChecking two\nFAIL"}
     )
 
     assert markers and markers.fraction == 2 / 3
     assert status_lines and status_lines.fraction == 1 / 2
+
+
+def test_crashed_evaluator_does_not_qualify_from_truncated_log(tmp_path):
+    for index, marker in enumerate(("[PASS] first check", "PASS")):
+        path = evaluation(tmp_path, str(index), {
+            "pass": False, "returncode": 1, "stdout": marker,
+            "stderr": "Traceback (most recent call last):\nRuntimeError: database unavailable",
+        })
+        outcome = scheduler.load_launch_outcome("task", path)
+        assert outcome.partial_score is None
+        assert not outcome.qualifies(.9)
+
+
+def test_failed_checks_with_explicit_totals_keep_partial_score():
+    score = scheduler.extract_partial_score({
+        "returncode": 1, "stdout": "Results: 19/20 passed",
+    })
+    assert score.fraction == .95
+
+
+def test_agent_timeout_score_is_diagnostic_only(tmp_path):
+    path = evaluation(tmp_path, "timeout", {
+        "pass": False, "agent_error": "TimeoutError()",
+        "native_result": {"passed": 10, "total": 10},
+    })
+    outcome = scheduler.load_launch_outcome("task", path)
+    assert outcome.partial_score.fraction == 1
+    assert not outcome.qualifies(.9)
 
 
 def test_qualification_is_strictly_greater_than_threshold(tmp_path: Path) -> None:

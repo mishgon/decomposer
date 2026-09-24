@@ -127,7 +127,25 @@ def _cleanup_episode(
         ):
             try:
                 completed = _docker(*command, check=False)
-                content = completed.stdout + completed.stderr
+                if kind == "inspect.json":
+                    # Container config includes API keys and command arguments.
+                    # Save only the lifecycle fields needed for failure analysis.
+                    inspected = json.loads(completed.stdout)
+                    content = json.dumps([
+                        {
+                            "Id": item.get("Id"),
+                            "Name": item.get("Name"),
+                            "Image": item.get("Image"),
+                            "State": {
+                                key: item.get("State", {}).get(key)
+                                for key in ("Status", "Running", "ExitCode", "OOMKilled",
+                                            "StartedAt", "FinishedAt")
+                            },
+                        }
+                        for item in inspected
+                    ], indent=2)
+                else:
+                    content = completed.stdout + completed.stderr
                 if content:
                     (episode_dir / f"{label}.{kind}").write_text(
                         content, encoding="utf-8"
@@ -827,9 +845,6 @@ def run_episode(args) -> None:
         answer = str(last.get("data", last).get("content", ""))
         (episode_dir / "answer.txt").write_text(answer, encoding="utf-8")
 
-        if agent_exception is not None:
-            raise RuntimeError(f"Agent loop failed: {agent_error}") from agent_exception
-
         print("Running native evaluation...", flush=True)
         config = runtime["task_config"]
         command = config["evaluation"]["evaluation_command"]
@@ -890,6 +905,10 @@ def run_episode(args) -> None:
             json.dumps(evaluation, indent=2, ensure_ascii=False),
             encoding="utf-8",
         )
+
+        # Preserve diagnostic scores, but keep interrupted agents unsuccessful.
+        if agent_exception is not None:
+            raise RuntimeError(f"Agent loop failed: {agent_error}") from agent_exception
 
         print(answer)
         print(f"\nArtifacts: {episode_dir}")
