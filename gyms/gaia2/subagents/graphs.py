@@ -321,6 +321,11 @@ async def run_subagent(
         tools=tools,
         system_prompt=system_prompt,
         middleware=middleware,
+        # The outer graph checkpoints the worker's conversation; this per-run agent
+        # needs none. Inheriting the thread's checkpointer breaks forked workers:
+        # the in-memory runtime copies a thread's checkpoints into a plain dict, so
+        # looking up this agent's new `subagent:<task id>` namespace raises KeyError.
+        checkpointer=False,
     )
     result = await agent.ainvoke({"messages": state["messages"]})
     return {"messages": result["messages"][len(state["messages"]) :]}

@@ -279,6 +279,9 @@ def test_worker_installs_fail_fast_overflow_middleware(monkeypatch):
         isinstance(item, ExactModelCallLimitMiddleware) and item.run_limit == 80
         for item in captured["middleware"]
     )
+    # Forked workers only run if the per-run agent keeps out of the thread's
+    # checkpoints (see run_subagent).
+    assert captured["checkpointer"] is False
 
 
 @pytest.mark.parametrize(
