@@ -281,6 +281,43 @@ def test_worker_installs_fail_fast_overflow_middleware(monkeypatch):
     )
 
 
+@pytest.mark.parametrize(
+    ("context", "env_prompt", "expected"),
+    [
+        ({"worker_system_prompt": "ARE native prompt"}, "override", "ARE native prompt"),
+        ({}, "override", "override"),
+        ({}, None, "legacy"),
+    ],
+)
+def test_worker_system_prompt_prefers_the_rendered_are_prompt(
+    monkeypatch, context, env_prompt, expected
+):
+    captured = {}
+
+    class FakeAgent:
+        async def ainvoke(self, value):
+            return {"messages": value["messages"]}
+
+    def fake_create_agent(**kwargs):
+        captured.update(kwargs)
+        return FakeAgent()
+
+    monkeypatch.setattr(graphs, "create_agent", fake_create_agent)
+    monkeypatch.setattr(graphs, "_model", lambda: object())
+    monkeypatch.setattr(graphs, "_worker_tools", lambda context, consumer: [])
+    if env_prompt is None:
+        monkeypatch.delenv("GAIA2_SUBAGENT_SYSTEM_PROMPT", raising=False)
+    else:
+        monkeypatch.setenv("GAIA2_SUBAGENT_SYSTEM_PROMPT", env_prompt)
+    runtime = type("Runtime", (), {"context": context})()
+
+    asyncio.run(graphs.run_subagent({"messages": []}, runtime))
+
+    if expected == "legacy":
+        expected = graphs.LEGACY_WORKER_SYSTEM_PROMPT
+    assert captured["system_prompt"] == expected
+
+
 def test_worker_wait_adapter_starts_from_context_and_advances_shared_cursor(
     monkeypatch,
 ):

@@ -1179,6 +1179,58 @@ def test_model_call_budget_semantics_are_part_of_resume_identity(tmp_path) -> No
         validate_run_identity(marker, expected, require_complete=True)
 
 
+def test_worker_system_prompt_reaches_the_proxy_and_resume_identity(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setattr("gyms.gaia2.run.git", lambda *_args: "commit")
+    repo_root = Path(__file__).resolve().parents[2]
+    assert DECOMPOSER_EXPERIMENT.worker_system_prompt == "are_native"
+    _, plugin_path = _runtime_configs(repo_root, tmp_path / "run", DECOMPOSER_EXPERIMENT)
+    plugin = json.loads(plugin_path.read_text(encoding="utf-8"))
+    assert plugin["worker_system_prompt"] == "are_native"
+    assert plugin["model_configuration"]["subagent"]["system_prompt"] == "are_native"
+
+    def identity(experiment):
+        return run_identity(
+            experiment,
+            domain="execution",
+            purpose="evaluation",
+            partition="test",
+            num_repeats=3,
+            concurrency=4,
+            limit=None,
+        )
+
+    native = identity(DECOMPOSER_EXPERIMENT)
+    legacy = identity(replace(DECOMPOSER_EXPERIMENT, worker_system_prompt="legacy"))
+    assert native["worker_system_prompt"] == "are_native"
+    assert identity(SIMPLE_QWEN_EXPERIMENT)["worker_system_prompt"] is None
+
+    # A Decomposer marker written before the setting existed gave workers the
+    # legacy prompt: it resumes a legacy run and is refused for an ARE-native one.
+    old_marker = {key: value for key, value in native.items() if key != "worker_system_prompt"}
+    marker = tmp_path / ".eval_done.json"
+    marker.write_text(
+        json.dumps({"state": "complete", **old_marker}) + "\n", encoding="utf-8"
+    )
+    validate_run_identity(marker, legacy, require_complete=True)
+    with pytest.raises(ValueError, match="worker_system_prompt"):
+        validate_run_identity(marker, native, require_complete=True)
+
+    simple = identity(SIMPLE_QWEN_EXPERIMENT)
+    marker.write_text(
+        json.dumps(
+            {
+                "state": "complete",
+                **{key: value for key, value in simple.items() if key != "worker_system_prompt"},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    validate_run_identity(marker, simple, require_complete=True)
+
+
 def test_langgraph_runtime_is_private_and_disables_file_persistence(tmp_path) -> None:
     repo_root = Path(__file__).resolve().parents[2]
     student_output = tmp_path / "student"

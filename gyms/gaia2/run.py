@@ -255,6 +255,11 @@ def run_identity(
             else None
         ),
         "decomposer_system_prompt_sha256": prompt_sha256(experiment),
+        "worker_system_prompt": (
+            experiment.worker_system_prompt
+            if isinstance(experiment, DecomposerExperiment)
+            else None
+        ),
         "runtime_configuration": runtime_configuration(experiment),
     }
     if partition != "full":
@@ -286,6 +291,11 @@ def validate_run_identity(
         "decomposer_system_prompt_sha256",
     }
     observed = dict(value)
+    # Decomposer runs from before the setting existed gave workers the legacy prompt.
+    observed.setdefault(
+        "worker_system_prompt",
+        "legacy" if observed.get("kind") == "decomposer" else None,
+    )
     existing_offset = observed.get("port_offset", 0)
     observed["port_offset"] = existing_offset
     if "port_layout" not in observed:
@@ -1463,6 +1473,7 @@ def _runtime_configs(
             f"http://127.0.0.1:{ports.decomposer_service_port(experiment)}"
         ),
         "policy": "shared_serialized",
+        "worker_system_prompt": experiment.worker_system_prompt,
         "request_timeout_seconds": 3500,
         "notification_poll_seconds": 0.1,
         "sidecar_root": str(directory / "decomposer_sidecars"),
@@ -1502,6 +1513,7 @@ def _runtime_configs(
                 "path": str(experiment.worker_checkpoint),
                 "served_name": experiment.worker_served_name,
                 "thinking": experiment.worker_thinking,
+                "system_prompt": experiment.worker_system_prompt,
                 "max_model_calls": experiment.subagent_max_model_calls,
                 "recursion_limit": experiment.subagent_recursion_limit,
             },
@@ -1686,6 +1698,11 @@ def _dry_plan(
             else None
         ),
         "decomposer_system_prompt_sha256": prompt_sha256(experiment),
+        "worker_system_prompt": (
+            experiment.worker_system_prompt
+            if isinstance(experiment, DecomposerExperiment)
+            else None
+        ),
         "manager_parallel_tool_calls": (
             experiment.manager_parallel_tool_calls
             if isinstance(experiment, DecomposerExperiment)

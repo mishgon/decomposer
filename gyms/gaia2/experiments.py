@@ -280,6 +280,9 @@ QWEN35_4B_GAIA2_EXECUTION_ONLY_SFT = (
 
 DecomposerManagerBackend = Literal["local_vllm", "openrouter", "llm_proxy"]
 DecomposerPromptProfile = Literal["student", "teacher"]
+# "are_native": workers get ARE's native agent system prompt for the scenario
+# (gyms/gaia2/worker_prompt.py); "legacy": the worker text used before it.
+WorkerSystemPrompt = Literal["are_native", "legacy"]
 SimpleAgentBackend = Literal["local_vllm", "openrouter"]
 Purpose = Literal["evaluation", "trace-generation"]
 Partition = Literal["train", "test", "full"]
@@ -377,6 +380,7 @@ class DecomposerExperiment:
     manager_verify_tls: bool = True
     prompt_profile: DecomposerPromptProfile = "student"
     manager_prompt_addendum_profile: Gaia2ManagerPromptAddendumProfile | None = None
+    worker_system_prompt: WorkerSystemPrompt = "are_native"
     num_gpus: int = 2
     manager_served_name: str = "decomposer/gemma4-e4b-sft-deepseek-e4b-v1-8k"
     worker_served_name: str = "google/gemma-4-E4B-it"
