@@ -430,3 +430,12 @@ venvs/gym/<lock-hash>/                      shared Gym CLI runtime
 venvs/workplace-assistant/<lock-hash>/      shared Gym component runtimes
 code/<git-commit>/                          immutable MLSpace code stages
 ```
+
+## Known issue: scoring from reported calls
+
+The Workplace resources server (`external/Gym/resources_servers/workplace_assistant`)
+scores the tool calls the Decomposer reports, which it rebuilds from subagent
+histories. A subagent that dies usually leaves no history, so its calls are not
+scored although they ran. The tau2 gym scores the server's own call log instead
+(`gyms/tau2_gym/README.md`, "How scoring works"); Workplace needs the same change in
+the Gym fork.

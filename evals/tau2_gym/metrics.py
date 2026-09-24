@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections import defaultdict
+from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
 
@@ -40,6 +40,7 @@ def compute(run_dir: Path) -> dict[str, Any]:
         rewards_by_domain[str(row.get("domain"))][task].append(reward)
 
     records = [analyse_rollout(row) for row in rows]
+    scoring = scoring_summary(rows)
     domains = sorted(rewards_by_domain)
     return {
         "gym": "tau2_gym",
@@ -56,5 +57,37 @@ def compute(run_dir: Path) -> dict[str, Any]:
             domain: summarise([record for record in records if str(record["domain"]) == domain])
             for domain in domains
         },
+        "scoring": scoring,
         "integrity": integrity,
+    }
+
+
+def scoring_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Which scoring path graded the rollouts, and how often the Decomposer under-reported.
+
+    `server_log_v1` rows were scored from the resources server's log of executed calls;
+    rows without the tag predate it and were scored from the calls the Decomposer
+    reported (`reported_replay_v0`). Rows without a breakdown never reached the verifier.
+    """
+    paths: Counter[str] = Counter()
+    underreported: list[float] = []
+    unreported_calls = 0
+    for row in rows:
+        breakdown = row.get("breakdown") or {}
+        if not breakdown:
+            paths["not_scored"] += 1
+            continue
+        paths[breakdown.get("scoring", "reported_replay_v0")] += 1
+        missing = int(breakdown.get("unreported_calls") or 0)
+        unreported_calls += missing
+        if missing:
+            underreported.append(float(row.get("reward", 0.0)))
+    return {
+        "paths": dict(sorted(paths.items())),
+        "rollouts_with_unreported_calls": len(underreported),
+        "unreported_calls": unreported_calls,
+        "pass_at_1_of_rollouts_with_unreported_calls": (
+            sum(1 for reward in underreported if reward == 1.0) / len(underreported)
+            if underreported else None
+        ),
     }

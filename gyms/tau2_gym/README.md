@@ -158,16 +158,34 @@ within noise:
 
 ## How scoring works
 
-`verify` receives a *flattened* trajectory: every subagent `function_call` in report
-order plus the manager's final assistant message, and **no `function_call_output`
-items** (`decomposer_agent/app.py:287-311`).
+Every subagent tool call reaches the resources server with the rollout's session
+cookie, and the server logs each call it executes with its result, in execution
+order. `verify` scores that log, not the calls the Decomposer reports. This is how
+tau2-gym's own environment records its trajectory, and how the GAIA2 judge reads
+ARE's event log: the environment is the source of truth.
 
-`tau2_bridge.score_trajectory` turns that into the trajectory of a *virtual flat
-agent*: the calls are replayed into a freshly seeded environment and every recorded
-result is appended as a `ToolMessage`; the manager's final report becomes the agent's
-final message. That is exactly what tau2's own `training/reward.compute_reward`
+The reported calls are the wrong source. The Decomposer rebuilds them from subagent
+histories (`decomposer_agent/app.py` `_collect_subagent_tool_calls`), and a subagent
+that dies usually leaves no history. On the Qwen3.8 teacher run of 2026-09-23
+(1,239 rollouts), subagents executed 34,485 calls but only 26,704 were reported;
+55 of 92 failed subagent runs reported none, and 35 of the 53 rollouts with a failed
+subagent had scored 1 without their writes being checked.
+
+`tau2_bridge.score_logged_calls` turns the log into the trajectory of a *virtual flat
+agent*: each call with its recorded result, then the manager's final report as the
+agent's final message. That is exactly what tau2's own `training/reward.compute_reward`
 consumes, so the Decomposer is graded by tau2's binary predicate with its tri-state
-terms (`None` = does not apply to this task):
+terms (`None` = does not apply to this task). The log must also reproduce: it is
+replayed into a freshly seeded environment, and any call whose result differs scores
+the rollout 0 (`log_replay_error`), as tau2's DB term fails closed.
+
+Every breakdown carries `scoring`: `server_log_v1` for this path, or
+`reported_replay_v0` for the earlier replay of reported calls. Runs from before the
+change have no log and cannot be rescored. `logged_calls`, `reported_calls` and
+`unreported_calls` show how much the Decomposer's own view missed;
+`python -m evals.tau2_gym.run --metrics-only <run>` summarises them per run.
+
+The terms:
 
 - **binding**: `action`, `param`, `db`, `answer`, `env_assertion`, `restraint`,
   `side_effects`. Reward = their conjunction.

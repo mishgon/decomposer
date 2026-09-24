@@ -3,17 +3,20 @@
 Everything that imports ``tau2`` lives here so the FastAPI app stays thin and the
 same task/tool/scoring logic is used by ``tau2_export.py`` and by ``verify``.
 
-Scoring note: the Decomposer hands the verifier a *flattened* trajectory -- every
-subagent ``function_call`` in report order plus the manager's final assistant
-message, and no ``function_call_output`` items (``decomposer_agent/app.py:287-311``).
-``score_trajectory`` turns that into the trajectory of a *virtual flat agent*: the
-calls are replayed into a freshly seeded environment and each recorded result is
-appended as a ``ToolMessage``, then the manager's final report becomes the agent's
-final message. That trajectory is exactly what tau2's own
-``tau2.training.reward.compute_reward`` consumes (its DB and env-assertion terms
-replay it through ``Environment.set_state``, which needs a result after every call),
-so the Decomposer is graded by the same predicate as tau2's flat agents, minus the
-terms that only describe a flat agent's own text.
+Scoring note: a Decomposer rollout is graded as the trajectory of a *virtual flat
+agent*: every tool call the subagents made, each followed by its result, then the
+manager's final report as the agent's final message. That trajectory is exactly what
+tau2's own ``tau2.training.reward.compute_reward`` consumes (its DB and env-assertion
+terms replay it through ``Environment.set_state``, which requires every replayed
+result to match the recorded one), so the Decomposer is graded by the same predicate
+as tau2's flat agents, minus the terms that only describe a flat agent's own text.
+
+``score_logged_calls`` builds that trajectory from the resources server's own log of
+executed calls, in execution order with their real results -- as tau2-gym's
+environment records its trajectory itself. ``score_trajectory`` is the earlier path:
+it replays the calls the Decomposer *reports* (``decomposer_agent/app.py``
+``_collect_subagent_tool_calls``, report order, no results) into a fresh world, which
+misses every call of a subagent whose history is lost when it dies.
 """
 
 from __future__ import annotations
@@ -29,9 +32,16 @@ import json  # noqa: E402
 import uuid  # noqa: E402
 from datetime import UTC, datetime  # noqa: E402
 from functools import lru_cache  # noqa: E402
+from collections.abc import Sequence  # noqa: E402
 from typing import Any  # noqa: E402
 
-from tau2.data_model.message import AssistantMessage, Message, ToolCall, UserMessage  # noqa: E402
+from tau2.data_model.message import (  # noqa: E402
+    AssistantMessage,
+    Message,
+    ToolCall,
+    ToolMessage,
+    UserMessage,
+)
 from tau2.data_model.simulation import SimulationRun, TerminationReason  # noqa: E402
 from tau2.data_model.tasks import Task  # noqa: E402
 from tau2.environment.environment import Environment  # noqa: E402
@@ -48,6 +58,9 @@ DEFAULT_LANGUAGE = "en"
 # harness, not the manager, so they are reported but not binding.
 DECOMPOSER_TERMS = ("action", "param", "db", "answer", "env_assertion", "restraint", "side_effects")
 NON_BINDING_TERMS = ("tool_validity", "signal", "closed")
+# Recorded in every breakdown, so rollouts scored by different paths are never mixed silently.
+SERVER_LOG_SCORING = "server_log_v1"
+REPORTED_REPLAY_SCORING = "reported_replay_v0"
 
 if tau2_reward.FORBIDDEN_PENALTY <= 0:
     raise RuntimeError(
@@ -166,6 +179,34 @@ def domain_policy(domain: str, *, language: str = DEFAULT_LANGUAGE) -> str:
     return build_environment(domain, None, language=language).get_policy()
 
 
+def executed_trajectory(
+    domain: str,
+    task_id: str,
+    executed: Sequence[tuple[ToolCall, ToolMessage]],
+    final_message: str | None,
+    *,
+    language: str = DEFAULT_LANGUAGE,
+) -> tuple[list[Message], set[str]]:
+    """The flat-agent trajectory of calls the environment executed, with their results.
+
+    One call per assistant message, followed by the result the live environment
+    returned for it, in execution order. Nothing is re-executed here; tau2's reward
+    replays the trajectory and fails closed if a recorded result does not reproduce.
+    """
+    task = load_task(domain, task_id)
+    tool_names = {
+        tool.openai_schema["function"]["name"]
+        for tool in seed_environment(domain, task_id, language=language).get_tools()
+    }
+    messages: list[Message] = [UserMessage(role="user", content=first_message(task) or "")]
+    for call, result in executed:
+        messages.append(AssistantMessage(role="assistant", content=None, tool_calls=[call]))
+        messages.append(result)
+    if final_message:
+        messages.append(AssistantMessage(role="assistant", content=final_message))
+    return messages, tool_names
+
+
 def virtual_trajectory(
     domain: str,
     task_id: str,
@@ -268,6 +309,63 @@ def structural_score(
     return breakdown["DB"] * breakdown["ENV_ASSERTION"] * breakdown["ACTION"], breakdown
 
 
+def score_logged_calls(
+    domain: str,
+    task_id: str,
+    executed: Sequence[tuple[ToolCall, ToolMessage]],
+    final_message: str | None,
+    *,
+    language: str = DEFAULT_LANGUAGE,
+) -> tuple[float, dict[str, Any]]:
+    """Binary reward from the calls the environment executed (the resources server's log).
+
+    Fails closed, like tau2's DB term: if the log does not reproduce from a freshly
+    seeded environment, the reward is 0 and the mismatch is recorded. tau2 replays the
+    trajectory itself only for tasks with a DB check, so this covers the rest.
+    """
+    messages, tool_names = executed_trajectory(
+        domain, task_id, executed, final_message, language=language
+    )
+    calls = [call for call, _ in executed]
+    reward, breakdown = _score(
+        domain, task_id, messages, tool_names, calls, final_message,
+        language=language, scoring=SERVER_LOG_SCORING,
+    )
+    mismatch = log_replay_mismatch(domain, task_id, executed, language=language)
+    if mismatch is not None:
+        reward = 0.0
+        breakdown["log_replay_error"] = mismatch
+    return reward, {"logged_calls": len(calls), "log_replays": mismatch is None, **breakdown}
+
+
+def log_replay_mismatch(
+    domain: str,
+    task_id: str,
+    executed: Sequence[tuple[ToolCall, ToolMessage]],
+    *,
+    language: str = DEFAULT_LANGUAGE,
+) -> str | None:
+    """The first logged call whose recorded result a fresh environment does not reproduce.
+
+    Results are compared as tau2's ``Environment.set_state`` compares them: JSON-decoded
+    when possible, otherwise as text. tau2 worlds are deterministic, so a mismatch means
+    the log is not a faithful record of the session.
+    """
+    environment = seed_environment(domain, task_id, language=language)
+    for index, (call, recorded) in enumerate(executed):
+        replayed = environment.get_response(call)
+        if _decoded(replayed.content) != _decoded(recorded.content):
+            return f"call {index} ({call.name}) returned {replayed.content!r:.200}, logged {recorded.content!r:.200}"
+    return None
+
+
+def _decoded(content: Any) -> Any:
+    try:
+        return json.loads(content)
+    except (TypeError, ValueError):
+        return content
+
+
 def score_trajectory(
     domain: str,
     task_id: str,
@@ -276,20 +374,42 @@ def score_trajectory(
     *,
     language: str = DEFAULT_LANGUAGE,
 ) -> tuple[float, dict[str, Any]]:
-    """Binary reward: the conjunction of the applicable ``DECOMPOSER_TERMS``.
+    """Binary reward from reported calls, replayed in report order into a fresh world.
+
+    The earlier scoring path, kept for comparison: it cannot see the calls of a
+    subagent whose history was lost. Rollouts are scored with ``score_logged_calls``.
+    """
+    messages, tool_names = virtual_trajectory(
+        domain, task_id, predicted_tool_calls, final_message, language=language
+    )
+    return _score(
+        domain, task_id, messages, tool_names, predicted_tool_calls, final_message,
+        language=language, scoring=REPORTED_REPLAY_SCORING,
+    )
+
+
+def _score(
+    domain: str,
+    task_id: str,
+    messages: list[Message],
+    tool_names: set[str],
+    calls: list[ToolCall],
+    final_message: str | None,
+    *,
+    language: str,
+    scoring: str,
+) -> tuple[float, dict[str, Any]]:
+    """The conjunction of the applicable ``DECOMPOSER_TERMS`` over a flat-agent trajectory.
 
     Terms come from tau2's ``compute_reward`` with its tri-state semantics: ``None``
     means the term does not apply to this task (no answer_spec, no declared
     prohibition, read-only gold) and does not bind.
     """
     task = load_task(domain, task_id)
-    breakdown: dict[str, Any] = {"num_predicted_tool_calls": len(predicted_tool_calls)}
+    breakdown: dict[str, Any] = {"scoring": scoring, "num_predicted_tool_calls": len(calls)}
     if task.evaluation_criteria is None:
         return 0.0, {**breakdown, "note": "no evaluation criteria"}
 
-    messages, tool_names = virtual_trajectory(
-        domain, task_id, predicted_tool_calls, final_message, language=language
-    )
     now = datetime.now(UTC).isoformat()
     simulation = SimulationRun(
         id=uuid.uuid4().hex,
@@ -309,7 +429,7 @@ def score_trajectory(
     reward = 1.0 if binding and all(binding.values()) else 0.0
 
     structural, structural_breakdown = structural_score(
-        domain, task_id, predicted_tool_calls, language=language
+        domain, task_id, calls, language=language
     )
     breakdown.update(
         {

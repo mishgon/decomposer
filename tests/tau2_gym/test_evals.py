@@ -71,6 +71,24 @@ def test_metrics_agree_with_the_gym_run_summary(tmp_path):
     assert result["decomposition"]["spawns_per_rollout"]["mean"] == 1.0
 
 
+def test_scoring_summary_separates_paths_and_counts_unreported_calls(tmp_path):
+    rows = [
+        {"reward": 1.0, "breakdown": {"scoring": "server_log_v1", "unreported_calls": 3}},
+        {"reward": 0.0, "breakdown": {"scoring": "server_log_v1", "unreported_calls": 0}},
+        {"reward": 1.0, "breakdown": {"terms": {}}},
+        {"reward": 0.0},
+    ]
+
+    summary = metrics_module.scoring_summary(rows)
+
+    assert summary["paths"] == {"not_scored": 1, "reported_replay_v0": 1, "server_log_v1": 2}
+    assert summary["rollouts_with_unreported_calls"] == 1
+    assert summary["unreported_calls"] == 3
+    assert summary["pass_at_1_of_rollouts_with_unreported_calls"] == 1.0
+    run_dir = _completed_run(tmp_path)
+    assert metrics_module.compute(run_dir)["scoring"]["paths"] == {"not_scored": 4}
+
+
 def test_metrics_require_a_complete_run(tmp_path):
     with pytest.raises(FileNotFoundError, match="not complete"):
         metrics_module.compute(tmp_path)
