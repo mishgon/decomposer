@@ -20,7 +20,7 @@ import yaml
 from decomposer.core import build_decomposer_chat_tools
 from decomposer.prompts import resolve_decomposer_system_prompt
 
-from .adapters import ADAPTER_VERSIONS, ADAPTERS
+from .adapters.registry import ADAPTER_VERSIONS, ADAPTERS
 from .schema import (
     CANONICAL_SCHEMA_VERSION,
     EXCLUSION_REASONS,

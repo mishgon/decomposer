@@ -125,7 +125,7 @@ from gyms.gaia2.run import (
     validate_run_identity,
 )
 from gyms.gaia2.run_eval import build_payload, normalize_job_desc, redact_payload
-from gyms.gaia2.snapshot_trace_prefix import create_trace_prefix_snapshot
+from sft.gaia2.snapshot_trace_prefix import create_trace_prefix_snapshot
 
 
 def _default_chat_template_kwargs(command: list[str]) -> dict:
