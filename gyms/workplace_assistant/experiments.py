@@ -10,7 +10,10 @@ from pathlib import Path
 from typing import Literal, cast
 
 from gyms.qwen_sampling import (
+    QWEN35_UNLOOPED_NON_THINKING,
+    QWEN38_TEACHER_THINKING,
     QwenSamplingParams,
+    SubagentSampling,
     qwen35_general_sampling,
     qwen36_non_thinking_sampling,
     qwen36_thinking_sampling,
@@ -44,6 +47,9 @@ WORKPLACE_SUBAGENT_RECURSION_LIMIT = 1000
 RunPurpose = Literal["trace-generation", "evaluation"]
 DecomposerPromptProfile = Literal["teacher", "student"]
 DecomposerManagerBackend = Literal["openrouter", "llm_proxy", "local_vllm"]
+DecomposerSubagentBackend = Literal["local_vllm", "llm_proxy"]
+# Qwen3.8-Flash-Next on the proxy accepts none/low/medium/xhigh and defaults to xhigh.
+ManagerReasoningEffort = Literal["none", "low", "medium", "high", "xhigh"]
 SimpleAgentBackend = Literal["openrouter", "local_vllm"]
 
 
@@ -119,6 +125,24 @@ class DecomposerExperiment:
     ] | None = None
     manager_verify_tls: bool = True
     manager_sampling: QwenSamplingParams | None = None
+    # llm_proxy thinking managers only: `reasoning.effort` on the Responses API, which
+    # ignores chat_template_kwargs. None leaves the provider default.
+    manager_reasoning_effort: ManagerReasoningEffort | None = None
+    # The upstream renders replayed reasoning items into the manager's prompt.
+    # Verified for Qwen3.8-Flash-Next on the shared proxy (2026-09-25: a replayed
+    # reasoning item raised the follow-up input from 83 to 158 tokens); Qwen3.6 there
+    # discards them, so its profiles stay capture-only.
+    upstream_replays_reasoning: bool = False
+    # llm_proxy: subagents reach the shared proxy through a loopback
+    # gyms.remote_model_proxy on subagent_proxy_port instead of a local vLLM.
+    subagent_backend: DecomposerSubagentBackend = "local_vllm"
+    subagent_model_id: str | None = None
+    subagent_proxy_port: int | None = None
+    subagent_upstream_url_env: str | None = None
+    subagent_api_key_env: str | None = None
+    subagent_verify_tls: bool = True
+    # None keeps the subagent graph's built-in preset.
+    subagent_sampling: SubagentSampling | None = None
     evaluation_prompt_profile: DecomposerPromptProfile = "student"
     concurrency: int = 8
     max_model_len: int = 32768
@@ -165,6 +189,49 @@ class DecomposerExperiment:
             raise ValueError(
                 f"{self.name}: manager_sampling requires manager_backend=llm_proxy"
             )
+        thinking_proxy_manager = (
+            self.requires_llm_proxy and self.manager_reasoning_mode == "thinking"
+        )
+        if self.manager_reasoning_effort is not None and not thinking_proxy_manager:
+            raise ValueError(
+                f"{self.name}: manager_reasoning_effort needs an llm_proxy thinking manager"
+            )
+        if self.upstream_replays_reasoning and not thinking_proxy_manager:
+            raise ValueError(
+                f"{self.name}: upstream_replays_reasoning needs an llm_proxy thinking manager"
+            )
+        subagent_remote_fields = (
+            self.subagent_model_id,
+            self.subagent_proxy_port,
+            self.subagent_upstream_url_env,
+            self.subagent_api_key_env,
+        )
+        if self.requires_subagent_proxy:
+            if any(value is None for value in subagent_remote_fields):
+                raise ValueError(
+                    f"{self.name}: llm_proxy subagents require complete remote fields"
+                )
+            if self.subagent_graph != "repository":
+                raise ValueError(
+                    f"{self.name}: llm_proxy subagents need subagent_graph=repository"
+                )
+        elif any(value is not None for value in subagent_remote_fields):
+            raise ValueError(
+                f"{self.name}: remote subagent fields require subagent_backend=llm_proxy"
+            )
+        if (
+            self.subagent_sampling is not None
+            and self.subagent_sampling.max_completion_tokens is not None
+            and self.max_output_tokens is not None
+        ):
+            raise ValueError(
+                f"{self.name}: cap subagents through subagent_sampling or "
+                "max_output_tokens, not both"
+            )
+        if not self.requires_local_models and self.num_gpus != 0:
+            raise ValueError(
+                f"{self.name}: no local model server, so num_gpus must be 0"
+            )
 
     @property
     def requires_openrouter(self) -> bool:
@@ -181,6 +248,29 @@ class DecomposerExperiment:
     @property
     def requires_local_manager(self) -> bool:
         return self.manager_backend == "local_vllm"
+
+    @property
+    def requires_subagent_proxy(self) -> bool:
+        return self.subagent_backend == "llm_proxy"
+
+    @property
+    def requires_local_models(self) -> bool:
+        """Whether any model is served by a local vLLM (the only use of GPUs)."""
+        if self.model_servers is not None:
+            return bool(self.model_servers)
+        if self.model_ids is not None:
+            return bool(self.model_ids)
+        return True
+
+    @property
+    def upstream_model_ids(self) -> tuple[str, ...]:
+        """Every model this experiment requests from an upstream proxy."""
+        models = []
+        if self.requires_llm_proxy and self.manager_model_id is not None:
+            models.append(self.manager_model_id)
+        if self.requires_subagent_proxy and self.subagent_model_id is not None:
+            models.append(self.subagent_model_id)
+        return tuple(models)
 
     @property
     def remote_manager_extra_body(self) -> dict[str, object]:
@@ -214,6 +304,8 @@ class DecomposerExperiment:
                     },
                 }
             )
+        if self.manager_reasoning_effort is not None:
+            value["reasoning"] = {"effort": self.manager_reasoning_effort}
         return value
 
 
@@ -702,6 +794,41 @@ DECOMPOSER_EXPERIMENTS = (
                 gdn_prefill_backend="triton",
             ),
         ),
+    ),
+    # SFT teacher traces without any GPU: Qwen3.8-Flash-Next at effort low (no
+    # presence penalty) and Qwen3.5-4B-unlooped non-thinking subagents on their
+    # recommended sampling (0.7/0.8/20, 2048 tokens, no penalties), both through the
+    # LLM proxy. Unlike Qwen3.6 there, Qwen3.8 renders replayed reasoning.
+    DecomposerExperiment(
+        name="qwen38-flash-thinking-low-teacher-qwen35-4b-unlooped-non-thinking",
+        gym_config_filename=(
+            "workplace_assistant_qwen38_flash_thinking_low_teacher_"
+            "qwen35_4b_unlooped_non_thinking.yaml"
+        ),
+        manager_backend="llm_proxy",
+        manager_model_id="Qwen/Qwen3.8-Flash-Next-NVFP4",
+        manager_proxy_port=8142,
+        manager_upstream_url_env="LLM_PROXY_URL",
+        manager_api_key_env="LLM_PROXY_MASTER_KEY",
+        manager_response_tool_parser="qwen3_xml",
+        manager_reasoning_mode="thinking",
+        manager_reasoning_effort="low",
+        manager_verify_tls=False,
+        manager_sampling=QWEN38_TEACHER_THINKING,
+        upstream_replays_reasoning=True,
+        subagent_backend="llm_proxy",
+        subagent_model_id="Qwen/Qwen3.5-4B-unlooped",
+        subagent_proxy_port=8025,
+        subagent_upstream_url_env="LLM_PROXY_URL",
+        subagent_api_key_env="LLM_PROXY_MASTER_KEY",
+        subagent_verify_tls=False,
+        subagent_sampling=QWEN35_UNLOOPED_NON_THINKING,
+        evaluation_prompt_profile="teacher",
+        concurrency=16,
+        num_gpus=0,
+        max_model_len=131072,
+        subagent_graph="repository",
+        model_servers=(),
     ),
     DecomposerExperiment(
         name=("qwen35-4b-base-non-thinking-" "qwen35-4b-non-thinking"),
@@ -1855,6 +1982,19 @@ def collect_experiments(
         for experiment in ALL_EXPERIMENTS
         if experiment.name in selected_names
     ]
+
+
+def remote_subagent_record(experiment: DecomposerExperiment) -> dict[str, object] | None:
+    """How preparation manifests record proxy-served subagents; None when local."""
+    if not experiment.requires_subagent_proxy:
+        return None
+    return {
+        "backend": experiment.subagent_backend,
+        "model_id": experiment.subagent_model_id,
+        "upstream_url_env": experiment.subagent_upstream_url_env,
+        "api_key_env": experiment.subagent_api_key_env,
+        "verify_tls": experiment.subagent_verify_tls,
+    }
 
 
 def models_for_experiment(

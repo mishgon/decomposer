@@ -58,6 +58,48 @@ def _retryable_status(status_code: int) -> bool:
     return status_code in _RETRYABLE_STATUSES
 
 
+def require_upstream_models(
+    url_env: str,
+    key_env: str,
+    model_ids: Sequence[str],
+    *,
+    verify_tls: bool = True,
+    timeout_seconds: float = 20.0,
+) -> None:
+    """Fail unless the upstream lists every model in ``model_ids``.
+
+    Run before a job starts: this proxy retries upstream failures, so a model the
+    upstream does not serve would otherwise stall a run instead of failing it.
+    Messages never include the upstream address.
+    """
+
+    url = os.environ.get(url_env)
+    key = os.environ.get(key_env)
+    if not url or not key:
+        raise RuntimeError(f"{url_env} and {key_env} must be set")
+    try:
+        with httpx.Client(
+            verify=verify_tls, trust_env=False, timeout=timeout_seconds
+        ) as client:
+            response = client.get(
+                url.rstrip("/") + "/models",
+                headers={"Authorization": f"Bearer {key}"},
+            )
+    except httpx.HTTPError as error:
+        raise RuntimeError(
+            f"{url_env} is unavailable: {type(error).__name__}"
+        ) from None
+    if response.status_code != 200:
+        raise RuntimeError(f"{url_env} /models returned HTTP {response.status_code}")
+    try:
+        served = {item["id"] for item in response.json()["data"]}
+    except (ValueError, KeyError, TypeError):
+        raise RuntimeError(f"{url_env} returned an unreadable model list") from None
+    missing = [model_id for model_id in model_ids if model_id not in served]
+    if missing:
+        raise RuntimeError(f"{url_env} does not serve: {', '.join(missing)}")
+
+
 def _without_matches(value: str, matches: Sequence[re.Match[str]]) -> str:
     pieces: list[str] = []
     cursor = 0

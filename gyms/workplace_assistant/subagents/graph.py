@@ -13,10 +13,15 @@ from responses_api_agents.decomposer_agent.subagents.graph import (
 
 from decomposer.chat_vllm import ChatVLLM
 from decomposer.prompts import SUBAGENT_SYSTEM_PROMPT
-from gyms.qwen_sampling import qwen35_general_sampling
+from gyms.qwen_sampling import non_thinking_subagent_sampling_kwargs
 
 REQUEST_TIMEOUT_SECONDS = 300.0
 MODEL_BASE_URLS_ENV = "WORKPLACE_ASSISTANT_MODEL_BASE_URLS_JSON"
+# The Qwen3.5-4B model the subagents request. run.py sets it for proxy-served
+# subagents (the proxy serves the unlooped weights); a local vLLM serves the original.
+QWEN35_4B_MODEL_ID = (
+    os.environ.get("WORKPLACE_ASSISTANT_SUBAGENT_MODEL_ID") or "Qwen/Qwen3.5-4B"
+)
 SUBAGENT_MAX_MODEL_CALLS = int(
     os.environ.get("DECOMPOSER_SUBAGENT_MAX_MODEL_CALLS", "100")
 )
@@ -75,25 +80,19 @@ def _create_subagent(model: ChatVLLM) -> CompiledStateGraph:
 
 
 def qwen35_4b_non_thinking() -> CompiledStateGraph:
-    sampling = qwen35_general_sampling(thinking=False)
+    # The experiment's sampling (DECOMPOSER_SUBAGENT_SAMPLING_JSON, set by run.py),
+    # else Qwen3.5's general non-thinking preset.
     model = ChatVLLM(
-        model="Qwen/Qwen3.5-4B",
-        base_url=_model_base_url("Qwen/Qwen3.5-4B", 8025),
+        model=QWEN35_4B_MODEL_ID,
+        base_url=_model_base_url(QWEN35_4B_MODEL_ID, 8025),
         api_key="EMPTY",
-        temperature=sampling.temperature,
-        top_p=sampling.top_p,
-        presence_penalty=sampling.presence_penalty,
         timeout=REQUEST_TIMEOUT_SECONDS,
         max_retries=0,
         disable_streaming=True,
         use_responses_api=False,
         preserve_reasoning=False,
         **_completion_kwargs(),
-        extra_body={
-            **sampling.extra_body,
-            "include_reasoning": False,
-            "chat_template_kwargs": {"enable_thinking": False},
-        },
+        **non_thinking_subagent_sampling_kwargs(),
     )
     return _create_subagent(model)
 

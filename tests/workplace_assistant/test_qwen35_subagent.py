@@ -139,3 +139,43 @@ def test_gemma_worker_uses_official_thinking_sampling(monkeypatch) -> None:
     )
     assert limiter.run_limit == 100
     assert limiter.exit_behavior == "error"
+
+
+def test_qwen35_worker_takes_model_and_sampling_from_the_run(monkeypatch) -> None:
+    from gyms.qwen_sampling import (
+        QWEN35_UNLOOPED_NON_THINKING,
+        subagent_sampling_environment,
+    )
+
+    captured: dict[str, Any] = {}
+
+    def fake_chat_vllm(**kwargs: Any) -> object:
+        captured.update(kwargs)
+        return object()
+
+    monkeypatch.setattr(graph, "ChatVLLM", fake_chat_vllm)
+    monkeypatch.setattr(graph, "create_agent", lambda **kwargs: object())
+    monkeypatch.setattr(graph, "QWEN35_4B_MODEL_ID", "Qwen/Qwen3.5-4B-unlooped")
+    monkeypatch.setattr(graph, "SUBAGENT_MAX_COMPLETION_TOKENS", 2048)
+    monkeypatch.setenv(
+        graph.MODEL_BASE_URLS_ENV,
+        '{"Qwen/Qwen3.5-4B-unlooped":"http://127.0.0.1:9025/v1"}',
+    )
+    for name, value in subagent_sampling_environment(
+        QWEN35_UNLOOPED_NON_THINKING
+    ).items():
+        monkeypatch.setenv(name, value)
+
+    graph.qwen35_4b_non_thinking()
+
+    assert captured["model"] == "Qwen/Qwen3.5-4B-unlooped"
+    assert captured["base_url"] == "http://127.0.0.1:9025/v1"
+    assert captured["temperature"] == 0.7
+    assert captured["top_p"] == 0.8
+    assert "presence_penalty" not in captured
+    assert captured["max_completion_tokens"] == 2048
+    assert captured["extra_body"] == {
+        "top_k": 20,
+        "include_reasoning": False,
+        "chat_template_kwargs": {"enable_thinking": False},
+    }

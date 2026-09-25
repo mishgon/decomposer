@@ -5,9 +5,10 @@ default task pool. ``run.py`` builds the Gym config from it at run time and writ
 the materialized config into the run directory, so this registry is the only place
 an experiment is described.
 
-Subagents are infrastructure, not part of an experiment: always Qwen3.5-4B
-non-thinking, served by a local vLLM or reached through the shared LLM proxy
-(``run.py --subagent-backend``).
+Subagents are always Qwen3.5-4B non-thinking, served by a local vLLM or reached
+through the shared LLM proxy (``run.py --subagent-backend``). An experiment may set
+their sampling (``subagent_sampling``); otherwise they use Qwen3.5's general
+non-thinking preset.
 """
 
 from __future__ import annotations
@@ -20,10 +21,13 @@ from typing import Any, Literal
 from decomposer.prompt_profiles import DECOMPOSER_PROMPT_PROFILES, DecomposerPromptProfile
 from gyms.qwen_sampling import (
     QWEN35_GENERAL_NON_THINKING,
+    QWEN35_UNLOOPED_NON_THINKING,
     QWEN38_NON_THINKING,
+    QWEN38_TEACHER_THINKING,
     QWEN38_THINKING,
     UNTRUNCATED_SAMPLING,
     QwenSamplingParams,
+    SubagentSampling,
 )
 
 ManagerBackend = Literal["openrouter", "llm_proxy", "local_vllm"]
@@ -89,6 +93,13 @@ class Tau2Experiment:
     # local_vllm only: Gym records prompt/generation token ids and logprobs on every
     # manager turn (vllm_model.return_token_id_information), which OPD consumes.
     return_token_ids: bool = False
+    # None keeps Qwen3.5's general non-thinking preset (presence penalty 1.5, no cap).
+    subagent_sampling: SubagentSampling | None = None
+    # The upstream renders replayed reasoning items into the manager's prompt. Verified
+    # for Qwen3.8-Flash-Next on the shared proxy's Responses API (2026-09-25: a replayed
+    # reasoning item raised the follow-up input from 83 to 158 tokens); recorded in
+    # run_status so traces say whether the teacher saw its earlier reasoning.
+    upstream_replays_reasoning: bool = False
     concurrency: int = 16
     manager_max_model_calls: int = 100
     subagent_recursion_limit: int = 1000
@@ -111,6 +122,10 @@ class Tau2Experiment:
             self.manager_backend != "llm_proxy" or self.manager_reasoning_mode != "thinking"
         ):
             raise ValueError(f"{self.name}: manager_reasoning_effort needs an llm_proxy thinking manager")
+        if self.upstream_replays_reasoning and (
+            self.manager_backend != "llm_proxy" or self.manager_reasoning_mode != "thinking"
+        ):
+            raise ValueError(f"{self.name}: upstream_replays_reasoning needs an llm_proxy thinking manager")
         if local and self.manager_reasoning_mode != "non_thinking":
             # The SFT/OPD student is trained non-thinking only (sft/model_support.py).
             raise ValueError(f"{self.name}: a local manager must be non_thinking")
@@ -192,6 +207,25 @@ EXPERIMENTS: tuple[Tau2Experiment, ...] = (
     _qwen38_flash_teacher("thinking"),
     # Shorter reasoning than the "xhigh" default: faster traces and shorter SFT targets.
     _qwen38_flash_teacher("thinking", effort="low"),
+    # SFT teacher traces: effort low without the presence penalty, and subagents on the
+    # unlooped model's own non-thinking settings (0.7/0.8/20, 2048 tokens, no penalties).
+    Tau2Experiment(
+        name="qwen38_flash_thinking_low_teacher_qwen35_4b_unlooped",
+        description=(
+            "Qwen3.8 Flash Next (thinking, effort low, no presence penalty) manager with the "
+            "teacher prompt; Qwen3.5-4B-unlooped non-thinking subagents on their recommended "
+            "sampling. SFT teacher traces."
+        ),
+        manager_backend="llm_proxy",
+        manager_model_id=QWEN38_FLASH_MODEL_ID,
+        prompt_profile="teacher",
+        pool=TRAIN_POOL,
+        manager_reasoning_mode="thinking",
+        manager_reasoning_effort="low",
+        manager_sampling=QWEN38_TEACHER_THINKING,
+        subagent_sampling=QWEN35_UNLOOPED_NON_THINKING,
+        upstream_replays_reasoning=True,
+    ),
     Tau2Experiment(
         name="qwen35_4b_base_student",
         description="Untuned Qwen3.5-4B manager with the student prompt.",

@@ -156,3 +156,60 @@ def test_proxy_normalizes_live_response_shape_and_isolates_credential(monkeypatc
     assert forwarded["temperature"] == 0.7
     assert forwarded["max_output_tokens"] == 32768
     assert forwarded["chat_template_kwargs"] == {"enable_thinking": False}
+
+
+class _FakeModelsClient:
+    def __init__(self, status_code: int, payload: object) -> None:
+        self.status_code = status_code
+        self.payload = payload
+        self.requested: list[str] = []
+
+    def __call__(self, **kwargs: object) -> "_FakeModelsClient":
+        self.kwargs = kwargs
+        return self
+
+    def __enter__(self) -> "_FakeModelsClient":
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        return None
+
+    def get(self, url: str, headers: dict[str, str]) -> "_FakeModelsClient":
+        self.requested.append(url)
+        return self
+
+    def json(self) -> object:
+        return self.payload
+
+
+def test_upstream_model_preflight_names_missing_models_without_the_url(monkeypatch) -> None:
+    monkeypatch.setenv("TEST_UPSTREAM_URL", "https://secret-host.example/v1")
+    monkeypatch.setenv("TEST_UPSTREAM_KEY", "sk-test")
+    client = _FakeModelsClient(200, {"data": [{"id": "Qwen/A"}, {"id": "Qwen/B"}]})
+    monkeypatch.setattr(remote_model_proxy.httpx, "Client", client)
+
+    remote_model_proxy.require_upstream_models(
+        "TEST_UPSTREAM_URL", "TEST_UPSTREAM_KEY", ["Qwen/A", "Qwen/B"], verify_tls=False
+    )
+    assert client.requested == ["https://secret-host.example/v1/models"]
+    assert client.kwargs["verify"] is False and client.kwargs["trust_env"] is False
+
+    with pytest.raises(RuntimeError) as missing:
+        remote_model_proxy.require_upstream_models(
+            "TEST_UPSTREAM_URL", "TEST_UPSTREAM_KEY", ["Qwen/A", "Qwen/C"]
+        )
+    assert "Qwen/C" in str(missing.value)
+    assert "secret-host" not in str(missing.value)
+
+    monkeypatch.setattr(
+        remote_model_proxy.httpx, "Client", _FakeModelsClient(503, {})
+    )
+    with pytest.raises(RuntimeError, match="HTTP 503"):
+        remote_model_proxy.require_upstream_models(
+            "TEST_UPSTREAM_URL", "TEST_UPSTREAM_KEY", ["Qwen/A"]
+        )
+    monkeypatch.delenv("TEST_UPSTREAM_KEY")
+    with pytest.raises(RuntimeError, match="must be set"):
+        remote_model_proxy.require_upstream_models(
+            "TEST_UPSTREAM_URL", "TEST_UPSTREAM_KEY", ["Qwen/A"]
+        )

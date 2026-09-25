@@ -35,6 +35,13 @@ from decomposer.prompt_profiles import (  # noqa: E402
     resolve_decomposer_system_prompt,
 )
 
+from gyms.qwen_sampling import (  # noqa: E402
+    SUBAGENT_MAX_COMPLETION_TOKENS_ENV,
+    SUBAGENT_SAMPLING_ENV,
+    non_thinking_subagent_sampling_kwargs,
+    subagent_sampling_environment,
+)
+from gyms.remote_model_proxy import require_upstream_models  # noqa: E402
 from gyms.workplace_assistant.experiments import (  # noqa: E402
     ARTIFACTS_ROOT,
     HF_HOME,
@@ -57,6 +64,7 @@ from gyms.workplace_assistant.experiments import (  # noqa: E402
     models_for_experiment,
     output_dir,
     preparation_manifest,
+    remote_subagent_record,
     run_name,
     source_dataset,
     validate_num_repeats,
@@ -72,6 +80,7 @@ GYM_COMPONENT_PORT_LOW = 11001
 GYM_COMPONENT_PORT_HIGH = 11999
 MAX_TCP_PORT = 65535
 SUBAGENT_MODEL_URLS_ENV = "WORKPLACE_ASSISTANT_MODEL_BASE_URLS_JSON"
+SUBAGENT_MODEL_ID_ENV = "WORKPLACE_ASSISTANT_SUBAGENT_MODEL_ID"
 
 
 @dataclass(frozen=True)
@@ -126,6 +135,11 @@ class WorkplacePortLayout:
             raise ValueError(f"{experiment.name} has no local manager proxy")
         return self.shifted(experiment.manager_proxy_port)
 
+    def subagent_proxy_port(self, experiment: DecomposerExperiment) -> int:
+        if experiment.subagent_proxy_port is None:
+            raise ValueError(f"{experiment.name} has no local subagent proxy")
+        return self.shifted(experiment.subagent_proxy_port)
+
     def as_dict(self, experiment: Experiment) -> dict[str, Any]:
         value: dict[str, Any] = {
             "offset": self.offset,
@@ -146,6 +160,9 @@ class WorkplacePortLayout:
             }
             if experiment.requires_llm_proxy:
                 value["manager_proxy"] = self.manager_proxy_port(experiment)
+            # Only for proxy-served subagents, so older run identities still match.
+            if experiment.requires_subagent_proxy:
+                value["subagent_proxy"] = self.subagent_proxy_port(experiment)
         return value
 
 
@@ -214,13 +231,26 @@ def hydra_flow_mapping(values: Mapping[str, Any]) -> str:
     )
 
 
+def subagent_sampling_record(experiment: DecomposerExperiment) -> dict[str, Any]:
+    """The sampling the Qwen3.5 subagent graph sends for this experiment."""
+    environment = subagent_sampling_environment(experiment.subagent_sampling)
+    record = non_thinking_subagent_sampling_kwargs(environment)
+    cap = environment.get(SUBAGENT_MAX_COMPLETION_TOKENS_ENV)
+    record["max_completion_tokens"] = int(cap) if cap is not None else None
+    return record
+
+
 def runtime_configuration(experiment: Experiment) -> dict[str, Any]:
     structured_reasoning_policy = "capture_replay_v2_template_preserved"
     if (
         isinstance(experiment, DecomposerExperiment)
         and experiment.requires_llm_proxy
     ):
-        structured_reasoning_policy = "capture_only_upstream_no_replay_v1"
+        structured_reasoning_policy = (
+            "capture_replay_upstream_verified_v1"
+            if experiment.upstream_replays_reasoning
+            else "capture_only_upstream_no_replay_v1"
+        )
     if isinstance(experiment, SimpleExperiment):
         return {
             "max_model_len": experiment.max_model_len,
@@ -237,7 +267,7 @@ def runtime_configuration(experiment: Experiment) -> dict[str, Any]:
                 "repetition_penalty": experiment.repetition_penalty,
             },
         }
-    return {
+    configuration: dict[str, Any] = {
         "max_model_len": experiment.max_model_len,
         "max_output_tokens": experiment.max_output_tokens,
         "evaluation_prompt_profile": experiment.evaluation_prompt_profile,
@@ -257,6 +287,19 @@ def runtime_configuration(experiment: Experiment) -> dict[str, Any]:
             "recursion_limit": experiment.subagent_recursion_limit,
         },
     }
+    # Keys are added only when set, so identities of earlier runs still match.
+    if experiment.manager_reasoning_effort is not None:
+        configuration["manager"]["reasoning_effort"] = experiment.manager_reasoning_effort
+    if experiment.requires_subagent_proxy:
+        configuration["subagent"].update(
+            {
+                "backend": experiment.subagent_backend,
+                "model": experiment.subagent_model_id,
+            }
+        )
+    if experiment.subagent_sampling is not None:
+        configuration["subagent"]["sampling"] = subagent_sampling_record(experiment)
+    return configuration
 
 
 def _decomposer_config_source(
@@ -583,6 +626,39 @@ def remote_manager_proxy_command(
     return command
 
 
+def remote_subagent_proxy_command(
+    experiment: DecomposerExperiment,
+    ports: WorkplacePortLayout = DEFAULT_PORT_LAYOUT,
+) -> list[str]:
+    """Loopback proxy for proxy-served subagents.
+
+    No tool parser (subagents use Chat Completions) and no extra body: the proxy's
+    extra body would override the graph's own sampling.
+    """
+    if not experiment.requires_subagent_proxy:
+        raise ValueError(f"{experiment.name} does not use proxy-served subagents")
+    command = [
+        str(PROJECT_VENV / "bin" / "python"),
+        "-m",
+        "gyms.remote_model_proxy",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        str(ports.subagent_proxy_port(experiment)),
+        "--upstream-url-env",
+        str(experiment.subagent_upstream_url_env),
+        "--api-key-env",
+        str(experiment.subagent_api_key_env),
+        "--timeout-seconds",
+        "3300",
+        "--max-retries",
+        "2",
+    ]
+    if not experiment.subagent_verify_tls:
+        command.append("--no-verify-tls")
+    return command
+
+
 def langgraph_command(
     local_repo: Path,
     experiment: DecomposerExperiment,
@@ -896,10 +972,17 @@ def validate_preparation(
                 "reasoning_mode": experiment.manager_reasoning_mode,
                 "verify_tls": experiment.manager_verify_tls,
             }
+            if experiment.manager_reasoning_effort is not None:
+                expected_manager["reasoning_effort"] = experiment.manager_reasoning_effort
             if manifest["models"].get("manager") != expected_manager:
                 raise ValueError(
                     "Preparation manifest points at an unexpected remote manager"
                 )
+        expected_subagent = remote_subagent_record(experiment)
+        if manifest["models"].get("remote_subagent") != expected_subagent:
+            raise ValueError(
+                "Preparation manifest points at an unexpected remote subagent"
+            )
     return manifest
 
 
@@ -1259,11 +1342,19 @@ def _base_environment(
         env["DECOMPOSER_SUBAGENT_MAX_MODEL_CALLS"] = str(
             experiment.subagent_max_model_calls
         )
+        subagent_urls = {
+            model.model_id: loopback_url(ports.model_port(model))
+            for model in models_for_experiment(experiment)
+        }
+        env.pop(SUBAGENT_MODEL_ID_ENV, None)
+        if experiment.requires_subagent_proxy:
+            assert experiment.subagent_model_id is not None
+            subagent_urls[experiment.subagent_model_id] = loopback_url(
+                ports.subagent_proxy_port(experiment)
+            )
+            env[SUBAGENT_MODEL_ID_ENV] = experiment.subagent_model_id
         env[SUBAGENT_MODEL_URLS_ENV] = json.dumps(
-            {
-                model.model_id: loopback_url(ports.model_port(model))
-                for model in models_for_experiment(experiment)
-            },
+            subagent_urls,
             separators=(",", ":"),
             sort_keys=True,
         )
@@ -1271,6 +1362,9 @@ def _base_environment(
             env["DECOMPOSER_SUBAGENT_MAX_COMPLETION_TOKENS"] = str(
                 experiment.max_output_tokens
             )
+        # Subagent sampling comes from the experiment, never the shell.
+        env.pop(SUBAGENT_SAMPLING_ENV, None)
+        env.update(subagent_sampling_environment(experiment.subagent_sampling))
     if isinstance(experiment, SimpleExperiment) and not experiment.requires_openrouter:
         for name in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"):
             env.pop(name, None)
@@ -1314,6 +1408,8 @@ def _dry_plan(
         services = []
         if experiment.requires_llm_proxy:
             services.append(remote_manager_proxy_command(experiment, ports))
+        if experiment.requires_subagent_proxy:
+            services.append(remote_subagent_proxy_command(experiment, ports))
         services.extend(
             decomposer_vllm_command(model, experiment, ports) for model in models
         )
@@ -1542,6 +1638,30 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
             raise RuntimeError(
                 "Remote manager environment is not set: " + ", ".join(missing)
             )
+    if isinstance(experiment, DecomposerExperiment):
+        upstreams: dict[tuple[str, str, bool], list[str]] = {}
+        if experiment.requires_llm_proxy:
+            upstreams.setdefault(
+                (
+                    str(experiment.manager_upstream_url_env),
+                    str(experiment.manager_api_key_env),
+                    experiment.manager_verify_tls,
+                ),
+                [],
+            ).append(str(experiment.manager_model_id))
+        if experiment.requires_subagent_proxy:
+            upstreams.setdefault(
+                (
+                    str(experiment.subagent_upstream_url_env),
+                    str(experiment.subagent_api_key_env),
+                    experiment.subagent_verify_tls,
+                ),
+                [],
+            ).append(str(experiment.subagent_model_id))
+        # The local proxies retry upstream failures, so a model the upstream does
+        # not serve would stall the run instead of failing it.
+        for (url_env, key_env, verify_tls), model_ids in upstreams.items():
+            require_upstream_models(url_env, key_env, model_ids, verify_tls=verify_tls)
 
     archived_attempt = archive_attempt(directory) if args.force else None
     directory.mkdir(parents=True, exist_ok=True)
@@ -1626,10 +1746,21 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
         status["manager"] = {
             "backend": experiment.manager_backend,
             "model": experiment.manager_model_id,
-            "endpoint": os.environ.get(experiment.manager_upstream_url_env or "", ""),
+            # The variable's name, not its value: the proxy address stays out of records.
+            "endpoint_env": experiment.manager_upstream_url_env,
             "response_tool_parser": experiment.manager_response_tool_parser,
             "reasoning_mode": experiment.manager_reasoning_mode,
         }
+        if experiment.manager_reasoning_effort is not None:
+            status["manager"]["reasoning_effort"] = experiment.manager_reasoning_effort
+    if isinstance(experiment, DecomposerExperiment):
+        status["subagent_sampling"] = subagent_sampling_record(experiment)
+        if experiment.requires_subagent_proxy:
+            status["subagent"] = {
+                "backend": experiment.subagent_backend,
+                "model": experiment.subagent_model_id,
+                "endpoint_env": experiment.subagent_upstream_url_env,
+            }
     if archived_attempt is not None:
         status["archived_attempt"] = str(archived_attempt)
     atomic_json(status_path, status)
@@ -1678,6 +1809,20 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
                             f"{ports.manager_proxy_port(experiment)}/health"
                         ),
                         [proxy_process],
+                        300,
+                    )
+                if experiment.requires_subagent_proxy:
+                    subagent_proxy = supervisor.start(
+                        "remote_subagent_proxy",
+                        remote_subagent_proxy_command(experiment, ports),
+                        cwd=local_repo,
+                    )
+                    wait_http(
+                        (
+                            "http://127.0.0.1:"
+                            f"{ports.subagent_proxy_port(experiment)}/health"
+                        ),
+                        [subagent_proxy],
                         300,
                     )
                 model_processes: list[subprocess.Popen[Any]] = []

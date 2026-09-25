@@ -86,6 +86,8 @@ config from it and writes it to `<run>/configuration/tau2_gym.yaml`.
 | experiment | manager | prompt | pool |
 |---|---|---|---|
 | `qwen38_flash_teacher_{non_thinking,thinking}` | Qwen3.8-Flash-Next via the LLM proxy | teacher | train_v2 |
+| `qwen38_flash_teacher_thinking_low` | the same, thinking with `reasoning.effort` low | teacher | train_v2 |
+| `qwen38_flash_thinking_low_teacher_qwen35_4b_unlooped` | the same at effort low without the presence penalty; subagents on the unlooped model's own non-thinking sampling | teacher | train_v2 |
 | `deepseek_v4_flash_teacher` | DeepSeek-v4-flash via OpenRouter (effort max) | teacher | train_v2 |
 | `qwen35_4b_base_student` | untuned Qwen3.5-4B, local vLLM | student | eval_v1 |
 | `qwen35_4b_sft_mixed_v3_student` | Qwen3.5-4B SFT (v5 student release), local vLLM | student | eval_v1 |
@@ -94,6 +96,26 @@ config from it and writes it to `<run>/configuration/tau2_gym.yaml`.
 Every experiment exposes one subagent type, `subagent_non_thinking`, with the SFT
 releases' canonical description, so teacher traces, SFT data, student evals and OPD
 rollouts all see the same `new`/`fork`/`run`/`wait` schema.
+
+Subagent sampling is Qwen3.5's general non-thinking preset (0.7/0.8/20, presence 1.5,
+no length cap) unless the experiment sets `subagent_sampling`. `run.py` passes it to
+the LangGraph server as `DECOMPOSER_SUBAGENT_SAMPLING_JSON` (plus
+`DECOMPOSER_SUBAGENT_MAX_COMPLETION_TOKENS`), and `run_status.json` records the
+values the graph sends. The unlooped teacher experiment uses the unlooped model's
+recommended non-thinking values: 0.7/0.8/20, 2048 tokens, no penalties
+(`QWEN35_UNLOOPED_NON_THINKING`). A subagent completion that reaches the cap fails
+that subagent run (`ChatVLLM` raises on `finish_reason=length`).
+
+Qwen3.8-Flash-Next on the proxy's Responses API renders replayed reasoning items: a
+probe on 2026-09-25 raised the follow-up input from 83 to 158 tokens with the earlier
+reasoning item. Gym's decomposer agent replays every output item, so the thinking
+teacher sees its own earlier reasoning; experiments that rely on it set
+`upstream_replays_reasoning`. (Qwen3.6 on the same proxy discards them; see the
+Workplace README.)
+
+Before starting, `run.py` checks that the shared proxy lists every model the run
+requests (`GET /models`), because the local proxies retry upstream failures and a
+missing model would otherwise stall the run.
 
 Remote Qwen managers go through `gyms.remote_model_proxy` on port 8144 with the
 `qwen3_xml` normaliser and the experiment's sampling as `--extra-body-json`. Gym's

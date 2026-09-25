@@ -38,6 +38,7 @@ from gyms.workplace_assistant.experiments import (  # noqa: E402
     gym_venv,
     models_for_experiment,
     preparation_manifest,
+    remote_subagent_record,
     source_dataset,
 )
 
@@ -364,6 +365,10 @@ def _experiment_models(
             "reasoning_mode": experiment.manager_reasoning_mode,
             "verify_tls": experiment.manager_verify_tls,
         }
+        if experiment.manager_reasoning_effort is not None:
+            models["manager"]["reasoning_effort"] = experiment.manager_reasoning_effort
+    if (remote_subagent := remote_subagent_record(experiment)) is not None:
+        models["remote_subagent"] = remote_subagent
     return models
 
 
@@ -461,7 +466,10 @@ def prepare_eval(args: argparse.Namespace) -> int:
         reuse_source=args.reuse_source,
     )
     needs_vllm = any(
-        isinstance(experiment, DecomposerExperiment)
+        (
+            isinstance(experiment, DecomposerExperiment)
+            and experiment.requires_local_models
+        )
         or (
             isinstance(experiment, SimpleExperiment)
             and not experiment.requires_openrouter

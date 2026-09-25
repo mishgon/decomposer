@@ -49,9 +49,9 @@ from gyms.qwen_sampling import qwen35_general_sampling
 
 
 def test_registry_is_global_and_unique() -> None:
-    assert len(DECOMPOSER_EXPERIMENTS) == 38
+    assert len(DECOMPOSER_EXPERIMENTS) == 39
     assert len(SIMPLE_EXPERIMENTS) == 32
-    assert len(experiments.EXPERIMENTS) == 70
+    assert len(experiments.EXPERIMENTS) == 71
     assert experiments.BASE_IMAGE.endswith("py3.12-torch2.7.0:0.0.42")
     assert {experiment.kind for experiment in experiments.ALL_EXPERIMENTS} == {
         "decomposer",
@@ -2369,3 +2369,126 @@ def test_named_sft_specs_live_with_the_workplace_sft_code() -> None:
         for filename in sft_prepare_module.SFT_SPECS.values()
     )
     assert not hasattr(prepare_module, "SFT_SPECS")
+
+
+QWEN38_UNLOOPED = "qwen38-flash-thinking-low-teacher-qwen35-4b-unlooped-non-thinking"
+
+
+def test_qwen38_unlooped_teacher_needs_no_gpu_and_reaches_both_models_by_proxy() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    experiment = get_experiment(QWEN38_UNLOOPED)
+    assert isinstance(experiment, DecomposerExperiment)
+    assert experiment.num_gpus == 0
+    assert models_for_experiment(experiment) == ()
+    assert run_module.selected_cuda_devices(experiment, None) == ()
+    assert experiment.upstream_model_ids == (
+        "Qwen/Qwen3.8-Flash-Next-NVFP4",
+        "Qwen/Qwen3.5-4B-unlooped",
+    )
+    assert experiment.remote_manager_extra_body == {
+        "temperature": 1.0,
+        "top_p": 0.95,
+        "top_k": 20,
+        "min_p": 0.0,
+        "presence_penalty": 0.0,
+        "repetition_penalty": 1.0,
+        "include_reasoning": True,
+        "chat_template_kwargs": {"enable_thinking": True, "preserve_thinking": True},
+        "reasoning": {"effort": "low"},
+    }
+    ports = run_module.WorkplacePortLayout(1000)
+    command = run_module.remote_subagent_proxy_command(experiment, ports)
+    assert command[command.index("--port") + 1] == "9025"
+    assert command[command.index("--upstream-url-env") + 1] == "LLM_PROXY_URL"
+    assert "--no-verify-tls" in command
+    assert "--extra-body-json" not in command
+    assert "--response-tool-parser" not in command
+    assert ports.as_dict(experiment)["subagent_proxy"] == 9025
+    environment = run_module._base_environment(
+        repo_root, experiment, "unlooped-test", ports
+    )
+    assert json.loads(environment[run_module.SUBAGENT_MODEL_URLS_ENV]) == {
+        "Qwen/Qwen3.5-4B-unlooped": "http://127.0.0.1:9025/v1"
+    }
+    assert environment[run_module.SUBAGENT_MODEL_ID_ENV] == "Qwen/Qwen3.5-4B-unlooped"
+    assert environment["DECOMPOSER_SUBAGENT_MAX_COMPLETION_TOKENS"] == "2048"
+    configuration = run_module.runtime_configuration(experiment)
+    assert configuration["structured_reasoning_policy"] == (
+        "capture_replay_upstream_verified_v1"
+    )
+    assert configuration["manager"]["reasoning_effort"] == "low"
+    assert configuration["subagent"]["backend"] == "llm_proxy"
+    assert configuration["subagent"]["sampling"] == {
+        "temperature": 0.7,
+        "top_p": 0.8,
+        "extra_body": {
+            "top_k": 20,
+            "include_reasoning": False,
+            "chat_template_kwargs": {"enable_thinking": False},
+        },
+        "max_completion_tokens": 2048,
+    }
+    plan = run_module._dry_plan(
+        repo_root,
+        experiment,
+        "trace-generation",
+        "train",
+        3,
+        None,
+        repo_root / "unused",
+        (),
+        None,
+        None,
+        ports,
+    )
+    assert plan["gpu_assignments"] == {}
+    assert not any("vllm serve" in service for service in plan["services"])
+    assert any("--port 9025" in service for service in plan["services"])
+    assert any("--port 9142" in service for service in plan["services"])
+
+
+def test_proxy_subagents_leave_older_identities_unchanged(monkeypatch) -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    qwen36 = get_experiment(
+        "qwen36-35b-a3b-thinking-teacher-qwen35-4b-non-thinking-text-defaults"
+    )
+    configuration = run_module.runtime_configuration(qwen36)
+    assert "reasoning_effort" not in configuration["manager"]
+    assert set(configuration["subagent"]) == {"max_model_calls", "recursion_limit"}
+    assert "subagent_proxy" not in run_module.DEFAULT_PORT_LAYOUT.as_dict(qwen36)
+    monkeypatch.setenv("DECOMPOSER_SUBAGENT_SAMPLING_JSON", '{"temperature": 0.1}')
+    monkeypatch.setenv("WORKPLACE_ASSISTANT_SUBAGENT_MODEL_ID", "Qwen/Stale")
+    environment = run_module._base_environment(repo_root, qwen36, "identity-test")
+    assert "DECOMPOSER_SUBAGENT_SAMPLING_JSON" not in environment
+    assert run_module.SUBAGENT_MODEL_ID_ENV not in environment
+    assert experiments.remote_subagent_record(qwen36) is None
+    assert experiments.remote_subagent_record(get_experiment(QWEN38_UNLOOPED)) == {
+        "backend": "llm_proxy",
+        "model_id": "Qwen/Qwen3.5-4B-unlooped",
+        "upstream_url_env": "LLM_PROXY_URL",
+        "api_key_env": "LLM_PROXY_MASTER_KEY",
+        "verify_tls": False,
+    }
+
+
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    [
+        ({"manager_reasoning_mode": "non_thinking"}, "manager_reasoning_effort"),
+        ({"subagent_proxy_port": None}, "complete remote fields"),
+        ({"subagent_graph": "qwen35"}, "subagent_graph=repository"),
+        ({"num_gpus": 1}, "num_gpus must be 0"),
+        ({"max_output_tokens": 4096}, "not both"),
+        (
+            {
+                "subagent_backend": "local_vllm",
+            },
+            "require subagent_backend=llm_proxy",
+        ),
+    ],
+)
+def test_invalid_proxy_subagent_experiments_are_rejected(
+    overrides: dict, message: str
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        replace(get_experiment(QWEN38_UNLOOPED), **overrides)

@@ -60,6 +60,17 @@ The matched text-default profiles are:
   deployment discards reasoning items replayed by the harness. This profile is
   capture-only and is not a clean comparison with full-replay local Gemma or
   OpenRouter DeepSeek.
+- `qwen38-flash-thinking-low-teacher-qwen35-4b-unlooped-non-thinking` needs no
+  GPU. The manager is Qwen3.8-Flash-Next through the LLM proxy, thinking at
+  `reasoning.effort` low, with the teacher prompt and no presence penalty. The
+  subagents are `Qwen/Qwen3.5-4B-unlooped` non-thinking through the same proxy, via a
+  loopback `gyms.remote_model_proxy` on port 8025 (`subagent_backend="llm_proxy"`).
+  They use that model's recommended non-thinking sampling: 0.7/0.8/20, 2048 tokens,
+  no penalties (`subagent_sampling`, passed to the graph as
+  `DECOMPOSER_SUBAGENT_SAMPLING_JSON`). Unlike Qwen3.6, Qwen3.8 on the proxy renders
+  replayed reasoning items (probe on 2026-09-25: 83 → 158 input tokens), so its
+  identity records `capture_replay_upstream_verified_v1`. Before starting, the run
+  checks that the proxy lists both models.
 - `deepseek-v4-flash-0731-teacher-gemma4-26b-a4b-non-thinking`: OpenRouter
   DeepSeek with high reasoning and the teacher prompt, plus one local
   non-thinking Gemma-4-26B-A4B worker.

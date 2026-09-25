@@ -193,3 +193,82 @@ def test_run_name_records_pool_and_subsample() -> None:
         run_module.run_name(experiment, pool="decomposer_eval_v1", tasks_per_domain=None, num_repeats=3, port_offset=0)
         == "qwen38_flash_teacher_non_thinking-decomposer_eval_v1-n3"
     )
+
+
+def test_unlooped_teacher_sampling_for_manager_and_subagents() -> None:
+    experiment = get_experiment("qwen38_flash_thinking_low_teacher_qwen35_4b_unlooped")
+    assert experiment.pool == "decomposer_train_v2"
+    assert experiment.prompt_profile == "teacher"
+    assert experiment.upstream_replays_reasoning
+    assert experiment.manager_proxy_extra_body == {
+        "temperature": 1.0,
+        "top_p": 0.95,
+        "top_k": 20,
+        "min_p": 0.0,
+        "presence_penalty": 0.0,
+        "repetition_penalty": 1.0,
+        "include_reasoning": True,
+        "chat_template_kwargs": {"enable_thinking": True, "preserve_thinking": True},
+        "reasoning": {"effort": "low"},
+    }
+    env = run_module.subagent_environment(experiment)
+    assert run_module.subagent_sampling_record(env) == {
+        "temperature": 0.7,
+        "top_p": 0.8,
+        "extra_body": {
+            "top_k": 20,
+            "include_reasoning": False,
+            "chat_template_kwargs": {"enable_thinking": False},
+        },
+        "max_completion_tokens": 2048,
+    }
+    assert run_module.upstream_model_ids(
+        experiment, subagent_backend="llm_proxy", subagent_model_id="Qwen/Qwen3.5-4B-unlooped"
+    ) == ["Qwen/Qwen3.8-Flash-Next-NVFP4", "Qwen/Qwen3.5-4B-unlooped"]
+    assert run_module.upstream_model_ids(
+        experiment, subagent_backend="local_vllm", subagent_model_id="Qwen/Qwen3.5-4B"
+    ) == ["Qwen/Qwen3.8-Flash-Next-NVFP4"]
+
+
+def test_existing_experiments_keep_their_sampling(monkeypatch: pytest.MonkeyPatch) -> None:
+    low = get_experiment("qwen38_flash_teacher_thinking_low")
+    assert low.manager_proxy_extra_body["presence_penalty"] == 1.5
+    assert run_module.subagent_environment(low) == {}
+    # A value left in the shell never reaches the graph of an experiment without one.
+    monkeypatch.setenv("DECOMPOSER_SUBAGENT_SAMPLING_JSON", '{"temperature": 0.1}')
+    env = run_module.base_environment(
+        run_module.PortLayout(), subagent_backend="llm_proxy", subagent_model_id="Qwen/Qwen3.5-4B-unlooped"
+    )
+    env.update(run_module.subagent_environment(low))
+    assert "DECOMPOSER_SUBAGENT_SAMPLING_JSON" not in env
+    assert run_module.subagent_sampling_record(env)["presence_penalty"] == 1.5
+
+
+def test_subagent_graph_sends_the_experiment_sampling(monkeypatch: pytest.MonkeyPatch) -> None:
+    import sys
+
+    sys.path.insert(0, str(REPO_ROOT / "external" / "Gym"))
+    from gyms.qwen_sampling import QWEN35_UNLOOPED_NON_THINKING, subagent_sampling_environment
+    from gyms.tau2_gym.subagents import graph
+
+    captured: dict = {}
+    monkeypatch.setattr(graph, "ChatVLLM", lambda **kwargs: captured.update(kwargs) or object())
+    monkeypatch.setattr(graph, "create_agent", lambda **kwargs: object())
+    monkeypatch.setattr(graph, "SUBAGENT_MAX_COMPLETION_TOKENS", 2048)
+    for name, value in subagent_sampling_environment(QWEN35_UNLOOPED_NON_THINKING).items():
+        monkeypatch.setenv(name, value)
+    graph.qwen35_4b_non_thinking()
+    assert captured["temperature"] == 0.7 and captured["top_p"] == 0.8
+    assert "presence_penalty" not in captured
+    assert captured["max_completion_tokens"] == 2048
+    assert captured["extra_body"] == {
+        "top_k": 20,
+        "include_reasoning": False,
+        "chat_template_kwargs": {"enable_thinking": False},
+    }
+    assert captured["preserve_reasoning"] is False
+
+
+def test_invalid_replay_flag_is_rejected() -> None:
+    with pytest.raises(ValueError, match="upstream_replays_reasoning"):
+        replace(get_experiment("qwen38_flash_teacher_non_thinking"), upstream_replays_reasoning=True)

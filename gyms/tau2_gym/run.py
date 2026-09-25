@@ -31,7 +31,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -57,6 +57,13 @@ from gyms.tau2_gym.experiments import (  # noqa: E402
     Tau2Experiment,
     get_experiment,
 )
+from gyms.qwen_sampling import (  # noqa: E402
+    SUBAGENT_MAX_COMPLETION_TOKENS_ENV,
+    SUBAGENT_SAMPLING_ENV,
+    non_thinking_subagent_sampling_kwargs,
+    subagent_sampling_environment,
+)
+from gyms.remote_model_proxy import require_upstream_models  # noqa: E402
 from gyms.tau2_gym.task_pools import load_pool  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -425,9 +432,33 @@ def base_environment(ports: PortLayout, *, subagent_backend: str, subagent_model
         }
     )
     env.setdefault("DECOMPOSER_SUBAGENT_MAX_MODEL_CALLS", "100")
+    # Subagent sampling comes from the experiment (subagent_environment), never the shell.
+    env.pop(SUBAGENT_SAMPLING_ENV, None)
     # Nothing but the vLLM servers needs a GPU; each gets its own CUDA_VISIBLE_DEVICES.
     env.pop("CUDA_VISIBLE_DEVICES", None)
     return env
+
+
+def subagent_environment(experiment: Tau2Experiment) -> dict[str, str]:
+    """What the LangGraph server needs so subagents sample as the experiment says."""
+    return subagent_sampling_environment(experiment.subagent_sampling)
+
+
+def subagent_sampling_record(env: Mapping[str, str]) -> dict[str, Any]:
+    """The sampling the subagent graph will send, as run_status records it."""
+    record = non_thinking_subagent_sampling_kwargs(env)
+    record["max_completion_tokens"] = (
+        int(env[SUBAGENT_MAX_COMPLETION_TOKENS_ENV]) if SUBAGENT_MAX_COMPLETION_TOKENS_ENV in env else None
+    )
+    return record
+
+
+def upstream_model_ids(experiment: Tau2Experiment, *, subagent_backend: str, subagent_model_id: str) -> list[str]:
+    """Every model this run requests from the shared LLM proxy."""
+    models = [experiment.manager_model_id] if experiment.manager_backend == "llm_proxy" else []
+    if subagent_backend == "llm_proxy":
+        models.append(subagent_model_id)
+    return models
 
 
 def prepare_dataset(
@@ -740,6 +771,7 @@ def execute(args: argparse.Namespace) -> int:
 
     subagent_model_id = resolve_subagent_model_id(args.subagent_backend, args.subagent_model_id)
     env = base_environment(ports, subagent_backend=args.subagent_backend, subagent_model_id=subagent_model_id)
+    env.update(subagent_environment(experiment))
     use_subagent_proxy = args.subagent_backend == "llm_proxy"
     manager_command: list[str] | None = None
     if experiment.manager_backend == "local_vllm":
@@ -772,6 +804,7 @@ def execute(args: argparse.Namespace) -> int:
             "manager_checkpoint": str(checkpoint) if checkpoint else None,
             "manager": manager_command, "manager_gpu": args.manager_gpu,
             "subagent_backend": args.subagent_backend, "subagent_model_id": subagent_model_id,
+            "subagent_sampling": subagent_sampling_record(env),
             "subagent": subagent_command,
             "subagent_gpu": args.subagent_gpu,
             "langgraph": langgraph_command(ports, args.langgraph_jobs),
@@ -787,6 +820,19 @@ def execute(args: argparse.Namespace) -> int:
         require_env([OPENROUTER_API_KEY_ENV], "Source ~/.secrets/decomposer.env first.")
     if experiment.manager_backend == "llm_proxy" or use_subagent_proxy:
         require_env([LLM_PROXY_URL_ENV, LLM_PROXY_API_KEY_ENV], "Source ~/.secrets/decomposer.env first.")
+        # The local proxies retry upstream failures, so a model the shared proxy does
+        # not serve would stall the run instead of failing it: check before starting.
+        try:
+            require_upstream_models(
+                LLM_PROXY_URL_ENV,
+                LLM_PROXY_API_KEY_ENV,
+                upstream_model_ids(
+                    experiment, subagent_backend=args.subagent_backend, subagent_model_id=subagent_model_id
+                ),
+                verify_tls=False,
+            )
+        except RuntimeError as error:
+            raise SystemExit(f"LLM proxy pre-flight failed: {error}") from None
     if experiment.manager_backend == "local_vllm" and args.manager_gpu is None:
         raise SystemExit("A local manager needs --manager-gpu")
     if not use_subagent_proxy and args.subagent_gpu is None:
@@ -827,6 +873,7 @@ def execute(args: argparse.Namespace) -> int:
         "manager_checkpoint_fingerprint": checkpoint_fingerprint(checkpoint) if checkpoint else None,
         "subagent_backend": args.subagent_backend,
         "subagent_model_id": subagent_model_id,
+        "subagent_sampling": subagent_sampling_record(env),
         "subagent_endpoint": subagent_base_url(ports, args.subagent_backend),
         "ports": ports.as_dict(),
         "gyms_config_sha256": hashlib.sha256(config_path.read_bytes()).hexdigest()[:16],
