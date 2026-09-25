@@ -627,7 +627,7 @@ def _percentiles(values: Sequence[float]) -> dict[str, float]:
     }
 
 
-def _outcomes(run_dir: Path) -> dict[tuple[str, int], float]:
+def _outcomes(run_dir: Path) -> dict[tuple[str, int | None], float]:
     """Per-rollout score keyed by (scenario, run number).
 
     ``output.jsonl`` rows are not in run order, so the repeat index has to come
@@ -645,9 +645,10 @@ def _outcomes(run_dir: Path) -> dict[tuple[str, int], float]:
         meta = row.get("metadata") or {}
         scenario = str(meta.get("scenario_id") or row.get("task_id"))
         run_number = meta.get("run_number")
-        if run_number is None:
-            continue
-        out[(scenario, int(run_number))] = float(row.get("score") or 0.0)
+        # ARE records no run number when each scenario runs once (--num-repeats
+        # 1); the rollout records carry None then too, so the key still joins.
+        key = (scenario, None if run_number is None else int(run_number))
+        out[key] = float(row.get("score") or 0.0)
     return out
 
 

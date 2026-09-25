@@ -270,3 +270,15 @@ def test_a_remotely_served_model_needs_an_explicit_tokenizer():
     assert trace_stats._tokenizer_path(None, "/qwen35-4b", "worker") == "/qwen35-4b"
     with pytest.raises(ValueError, match="pass --tokenizer"):
         trace_stats._tokenizer_path(None, None, "policy")
+
+
+def test_single_repeat_scores_join_without_run_numbers(tmp_path):
+    rows = [
+        {"task_id": "a", "score": 1.0, "metadata": {"scenario_id": "a"}},
+        {"task_id": "b", "score": 0.0, "metadata": {"scenario_id": "b", "run_number": 2}},
+    ]
+    (tmp_path / "output.jsonl").write_text(
+        "".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8"
+    )
+
+    assert trace_stats._outcomes(tmp_path) == {("a", None): 1.0, ("b", 2): 0.0}
