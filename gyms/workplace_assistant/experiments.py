@@ -797,7 +797,7 @@ DECOMPOSER_EXPERIMENTS = (
     ),
     # SFT teacher traces without any GPU: Qwen3.8-Flash-Next at effort low (no
     # presence penalty) and Qwen3.5-4B-unlooped non-thinking subagents on their
-    # recommended sampling (0.7/0.8/20, 2048 tokens, no penalties), both through the
+    # recommended sampling (0.7/0.8/20, no penalties; 8192-token cap), both through the
     # LLM proxy. Unlike Qwen3.6 there, Qwen3.8 renders replayed reasoning.
     DecomposerExperiment(
         name="qwen38-flash-thinking-low-teacher-qwen35-4b-unlooped-non-thinking",

@@ -91,7 +91,7 @@ def test_unlooped_subagent_sampling_sends_only_what_is_set() -> None:
     )
 
     environment = subagent_sampling_environment(QWEN35_UNLOOPED_NON_THINKING)
-    assert environment["DECOMPOSER_SUBAGENT_MAX_COMPLETION_TOKENS"] == "2048"
+    assert environment["DECOMPOSER_SUBAGENT_MAX_COMPLETION_TOKENS"] == "8192"
     # No penalties and no min_p: the unlooped model was evaluated without them.
     assert non_thinking_subagent_sampling_kwargs(environment) == {
         "temperature": 0.7,

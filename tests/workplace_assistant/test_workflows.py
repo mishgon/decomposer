@@ -2411,7 +2411,7 @@ def test_qwen38_unlooped_teacher_needs_no_gpu_and_reaches_both_models_by_proxy()
         "Qwen/Qwen3.5-4B-unlooped": "http://127.0.0.1:9025/v1"
     }
     assert environment[run_module.SUBAGENT_MODEL_ID_ENV] == "Qwen/Qwen3.5-4B-unlooped"
-    assert environment["DECOMPOSER_SUBAGENT_MAX_COMPLETION_TOKENS"] == "2048"
+    assert environment["DECOMPOSER_SUBAGENT_MAX_COMPLETION_TOKENS"] == "8192"
     configuration = run_module.runtime_configuration(experiment)
     assert configuration["structured_reasoning_policy"] == (
         "capture_replay_upstream_verified_v1"
@@ -2426,7 +2426,7 @@ def test_qwen38_unlooped_teacher_needs_no_gpu_and_reaches_both_models_by_proxy()
             "include_reasoning": False,
             "chat_template_kwargs": {"enable_thinking": False},
         },
-        "max_completion_tokens": 2048,
+        "max_completion_tokens": 8192,
     }
     plan = run_module._dry_plan(
         repo_root,

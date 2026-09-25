@@ -208,7 +208,7 @@ EXPERIMENTS: tuple[Tau2Experiment, ...] = (
     # Shorter reasoning than the "xhigh" default: faster traces and shorter SFT targets.
     _qwen38_flash_teacher("thinking", effort="low"),
     # SFT teacher traces: effort low without the presence penalty, and subagents on the
-    # unlooped model's own non-thinking settings (0.7/0.8/20, 2048 tokens, no penalties).
+    # unlooped model's own non-thinking settings (0.7/0.8/20, no penalties) with an 8192-token cap.
     Tau2Experiment(
         name="qwen38_flash_thinking_low_teacher_qwen35_4b_unlooped",
         description=(

@@ -158,11 +158,14 @@ class SubagentSampling:
 # Its authors recommend the base model's non-thinking values and evaluated the
 # model without any penalty, so none is sent. Thinking mode would be 0.6/0.95/20
 # with 8192 tokens; Decomposer subagents do not think.
+# The cap is 8192, not the doc's non-thinking 2048: in the Workplace smoke
+# (2026-09-25) 2048 cut 2 of 16 subagent runs, both legitimate full-record reports
+# rather than loops, and the base model rarely loops without thinking.
 QWEN35_UNLOOPED_NON_THINKING = SubagentSampling(
     temperature=0.7,
     top_p=0.8,
     top_k=20,
-    max_completion_tokens=2048,
+    max_completion_tokens=8192,
 )
 
 

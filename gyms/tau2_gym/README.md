@@ -87,7 +87,7 @@ config from it and writes it to `<run>/configuration/tau2_gym.yaml`.
 |---|---|---|---|
 | `qwen38_flash_teacher_{non_thinking,thinking}` | Qwen3.8-Flash-Next via the LLM proxy | teacher | train_v2 |
 | `qwen38_flash_teacher_thinking_low` | the same, thinking with `reasoning.effort` low | teacher | train_v2 |
-| `qwen38_flash_thinking_low_teacher_qwen35_4b_unlooped` | the same at effort low without the presence penalty; subagents on the unlooped model's own non-thinking sampling | teacher | train_v2 |
+| `qwen38_flash_thinking_low_teacher_qwen35_4b_unlooped` | the same at effort low without the presence penalty; subagents on the unlooped model's own non-thinking sampling, 8192-token cap | teacher | train_v2 |
 | `deepseek_v4_flash_teacher` | DeepSeek-v4-flash via OpenRouter (effort max) | teacher | train_v2 |
 | `qwen35_4b_base_student` | untuned Qwen3.5-4B, local vLLM | student | eval_v1 |
 | `qwen35_4b_sft_mixed_v3_student` | Qwen3.5-4B SFT (v5 student release), local vLLM | student | eval_v1 |
@@ -102,8 +102,9 @@ no length cap) unless the experiment sets `subagent_sampling`. `run.py` passes i
 the LangGraph server as `DECOMPOSER_SUBAGENT_SAMPLING_JSON` (plus
 `DECOMPOSER_SUBAGENT_MAX_COMPLETION_TOKENS`), and `run_status.json` records the
 values the graph sends. The unlooped teacher experiment uses the unlooped model's
-recommended non-thinking values: 0.7/0.8/20, 2048 tokens, no penalties
-(`QWEN35_UNLOOPED_NON_THINKING`). A subagent completion that reaches the cap fails
+recommended non-thinking values, 0.7/0.8/20 with no penalties, but caps completions
+at 8192 tokens rather than its 2048: in the Workplace smoke 2048 cut legitimate
+full-record reports (`QWEN35_UNLOOPED_NON_THINKING`). A subagent completion that reaches the cap fails
 that subagent run (`ChatVLLM` raises on `finish_reason=length`).
 
 Qwen3.8-Flash-Next on the proxy's Responses API renders replayed reasoning items: a

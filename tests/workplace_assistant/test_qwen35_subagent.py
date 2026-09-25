@@ -156,7 +156,7 @@ def test_qwen35_worker_takes_model_and_sampling_from_the_run(monkeypatch) -> Non
     monkeypatch.setattr(graph, "ChatVLLM", fake_chat_vllm)
     monkeypatch.setattr(graph, "create_agent", lambda **kwargs: object())
     monkeypatch.setattr(graph, "QWEN35_4B_MODEL_ID", "Qwen/Qwen3.5-4B-unlooped")
-    monkeypatch.setattr(graph, "SUBAGENT_MAX_COMPLETION_TOKENS", 2048)
+    monkeypatch.setattr(graph, "SUBAGENT_MAX_COMPLETION_TOKENS", 8192)
     monkeypatch.setenv(
         graph.MODEL_BASE_URLS_ENV,
         '{"Qwen/Qwen3.5-4B-unlooped":"http://127.0.0.1:9025/v1"}',
@@ -173,7 +173,7 @@ def test_qwen35_worker_takes_model_and_sampling_from_the_run(monkeypatch) -> Non
     assert captured["temperature"] == 0.7
     assert captured["top_p"] == 0.8
     assert "presence_penalty" not in captured
-    assert captured["max_completion_tokens"] == 2048
+    assert captured["max_completion_tokens"] == 8192
     assert captured["extra_body"] == {
         "top_k": 20,
         "include_reasoning": False,

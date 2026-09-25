@@ -65,8 +65,9 @@ The matched text-default profiles are:
   `reasoning.effort` low, with the teacher prompt and no presence penalty. The
   subagents are `Qwen/Qwen3.5-4B-unlooped` non-thinking through the same proxy, via a
   loopback `gyms.remote_model_proxy` on port 8025 (`subagent_backend="llm_proxy"`).
-  They use that model's recommended non-thinking sampling: 0.7/0.8/20, 2048 tokens,
-  no penalties (`subagent_sampling`, passed to the graph as
+  They use that model's recommended non-thinking sampling, 0.7/0.8/20 with no
+  penalties, capped at 8192 tokens instead of its 2048, which cut legitimate
+  full-record reports in the smoke (`subagent_sampling`, passed to the graph as
   `DECOMPOSER_SUBAGENT_SAMPLING_JSON`). Unlike Qwen3.6, Qwen3.8 on the proxy renders
   replayed reasoning items (probe on 2026-09-25: 83 → 158 input tokens), so its
   identity records `capture_replay_upstream_verified_v1`. Before starting, the run

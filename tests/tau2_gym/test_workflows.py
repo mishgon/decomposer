@@ -220,7 +220,7 @@ def test_unlooped_teacher_sampling_for_manager_and_subagents() -> None:
             "include_reasoning": False,
             "chat_template_kwargs": {"enable_thinking": False},
         },
-        "max_completion_tokens": 2048,
+        "max_completion_tokens": 8192,
     }
     assert run_module.upstream_model_ids(
         experiment, subagent_backend="llm_proxy", subagent_model_id="Qwen/Qwen3.5-4B-unlooped"
@@ -254,13 +254,13 @@ def test_subagent_graph_sends_the_experiment_sampling(monkeypatch: pytest.Monkey
     captured: dict = {}
     monkeypatch.setattr(graph, "ChatVLLM", lambda **kwargs: captured.update(kwargs) or object())
     monkeypatch.setattr(graph, "create_agent", lambda **kwargs: object())
-    monkeypatch.setattr(graph, "SUBAGENT_MAX_COMPLETION_TOKENS", 2048)
+    monkeypatch.setattr(graph, "SUBAGENT_MAX_COMPLETION_TOKENS", 8192)
     for name, value in subagent_sampling_environment(QWEN35_UNLOOPED_NON_THINKING).items():
         monkeypatch.setenv(name, value)
     graph.qwen35_4b_non_thinking()
     assert captured["temperature"] == 0.7 and captured["top_p"] == 0.8
     assert "presence_penalty" not in captured
-    assert captured["max_completion_tokens"] == 2048
+    assert captured["max_completion_tokens"] == 8192
     assert captured["extra_body"] == {
         "top_k": 20,
         "include_reasoning": False,
