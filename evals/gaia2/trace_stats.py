@@ -953,9 +953,11 @@ def analyse_simple_run(
     # the figure to compare against the decomposer.
     output_exact = sum(r["manager_output_tokens"] for r in rollouts)
     calibration = 1.0
+    calibration_source = "none"
     if policy.generation_tokens and rollouts:
         predicted = output_exact / len(rollouts) * len(population)
         calibration = predicted / policy.generation_tokens
+        calibration_source = "policy_vllm_log"
     logical = policy.logical_prompt_tokens
     measured_each = (
         logical * calibration / len(population) if logical and population else None
@@ -967,19 +969,16 @@ def analyse_simple_run(
         )
     summary = _summarise(rollouts, status, kind="simple", population=len(population))
     summary["clamped_rollout_durations"] = clamped
-    summary["manager_backend"] = "local_vllm"
-    summary["gpu_hours_cover_manager"] = True
-    summary["manager_backend"] = manager_backend
-    # A remote manager burns no local GPU, so this run's GPU-hours cover the
-    # worker alone and understate the system against locally served rows.
-    summary["gpu_hours_cover_manager"] = manager_backend == "local_vllm"
+    backend = _simple_policy_backend(status)
+    summary["manager_backend"] = backend
+    summary["gpu_hours_cover_manager"] = backend == "local_vllm"
     summary["tokens"] = {
         "method": "input reconstructed from the message history plus the tool "
         "schemas the benchmark binds per call; the calibrated throughput "
         "measurement corroborates it where the prefix-cache hit rate allows",
         "integral_calibration": round(calibration, 4),
-        # "none" means the manager ran on a remote API: there is no local log to
-        # measure the counter's bias against, so the worker integral is raw.
+        # "none" means the policy ran on a remote API (no local vLLM log), so
+        # there is no measured integral to calibrate.
         "calibration_source": calibration_source,
         "policy_vllm_integral": policy.as_dict(),
         "output_exact_per_rollout": round(output_exact / max(len(rollouts), 1)),
@@ -1033,6 +1032,16 @@ def _simple_model_path(status: dict[str, Any]) -> str | None:
         if isinstance(entry, dict) and entry.get("path"):
             return entry["path"]
     return None
+
+
+def _simple_policy_backend(status: dict[str, Any]) -> str:
+    """The simple policy's serving backend, from the preparation manifest."""
+
+    manifest = status.get("preparation_manifest")
+    if not manifest or not Path(manifest).is_file():
+        return "local_vllm"
+    policy = (json.loads(Path(manifest).read_text()).get("models") or {}).get("policy")
+    return (policy or {}).get("backend") or "local_vllm"
 
 
 def _run_number(name: str) -> int | None:
