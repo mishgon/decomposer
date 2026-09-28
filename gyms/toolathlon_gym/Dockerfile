@@ -4,6 +4,7 @@ FROM ${TOOLATHLON_BASE_IMAGE}
 ARG PYTHON_VERSION=3.12
 ENV SUBAGENT_VENV=/opt/subagents
 ENV LOCAL_SERVERS_PATH=/opt/local_servers
+ENV RAYON_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 POLARS_MAX_THREADS=1
 
 RUN apt-get update \
     && apt-get install --yes --no-install-recommends \

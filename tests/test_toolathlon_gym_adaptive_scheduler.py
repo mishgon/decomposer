@@ -236,6 +236,30 @@ def test_coverage_first_drops_known_zero_after_six_launches(tmp_path: Path) -> N
     assert manifest["adaptive_scheduler"]["phase"] == "complete"
 
 
+def test_unparseable_results_never_grant_unlimited_retries(tmp_path):
+    unknown = evaluation(tmp_path, "unknown", {"pass": False, "native_result": None})
+    manifest = {"episodes": [episode("alpha", i, attempt(unknown)) for i in range(1, 7)]}
+    state = scheduler.new_scheduler_state(["alpha"], threshold=.9, cull_fraction=.1, target_successes=4)
+    state["protect_unscored_evaluations"] = True  # Old manifests must also be bounded.
+    manifest["adaptive_scheduler"] = state
+    assert scheduler.plan_next_wave(manifest) == []
+    assert state["phase"] == "complete"
+
+
+def test_balancing_stops_after_its_attempt_budget(tmp_path):
+    passed = evaluation(tmp_path, "pass", {"pass": True})
+    failed = evaluation(tmp_path, "fail", {"pass": False})
+    manifest = {"episodes": [episode("alpha", 1, attempt(passed))]}
+    state = scheduler.new_scheduler_state(["alpha"], threshold=.9, cull_fraction=.1, target_successes=4)
+    state["max_balance_launches_per_task"] = 2
+    manifest["adaptive_scheduler"] = state
+    for _ in range(2):
+        assert scheduler.plan_next_wave(manifest)
+        manifest["episodes"][-1].update(status="completed", attempts=[attempt(failed)])
+    assert scheduler.plan_next_wave(manifest) == []
+    assert state["phase"] == "complete"
+
+
 def test_coverage_first_honors_per_task_limits_and_can_cap_unparseable(
     tmp_path: Path,
 ) -> None:

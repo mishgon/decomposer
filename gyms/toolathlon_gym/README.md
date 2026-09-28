@@ -60,3 +60,12 @@ use `/opt/subagents`. Rebuild the adapter after changing packaged code.
 - [Evaluation](../../evals/toolathlon_gym/README.md): fixed-sample runs and metrics.
 
 Workflows depend on this Gym, never the reverse.
+
+Python MCP servers launch directly from their preinstalled per-project virtual
+environments. Task startup never resolves or rebuilds those dependencies. A missing
+executable is an image-build problem and fails explicitly. Numerical thread pools
+are capped to one thread in the runtime image.
+
+`Qwen/Qwen3.5-4B-unlooped` uses the checkpoint's non-thinking profile:
+temperature 0.7, top-p 0.8, top-k 20, 2048 completion tokens, zero presence penalty
+and repetition penalty 1.0. Thinking and reasoning replay are disabled for workers.

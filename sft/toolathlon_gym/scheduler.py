@@ -310,10 +310,6 @@ def plan_next_wave(manifest: dict[str, Any]) -> list[str]:
             if task_rank(manifest, task, threshold)[0] == 0
             and task_rank(manifest, task, threshold)[2]
             >= zero_success_launch_limit(state, task)
-            and (
-                not state.get("protect_unscored_evaluations", True)
-                or not has_unscored_evaluation(manifest, task)
-            )
         ]
         if exhausted:
             state["culled_tasks"].extend(
@@ -387,7 +383,6 @@ def plan_next_wave(manifest: dict[str, Any]) -> list[str]:
             task
             for task in active
             if task_rank(manifest, task, threshold)[0] == 0
-            and not has_unscored_evaluation(manifest, task)
         ]
         state["culled_tasks"].extend(
             {
@@ -402,14 +397,20 @@ def plan_next_wave(manifest: dict[str, Any]) -> list[str]:
         return plan_next_wave(manifest)
 
     if phase == "balance_successes":
+        # Reaching four successes is a target, not permission for infinite retries.
+        limit = state.setdefault("max_balance_launches_per_task", 24)
+        starts = state.setdefault("balance_start_launches", {
+            task: len(task_launches(manifest, task)) for task in active
+        })
         successes = {
             task: task_rank(manifest, task, threshold)[0] for task in active
+            if len(task_launches(manifest, task)) - starts.get(task, 0) < limit
         }
         if not successes or min(successes.values()) >= state["target_successes"]:
             state["phase"] = "complete"
             return []
         next_target = min(successes.values()) + 1
-        deficient = [task for task in active if successes[task] < next_target]
+        deficient = [task for task in successes if successes[task] < next_target]
         added = append_one_episode_per_task(manifest, deficient)
         rounds.append(
             {

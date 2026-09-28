@@ -18,7 +18,7 @@ def model_http_client() -> httpx.AsyncClient:
 
 def generation_config(model: str, *, thinking: bool = False) -> dict:
     if "qwen3.5" in model.lower() and not thinking:
-        return {
+        settings = {
             "temperature": 0.7,
             "top_p": 0.8,
             "presence_penalty": 1.5,
@@ -31,6 +31,10 @@ def generation_config(model: str, *, thinking: bool = False) -> dict:
                 "chat_template_kwargs": {"enable_thinking": False},
             },
         }
+        if "unloop" in model.lower():
+            # Checkpoint SAMPLING.md: non-thinking profile, no repetition penalty.
+            settings.update(presence_penalty=0.0, max_tokens=2048)
+        return settings
     extra_body = {"top_k": 64}
     if not thinking:
         extra_body.update(

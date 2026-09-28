@@ -2,5 +2,7 @@
 # Pass a pinned image ID; this does not install or change dependencies.
 ARG RUNTIME_IMAGE
 FROM ${RUNTIME_IMAGE}
+ENV RAYON_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 POLARS_MAX_THREADS=1
+ENV UV_OFFLINE=1 UV_NO_SYNC=1 UV_CONCURRENT_BUILDS=1 UV_CONCURRENT_DOWNLOADS=1
 COPY src/decomposer /opt/subagents/lib/python3.12/site-packages/decomposer
 COPY gyms/toolathlon_gym /opt/decomposer/gyms/toolathlon_gym

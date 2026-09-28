@@ -44,6 +44,17 @@ def test_flash_next_teacher_sends_explicit_low_reasoning():
     assert "max_tokens" not in payload
 
 
+def test_unlooped_uses_checkpoint_nonthinking_sampling():
+    settings = generation_config("Qwen/Qwen3.5-4B-unlooped")
+    assert settings["temperature"] == .7
+    assert settings["top_p"] == .8
+    assert settings["max_tokens"] == 2048
+    assert settings["presence_penalty"] == 0
+    assert settings["extra_body"]["repetition_penalty"] == 1
+    assert settings["extra_body"]["chat_template_kwargs"]["enable_thinking"] is False
+    assert settings["preserve_reasoning"] is False
+
+
 def test_gemma_settings_preserve_collection_profile() -> None:
     settings = generation_config("google/gemma-4-26B-A4B-it")
     assert settings["temperature"] == 1.0

@@ -62,12 +62,11 @@ Each wave launches one attempt per task with no qualifying trace. A native pass
 or partial score strictly above 0.90 qualifies, provided the agent finished.
 Scores from agent errors/timeouts are diagnostic only. Check-marker logs without
 a successful evaluator exit or explicit totals remain unscored.
-After six unsuccessful launches,
-a task is culled; tasks with unparseable evaluations are protected from culling.
+After six unsuccessful launches, a task is culled, including tasks with
+unparseable evaluations. Missing scores remain unknown, not fabricated zeros.
 Once coverage is exhausted, the scheduler balances retained tasks toward four
-qualifying traces. This is bounded for scored zero-success tasks, not a fixed
-total attempt count. Inspect unscored failures rather than letting them retry
-indefinitely.
+qualifying traces, with at most 24 additional attempts per task in that phase.
+The target is not guaranteed: the run stops when the budgets are exhausted.
 
 Use `--adaptive-target-successes 1` for coverage only. Existing CLI threshold and
 target overrides remain available. Failed traces and all native outputs are kept.
