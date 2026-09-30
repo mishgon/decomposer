@@ -30,8 +30,9 @@ async def check(episode):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--image", default="decomposer-toolathlon:latest")
     args = parser.parse_args()
-    episode = Episode("ppt-snowflake-executive", args.output)
+    episode = Episode("ppt-snowflake-executive", args.output, image=args.image)
     try:
         episode.start()
         result = asyncio.run(asyncio.wait_for(check(episode), 180))
