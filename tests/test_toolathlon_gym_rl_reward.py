@@ -81,6 +81,15 @@ class NativeRewardTests(unittest.TestCase):
     def test_fraction(self):
         self.assertEqual(self.score(native_result={"passed": 2, "total": 4}), 0.5)
 
+    def test_native_overall_checks_summary(self):
+        # yf-stock-comparison-word-gcal writes counts to stdout, not JSON.
+        self.assertEqual(self.score("Overall: 0/16 checks passed [FAIL_COUNT=16]\nFAIL\n"), 0)
+        self.assertEqual(self.score("Overall: 6/16 checks passed [FAIL_COUNT=10]\nFAIL\n"), .375)
+        self.assertEqual(self.score("Overall: 16/16 checks passed [FAIL_COUNT=0]\nPASS\n",
+                                    returncode=0), 1)
+        with self.assertRaises(RuntimeError):
+            self.score("Overall: 16/16 checks passed [FAIL_COUNT=0]\nFAIL\n")
+
     def test_binary(self):
         self.assertEqual(self.score("=== RESULT: FAIL (2 errors) ==="), 0)
         self.assertEqual(self.score("=== RESULT: PASS ===", returncode=0), 1)

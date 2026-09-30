@@ -49,7 +49,7 @@ def extract_partial_score(evaluation: dict[str, Any]) -> PartialScore | None:
         return None
 
     fraction_patterns = (
-        r"(?:Results:\s*)?(\d+)\s*/\s*(\d+)\s+passed",
+        r"(?:Results:\s*)?(\d+)\s*/\s*(\d+)\s+(?:checks\s+)?passed",
         r"Passed\s+(\d+)\s*/\s*(\d+)\s+checks",
     )
     for pattern in fraction_patterns:
