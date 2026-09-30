@@ -71,12 +71,6 @@ use `ssh -tt GATEWAY_ALIAS` and run commands inside the activated shell.
 Confirm that `LLM_PROXY_MASTER_KEY` is nonempty without displaying its value.
 Use this activated environment for setup and credential transfer.
 
-The user supplies host identities and ordinary SSH access. Perform the
-remaining setup yourself: prepare the scripts and runtime, configure the
-restricted tunnel key, tunnel, relay, credentials, and persistent environment,
-then verify a model call. Check the supplied hosts and connections and ask
-the user for any missing access information.
-
 Use a reverse tunnel and a private Unix socket relay:
 
 ```text
@@ -91,7 +85,6 @@ and has the key, use direct access without a tunnel or socket variable.
 
 Before setting up the tunnel, read `LLM_PROXY_URL` in the activated gateway
 environment. Use its hostname or IP as the tunnel destination.
-Keep the model registry URL unchanged.
 Verify the destination with TLS for `lmrouter.2a2i.org` before proceeding:
 
 ```bash
