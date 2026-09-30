@@ -7,6 +7,9 @@ loops, native result checking, cleanup, and raw artifacts.
 
 From the repository root:
 
+Ensure `docker` resolves to your configured runtime. On Hertz with the user-local
+Podman wrapper, first run `export PATH="$HOME/.local/bin:$PATH"`.
+
 ```bash
 PYTHONPATH=src:. python -m gyms.toolathlon_gym.run \
   --tasks task-a task-b --harness decomposer --concurrency 8 -n 1
