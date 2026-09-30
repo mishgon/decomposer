@@ -1,10 +1,27 @@
 import unittest
+import json
+import tempfile
+from pathlib import Path
 
-from rl.toolathlon_gym.task_profiles import select_profiles
+from rl.toolathlon_gym.task_profiles import check_data, prepare_data, select_profiles
 from rl.toolathlon_gym.watch import run_plan
 
 
 class ProfileTests(unittest.TestCase):
+    def test_prepare_preserves_group_counts_and_fixed_panel(self):
+        import pytest
+        pytest.importorskip("pyarrow")
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary) / "data"
+            prepare_data(directory, "smoke", 3)
+            check_data(directory, "smoke")
+            split = json.loads((directory / "split.json").read_text())
+            self.assertEqual(split["groups_per_task"], 3)
+            self.assertEqual(split["train"], split["validation"])
+            self.assertEqual(len(split["train"]), 2)
+            with self.assertRaises(FileExistsError):
+                prepare_data(directory, "smoke", 3)
+
     def test_selection_boundaries_and_zero_successes(self):
         cases = {"zero-pass": ([0, .4, .5, .6, .8], 30),
                  "easy": ([.95] * 5, 5), "binary": ([0, 1, 0, 1, 0], 5),
