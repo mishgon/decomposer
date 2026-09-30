@@ -156,7 +156,7 @@ def create_model(
                 },
                 preserve_reasoning=False,
                 timeout=600,
-                max_retries=5,
+                max_retries=2,
                 http_client=sync_client,
                 http_async_client=client,
                 disable_streaming=True,

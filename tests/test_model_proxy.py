@@ -19,6 +19,21 @@ def anyio_backend():
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize("profile", [
+    "qwen_3_5_4b_unlooped_thinking",
+    "qwen_3_5_4b_unlooped_non_thinking",
+    "qwen_3_8_flash_next_non_thinking",
+])
+async def test_qwen_models_use_two_retries(profile):
+    model = models.create_model(profile)
+    try:
+        assert model.max_retries == 2
+    finally:
+        model.http_client.close()
+        await model.http_async_client.aclose()
+
+
+@pytest.mark.anyio
 async def test_model_instances_use_current_credentials_and_independent_clients(monkeypatch):
     monkeypatch.setenv("LLM_PROXY_MASTER_KEY", "first-key")
     first = models.create_model("qwen_3_5_4b_unlooped_thinking")
