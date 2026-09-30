@@ -42,6 +42,147 @@ We plan to train the orchestration model in two stages:
 
 Evaluation and training workflows reuse `gyms/<gym_name>/`.
 
+## Private lmrouter Access
+
+The **application host** is the machine where lmrouter access is needed.
+The **gateway** already reaches lmrouter and has `LLM_PROXY_URL` and
+`LLM_PROXY_MASTER_KEY` in its environment. The **Codex host** runs the
+current session.
+
+When asked to configure lmrouter, ask the user to specify the application
+host and gateway unless they have already done so. Use the gateway specified
+by the user. If the request says "this machine", use the Codex host as the
+application host.
+
+Ask only for missing SSH details for gateway → application host and,
+if Codex runs elsewhere, Codex host → gateway. Accept an existing alias
+on the connecting host or a hostname, username, and port, together with
+any required authentication details. Test these supplied connections.
+If authentication fails, explain which connection the user needs to
+configure. If Codex host → gateway access is impossible, ask the user
+to run Codex on the gateway.
+
+Activate the gateway's configured user environment. Inspect the supplied alias's
+effective SSH settings, including `RemoteCommand` and `RequestTTY`, before
+running remote commands. A launcher such as `sweethome` may activate the
+environment that provides `LLM_PROXY_MASTER_KEY` and changes the user's home.
+Connect using the configured launcher. If activation requires a terminal,
+use `ssh -tt GATEWAY_ALIAS` and run commands inside the activated shell.
+Confirm that `LLM_PROXY_MASTER_KEY` is nonempty without displaying its value.
+Use this activated environment for setup and credential transfer.
+
+The user supplies host identities and ordinary SSH access. Perform the
+remaining setup yourself: prepare the scripts and runtime, configure the
+restricted tunnel key, tunnel, relay, credentials, and persistent environment,
+then verify a model call. Check the supplied hosts and connections and ask
+the user for any missing access information.
+
+Use a reverse tunnel and a private Unix socket relay:
+
+```text
+Application / container → private Unix socket → application loopback :18443
+                        → SSH reverse tunnel → gateway → lmrouter.2a2i.org:443
+```
+
+Clients keep `https://lmrouter.2a2i.org/v1` and verify its TLS certificate.
+The relay forwards encrypted bytes and has no API key. Reuse working
+listeners and relays. If the application host already reaches lmrouter
+and has the key, use direct access without a tunnel or socket variable.
+
+Before setting up the tunnel, read `LLM_PROXY_URL` in the activated gateway
+environment. Use its hostname or IP as the tunnel destination.
+Keep the model registry URL unchanged.
+Verify the destination with TLS for `lmrouter.2a2i.org` before proceeding:
+
+```bash
+router_host=$(python3 -c 'import os; from urllib.parse import urlsplit; print(urlsplit(os.environ["LLM_PROXY_URL"]).hostname)')
+curl --noproxy '*' --connect-timeout 10 --max-time 20 \
+  --connect-to "lmrouter.2a2i.org:443:$router_host:443" \
+  https://lmrouter.2a2i.org/v1/models
+```
+
+HTTP 401 confirms connectivity and successful TLS verification without a key.
+Keep certificate verification enabled. If `LLM_PROXY_URL` is missing or the
+check fails, ask the user for the gateway's working router configuration.
+
+Run commands from repository checkouts on the corresponding hosts. Locate
+existing checkouts or copy the two tunnel scripts if needed. Execute
+application-host commands over ordinary SSH from the gateway.
+
+On the gateway, reuse an existing dedicated tunnel key or create one:
+
+```bash
+ssh-keygen -t ed25519 -f "$HOME/.ssh/lmrouter_tunnel" -N '' -C lmrouter-tunnel
+```
+
+Using ordinary SSH access, add its public key to the application user's
+`~/.ssh/authorized_keys` with these restrictions on the same line. Preserve
+existing keys and avoid duplicate entries:
+
+```text
+restrict,port-forwarding,permitlisten="127.0.0.1:18443",permitopen="reserved.invalid:1",command="/bin/false" ssh-ed25519 PUBLIC_KEY lmrouter-tunnel
+```
+
+Keep the private key on the gateway. Configure an SSH alias there for the
+application host using the supplied hostname, user, and port if no suitable
+alias exists. Verify unfamiliar SSH host keys through trusted access.
+Start the tunnel with that alias, the dedicated key, and the destination
+derived from `LLM_PROXY_URL`:
+
+```bash
+tmux -L lmrouter new-session -d -s tunnel \
+  "bash '$PWD/scripts/lmrouter/router_tunnel.sh' APPLICATION_ALIAS '$HOME/.ssh/lmrouter_tunnel' '$router_host'"
+```
+
+The launcher reconnects automatically. Use ordinary SSH access, rather than
+the restricted tunnel key, to transfer `LLM_PROXY_MASTER_KEY` from the gateway
+environment to `~/.local/share/environment/lmrouter.env` on the application
+host. Store a shell-safe assignment, with directory permissions `0700` and
+file permissions `0600`. Never expose the key in messages, logs, or command
+arguments. If the variable is unavailable after activating the configured
+environment, ask the user how to load it.
+
+On the application host, check the TLS route without credentials:
+
+```bash
+curl --noproxy '*' --connect-timeout 10 --max-time 20 \
+  --connect-to lmrouter.2a2i.org:443:127.0.0.1:18443 \
+  https://lmrouter.2a2i.org/v1/models
+```
+
+HTTP 401 confirms that the request reached the router. Start the relay and
+load the model environment:
+
+```bash
+tmux -L lmrouter new-session -d -s relay \
+  "$PWD/.venv/bin/python '$PWD/scripts/lmrouter/socket_relay.py' --socket '$HOME/.local/share/lmrouter-relay/router.sock' --port 18443"
+
+set -a
+source "$HOME/.local/share/environment/lmrouter.env"
+set +a
+export LLM_PROXY_UNIX_SOCKET="$HOME/.local/share/lmrouter-relay/router.sock"
+```
+
+Persist credential loading and the socket export in the user's shell startup
+file for future sessions. New processes must inherit both variables.
+Toolathlon Gym mounts the socket directory automatically; other container
+launchers need the directory mount, key, and container-side socket path.
+
+Verify a real model call on the application host:
+
+```bash
+PYTHONPATH=src .venv/bin/python - <<'PYTHON'
+from decomposer.models import create_model
+
+model = create_model("qwen_3_8_flash_next_non_thinking")
+print(model.invoke("Say hello.").content)
+PYTHON
+```
+
+Report success only after receiving a model response. Both tmux sessions
+normally survive Codex termination and SSH disconnection. Restart them
+after host reboot.
+
 <!-- BEGIN agent-style v0.4.2 -->
 <!-- SPDX-License-Identifier: CC-BY-4.0 -->
 <!-- Adapter: AGENTS.md cross-agent standard -->
