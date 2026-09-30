@@ -159,7 +159,9 @@ class Episode:
                          *[arg for key, value in env.items() for arg in ("-e", f"{key}={value}")],
                          "-v", f"{data}:/artifacts/data",
                          "-v", f"{self.root}/src:/decomposer-source/src:ro",
-                         "-v", f"{self.root}/gyms/toolathlon_gym:/opt/decomposer/gyms/toolathlon_gym:ro",
+                         *[arg for name in ("graph.py", "webapp.py", "python_execute.py", "model_logging.py", "langgraph.json")
+                           for arg in ("-v", f"{self.root}/gyms/toolathlon_gym/subagents/{name}:"
+                                             f"/opt/decomposer/gyms/toolathlon_gym/subagents/{name}:ro")],
                          self.image)
             port = self.command("port", self.container, "2024/tcp").stdout.strip().rsplit(":", 1)[1]
             self.url = f"http://127.0.0.1:{port}"
