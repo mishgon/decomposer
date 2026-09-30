@@ -1,4 +1,4 @@
-"""Expose a loopback SSH tunnel to task containers through a private Unix socket.
+"""Expose a loopback SSH tunnel to model clients through a private Unix socket.
 
 This relays bytes only. Model clients still verify the upstream TLS hostname.
 """

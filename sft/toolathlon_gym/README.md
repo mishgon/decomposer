@@ -19,16 +19,16 @@ Teacher and workers: `LLM_PROXY_MASTER_KEY`, using the explicit entries in
 [models.py](../../src/decomposer/models.py).
 No local GPU server is started for hosted workers. Add
 `--subagent-host hostname:IP` if containers need an explicit DNS mapping.
-Infrastructure-specific inference launchers are isolated under `inference/`.
+Shared tunnel tools live under `scripts/lmrouter/`. The Gym image refresh remains
+under `inference/`.
 
 ### Private Router Tunnel
 
-Follow [the complete setup instructions](inference/README.md) to create the
-restricted SSH key, start the reverse tunnel on OCC and expose its loopback
-listener to task containers through a private Unix socket:
+Follow [the shared setup instructions](../../README.md#hosted-models-and-private-lmrouter-access)
+to create the restricted SSH key and start the tunnel and relay once per host:
 
 ```bash
-python -m sft.toolathlon_gym.inference.socket_relay \
+python scripts/lmrouter/socket_relay.py \
   --socket "$HOME/.local/share/lmrouter-relay/router.sock" --port 18443
 ```
 

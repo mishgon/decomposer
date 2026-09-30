@@ -3,6 +3,7 @@
 This LangGraph server exposes the hosted Qwen3.5-4B-unlooped thinking model
 from `src/decomposer/models.py`. Set `LLM_PROXY_MASTER_KEY` before starting it.
 The agent has no tools or environment-specific middleware.
+For a private inference network, use the [shared lmrouter setup](../../README.md#hosted-models-and-private-lmrouter-access).
 
 From the repository root:
 

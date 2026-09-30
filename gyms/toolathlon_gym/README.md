@@ -34,7 +34,7 @@ in artifacts. Sampling does not depend on environment variables.
 The subagent profile follows the checkpoint's `SAMPLING.md` and `eval_sampling.yaml`.
 Worker reasoning is saved and replayed between tool calls. Teacher settings follow
 the [official non-thinking profile](https://huggingface.co/Qwen/Qwen3.8-Flash-Next#api-usage).
-For a private inference network, follow the [SSH tunnel setup](../../sft/toolathlon_gym/inference/README.md).
+For a private inference network, follow the [shared lmrouter setup](../../README.md#hosted-models-and-private-lmrouter-access).
 The same registry runs on the host and inside Docker through the mounted socket.
 
 Defaults: 45-minute agent timeout, 55-minute total episode timeout, recursion

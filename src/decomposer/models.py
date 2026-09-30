@@ -156,6 +156,10 @@ class ChatVLLM(ChatOpenAI):
 # Credentials and the optional private socket are deployment inputs. Sampling,
 # reasoning behavior and provider URLs belong to each explicit model entry.
 _socket = os.environ.get("LLM_PROXY_UNIX_SOCKET")
+_sync_client = httpx.Client(
+    transport=httpx.HTTPTransport(uds=_socket) if _socket else None,
+    trust_env=False,
+)
 _client = httpx.AsyncClient(
     transport=httpx.AsyncHTTPTransport(uds=_socket) if _socket else None,
     trust_env=False,
@@ -173,6 +177,7 @@ MODELS = {
         preserve_reasoning=True,
         timeout=600,
         max_retries=2,
+        http_client=_sync_client,
         http_async_client=_client,
         disable_streaming=True,
         use_responses_api=False,
@@ -194,6 +199,7 @@ MODELS = {
         preserve_reasoning=False,
         timeout=600,
         max_retries=5,
+        http_client=_sync_client,
         http_async_client=_client,
         disable_streaming=True,
         use_responses_api=False,

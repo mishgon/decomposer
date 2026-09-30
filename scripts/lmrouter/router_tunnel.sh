@@ -1,8 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ $# != 2 ]]; then
-    echo "Usage: bash router_tunnel.sh USER@HERTZ SSH_KEY" >&2
+if [[ $# -lt 2 || $# -gt 4 ]]; then
+    echo "Usage: bash router_tunnel.sh SSH_ALIAS SSH_KEY [ROUTER_HOST] [LISTEN_PORT]" >&2
+    exit 2
+fi
+
+router_host="${3:-lmrouter.2a2i.org}"
+listen_port="${4:-18443}"
+if [[ ! "$listen_port" =~ ^[0-9]{1,5}$ ]] || (( 10#$listen_port < 1 || 10#$listen_port > 65535 )); then
+    echo "LISTEN_PORT must be between 1 and 65535" >&2
     exit 2
 fi
 
@@ -22,7 +29,7 @@ while true; do
     ssh -N -T -i "$2" -o IdentitiesOnly=yes -o IdentityAgent=none -o BatchMode=yes \
         -o StrictHostKeyChecking=yes -o ConnectTimeout=10 \
         -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 \
-        -R 127.0.0.1:18443:176.108.242.226:443 "$1" &
+        -R "127.0.0.1:$listen_port:$router_host:443" "$1" &
     child=$!
     wait "$child" || true
     child=
