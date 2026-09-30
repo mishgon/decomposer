@@ -347,7 +347,7 @@ def test_adaptive_batch_water_fills_without_changing_models(
     for task in tasks:
         (toolathlon_root / "tasks" / "finalpool" / task).mkdir(parents=True)
     artifacts = tmp_path / "artifacts"
-    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    monkeypatch.setenv("LLM_PROXY_MASTER_KEY", "test-key")
     monkeypatch.setattr(batch, "new_run_id", lambda: "adaptive-run")
     calls = []
 

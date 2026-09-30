@@ -1,9 +1,11 @@
 import html
 import json
+import os
 import re
 import uuid
 from typing import Any, ClassVar
 
+import httpx
 from langchain_core.messages import AIMessage
 from langchain_core.outputs import ChatResult
 from langchain_openai import ChatOpenAI
@@ -149,3 +151,51 @@ class ChatVLLM(ChatOpenAI):
                 request_message["reasoning"] = reasoning
 
         return payload
+
+
+# Credentials and the optional private socket are deployment inputs. Sampling,
+# reasoning behavior and provider URLs belong to each explicit model entry.
+_socket = os.environ.get("LLM_PROXY_UNIX_SOCKET")
+_client = httpx.AsyncClient(
+    transport=httpx.AsyncHTTPTransport(uds=_socket) if _socket else None,
+    trust_env=False,
+)
+
+MODELS = {
+    "Qwen/Qwen3.5-4B-unlooped": ChatVLLM(
+        model="Qwen/Qwen3.5-4B-unlooped",
+        base_url="https://lmrouter.2a2i.org/v1",
+        api_key=os.environ.get("LLM_PROXY_MASTER_KEY", "EMPTY"),
+        temperature=0.6,
+        top_p=0.95,
+        max_tokens=8192,
+        extra_body={"top_k": 20, "chat_template_kwargs": {"enable_thinking": True}},
+        preserve_reasoning=True,
+        timeout=600,
+        max_retries=2,
+        http_async_client=_client,
+        disable_streaming=True,
+        use_responses_api=False,
+    ),
+    "Qwen/Qwen3.8-Flash-Next-NVFP4": ChatVLLM(
+        model="Qwen/Qwen3.8-Flash-Next-NVFP4",
+        base_url="https://lmrouter.2a2i.org/v1",
+        api_key=os.environ.get("LLM_PROXY_MASTER_KEY", "EMPTY"),
+        # https://huggingface.co/Qwen/Qwen3.8-Flash-Next#api-usage
+        temperature=0.7,
+        top_p=0.8,
+        presence_penalty=1.5,
+        extra_body={
+            "top_k": 20,
+            "min_p": 0.0,
+            "repetition_penalty": 1.0,
+            "chat_template_kwargs": {"enable_thinking": False},
+        },
+        preserve_reasoning=False,
+        timeout=600,
+        max_retries=5,
+        http_async_client=_client,
+        disable_streaming=True,
+        use_responses_api=False,
+    ),
+}

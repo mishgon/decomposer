@@ -1,11 +1,10 @@
 # Generic Qwen subagents
 
-This self-contained LangGraph server exposes Qwen3.5-4B with thinking disabled.
+This LangGraph server exposes the hosted Qwen3.5-4B-unlooped thinking model
+from `src/decomposer/models.py`. Set `LLM_PROXY_MASTER_KEY` before starting it.
 The agent has no tools or environment-specific middleware.
 
-Start the required vLLM server with `scripts/vllm/serve_qwen_3_5_4b.sh`
-(port 8024), then run
-from the repository root:
+From the repository root:
 
 ```bash
 scripts/subagents/serve.sh

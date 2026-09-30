@@ -2,7 +2,7 @@ import asyncio
 import logging
 from pathlib import Path
 
-from langchain_openrouter import ChatOpenRouter
+from decomposer.models import MODELS
 
 from decomposer.core import create_decomposer_agent
 from render_messages import render_decomposer_messages
@@ -12,17 +12,12 @@ logging.basicConfig(level=logging.INFO)
 
 async def main() -> None:
     decomposer_agent = create_decomposer_agent(
-        decomposer_model=ChatOpenRouter(
-            model="deepseek/deepseek-v4-flash-0731",
-            temperature=1.0,
-            top_p=0.95,
-            reasoning={"effort": "max"},
-        ),
+        decomposer_model=MODELS["Qwen/Qwen3.8-Flash-Next-NVFP4"],
         subagent_types=[
             {
-                "subagent_type_id": "qwen_3_5_4b_non_thinking",
-                "description": "Qwen3.5-4B with thinking disabled, without tools.",
-                "assistant_id": "qwen_3_5_4b_non_thinking",
+                "subagent_type_id": "qwen_3_5_4b_unlooped_thinking",
+                "description": "Qwen3.5-4B unlooped with thinking enabled, without tools.",
+                "assistant_id": "qwen_3_5_4b_unlooped_thinking",
                 "url": "http://127.0.0.1:2024",
             }
         ],

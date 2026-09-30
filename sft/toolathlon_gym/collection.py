@@ -191,19 +191,8 @@ def openrouter_transient_failure(result: dict[str, Any]) -> str | None:
 
 
 def validate_teacher_credentials() -> None:
-    if os.environ.get("DECOMPOSER_VLLM_BASE_URL"):
-        return
-    proxy_url = os.environ.get("LLM_PROXY_URL")
-    proxy_key = os.environ.get("LLM_PROXY_MASTER_KEY")
-    if proxy_url or proxy_key:
-        if not (proxy_url and proxy_key):
-            raise RuntimeError("Set both LLM_PROXY_URL and LLM_PROXY_MASTER_KEY")
-        return
-    if not os.environ.get("OPENROUTER_API_KEY"):
-        raise RuntimeError(
-            "Set OPENROUTER_API_KEY, or configure LLM_PROXY_URL and "
-            "LLM_PROXY_MASTER_KEY for the Decomposer model"
-        )
+    if not os.environ.get("LLM_PROXY_MASTER_KEY"):
+        raise RuntimeError("Set LLM_PROXY_MASTER_KEY for the registered lmrouter models")
 
 
 def wants_batch(argv: Sequence[str]) -> bool:
@@ -231,7 +220,8 @@ def parse_args(argv: Sequence[str], defaults: dict[str, Any]) -> argparse.Namesp
         default=defaults.get("subagent_api_model", defaults["subagent_model"]),
     )
     parser.add_argument("--subagent-port", type=int, default=defaults["subagent_port"])
-    parser.add_argument("--subagent-base-url", help="Hosted endpoint; skips local vLLM.")
+    parser.add_argument("--subagent-base-url", default=defaults.get("subagent_base_url"),
+                        help="Registered hosted endpoint; skips local vLLM.")
     parser.add_argument("--subagent-host", help="Optional container DNS mapping, hostname:IP.")
     parser.add_argument(
         "--subagent-ports",
@@ -720,6 +710,8 @@ def main(
     stop_vllm: Callable[[subprocess.Popen[bytes] | None], None],
     docker: Callable[..., subprocess.CompletedProcess[str]],
 ) -> dict[str, Any]:
+    from decomposer.models import MODELS
+    subagent = MODELS.get(default_subagent_api_model or default_subagent_model)
     defaults = {
         "artifacts_dir": default_artifacts_dir,
         "image": default_image,
@@ -727,6 +719,7 @@ def main(
         "subagent_model": default_subagent_model,
         "subagent_api_model": default_subagent_api_model or default_subagent_model,
         "subagent_port": default_subagent_port,
+        "subagent_base_url": subagent.openai_api_base if subagent else None,
     }
     args = parse_args(argv, defaults)
     root = args.gym_artifacts_dir.resolve()

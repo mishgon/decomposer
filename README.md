@@ -29,16 +29,16 @@ We plan to train the orchestration model in two stages:
 
 ## Get started
 
-The minimal example runs Decomposer with DeepSeek V4 Flash 0731 through OpenRouter and
-Qwen3.5-4B non-thinking workers through local vLLM and LangGraph servers.
-From the repository root, install the development environment and start vLLM:
+The minimal example runs Decomposer with Flash Next non-thinking and Qwen3.5-4B
+unlooped thinking workers through lmrouter and a local LangGraph server. Both use
+the ready model entries in `src/decomposer/models.py`.
+From the repository root, install the development environment:
 
 ```bash
 uv sync
-scripts/vllm/serve_qwen_3_5_4b.sh
 ```
 
-With `OPENROUTER_API_KEY` set, start the subagent server in another terminal:
+With `LLM_PROXY_MASTER_KEY` set, start the subagent server in another terminal:
 
 ```bash
 scripts/subagents/serve.sh

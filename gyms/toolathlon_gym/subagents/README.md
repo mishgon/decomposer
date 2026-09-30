@@ -2,9 +2,13 @@
 
 This container-local LangGraph server exposes one assistant:
 
-| Assistant ID | Endpoint variable | Default host port |
-| --- | --- | --- |
-| `qwen_3_5_4b_non_thinking` | `QWEN_3_5_4B_BASE_URL` | 8024 |
+Assistant ID: `qwen_3_5_4b_unlooped_thinking`.
+
+Its ready model is `MODELS["Qwen/Qwen3.5-4B-unlooped"]` from
+[models.py](../../../src/decomposer/models.py). Temperature is 0.6, top-p 0.95,
+top-k 20 and max tokens 8192. Thinking and reasoning preservation are enabled;
+other sampling parameters retain provider defaults. There are no per-model
+environment variables or model factories in this graph.
 
 The server reads the prepared task configuration from
 `$TOOLATHLON_DATA_DIR/runtime.json`. When it starts, it opens one persistent

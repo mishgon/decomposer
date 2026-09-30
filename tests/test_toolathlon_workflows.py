@@ -92,3 +92,44 @@ def test_partial_state_is_saved_on_failure():
     state, error = asyncio.run(gym.invoke_and_capture(Agent(), {}, {}, 1))
     assert str(error) == "provider unavailable"
     assert gym.serialize_messages(state["messages"])[0]["content"] == "partial"
+
+
+@pytest.mark.parametrize("outcome", ["success", "exception", "timeout"])
+def test_remote_runs_stop_before_returning_partial_state(subagent_server, tmp_path, outcome):
+    from types import SimpleNamespace
+    from langgraph_sdk import get_sync_client
+    import time
+
+    paths = [tmp_path / f"worker-{n}.txt" for n in range(2)]
+    with get_sync_client(url=subagent_server, timeout=10) as client:
+        runs = []
+        for path in paths:
+            thread = client.threads.create()["thread_id"]
+            run = client.runs.create(thread, "slow_subagent",
+                                     input={"messages": [{"role": "user", "content": str(path)}]})
+            runs.append((thread, run["run_id"]))
+        deadline = time.monotonic() + 10
+        while not all(p.with_suffix(".started").exists() for p in paths):
+            assert time.monotonic() < deadline
+            time.sleep(.02)
+
+        # These runs never reached the parent's checkpoint. Querying the episode
+        # server must still find and stop them before native evaluation starts.
+        class Agent:
+            async def ainvoke(self, *args, **kwargs):
+                if outcome == "exception":
+                    raise RuntimeError("provider unavailable")
+                if outcome == "timeout":
+                    await asyncio.sleep(10)
+                return {"messages": []}
+
+            async def aget_state(self, config):
+                return SimpleNamespace(values={"messages": []})
+
+        state, error = asyncio.run(gym.invoke_and_capture(Agent(), {}, {}, .1, subagent_server))
+        assert (error is None) is (outcome == "success")
+        assert "subagent_shutdown_error" not in state
+        assert len(state["subagent_shutdown"]) == 2
+        assert all(client.runs.get(t, r)["status"] == "interrupted" for t, r in runs)
+        time.sleep(2.1)
+        assert all(not p.exists() for p in paths)

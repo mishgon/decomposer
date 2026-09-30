@@ -1,10 +1,11 @@
 import asyncio
+import importlib
 import tempfile
 from pathlib import Path
 
 import pytest
 
-from gyms.toolathlon_gym.subagents.model_config import model_http_client
+from decomposer import models
 from sft.toolathlon_gym.inference.socket_relay import relay
 
 
@@ -25,11 +26,15 @@ async def test_model_client_uses_socket_without_changing_https_hostname(monkeypa
             return httpx.Response(200, json={"ok": True})
         return httpx.MockTransport(respond)
 
-    monkeypatch.setenv("LLM_PROXY_UNIX_SOCKET", str(tmp_path / "router.sock"))
-    monkeypatch.setattr(httpx, "AsyncHTTPTransport", transport)
-    async with model_http_client() as client:
-        response = await client.get("https://lmrouter.example/v1/models")
-        assert response.json() == {"ok": True}
+    with monkeypatch.context() as patch:
+        patch.setenv("LLM_PROXY_UNIX_SOCKET", str(tmp_path / "router.sock"))
+        patch.setattr(httpx, "AsyncHTTPTransport", transport)
+        importlib.reload(models)
+        model = models.MODELS["Qwen/Qwen3.5-4B-unlooped"]
+        async with model.http_async_client as client:
+            response = await client.get("https://lmrouter.example/v1/models")
+            assert response.json() == {"ok": True}
+    importlib.reload(models)
     assert seen["uds"] == str(tmp_path / "router.sock")
 
 

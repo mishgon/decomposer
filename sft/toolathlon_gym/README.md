@@ -12,21 +12,20 @@ Confirm exact deployment IDs and perform a one-task smoke before a full run.
 ```bash
 PYTHONPATH=src:. python -m sft.toolathlon_gym.run \
   --all --adaptive -n 1 --concurrency 8 \
-  --model "$TEACHER_MODEL" \
-  --subagent-model "$SUBAGENT_MODEL" --subagent-api-model "$SUBAGENT_MODEL" \
-  --subagent-base-url "$LLM_PROXY_URL"
+  --subagent-base-url https://lmrouter.2a2i.org/v1
 ```
 
-Teacher: `LLM_PROXY_URL` + `LLM_PROXY_MASTER_KEY`.
-Workers: hosted URL above, with `VLLM_API_KEY` or the same router key.
+Teacher and workers: `LLM_PROXY_MASTER_KEY`, using the explicit entries in
+[models.py](../../src/decomposer/models.py).
 No local GPU server is started for hosted workers. Add
 `--subagent-host hostname:IP` if containers need an explicit DNS mapping.
 Infrastructure-specific inference launchers are isolated under `inference/`.
 
 ### Private Router Tunnel
 
-When inference is reachable only through an SSH tunnel, expose its loopback
-listener as a private Unix socket:
+Follow [the complete setup instructions](inference/README.md) to create the
+restricted SSH key, start the reverse tunnel on OCC and expose its loopback
+listener to task containers through a private Unix socket:
 
 ```bash
 python -m sft.toolathlon_gym.inference.socket_relay \
@@ -39,7 +38,7 @@ and verify its certificate; the relay never decrypts traffic or stores keys.
 The directory should contain only the relay socket. Run the relay separately
 from collection and keep it alive when resuming.
 
-`collect_hosted.sh` selects Flash Next low-thinking and Qwen4B-unlooped non-thinking
+`collect_hosted.sh` selects Flash Next non-thinking and Qwen4B-unlooped thinking
 with native tool calling. It loads credentials from `LMROUTER_ENV` and requires
 a validated `COLLECTION_IMAGE` plus `LLM_PROXY_UNIX_SOCKET`. Example:
 
@@ -47,9 +46,9 @@ a validated `COLLECTION_IMAGE` plus `LLM_PROXY_UNIX_SOCKET`. Example:
 bash sft/toolathlon_gym/collect_hosted.sh --all --adaptive -n 1 --concurrency 8
 ```
 
-This profile disables the legacy XML workaround and OpenRouter fallback.
-`DECOMPOSER_PARSE_QWEN_XML=0` selects native tool calling in the generic runner;
-the compatibility default remains unchanged for older deployments.
+The two registry entries use native tool calling. The runner has no automatic
+provider fallback. Old traces keep their recorded settings; start a new run when
+changing generation profiles to keep collections comparable.
 
 `inference/Dockerfile.refresh` can refresh application code on a pinned,
 previously validated Python 3.12 runtime image without downloading dependencies.

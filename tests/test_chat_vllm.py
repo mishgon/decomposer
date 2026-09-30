@@ -1,7 +1,7 @@
 import pytest
 from langchain_core.messages import AIMessage
 
-from decomposer.chat_vllm import ChatVLLM
+from decomposer.models import ChatVLLM
 
 
 def _response(*, finish_reason: str = "stop") -> dict:
