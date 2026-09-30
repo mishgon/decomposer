@@ -1,62 +1,81 @@
-# Toolathlon-Gym
+# Toolathlon Gym
 
-This gym integration keeps Decomposer and its model credentials on the host while a
-task container owns the Toolathlon workspace, MCP servers, and evaluator.
-Host vLLM servers remain long-lived services outside the task container.
+Reusable environment execution only: task setup, container lifecycle, model/tool
+loops, native result checking, cleanup, and raw artifacts.
 
-## Image layout
+## Run
 
-The adapter image extends `toolathlon-pack:latest`, preserving Toolathlon's
-existing `/opt/venv` and prebuilt MCP servers. It adds a separate Python 3.12
-environment at `/opt/subagents` for the LangGraph subagent server.
-The two environments are intentionally isolated. It also patches the bundled
-Canvas MCP client to use its existing PostgreSQL router when `PG_HOST` is set,
-while preserving its normal HTTP client outside Toolathlon.
+From the repository root:
 
-Build both images from the repository root:
+Ensure `docker` resolves to your configured runtime. On Hertz with the user-local
+Podman wrapper, first run `export PATH="$HOME/.local/bin:$PATH"`.
 
 ```bash
-gyms/toolathlon_gym/build.sh
+PYTHONPATH=src:. python -m gyms.toolathlon_gym.run \
+  --tasks task-a task-b --harness decomposer --concurrency 8 -n 1
 ```
 
-Override either image name with `TOOLATHLON_BASE_IMAGE` or
-`TOOLATHLON_DECOMPOSER_IMAGE`.
+Use `--harness react` for the same tool-equipped worker acting directly on the
+task, without a Decomposer. Its model is selected by `--subagent-api-model`.
+Use a positional task for one task, `--tasks` for a subset, or `--all`.
+The fixed executor has no coverage policy, culling, adaptive retries or resume.
 
-## Episode lifecycle
+Both roles use `create_model(model)` from [models.py](../../src/decomposer/models.py).
+Each entry declares its provider, URL, sampling parameters and reasoning behavior
+directly. Set `LLM_PROXY_MASTER_KEY` before creating models; the runner passes the
+key into the task container by its environment variable name, without storing it
+in artifacts. Sampling does not depend on environment variables.
 
-The adapter image requires `TOOLATHLON_TASK` and an empty `/artifacts/data`
-mount. Its `task.py serve` command prepares the task with Toolathlon's native
-Python environment, writes `/artifacts/data/runtime.json`, and then starts the
-LangGraph server on port 2024. The server uses the separate `/opt/subagents`
-environment.
+| Role | Deployment | Generation Settings |
+| --- | --- | --- |
+| Teacher | `Qwen/Qwen3.8-Flash-Next-NVFP4` | Non-thinking; temperature 0.7, top-p 0.8, top-k 20, min-p 0, presence penalty 1.5, repetition penalty 1 |
+| Subagent / ReAct | `Qwen/Qwen3.5-4B-unlooped` | Thinking; temperature 0.6, top-p 0.95, top-k 20; other sampling parameters use defaults |
 
-The container resolves the host vLLM server through this variable:
+The subagent profile follows the checkpoint's `SAMPLING.md` and `eval_sampling.yaml`.
+Worker reasoning is saved and replayed between tool calls. Teacher settings follow
+the [official non-thinking profile](https://huggingface.co/Qwen/Qwen3.8-Flash-Next#api-usage).
+For a private inference network, follow the [shared lmrouter setup](../../README.md#hosted-models-and-private-lmrouter-access).
+The same factory runs on the host and inside Docker through the mounted socket.
 
-- `QWEN_3_5_4B_BASE_URL`
+Defaults: 45-minute agent timeout, 55-minute total episode timeout, recursion
+limit 410. Decomposer uses upstream's `new / fork / run / wait` interface.
 
-It defaults to port 8024 on `host.docker.internal`.
+## Raw Outputs
 
-Start Qwen3.5-4B with `scripts/vllm/serve_qwen_3_5_4b.sh` first,
-then run an episode from the host:
+`--output-dir` defaults to `artifacts/gyms/toolathlon_gym/raw`. Each execution
+gets a new run ID with:
 
-```bash
-export OPENROUTER_API_KEY=...
-uv run python gyms/toolathlon_gym/run.py howtocook-event-menu-ppt
-```
+- `manifest.json`: selected tasks, repetitions, completion and process outcomes.
+- `traces/<task>/<episode>/`: raw messages, subagent histories, usage, answer,
+  task workspace and cleanup records.
+- `evals/<task>/<episode>/result.json`: native evaluator output.
+- `logs/<task>/<repetition>/`: process stdout and stderr.
 
-The runner checks the vLLM endpoint, creates an isolated Docker network and
-PostgreSQL container, starts the task container, runs Decomposer, evaluates the
-result inside the live task container, and removes all temporary Docker
-resources. It writes `runtime.json`, `trace.json`, `answer.txt`, and
-`container.log` under `artifacts/data/toolathlon_gym/<task>/<episode-id>/`, and
-the native evaluation result under
-`artifacts/evals/toolathlon_gym/<task>/<episode-id>/result.json`.
+An agent timeout/model failure retains partial messages, cancels active remote
+runs and waits for them to stop before native evaluation. This also covers ReAct
+runs and runs launched just before a checkpoint was interrupted. If shutdown
+cannot be confirmed within 60 seconds, the evaluator is skipped and the attempt
+fails with a saved shutdown error. Its diagnostic score does not turn the attempt into a success.
+A hard process kill or infrastructure failure can still prevent evaluation.
+Missing native scores remain missing; the Gym does not invent an aggregate score.
+Container inspection artifacts contain only allowlisted lifecycle fields, never
+the environment or command arguments. Older artifacts may contain credentials;
+sanitize them before sharing.
 
-## Runtime boundary
+## Build
 
-- Host: Decomposer, OpenRouter credentials, and vLLM servers.
-- Task container: task preprocessing, LangGraph subagent server, MCP server
-  processes, workspace, and native evaluation.
-- Episode network: an isolated Toolathlon PostgreSQL container.
+`gyms/toolathlon_gym/build.sh` builds the task adapter on top of
+`toolathlon-pack:latest`. Native tools run in `/opt/venv`; LangGraph workers
+use `/opt/subagents`. Rebuild the adapter after changing packaged code.
 
-Evaluation records use the same episode identifier as their traces.
+## Workflows
+
+- [SFT collection](../../sft/toolathlon_gym/README.md): resumable coverage-first scheduling.
+- [Evaluation](../../evals/toolathlon_gym/README.md): fixed-sample runs and metrics.
+
+Workflows depend on this Gym, never the reverse.
+
+Python MCP servers launch directly from their preinstalled per-project virtual
+environments. Task startup never resolves or rebuilds those dependencies. A missing
+executable is an image-build problem and fails explicitly. Numerical thread pools
+are capped to one thread in the runtime image.

@@ -4,6 +4,7 @@ FROM ${TOOLATHLON_BASE_IMAGE}
 ARG PYTHON_VERSION=3.12
 ENV SUBAGENT_VENV=/opt/subagents
 ENV LOCAL_SERVERS_PATH=/opt/local_servers
+ENV RAYON_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 POLARS_MAX_THREADS=1
 
 RUN apt-get update \
     && apt-get install --yes --no-install-recommends \
@@ -25,6 +26,12 @@ RUN set -e; for server in mcp-canvas-lms notion-mcp-server woocommerce-mcp; do \
 COPY gyms/toolathlon_gym/patches/mcp-canvas-lms-postgres.patch /tmp/
 RUN cd /opt/local_servers/mcp-canvas-lms \
     && git apply --no-index /tmp/mcp-canvas-lms-postgres.patch
+
+COPY gyms/toolathlon_gym/patches/emails-mcp-fixtures.patch /tmp/
+RUN cd /opt \
+    && git apply --no-index --check /tmp/emails-mcp-fixtures.patch \
+    && git apply --no-index /tmp/emails-mcp-fixtures.patch \
+    && uv sync --directory /opt/local_servers/emails-mcp --frozen
 
 RUN set -e; for server in \
         12306-mcp \
