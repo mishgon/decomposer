@@ -46,7 +46,7 @@ a validated `COLLECTION_IMAGE` plus `LLM_PROXY_UNIX_SOCKET`. Example:
 bash sft/toolathlon_gym/collect_hosted.sh --all --adaptive -n 1 --concurrency 8
 ```
 
-The two registry entries use native tool calling. The runner has no automatic
+The two model configurations use native tool calling. The runner has no automatic
 provider fallback. Old traces keep their recorded settings; start a new run when
 changing generation profiles to keep collections comparable.
 

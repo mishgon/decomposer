@@ -2,7 +2,7 @@ import asyncio
 import logging
 from pathlib import Path
 
-from decomposer.models import MODELS
+from decomposer.models import create_model
 
 from decomposer.core import create_decomposer_agent
 from render_messages import render_decomposer_messages
@@ -12,7 +12,7 @@ logging.basicConfig(level=logging.INFO)
 
 async def main() -> None:
     decomposer_agent = create_decomposer_agent(
-        decomposer_model=MODELS["Qwen/Qwen3.8-Flash-Next-NVFP4"],
+        decomposer_model=create_model("qwen_3_8_flash_next_non_thinking"),
         subagent_types=[
             {
                 "subagent_type_id": "qwen_3_5_4b_unlooped_thinking",

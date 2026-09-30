@@ -19,7 +19,7 @@ from pathlib import Path
 from langchain_core.messages import message_to_dict
 from langgraph.checkpoint.memory import InMemorySaver
 
-from decomposer.models import MODELS
+from decomposer.models import create_model
 from decomposer.core import create_decomposer_agent
 
 try:
@@ -34,7 +34,7 @@ DEFAULT_GYM_ARTIFACTS_DIR = REPO_ROOT / "artifacts" / "gyms" / "toolathlon_gym"
 DEFAULT_ARTIFACTS_DIR = DEFAULT_GYM_ARTIFACTS_DIR / "traces"
 DEFAULT_EVALS_DIR = DEFAULT_GYM_ARTIFACTS_DIR / "evals"
 DEFAULT_IMAGE = "decomposer-toolathlon:latest"
-DEFAULT_MODEL = "Qwen/Qwen3.8-Flash-Next-NVFP4"
+DEFAULT_MODEL = "qwen_3_8_flash_next_non_thinking"
 DEFAULT_SUBAGENT_MODEL = "Qwen/Qwen3.5-4B-unlooped"
 DEFAULT_SUBAGENT_API_MODEL = "Qwen/Qwen3.5-4B-unlooped"
 DEFAULT_SUBAGENT_PORT = 8023
@@ -376,11 +376,11 @@ def create_parser() -> argparse.ArgumentParser:
     parser.add_argument("--repetition", type=int, help=argparse.SUPPRESS)
     parser.add_argument("--attempt", type=int, help=argparse.SUPPRESS)
     parser.add_argument("--purpose", default="raw", help=argparse.SUPPRESS)
-    parser.add_argument("--model", choices=MODELS, default=DEFAULT_MODEL)
+    parser.add_argument("--model", choices=(DEFAULT_MODEL, SUBAGENT_TYPE_ID, "qwen_3_5_4b_unlooped_non_thinking"), default=DEFAULT_MODEL)
     parser.add_argument("--subagent-model", default=DEFAULT_SUBAGENT_MODEL)
     parser.add_argument("--subagent-api-model", choices=(DEFAULT_SUBAGENT_API_MODEL,), default=DEFAULT_SUBAGENT_API_MODEL)
     parser.add_argument("--subagent-port", type=int, default=DEFAULT_SUBAGENT_PORT)
-    parser.add_argument("--subagent-base-url", default=MODELS[DEFAULT_SUBAGENT_API_MODEL].openai_api_base,
+    parser.add_argument("--subagent-base-url", default=create_model(SUBAGENT_TYPE_ID).openai_api_base,
                         help="Registered hosted endpoint; skips local vLLM.")
     parser.add_argument("--subagent-host", help="Optional container DNS mapping, hostname:IP.")
     parser.add_argument("--subagent-gpu", default="0")
@@ -419,7 +419,8 @@ def run_episode(args) -> None:
         raise ValueError(f"Unknown Toolathlon task: {args.task!r}")
     if not os.environ.get("LLM_PROXY_MASTER_KEY"):
         raise RuntimeError("Set LLM_PROXY_MASTER_KEY for the registered lmrouter models")
-    if args.subagent_base_url != MODELS[args.subagent_api_model].openai_api_base:
+    subagent_model = create_model(SUBAGENT_TYPE_ID)
+    if args.subagent_base_url != subagent_model.openai_api_base:
         raise ValueError("Set the subagent endpoint in src/decomposer/models.py")
 
     proxy_mount = []
@@ -653,8 +654,7 @@ def run_episode(args) -> None:
         runtime = json.loads((episode_dir / "runtime.json").read_text(encoding="utf-8"))
         print(f"Running {args.harness}...", flush=True)
         checkpointer = InMemorySaver()
-        decomposer_model = MODELS[args.model] if args.harness == "decomposer" else None
-        subagent_model = MODELS[args.subagent_api_model]
+        decomposer_model = create_model(args.model) if args.harness == "decomposer" else None
         agent, agent_config = make_agent(args.harness, decomposer_model, subagent_url,
                                         args.subagent_api_model, episode_id, checkpointer)
         state, agent_exception = asyncio.run(invoke_and_capture(

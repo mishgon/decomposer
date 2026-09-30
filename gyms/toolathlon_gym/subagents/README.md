@@ -4,9 +4,9 @@ This container-local LangGraph server exposes one assistant:
 
 Assistant ID: `qwen_3_5_4b_unlooped_thinking`.
 
-Its ready model is `MODELS["Qwen/Qwen3.5-4B-unlooped"]` from
+Its model is created by `create_model("qwen_3_5_4b_unlooped_thinking")` in
 [models.py](../../../src/decomposer/models.py). Temperature is 0.6, top-p 0.95,
-top-k 20 and max tokens 8192. Thinking and reasoning preservation are enabled;
+top-k 20. Thinking and reasoning preservation are enabled;
 other sampling parameters retain provider defaults. There are no per-model
 environment variables or model factories in this graph.
 

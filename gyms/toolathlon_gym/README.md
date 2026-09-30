@@ -20,22 +20,22 @@ task, without a Decomposer. Its model is selected by `--subagent-api-model`.
 Use a positional task for one task, `--tasks` for a subset, or `--all`.
 The fixed executor has no coverage policy, culling, adaptive retries or resume.
 
-Both roles use ready model instances from [models.py](../../src/decomposer/models.py).
+Both roles use `create_model(model)` from [models.py](../../src/decomposer/models.py).
 Each entry declares its provider, URL, sampling parameters and reasoning behavior
-directly. Set `LLM_PROXY_MASTER_KEY` before starting Python; the runner passes the
+directly. Set `LLM_PROXY_MASTER_KEY` before creating models; the runner passes the
 key into the task container by its environment variable name, without storing it
 in artifacts. Sampling does not depend on environment variables.
 
 | Role | Deployment | Generation Settings |
 | --- | --- | --- |
 | Teacher | `Qwen/Qwen3.8-Flash-Next-NVFP4` | Non-thinking; temperature 0.7, top-p 0.8, top-k 20, min-p 0, presence penalty 1.5, repetition penalty 1 |
-| Subagent / ReAct | `Qwen/Qwen3.5-4B-unlooped` | Thinking; temperature 0.6, top-p 0.95, top-k 20, max tokens 8192; other sampling parameters use defaults |
+| Subagent / ReAct | `Qwen/Qwen3.5-4B-unlooped` | Thinking; temperature 0.6, top-p 0.95, top-k 20; other sampling parameters use defaults |
 
 The subagent profile follows the checkpoint's `SAMPLING.md` and `eval_sampling.yaml`.
 Worker reasoning is saved and replayed between tool calls. Teacher settings follow
 the [official non-thinking profile](https://huggingface.co/Qwen/Qwen3.8-Flash-Next#api-usage).
 For a private inference network, follow the [shared lmrouter setup](../../README.md#hosted-models-and-private-lmrouter-access).
-The same registry runs on the host and inside Docker through the mounted socket.
+The same factory runs on the host and inside Docker through the mounted socket.
 
 Defaults: 45-minute agent timeout, 55-minute total episode timeout, recursion
 limit 410. Decomposer uses upstream's `new / fork / run / wait` interface.

@@ -1,5 +1,4 @@
 import asyncio
-import importlib
 import json
 import os
 import shlex
@@ -17,6 +16,24 @@ from scripts.lmrouter.socket_relay import relay
 @pytest.fixture
 def anyio_backend():
     return "asyncio"
+
+
+@pytest.mark.anyio
+async def test_model_instances_use_current_credentials_and_independent_clients(monkeypatch):
+    monkeypatch.setenv("LLM_PROXY_MASTER_KEY", "first-key")
+    first = models.create_model("qwen_3_5_4b_unlooped_thinking")
+    monkeypatch.setenv("LLM_PROXY_MASTER_KEY", "second-key")
+    second = models.create_model("qwen_3_5_4b_unlooped_thinking")
+    try:
+        assert first.openai_api_key.get_secret_value() == "first-key"
+        assert second.openai_api_key.get_secret_value() == "second-key"
+        await first.http_async_client.aclose()
+        assert not second.http_async_client.is_closed
+    finally:
+        first.http_client.close()
+        second.http_client.close()
+        await first.http_async_client.aclose()
+        await second.http_async_client.aclose()
 
 
 @pytest.mark.anyio
@@ -51,19 +68,20 @@ async def test_registry_models_use_socket_for_sync_and_async_calls(monkeypatch, 
         patch.setenv("LLM_PROXY_MASTER_KEY", "test-key")
         patch.setattr(httpx, "HTTPTransport", sync_transport)
         patch.setattr(httpx, "AsyncHTTPTransport", async_transport)
-        importlib.reload(models)
-        for model in models.MODELS.values():
+        for profile in ("qwen_3_5_4b_unlooped_thinking",
+                        "qwen_3_5_4b_unlooped_non_thinking",
+                        "qwen_3_8_flash_next_non_thinking"):
+            model = models.create_model(profile)
             sync_response = model.invoke("Reply OK")
             async_response = await model.ainvoke("Reply OK")
             assert sync_response.content == async_response.content == "OK"
             if model.preserve_reasoning:
                 assert sync_response.additional_kwargs["reasoning_content"] == "thinking"
                 assert async_response.additional_kwargs["reasoning_content"] == "thinking"
-        model.http_client.close()
-        await model.http_async_client.aclose()
-    importlib.reload(models)
+            model.http_client.close()
+            await model.http_async_client.aclose()
     assert seen["sync"]["uds"] == seen["async"]["uds"] == str(tmp_path / "router.sock")
-    assert len(requests) == 4
+    assert len(requests) == 6
 
 
 @pytest.mark.anyio

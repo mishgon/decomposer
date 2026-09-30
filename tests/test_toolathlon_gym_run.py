@@ -12,11 +12,11 @@ import pytest
 
 from gyms.toolathlon_gym import run, usage
 from sft.toolathlon_gym import collection as batch
-from decomposer.models import MODELS
+from decomposer.models import create_model
 
 
 def test_flash_next_teacher_sends_official_nonthinking_sampling():
-    model = MODELS[run.DEFAULT_MODEL]
+    model = create_model(run.DEFAULT_MODEL)
     payload = model._get_request_payload("test")
     assert "reasoning_effort" not in payload
     assert payload["temperature"] == .7
@@ -31,16 +31,20 @@ def test_flash_next_teacher_sends_official_nonthinking_sampling():
     assert "max_completion_tokens" not in payload
 
 
-def test_unlooped_uses_checkpoint_thinking_sampling():
-    model = MODELS[run.DEFAULT_SUBAGENT_API_MODEL]
+@pytest.mark.parametrize("profile, thinking, temperature, top_p", [
+    ("qwen_3_5_4b_unlooped_thinking", True, .6, .95),
+    ("qwen_3_5_4b_unlooped_non_thinking", False, .7, .8),
+])
+def test_unlooped_uses_checkpoint_sampling(profile, thinking, temperature, top_p):
+    model = create_model(profile)
     payload = model._get_request_payload("test")
-    assert payload["temperature"] == .6
-    assert payload["top_p"] == .95
-    assert payload["max_completion_tokens"] == 8192
+    assert payload["model"] == "Qwen/Qwen3.5-4B-unlooped"
+    assert payload["temperature"] == temperature
+    assert payload["top_p"] == top_p
     assert "presence_penalty" not in payload
-    assert payload["extra_body"] == {"top_k": 20, "chat_template_kwargs": {"enable_thinking": True}}
-    assert model.preserve_reasoning is True
-    assert run.model_metadata(model)["preserve_reasoning"] is True
+    assert payload["extra_body"] == {"top_k": 20, "chat_template_kwargs": {"enable_thinking": thinking}}
+    assert model.preserve_reasoning is thinking
+    assert run.model_metadata(model)["preserve_reasoning"] is thinking
     assert "openai_api_key" not in run.model_metadata(model)
 
 

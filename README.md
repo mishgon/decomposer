@@ -31,7 +31,7 @@ We plan to train the orchestration model in two stages:
 
 The minimal example runs Decomposer with Flash Next non-thinking and Qwen3.5-4B
 unlooped thinking workers through lmrouter and a local LangGraph server. Both use
-the ready model entries in `src/decomposer/models.py`.
+`create_model(model)` in `src/decomposer/models.py`.
 From the repository root, install the development environment:
 
 ```bash
@@ -150,7 +150,7 @@ Both tmux sessions survive laptop disconnection. Detach with Ctrl-b d; stop
 the selected service with Ctrl-c. Restart the services after host reboot.
 Save the credential loading and socket export in your shell startup file for
 future terminals. Services and existing tmux sessions must inherit these values
-before importing the registry. Without the socket variable, clients connect directly.
+before creating models. Without the socket variable, clients connect directly.
 
 ### Use the Registry Anywhere
 
@@ -159,9 +159,9 @@ The same connection works with synchronous `invoke()` and asynchronous
 
 ```python
 from langchain.agents import create_agent
-from decomposer.models import MODELS
+from decomposer.models import create_model
 
-agent = create_agent(model=MODELS["Qwen/Qwen3.8-Flash-Next-NVFP4"], tools=[])
+agent = create_agent(model=create_model("qwen_3_8_flash_next_non_thinking"), tools=[])
 result = agent.invoke({"messages": [{"role": "user", "content": "Say hello."}]})
 print(result["messages"][-1].content)
 ```

@@ -710,8 +710,12 @@ def main(
     stop_vllm: Callable[[subprocess.Popen[bytes] | None], None],
     docker: Callable[..., subprocess.CompletedProcess[str]],
 ) -> dict[str, Any]:
-    from decomposer.models import MODELS
-    subagent = MODELS.get(default_subagent_api_model or default_subagent_model)
+    from decomposer.models import create_model
+    subagent = (
+        create_model("qwen_3_5_4b_unlooped_thinking")
+        if (default_subagent_api_model or default_subagent_model) == "Qwen/Qwen3.5-4B-unlooped"
+        else None
+    )
     defaults = {
         "artifacts_dir": default_artifacts_dir,
         "image": default_image,
