@@ -19,10 +19,10 @@ trap stop INT TERM
 delay=2
 while true; do
     started=$SECONDS
-    ssh -N -T -i "$2" -o IdentitiesOnly=yes -o BatchMode=yes \
+    ssh -N -T -i "$2" -o IdentitiesOnly=yes -o IdentityAgent=none -o BatchMode=yes \
         -o StrictHostKeyChecking=yes -o ConnectTimeout=10 \
         -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 \
-        -R 127.0.0.1:18443:lmrouter.2a2i.org:443 "$1" &
+        -R 127.0.0.1:18443:176.108.242.226:443 "$1" &
     child=$!
     wait "$child" || true
     child=

@@ -56,6 +56,10 @@ Detach with Ctrl-b d. Stop with Ctrl-c. The launcher retries failed SSH sessions
 with a delay that increases from 2 to 30 seconds and uses SSH keepalives.
 The tmux socket name after `-L` must match when starting and attaching.
 
+The launcher dials the current router IP, `176.108.242.226`, because OCC-CDS-1
+cannot currently resolve its hostname. HTTPS clients still use and verify
+`lmrouter.2a2i.org`. If the router moves, update the destination in the launcher.
+
 On Hertz, verify the TLS route before using credentials (HTTP 401 is expected):
 
 ```bash
