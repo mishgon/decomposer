@@ -7,6 +7,19 @@ import subprocess
 import time
 from pathlib import Path
 
+from decomposer.models import create_model
+from gyms.toolathlon_gym.run import model_metadata
+
+
+def profile_metadata(profile):
+    model = create_model(profile)
+    try:
+        return {"profile": profile, **model_metadata(model)}
+    finally:
+        model.http_client.close()
+        import asyncio
+        asyncio.run(model.http_async_client.aclose())
+
 
 def main():
     parser = argparse.ArgumentParser()
@@ -19,23 +32,21 @@ def main():
     metadata = {"pid": args.pid, "started_at": time.time() - age,
                 "process_start_ticks": ticks,
                 "gym_image": os.environ.get("RL_GYM_IMAGE"),
-                "subagent_url": os.environ.get("SUBAGENT_URL"),
-                "subagent_model": os.environ.get("SUBAGENT_MODEL"),
-                "subagent_host": os.environ.get("SUBAGENT_HOST"),
+                "subagent": profile_metadata("qwen_3_5_4b_unlooped_non_thinking"),
                 "model_path": os.environ.get("MODEL_PATH"),
                 "model_requested_path": os.environ.get("MODEL_CHECKPOINT_LINK"),
                 "data_dir": os.environ.get("RL_DATA"),
                 "config_name": os.environ.get("RL_CONFIG"),
                 "trainer_module": os.environ.get("RL_TRAINER_MODULE"),
                 "config_dir": os.environ.get("RL_CONFIG_DIR"),
-                "teacher_model": os.environ.get("OPD_TEACHER_MODEL"),
-                "teacher_url": os.environ.get("OPD_TEACHER_URL"),
                 "nccl_transport": {key: os.environ.get(key) for key in ("NCCL_P2P_DISABLE", "NCCL_IB_DISABLE")},
                 "checkpoint_path": str((args.directory / "checkpoints").resolve()),
                 "ray_tmpdir": os.environ.get("RAY_TMPDIR"),
                 "episode_timeout_seconds": float(os.environ.get("RL_EPISODE_TIMEOUT", "2700")),
                 "revision": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
                 "policy_gpu": os.environ.get("CUDA_VISIBLE_DEVICES"), "overrides": overrides}
+    if os.environ.get("RL_CONFIG_DIR", "").endswith("/opd/toolathlon_gym"):
+        metadata["teacher"] = profile_metadata("qwen_3_8_flash_next_non_thinking")
     (args.directory / "run.json").write_text(json.dumps(metadata, indent=2))
     diff = subprocess.check_output(["git", "diff", "HEAD", "--", "rl/toolathlon_gym", "opd/toolathlon_gym",
                                     "gyms/toolathlon_gym", "src/decomposer"], text=True)

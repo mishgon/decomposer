@@ -1,6 +1,5 @@
-# Only the task pool and experiment label differ from full.
 defaults:
-  - full
+  - recipe
   - _self_
 trainer:
   experiment_name: smoke

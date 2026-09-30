@@ -2,6 +2,30 @@ import os
 import unittest
 from types import SimpleNamespace
 
+from rl.toolathlon_gym.policy import parse_tool_calls
+
+
+class ToolCallTests(unittest.TestCase):
+    def test_raw_policy_calls_parse_without_inference_model(self):
+        text = 'Plan. <tool_call><function=run><parameter=subagent_id>s1</parameter>' \
+               '<parameter=prompt>Compare A &amp; B</parameter><parameter=options>{"n": 2}</parameter>' \
+               '</function></tool_call>'
+        content, calls = parse_tool_calls(text)
+        self.assertEqual(content, 'Plan.')
+        self.assertEqual(calls[0]['name'], 'run')
+        self.assertEqual(calls[0]['args'], {'subagent_id': 's1', 'prompt': 'Compare A & B', 'options': {'n': 2}})
+        self.assertTrue(calls[0]['id'].startswith('call_'))
+
+    def test_multiple_calls_and_plain_answers(self):
+        self.assertEqual(parse_tool_calls('done'), ('done', []))
+        _, calls = parse_tool_calls('<tool_call><function=wait></function></tool_call>' * 2)
+        self.assertEqual([call['name'] for call in calls], ['wait', 'wait'])
+        self.assertNotEqual(calls[0]['id'], calls[1]['id'])
+
+    def test_malformed_call_is_explicit(self):
+        with self.assertRaisesRegex(ValueError, 'Could not parse'):
+            parse_tool_calls('<tool_call>broken')
+
 
 @unittest.skipUnless(os.environ.get("RL_TOKENIZER"), "Set RL_TOKENIZER for real Qwen template tests")
 class PolicyTests(unittest.IsolatedAsyncioTestCase):

@@ -2,7 +2,6 @@
 import argparse
 import asyncio
 import json
-import os
 from pathlib import Path
 
 from langgraph_sdk import get_client
@@ -11,7 +10,7 @@ from gyms.toolathlon_gym.episode import Episode
 
 async def check(episode):
     client = get_client(url=episode.url)
-    result = await client.runs.wait(None, "configured_non_thinking", input={"messages": [{
+    result = await client.runs.wait(None, "qwen_3_5_4b_unlooped_non_thinking", input={"messages": [{
         "role": "user", "content": "Use python_execute to run print(73129 * 17). "
         "Then use python_execute with timeout=1 to run import time; time.sleep(10). "
         "Then call save_overlong_output with content='overlong-roundtrip-73129' and label='probe'. "
@@ -31,18 +30,8 @@ async def check(episode):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--webapp", type=Path, help="Test a staged webapp without changing live workers")
     args = parser.parse_args()
-    episode = Episode("ppt-snowflake-executive", args.output,
-                      subagent_url=os.environ["SUBAGENT_URL"],
-                      subagent_host=os.environ.get("SUBAGENT_HOST"))
-    if args.webapp:
-        start = episode.start_task_container
-        def staged_start(*arguments):
-            return start(*(f"{args.webapp.resolve()}:/opt/decomposer/gyms/toolathlon_gym/subagents/webapp.py:ro"
-                           if str(arg).endswith("/subagents/webapp.py:ro") else arg
-                           for arg in arguments))
-        episode.start_task_container = staged_start
+    episode = Episode("ppt-snowflake-executive", args.output)
     try:
         episode.start()
         result = asyncio.run(asyncio.wait_for(check(episode), 180))

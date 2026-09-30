@@ -22,7 +22,7 @@ distillation:
   nnodes: 0
   teacher_models:
     teacher_model:
-      model_path: ${oc.env:OPD_TEACHER_MODEL}
+      model_path: Qwen/Qwen3.8-Flash-Next-NVFP4
       inference:
         temperature: 1.0
   distillation_loss:

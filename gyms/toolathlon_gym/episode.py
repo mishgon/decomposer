@@ -1,6 +1,7 @@
 """One isolated Gym environment; no model client or training dependencies."""
 
 import json
+import os
 import posixpath
 import re
 import shlex
@@ -75,9 +76,7 @@ def native_reward(evaluation):
 
 
 class Episode:
-    def __init__(self, task: str, directory: Path, *, subagent_port: int = 8025,
-                 subagent_model: str = "Qwen/Qwen3.5-4B",
-                 subagent_url: str | None = None, subagent_host: str | None = None,
+    def __init__(self, task: str, directory: Path, *,
                  image: str = "decomposer-toolathlon:latest", engine: str = "podman",
                  startup_timeout: float = 300):
         self.root = Path(__file__).resolve().parents[2]
@@ -85,8 +84,6 @@ class Episode:
         if (tasks / task).resolve().parent != tasks.resolve() or not (tasks / task).is_dir():
             raise ValueError(f"Unknown task: {task}")
         self.task, self.directory = task, directory.resolve()
-        self.subagent_port, self.subagent_model = subagent_port, subagent_model
-        self.subagent_url, self.subagent_host = subagent_url, subagent_host
         self.image, self.engine, self.startup_timeout = image, engine, startup_timeout
         self.network = "decomposer-rl-" + uuid.uuid4().hex[:16]
         self.pg, self.container = self.network + "-pg", self.network + "-task"
@@ -99,6 +96,15 @@ class Episode:
         return result
 
     def start(self):
+        if not os.environ.get("LLM_PROXY_MASTER_KEY"):
+            raise RuntimeError("Set LLM_PROXY_MASTER_KEY for the registered lmrouter models")
+        proxy_mount = []
+        if socket := os.environ.get("LLM_PROXY_UNIX_SOCKET"):
+            path = Path(socket).resolve()
+            if not path.is_socket():
+                raise RuntimeError(f"Model proxy socket is missing: {path}")
+            proxy_mount = ["-v", f"{path.parent}:/run/model-proxy:ro",
+                           "-e", f"LLM_PROXY_UNIX_SOCKET=/run/model-proxy/{path.name}"]
         self.directory.mkdir(parents=True, exist_ok=False)
         (self.directory / "resources.json").write_text(json.dumps({
             "engine": self.engine, "container": self.container, "pg": self.pg, "network": self.network}))
@@ -141,26 +147,19 @@ class Episode:
                    "PGUSER": "eigent", "PGPASSWORD": "camel", "PGDATABASE": "toolathlon_gym",
                    "TOOLATHLON_TASK": self.task, "N_JOBS_PER_WORKER": "1000",
                    "TOOLATHLON_SUBAGENT_CALL_LOG": "/artifacts/data/subagent_model_calls.jsonl",
-                   "DECOMPOSER_SUBAGENT_MODEL": self.subagent_model,
-                   "DECOMPOSER_SUBAGENT_BASE_URL": self.subagent_url or f"http://host.docker.internal:{self.subagent_port}/v1",
-                   "PYTHONPATH": "/rl-source/src:/opt/decomposer",
+                   "PYTHONPATH": "/decomposer-source/src:/opt/decomposer",
                    "RAYON_NUM_THREADS": "2", "UV_CONCURRENT_BUILDS": "2",
                    "UV_CONCURRENT_INSTALLS": "2", "OMP_NUM_THREADS": "1",
                    "OPENBLAS_NUM_THREADS": "1", "MKL_NUM_THREADS": "1"}
             # Pass credentials by environment name, never in command arguments or artifacts.
-            credentials = ("-e", "VLLM_API_KEY") if self.subagent_url else ()
             self.start_task_container("run", "--http-proxy=false", "-d", "--name", self.container,
                          "--memory", "16g", "--memory-swap", "16g",
-                         "--network", self.network, "--add-host", "host.docker.internal:host-gateway",
-                         *(("--add-host", self.subagent_host) if self.subagent_host else ()),
-                         *credentials,
+                         "--network", self.network, "-e", "LLM_PROXY_MASTER_KEY", *proxy_mount,
                          "-p", "127.0.0.1::2024",
                          *[arg for key, value in env.items() for arg in ("-e", f"{key}={value}")],
                          "-v", f"{data}:/artifacts/data",
-                         "-v", f"{self.root}/src:/rl-source/src:ro",
-                         "-v", f"{self.root}/gyms/toolathlon_gym/subagents/graph.py:/opt/decomposer/gyms/toolathlon_gym/subagents/graph.py:ro",
-                         "-v", f"{self.root}/gyms/toolathlon_gym/subagents/webapp.py:/opt/decomposer/gyms/toolathlon_gym/subagents/webapp.py:ro",
-                         "-v", f"{self.root}/gyms/toolathlon_gym/subagents/python_execute.py:/opt/decomposer/gyms/toolathlon_gym/subagents/python_execute.py:ro",
+                         "-v", f"{self.root}/src:/decomposer-source/src:ro",
+                         "-v", f"{self.root}/gyms/toolathlon_gym:/opt/decomposer/gyms/toolathlon_gym:ro",
                          self.image)
             port = self.command("port", self.container, "2024/tcp").stdout.strip().rsplit(":", 1)[1]
             self.url = f"http://127.0.0.1:{port}"

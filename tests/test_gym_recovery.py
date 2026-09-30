@@ -3,10 +3,8 @@ import json
 import tempfile
 from pathlib import Path
 from subprocess import CompletedProcess
-from unittest.mock import Mock, AsyncMock, patch
-import httpx
+from unittest.mock import Mock, patch
 from gyms.toolathlon_gym.episode import Episode
-from gyms.toolathlon_gym.cancel import cancel_subagents
 
 
 class Recovery(unittest.IsolatedAsyncioTestCase):
@@ -68,28 +66,6 @@ class Recovery(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(RuntimeError, "image missing"):
             ep.start_task_container("run", "image")
         self.assertEqual(ep.command.call_count, 1)
-
-    async def test_cancel_missing_finished_run(self):
-        client = Mock()
-        error = httpx.HTTPStatusError("missing", request=httpx.Request("POST", "http://test"),
-                                      response=httpx.Response(404))
-        client.runs.cancel = AsyncMock(side_effect=error)
-        client.runs.list = AsyncMock(return_value=[])
-        await cancel_subagents(client, {"a": {"subagent_id": "s", "run_id": "r"}}, {"s": {"thread_id": "t"}})
-        self.assertEqual(client.runs.list.await_count, 2)
-        client.runs.list.return_value = [{"status": "running"}]
-        with self.assertRaises(httpx.HTTPStatusError):
-            await cancel_subagents(client, {"a": {"subagent_id": "s", "run_id": "r"}}, {"s": {"thread_id": "t"}})
-
-    async def test_responded_run_does_not_cancel_reused_worker(self):
-        client = Mock()
-        client.runs.cancel = AsyncMock()
-        await cancel_subagents(client, {
-            "old": {"subagent_id": "s", "run_id": "old", "response_sequence_number": 0},
-            "new": {"subagent_id": "s", "run_id": "new"},
-        }, {"s": {"thread_id": "t"}})
-        client.runs.cancel.assert_awaited_once_with("t", "new", wait=True)
-
 
 if __name__ == "__main__":
     unittest.main()

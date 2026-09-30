@@ -4,26 +4,10 @@ import argparse
 import asyncio
 import json
 import math
-import os
 from pathlib import Path
 import time
 
-import httpx
-
-
-class HostTransport(httpx.AsyncHTTPTransport):
-    """Optional DNS override without disabling TLS hostname verification."""
-
-    def __init__(self, hostname, address):
-        super().__init__()
-        self.hostname, self.address = hostname, address
-
-    async def handle_async_request(self, request):
-        if request.url.host == self.hostname:
-            request.headers['Host'] = self.hostname
-            request.extensions['sni_hostname'] = self.hostname
-            request.url = request.url.copy_with(host=self.address)
-        return await super().handle_async_request(request)
+from decomposer.models import create_model
 
 
 def aligned_logprobs(response, token_ids, tokenizer=None):
@@ -52,27 +36,35 @@ def aligned_logprobs(response, token_ids, tokenizer=None):
     return values
 
 
-async def score(token_ids, *, tokenizer, output, model=None):
+async def score(token_ids, *, tokenizer, output):
     """Score exact generated IDs; decoding/re-encoding can change BPE boundaries."""
-    model = model or os.environ['OPD_TEACHER_MODEL']
-    payload = {'model': model, 'prompt': token_ids, 'prompt_logprobs': 0,
+    model = create_model('qwen_3_8_flash_next_non_thinking')
+    payload = {'model': model.model_name, 'prompt': token_ids, 'prompt_logprobs': 0,
                'max_tokens': 1, 'temperature': 1.0}
-    mapping = os.environ.get('OPD_TEACHER_HOST')
-    transport = HostTransport(*mapping.split(':', 1)) if mapping else None
-    base = os.environ['OPD_TEACHER_URL'].rstrip('/')
-    key = os.environ.get('OPD_TEACHER_API_KEY') or os.environ['LLM_PROXY_MASTER_KEY']
     started = time.time()
-    async with httpx.AsyncClient(transport=transport, timeout=300, trust_env=False) as client:
-        response = await client.post(base + '/completions', json=payload,
-                                     headers={'Authorization': f'Bearer {key}'})
-        response.raise_for_status()
-        raw = response.json()
-    output = Path(output)
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json.dumps({'model': model, 'started_at': started,
-                                 'elapsed_seconds': time.time() - started,
-                                 'request': payload, 'response': raw}))
-    return aligned_logprobs(raw, token_ids, tokenizer)
+    record = {'model': model.model_name, 'started_at': started, 'request': payload, 'status': 'failed'}
+    try:
+        # Reuse the registry's authenticated client, tunnel and two SDK retries.
+        response = await model.root_async_client.completions.create(
+            model=model.model_name, prompt=token_ids, max_tokens=1, temperature=1.0,
+            extra_body={'prompt_logprobs': 0})
+        raw = response.model_dump()
+        record['response'] = raw
+        values = aligned_logprobs(raw, token_ids, tokenizer)
+        record['status'] = 'completed'
+        return values
+    except Exception as error:
+        record['error'] = {'type': type(error).__name__, 'http_status': getattr(error, 'status_code', None)}
+        raise
+    finally:
+        record['elapsed_seconds'] = time.time() - started
+        try:
+            output = Path(output)
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_text(json.dumps(record))
+        finally:
+            model.http_client.close()
+            await model.http_async_client.aclose()
 
 
 def main():

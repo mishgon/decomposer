@@ -55,7 +55,7 @@ fi
 .venv-rl/bin/python -m rl.toolathlon_gym.record_run --pid "$$" --directory "$RL_ARTIFACTS" "$@"
 exec > >(tee -a "$RL_ARTIFACTS/trainer.log") 2>&1
 finish() {
-    .venv-rl/bin/python -m rl.toolathlon_gym.throughput_cleanup "$RL_ARTIFACTS" || true
+    .venv-rl/bin/python -m rl.toolathlon_gym.cleanup "$RL_ARTIFACTS" || true
     .venv-rl/bin/python -m rl.toolathlon_gym.report \
         --run "$RL_ARTIFACTS" --data "$RL_DATA" || true
     .venv-rl/bin/python -m rl.toolathlon_gym.select_checkpoints --run "$RL_ARTIFACTS" || true
