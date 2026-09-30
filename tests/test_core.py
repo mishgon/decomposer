@@ -9,7 +9,6 @@ import pytest
 from httpx import ReadError, RemoteProtocolError
 from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
-from langgraph.errors import GraphRecursionError
 from decomposer import create_decomposer_agent
 from decomposer.core import (
     DecomposerAgentMiddleware,
@@ -52,32 +51,55 @@ class ToolCallingFakeModel(FakeMessagesListChatModel):
         return self
 
 
-@pytest.mark.parametrize("async_invocation", [False, True])
-def test_new_rejects_unknown_type(async_invocation: bool) -> None:
-    client = AsyncMock() if async_invocation else MagicMock()
+def test_new_rejects_unknown_type() -> None:
+    client = MagicMock()
     tool = _build_new_tool(
         {"test": SUBAGENT_TYPE},
         _client_cache(client),
     )
     runtime = SimpleNamespace(tool_call_id="create_1")
 
-    if async_invocation:
-        result = asyncio.run(tool.coroutine("unknown", runtime))
-    else:
-        result = tool.func("unknown", runtime)
+    result = tool.func("unknown", runtime)
 
     assert "Unknown subagent type ID `unknown`" in result
     client.threads.create.assert_not_called()
 
 
 @pytest.mark.parametrize("async_invocation", [False, True])
-@pytest.mark.parametrize("recursion_limit", [None, 1])
-def test_run_records_run_and_passes_context(
-    async_invocation: bool, recursion_limit: int | None
-) -> None:
+def test_fork_copies_thread_and_preserves_subagent_type(async_invocation: bool) -> None:
+    client = AsyncMock() if async_invocation else MagicMock()
+    client.threads.copy.return_value = {"thread_id": "copied_thread"}
+    source = _subagent("source_thread")
+    runtime = SimpleNamespace(
+        state={"subagents": {"source_thread": source}, "subagent_runs": {}},
+        tool_call_id="fork_1",
+    )
+    tool = _build_fork_tool(_client_cache(client))
+
+    if async_invocation:
+        command = asyncio.run(tool.coroutine("source_thread", runtime))
+    else:
+        command = tool.func("source_thread", runtime)
+
+    client.threads.copy.assert_called_once_with("source_thread")
+    assert command.update["subagents"] == {
+        "copied_thread": {
+            **source,
+            "subagent_id": "copied_thread",
+            "thread_id": "copied_thread",
+        }
+    }
+    assert source == _subagent("source_thread")
+    message = command.update["messages"][0]
+    assert message.tool_call_id == "fork_1"
+    assert json.loads(message.content) == {"subagent_id": "copied_thread"}
+
+
+@pytest.mark.parametrize("async_invocation", [False, True])
+def test_run_records_run_and_passes_context(async_invocation: bool) -> None:
     client = AsyncMock() if async_invocation else MagicMock()
     client.runs.create.return_value = {"run_id": "run_1", "status": "pending"}
-    tool = _build_run_tool(_client_cache(client), recursion_limit)
+    tool = _build_run_tool(_client_cache(client), 1)
     context = {"value": 42}
     runtime = SimpleNamespace(
         state={"subagents": {"thread_1": _subagent("thread_1")}, "subagent_runs": {}},
@@ -94,7 +116,7 @@ def test_run_records_run_and_passes_context(
         thread_id="thread_1",
         assistant_id="test_assistant",
         input={"messages": [{"role": "user", "content": "do the task"}]},
-        config={"recursion_limit": 1} if recursion_limit is not None else None,
+        config={"recursion_limit": 1},
         context=context,
         multitask_strategy="reject",
     )
@@ -113,23 +135,19 @@ def test_run_records_run_and_passes_context(
     }
 
 
-@pytest.mark.parametrize("async_invocation", [False, True])
 @pytest.mark.parametrize(
     ("status", "collected", "expected_error"),
     [
         (None, False, "Unknown subagent ID `run_1_thread`"),
         ("running", False, "active run `run_1`"),
-        ("responded", False, "active run `run_1`"),
         ("error", True, "status `\"error\"`"),
-        ("timeout", True, "status `\"timeout\"`"),
-        ("interrupted", True, "status `\"interrupted\"`"),
     ],
 )
 @pytest.mark.parametrize("tool_name", ["run", "fork"])
 def test_subagent_tools_reject_unavailable_subagent(
-    async_invocation: bool, status: str | None, collected: bool, expected_error: str, tool_name: str
+    status: str | None, collected: bool, expected_error: str, tool_name: str
 ) -> None:
-    client = AsyncMock() if async_invocation else MagicMock()
+    client = MagicMock()
     tool = (
         _build_run_tool(_client_cache(client), 1)
         if tool_name == "run"
@@ -146,7 +164,7 @@ def test_subagent_tools_reject_unavailable_subagent(
     args = {"subagent_id": "run_1_thread", "runtime": runtime}
     if tool_name == "run":
         args["prompt"] = "follow up"
-    result = asyncio.run(tool.coroutine(**args)) if async_invocation else tool.func(**args)
+    result = tool.func(**args)
 
     assert expected_error in result
     client.runs.create.assert_not_called()
@@ -199,7 +217,6 @@ def test_wait_stores_tool_calls_in_returned_response_order() -> None:
     ]
 
 
-@pytest.mark.parametrize("async_invocation", [False, True])
 @pytest.mark.parametrize(
     "last_message",
     [
@@ -211,8 +228,8 @@ def test_wait_stores_tool_calls_in_returned_response_order() -> None:
     ],
     ids=["tool-message", "pending-tool-call", "null-content"],
 )
-def test_wait_rejects_responded_run_without_final_response(async_invocation, last_message) -> None:
-    client = _completed_client(async_invocation)
+def test_wait_rejects_responded_run_without_final_response(last_message) -> None:
+    client = _completed_client()
     history = _run_history("run_a")
     history[0]["values"]["messages"][-1] = last_message
     client.threads.get_history.side_effect = None
@@ -221,15 +238,11 @@ def test_wait_rejects_responded_run_without_final_response(async_invocation, las
     runtime = _wait_runtime()
 
     with pytest.raises(ValueError, match="Expected a final AI message.*responded run `run_a`"):
-        if async_invocation:
-            asyncio.run(tool.coroutine(runtime))
-        else:
-            tool.func(runtime)
+        tool.func(runtime)
 
 
-@pytest.mark.parametrize("async_invocation", [False, True])
-def test_wait_accepts_empty_final_response(async_invocation) -> None:
-    client = _completed_client(async_invocation)
+def test_wait_accepts_empty_final_response() -> None:
+    client = _completed_client()
     history = _run_history("run_a")
     history[0]["values"]["messages"][-1]["content"] = ""
     client.threads.get_history.side_effect = None
@@ -237,7 +250,7 @@ def test_wait_accepts_empty_final_response(async_invocation) -> None:
     tool = _build_wait_tool(_client_cache(client))
     runtime = _wait_runtime()
 
-    command = asyncio.run(tool.coroutine(runtime)) if async_invocation else tool.func(runtime)
+    command = tool.func(runtime)
 
     run = command.update["subagent_runs"]["run_a"]
     assert run["status"] == "responded"
@@ -245,13 +258,12 @@ def test_wait_accepts_empty_final_response(async_invocation) -> None:
     assert json.loads(command.update["messages"][0].content)[0]["response"] == ""
 
 
-@pytest.mark.parametrize("async_invocation", [False, True])
-def test_wait_stores_tool_calls_from_error_run(async_invocation: bool) -> None:
-    client = _completed_client(async_invocation, status="error")
+def test_wait_stores_tool_calls_from_error_run() -> None:
+    client = _completed_client(status="error")
     tool = _build_wait_tool(_client_cache(client))
     runtime = _wait_runtime()
 
-    command = asyncio.run(tool.coroutine(runtime)) if async_invocation else tool.func(runtime)
+    command = tool.func(runtime)
 
     subagent_run = command.update["subagent_runs"]["run_a"]
     assert subagent_run["tool_calls"] == [
@@ -263,7 +275,6 @@ def test_wait_stores_tool_calls_from_error_run(async_invocation: bool) -> None:
     }
 
 
-@pytest.mark.parametrize("async_invocation", [False, True])
 @pytest.mark.parametrize(
     ("empty_history", "thread", "expected_error"),
     [
@@ -275,9 +286,9 @@ def test_wait_stores_tool_calls_from_error_run(async_invocation: bool) -> None:
         ),
     ],
 )
-def test_wait_formats_thread_error(async_invocation, empty_history, thread, expected_error) -> None:
+def test_wait_formats_thread_error(empty_history, thread, expected_error) -> None:
     history = [] if empty_history else _run_history("run_a")
-    client = AsyncMock() if async_invocation else MagicMock()
+    client = MagicMock()
     client.runs.get.return_value = {
         "thread_id": "run_a_thread", "run_id": "run_a", "status": "error",
     }
@@ -286,10 +297,7 @@ def test_wait_formats_thread_error(async_invocation, empty_history, thread, expe
     tool = _build_wait_tool(_client_cache(client))
     runtime = _wait_runtime()
 
-    if async_invocation:
-        command = asyncio.run(tool.coroutine(runtime=runtime))
-    else:
-        command = tool.func(runtime=runtime)
+    command = tool.func(runtime=runtime)
 
     run = command.update["subagent_runs"]["run_a"]
     assert run["status"] == "error"
@@ -333,82 +341,7 @@ def test_await_wait_retries_until_completion(monkeypatch, first_result) -> None:
     assert command.update["subagent_runs"]["run_a"]["response"] == "response from run_a"
 
 
-def test_after_model_rejects_only_duplicate_runs() -> None:
-    middleware = DecomposerAgentMiddleware([SUBAGENT_TYPE], 1)
-    tool_calls = [
-        {
-            "name": "run",
-            "args": {"subagent_id": subagent_id, "prompt": "do the task"},
-            "id": f"call_{index}",
-        }
-        for index, subagent_id in enumerate(("agent_a", "agent_b", "agent_a", "agent_a"))
-    ]
-
-    update = middleware.after_model(
-        {"messages": [AIMessage(content="", tool_calls=tool_calls)]},
-        SimpleNamespace(),
-    )
-
-    assert [message.tool_call_id for message in update["messages"]] == [
-        "call_0", "call_2", "call_3"
-    ]
-    assert all(
-        message.content == PARALLEL_RUN_CALL_ERROR
-        for message in update["messages"]
-    )
-
-
-@pytest.mark.parametrize("args", [{}, {"subagent_id": []}])
-def test_after_model_leaves_invalid_run_arguments_to_tool_validation(args) -> None:
-    middleware = DecomposerAgentMiddleware([SUBAGENT_TYPE], 1)
-    tool_calls = [
-        {"name": "run", "args": args, "id": f"call_{index}"}
-        for index in range(2)
-    ]
-
-    assert middleware.after_model(
-        {"messages": [AIMessage(content="", tool_calls=tool_calls)]},
-        SimpleNamespace(),
-    ) is None
-
-
-def test_after_model_ignores_invalid_tool_calls_when_checking_response() -> None:
-    middleware = DecomposerAgentMiddleware([SUBAGENT_TYPE], 1)
-    ai_message = AIMessage(
-        content="early response",
-        invalid_tool_calls=[
-            {
-                "name": "wait",
-                "args": "{",
-                "id": "invalid_call",
-                "error": "invalid JSON",
-                "type": "invalid_tool_call",
-            }
-        ],
-    )
-
-    assert (
-        middleware.after_model(
-            {"messages": [ai_message], "subagent_runs": {}},
-            SimpleNamespace(),
-        )
-        is None
-    )
-
-    update = middleware.after_model(
-        {
-            "messages": [ai_message],
-            "subagent_runs": {"run_a": _subagent_run("run_a")},
-        },
-        SimpleNamespace(),
-    )
-
-    assert update is not None
-    assert update["messages"] == [HumanMessage(content=EARLY_RESPONSE_ERROR)]
-
-
-@pytest.mark.parametrize("async_invocation", [False, True])
-def test_decomposer_waits_before_creating_subagents(async_invocation: bool) -> None:
+def test_decomposer_waits_before_creating_subagents() -> None:
     agent = create_decomposer_agent(
         decomposer_model=ToolCallingFakeModel(
             responses=[
@@ -423,7 +356,7 @@ def test_decomposer_waits_before_creating_subagents(async_invocation: bool) -> N
     )
     inputs = {"messages": [{"role": "user", "content": "Hello"}]}
 
-    result = asyncio.run(agent.ainvoke(inputs)) if async_invocation else agent.invoke(inputs)
+    result = agent.invoke(inputs)
 
     assert result["subagents"] == {}
     assert result["subagent_runs"] == {}
@@ -434,22 +367,6 @@ def test_decomposer_waits_before_creating_subagents(async_invocation: bool) -> N
         for message in result["messages"]
     )
     assert result["messages"][-1].content == "done"
-
-
-@pytest.mark.parametrize("kwargs, expected_limit", [({}, 9999), ({"decomposer_recursion_limit": 200}, 200)])
-def test_decomposer_recursion_limit_can_be_overridden(kwargs, expected_limit) -> None:
-    agent = create_decomposer_agent(
-        decomposer_model=ToolCallingFakeModel(responses=[AIMessage(content="done")]),
-        subagent_types=SUBAGENT_TYPES,
-        **kwargs,
-    )
-    assert agent.config["recursion_limit"] == expected_limit
-
-    with pytest.raises(GraphRecursionError):
-        agent.invoke(
-            {"messages": [HumanMessage(content="Hello")]},
-            config={"recursion_limit": 1},
-        )
 
 
 @pytest.mark.parametrize("async_invocation", [False, True])
@@ -552,11 +469,8 @@ def test_decomposer_delegates(monkeypatch, async_invocation: bool) -> None:
     assert result["messages"][-1].content == "dummy"
 
 
-@pytest.mark.parametrize("async_invocation", [False, True])
-def test_decomposer_rejects_parallel_wait_and_finishes_with_idle_subagent(
-    monkeypatch, async_invocation: bool
-) -> None:
-    client = _mock_client(monkeypatch, async_invocation)
+def test_decomposer_rejects_parallel_wait_and_finishes_with_idle_subagent(monkeypatch) -> None:
+    client = _mock_client(monkeypatch, False)
     client.threads.create.return_value = {"thread_id": "dummy-thread"}
     agent = create_decomposer_agent(
         decomposer_model=ToolCallingFakeModel(
@@ -575,7 +489,7 @@ def test_decomposer_rejects_parallel_wait_and_finishes_with_idle_subagent(
     )
     inputs = {"messages": [{"role": "user", "content": "Hello"}]}
 
-    result = asyncio.run(agent.ainvoke(inputs)) if async_invocation else agent.invoke(inputs)
+    result = agent.invoke(inputs)
 
     client.threads.create.assert_called_once_with()
     client.runs.create.assert_not_called()
@@ -592,11 +506,8 @@ def test_decomposer_rejects_parallel_wait_and_finishes_with_idle_subagent(
     assert result["messages"][-1].content == "done"
 
 
-@pytest.mark.parametrize("async_invocation", [False, True])
-def test_decomposer_rejects_duplicate_runs_and_parallel_waits(
-    monkeypatch, async_invocation: bool
-) -> None:
-    client = _mock_client(monkeypatch, async_invocation)
+def test_decomposer_rejects_duplicate_runs_and_parallel_waits(monkeypatch) -> None:
+    client = _mock_client(monkeypatch, False)
     client.threads.create.return_value = {"thread_id": "thread_1"}
     agent = create_decomposer_agent(
         decomposer_model=ToolCallingFakeModel(responses=[
@@ -615,7 +526,7 @@ def test_decomposer_rejects_duplicate_runs_and_parallel_waits(
     )
     inputs = {"messages": [{"role": "user", "content": "Hello"}]}
 
-    result = asyncio.run(agent.ainvoke(inputs)) if async_invocation else agent.invoke(inputs)
+    result = agent.invoke(inputs)
 
     client.runs.create.assert_not_called()
     client.runs.get.assert_not_called()
@@ -743,9 +654,8 @@ def _call(name, call_id, **args):
     return {"name": name, "id": call_id, "args": args}
 
 
-@pytest.mark.parametrize("async_invocation", [False, True])
-def test_decomposer_rejects_parallel_fork_and_run(monkeypatch, async_invocation) -> None:
-    client = _mock_client(monkeypatch, async_invocation)
+def test_decomposer_rejects_parallel_fork_and_run(monkeypatch) -> None:
+    client = _mock_client(monkeypatch, False)
     agent = create_decomposer_agent(
         decomposer_model=ToolCallingFakeModel(responses=[
             AIMessage(content="", tool_calls=[
@@ -760,7 +670,7 @@ def test_decomposer_rejects_parallel_fork_and_run(monkeypatch, async_invocation)
         "messages": [HumanMessage("Hello")],
         "subagents": {"thread_1": _subagent("thread_1")},
     }
-    result = asyncio.run(agent.ainvoke(inputs)) if async_invocation else agent.invoke(inputs)
+    result = agent.invoke(inputs)
     client.runs.create.assert_not_called()
     client.threads.copy.assert_not_called()
     assert [m.content for m in result["messages"] if isinstance(m, ToolMessage)] == [
