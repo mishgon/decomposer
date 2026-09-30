@@ -8,7 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def test_opd_recipe_is_the_rl_recipe():
     assert (ROOT / "opd/toolathlon_gym/rl_recipe.yaml").resolve() == (
-        ROOT / "rl/toolathlon_gym/full.yaml")
+        ROOT / "rl/toolathlon_gym/recipe.yaml")
 
 
 def test_launcher_roots_and_shell_syntax():

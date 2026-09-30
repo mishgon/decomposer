@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 class RecipeTests(unittest.TestCase):
     def config(self, name):
         env = {'RL_ROOT': str(ROOT), 'RL_DATA': '/tmp/data', 'RL_ARTIFACTS': '/tmp/run',
-               'MODEL_PATH': '/tmp/student', 'OPD_TEACHER_MODEL': 'teacher'}
+               'MODEL_PATH': '/tmp/student'}
         with patch.dict(os.environ, env), initialize_config_dir(
                 config_dir=str(ROOT / 'opd/toolathlon_gym'), version_base=None):
             config = compose(config_name=name, overrides=['hydra.searchpath=[pkg://verl.trainer.config]',

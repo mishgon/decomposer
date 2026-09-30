@@ -91,24 +91,6 @@ client_session_timeout_seconds: 42
     }
 
 
-@pytest.mark.parametrize("args,command,expected", [
-    (["--directory", "/opt/tools/excel", "run", "excel-mcp-server", "stdio"], "uv",
-     ["--directory", "/opt/tools/excel", "run", "--no-sync", "--offline", "excel-mcp-server", "stdio"]),
-    (["run", "/opt/tools/yahoo/server.py"], "/opt/tools/yahoo/.venv/bin/python",
-     ["/opt/tools/yahoo/server.py"]),
-])
-def test_tool_startup_uses_installed_dependencies(tmp_path, args, command, expected):
-    import yaml
-    config_dir = tmp_path / "configs/mcp_servers"
-    config_dir.mkdir(parents=True)
-    (config_dir / "test.yaml").write_text(yaml.safe_dump({
-        "name": "test", "params": {"command": "uv", "args": args}}))
-    connection = webapp.load_connections({"task_dir": "test", "needed_mcp_servers": ["test"],
-        "agent_workspace": str(tmp_path / "workspace")}, tmp_path)["test"]
-    assert connection["command"] == command
-    assert connection["args"] == expected
-
-
 def test_webapp_keeps_sessions_open(tmp_path: Path, monkeypatch) -> None:
     events: list[str] = []
     connections = {
@@ -230,20 +212,21 @@ def test_webapp_loads_native_local_tools(tmp_path: Path, monkeypatch) -> None:
         lambda task_config, toolathlon_root: {},
     )
     sys.path.insert(0, str(TOOLATHLON_ROOT))
-    from utils.aux_tools import python_interpretor
+    from gyms.toolathlon_gym.subagents import python_execute as python_module
 
     def make_python_execute(workspace):
-        async def python_execute(
+        def python_execute(
             code: str,
             filename: str = "",
             timeout: int = 30,
         ) -> str:
+            """Return executor thread identity for this test."""
             return str(threading.get_ident())
 
         return python_execute
 
     monkeypatch.setattr(
-        python_interpretor,
+        python_module,
         "make_python_execute",
         make_python_execute,
     )

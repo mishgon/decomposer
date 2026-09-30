@@ -53,7 +53,7 @@ def test_configured_subagents_are_registered() -> None:
         (Path(run.__file__).parent / "subagents" / "langgraph.json").read_text()
     )["graphs"]
 
-    assert list(registered) == [run.SUBAGENT_TYPE_ID]
+    assert set(registered) == {run.SUBAGENT_TYPE_ID, "qwen_3_5_4b_unlooped_non_thinking"}
 
 
 def test_docker(monkeypatch) -> None:

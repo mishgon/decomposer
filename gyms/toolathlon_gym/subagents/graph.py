@@ -35,3 +35,12 @@ def qwen_3_5_4b_unlooped_thinking():
         # Validate outside the logger: retain raw output but never checkpoint unsafe arguments.
         middleware=[transport_safe_response, durable_model_call_log, truncate_mcp_tool_output],
     )
+
+
+def qwen_3_5_4b_unlooped_non_thinking():
+    return create_agent(
+        model=create_model("qwen_3_5_4b_unlooped_non_thinking"),
+        tools=get_tools(),
+        system_prompt=SUBAGENT_SYSTEM_PROMPT,
+        middleware=[transport_safe_response, durable_model_call_log, truncate_mcp_tool_output],
+    )

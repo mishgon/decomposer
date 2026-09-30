@@ -1,98 +1,71 @@
-# Toolathlon Gym on-policy distillation
+# Toolathlon Gym OPD
 
-Teacher scoring, smoke/full configuration composition and the actual masked
-loss have passed tests. On Hertz-2, `smoke-opd-20260922` completed its first
-end-to-end GPU update and saved model, optimizer and training state at
-`global_step_1`. This verifies the training path, not convergence or overfitting;
-the original smoke stopped at update 5 on a text re-tokenization mismatch.
-Teacher requests now send exact student token IDs and verify returned token
-meanings, avoiding text re-tokenization of non-canonical generated sequences.
+The SFT decomposer executes Gym tasks with hosted Qwen3.5-4B-unlooped
+non-thinking subagents. Hosted Qwen3.8 Flash Next scores the exact student token
+IDs. Only student-generated positions contribute to the distillation loss;
+tool observations and subagent reports are masked. Native reward measures
+quality but does not enter the OPD loss.
 
-Student: decomposer-4b SFT. Subagents: hosted Qwen3.5-4B non-thinking.
-Teacher: hosted `Qwen/Qwen3.8-Flash-Next-NVFP4`.
+## Files and Recipe
 
-The student executes the existing Gym environment. The teacher scores its
-generated token sequence; only decomposer-generated positions contribute to
-the distillation loss. Tool observations and subagent reports remain context,
-not training targets. Native evaluation remains the quality metric.
+`teacher.py` validates prompt logprobs and saves every teacher call.
+`manager.py` connects this client to veRL. Both teacher and subagent clients
+use `src/decomposer/models.py`, including its tunnel transport and two retries.
+There are no OPD-specific model URL, IP, credential or sampling overrides.
 
-## Teacher preflight
+`rl_recipe.yaml` links to `rl/toolathlon_gym/recipe.yaml`. OPD reuses RL's
+environment adapter, task preparation, launch infrastructure and monitoring.
+Its `full.yaml` changes only the objective and rollout schedule: sampled-token
+k1 policy-gradient distillation, no task rewards, one rollout/task/epoch, ten
+epochs, and two concurrent episodes. No teacher GPU is allocated. Smoke targets
+20 updates on the same two tasks as RL. Evaluation uses eight attempts/task
+before training and every eight updates; it reuses training tasks.
 
-Set `OPD_TEACHER_URL` to the OpenAI-compatible `/v1` endpoint,
-`OPD_TEACHER_MODEL` to the teacher ID, and `OPD_TEACHER_API_KEY` (or the existing
-`LLM_PROXY_MASTER_KEY`) privately in the environment. Optional
-`OPD_TEACHER_HOST=hostname:address` overrides DNS while preserving TLS verification.
+LoRA 32/64, LR 1.5e-5, two optimizer passes, 45-minute episodes and saving every
+update remain unchanged. `full` uses the frozen 346-task pool. The independent
+RL objective and the pristine Timur reference remain untouched.
+
+## Setup and Launch
+
+Configure the shared [lmrouter tunnel](../../README.md). Export the private
+`LLM_PROXY_MASTER_KEY` and, when needed, `LLM_PROXY_UNIX_SOCKET`.
 
 ```bash
-python -m opd.toolathlon_gym.teacher \
+bash opd/toolathlon_gym/setup.sh
+export POLICY_GPU=2 ROLLOUT_GPU=3  # choose two actually free GPUs
+export RL_GYM_IMAGE=your-tested-gym-image
+export RL_DATA="$PWD/artifacts/training/toolathlon_gym_opd/smoke-data"
+export RL_ARTIFACTS="$PWD/artifacts/training/toolathlon_gym_opd/smoke-01"
+bash opd/toolathlon_gym/train.sh smoke
+```
+
+The launcher prepares one training group/task if the dataset directory does not
+exist. Use a fresh run directory. Setup applies an opt-in teacher-manager hook
+to pinned veRL; it changes no RL behavior when distillation is disabled.
+
+## Teacher Preflight
+
+```bash
+PYTHONPATH=src:. .venv-rl/bin/python -m opd.toolathlon_gym.teacher \
   --trace /path/to/episode/trace.json \
   --tokenizer /path/to/decomposer-4b-sft \
   --output artifacts/training/toolathlon_gym_opd/preflight/teacher-score.json
 ```
 
-The preflight checks every scored token ID and its decoded meaning against
-the teacher's prompt scores. A mismatch is an error, never a substituted zero.
-Requests/responses are saved without authentication headers. The first token
-has no context and is excluded from student response targets.
+Every scored token must match both its numeric ID and decoded meaning. The
+first token has no preceding context and is excluded. Alignment failures stay
+errors, never zero scores. Prompt scoring requests one unused generated token;
+its temperature does not change prompt logprobs. No chat-template re-rendering
+or teacher reasoning is inserted into student trajectories.
 
-Verified on Hertz-2 on 2026-09-22: an existing Gym trajectory with 8,575 tokens
-and 4,245 student-generated tokens was scored with exact token-ID alignment.
-This validates that trajectory, not universal tokenizer equivalence: the same
-alignment check must run for every training sample.
-
-## Training
-
-Use a separate checkout while RL is active. `setup.sh` applies the existing RL
-dependency setup plus one optional teacher-manager hook to pinned veRL. The
-hook changes no behavior unless the OPD config enables it. No teacher GPU is
-allocated: the client uses lmrouter.
-
-```bash
-bash opd/toolathlon_gym/setup.sh
-export POLICY_GPU=0 ROLLOUT_GPU=1  # choose two actually free GPUs
-export MODEL_PATH=/path/to/decomposer-4b-sft
-export RL_GYM_IMAGE=your-verified-gym-image-id
-export RL_DATA="$PWD/artifacts/training/toolathlon_gym_opd/smoke-data"
-export RL_ARTIFACTS="$PWD/artifacts/training/toolathlon_gym_opd/smoke"
-export RAY_TMPDIR=/path/to/short/ray-temp
-bash opd/toolathlon_gym/train.sh smoke
-```
-
-Monitor the latest OPD run separately from RL:
+## Monitoring
 
 ```bash
 bash opd/toolathlon_gym/watch-opd.sh
-# Add --once for a single snapshot, or --run /path/to/run for a specific run.
+bash opd/toolathlon_gym/watch-opd.sh --run /path/to/run --once
 ```
 
-ClearML logging is inherited from the RL recipe; the task URL is printed in
-`trainer.log` under project `decomposer-toolathlon-gym-opd`.
-
-For the full pool, use `full` with new dataset/artifact directories. Smoke uses
-`canvas-quiz-analysis-gsheet-email` and `yf-stock-comparison-word-gcal`; full uses the same
-346-task observed-partial-score pool as RL. Both evaluate on their training
-pool: these scores measure fitting, not held-out generalization.
-
-Future smoke datasets use observed partial rewards (historical means 0.371 and
-0.55, runtimes 27.4 and 12.2 minutes). Existing runs retain their original tasks;
-prepare a new dataset directory rather than overwriting or reusing the old pool.
-
-Both configs share the optimizer/model/harness recipe by linking `rl_recipe.yaml`
-to `rl/toolathlon_gym/full.yaml`. They differ only in experiment name
-and selected task pool. Shared settings include all-linear LoRA 32/64,
-learning rate 1.5e-5, two optimizer passes, sequence-mean/token-mean aggregation,
-45-minute episodes, checkpointing every update and evaluation every eight
-updates with eight attempts/task. The unchanged Timur reference lives under
-the RL directory. Our async one-task minibatch differs from Timur's eight-task
-minibatch, as it already does in RL.
-
-OPD uses one rollout/task/epoch, ten epochs, and two concurrent episodes.
-Smoke therefore targets 20 updates. Native rewards do not enter the OPD loss;
-they remain logged for evaluation. The k1 teacher/student logprob difference
-feeds veRL's policy-gradient distillation objective, without GRPO group ranking.
-Teacher calls are saved in `teacher_calls/`; existing episode traces,
-checkpoints, TensorBoard and ClearML logging are reused.
-
-The separate RL checkout on Hertz-2 retains its old paths deliberately;
-only the new OPD checkout receives this reorganization. Do not pull the path
-migration into a live RL checkout.
+ClearML logs under `decomposer-toolathlon-gym-opd`. Teacher requests/responses
+and failure types go into `teacher_calls/`, without authentication headers.
+Episode traces, raw native scores, checkpoints and monitoring use the same
+formats as RL. A saved update verifies execution, not learning or overfitting.

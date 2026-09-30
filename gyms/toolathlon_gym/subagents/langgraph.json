@@ -3,7 +3,8 @@
     "."
   ],
   "graphs": {
-    "qwen_3_5_4b_unlooped_thinking": "./graph.py:qwen_3_5_4b_unlooped_thinking"
+    "qwen_3_5_4b_unlooped_thinking": "./graph.py:qwen_3_5_4b_unlooped_thinking",
+    "qwen_3_5_4b_unlooped_non_thinking": "./graph.py:qwen_3_5_4b_unlooped_non_thinking"
   },
   "http": {
     "app": "webapp:app"

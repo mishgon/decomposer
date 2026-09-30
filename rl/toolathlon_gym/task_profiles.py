@@ -6,7 +6,8 @@ import json
 from pathlib import Path
 from statistics import mean
 import subprocess
-import sys
+
+from rl.toolathlon_gym.prepare_data import make_split
 
 ROOT = Path(__file__).resolve().parent
 PROFILES = ("full", "cold-start", "smoke")
@@ -58,6 +59,38 @@ def check_data(directory, profile):
             raise ValueError(f"Incorrect {file} task/group counts")
 
 
+def prepare_data(directory, profile, groups_per_task):
+    """Use every task in one frozen pool; evaluation reuses the same tasks."""
+    import pandas as pd
+    if groups_per_task < 1:
+        raise ValueError("groups_per_task must be positive")
+    pool_path = ROOT / "task_pools" / f"{profile}.json"
+    names = sorted(row["task_id"] for row in json.loads(pool_path.read_text())["tasks"])
+    gym = ROOT.parents[1] / "external/toolathlon_gym"
+    split = make_split(gym / "tasks/finalpool", 0, 42)
+    if not names or len(names) != len(set(names)) or not set(names) <= set(split["train"]):
+        raise ValueError("Task pool contains duplicate or unavailable tasks")
+    split.update(train=names, validation=names, groups_per_task=groups_per_task,
+                 gym_revision=subprocess.check_output(["git", "-C", str(gym), "rev-parse", "HEAD"], text=True).strip(),
+                 selection="Entire frozen pool; evaluation reuses training tasks, no held-out validation",
+                 task_pool=str(pool_path), task_pool_sha256=hashlib.sha256(pool_path.read_bytes()).hexdigest(),
+                 excluded_tasks=[], eligible_tasks=len(names))
+    directory.mkdir(parents=True, exist_ok=False)
+    (directory / "split.json").write_text(json.dumps(split, indent=2))
+    frame = pd.DataFrame([
+        {"data_source": "toolathlon_gym/train", "agent_name": "toolathlon_decomposer",
+         "prompt": [{"role": "user", "content": f"Complete Gym task {name}."}],
+         "reward_model": {"style": "rule", "ground_truth": ""},
+         "extra_info": {"task_id": name, "split": "train"}, "index": i}
+        for i, name in enumerate(names)])
+    training = pd.concat([frame] * groups_per_task, ignore_index=True)
+    training["index"] = range(len(training))
+    training.to_parquet(directory / "train.parquet")
+    frame["data_source"] = "toolathlon_gym/train_probe"
+    frame.to_parquet(directory / "evaluation.parquet")
+    print(f"{len(names)} tasks; {groups_per_task} training groups/task; evaluation uses the same pool")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     action = parser.add_mutually_exclusive_group(required=True)
@@ -69,7 +102,7 @@ def main():
     args = parser.parse_args()
     if args.manifest:
         raw = args.manifest.read_bytes()
-        smoke = json.loads((ROOT / "smoke_pool.json").read_text())
+        smoke = json.loads((ROOT / "task_pools/smoke.json").read_text())
         pools = select_profiles(json.loads(raw), [r["task_id"] for r in smoke["tasks"]])
         (ROOT / "task_pools").mkdir(exist_ok=True)
         for name, tasks in pools.items():
@@ -85,12 +118,7 @@ def main():
     if not args.profile:
         parser.error("--profile is required")
     if args.prepare:
-        pool_path = ROOT / "task_pools" / f"{args.profile}.json"
-        count = len(json.loads(pool_path.read_text())["tasks"])
-        subprocess.run([sys.executable, "-m", "rl.toolathlon_gym.prepare_pilot",
-                        "--output", str(args.prepare), "--task-pool", str(pool_path),
-                        "--train-tasks", str(count), "--evaluate-training-tasks",
-                        "--groups-per-task", str(args.groups_per_task)], check=True)
+        prepare_data(args.prepare, args.profile, args.groups_per_task)
     check_data(args.prepare or args.check_data, args.profile)
 
 

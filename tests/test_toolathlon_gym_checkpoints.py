@@ -8,7 +8,7 @@ from rl.toolathlon_gym.select_checkpoints import select
 class CheckpointSelectionTest(unittest.TestCase):
     def test_best_and_last_can_differ(self):
         with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
+            root = Path(temporary).resolve()
             for step in (2, 4):
                 (root / f"global_step_{step}" / "actor").mkdir(parents=True)
             panels = [{"step": step, "complete": True, "panel": "toolathlon_gym/train_probe",
@@ -21,7 +21,7 @@ class CheckpointSelectionTest(unittest.TestCase):
 
     def test_incomplete_panel_cannot_win(self):
         with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
+            root = Path(temporary).resolve()
             (root / "global_step_2" / "actor").mkdir(parents=True)
             self.assertEqual(select(root, [{"step": 2, "complete": False}]), {"last": 2})
 

@@ -1,8 +1,11 @@
 """LangChain model bridge: veRL generates tokens; existing Decomposer owns tools."""
 
 import asyncio
+import html
 import json
+import re
 from typing import Any
+from uuid import uuid4
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage
@@ -11,7 +14,26 @@ from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.utils.function_calling import convert_to_openai_tool
 from pydantic import Field
 
-from decomposer.chat_vllm import ChatVLLM
+
+def parse_tool_calls(content):
+    """Parse raw Qwen policy tokens; the rollout API does not parse tools."""
+    pattern = r"<tool_call>\s*<function=([^>\s]+)>\s*(.*?)\s*</function>\s*</tool_call>"
+    calls = []
+    for match in re.finditer(pattern, content, re.DOTALL):
+        arguments = {}
+        for parameter in re.finditer(r"<parameter=([^>\s]+)>\s*(.*?)\s*</parameter>", match[2], re.DOTALL):
+            value = html.unescape(parameter[2].strip())
+            if value.startswith(("{", "[")):
+                try:
+                    value = json.loads(value)
+                except json.JSONDecodeError:
+                    pass
+            arguments[html.unescape(parameter[1])] = value
+        calls.append({"id": f"call_{uuid4().hex}", "name": html.unescape(match[1]),
+                      "args": arguments, "type": "tool_call"})
+    if "<tool_call>" in content and not calls:
+        raise ValueError("Could not parse Qwen XML tool call")
+    return re.sub(pattern, "", content, flags=re.DOTALL).strip(), calls
 
 
 class RolloutBudgetExceeded(Exception):
@@ -99,7 +121,7 @@ class PolicyTokens:
             raise RolloutBudgetExceeded("Generation exhausted budget without EOS")
         content = raw.removesuffix(self.tokenizer.eos_token)
         try:
-            content, calls = ChatVLLM._parse_qwen_xml(content)
+            content, calls = parse_tool_calls(content)
         except ValueError:
             # Malformed policy output is an agent outcome, not a broken server.
             calls = []

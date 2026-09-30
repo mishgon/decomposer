@@ -1,4 +1,4 @@
-"""Remove only environments recorded by this throughput test, including interrupted setup."""
+"""Close environments recorded under one run, including interrupted setup."""
 from concurrent.futures import ThreadPoolExecutor
 import json
 from pathlib import Path
