@@ -6,38 +6,16 @@ import fcntl
 from functools import lru_cache
 import json
 from pathlib import Path
+import statistics
 import time
+
+from sft.wideseek.scheduler import qualifies
+from gyms.wideseek.metrics import subagent_counts
 
 
 def duration(seconds):
     minutes = max(0, int(seconds)) // 60
     return f"{minutes // 60}h {minutes % 60:02d}m"
-
-
-def subagent_counts(messages):
-    """Workers stay active until wait returns their report, even if already done."""
-    calls, spawned, active = {}, set(), set()
-    peak = 0
-    for message in messages:
-        if message.get('type') == 'ai':
-            calls.update({c['id']: c['name'] for c in message.get('tool_calls', [])})
-        if message.get('type') != 'tool':
-            continue
-        name = calls.get(message.get('tool_call_id'))
-        try:
-            result = json.loads(message.get('content', ''))
-        except (ValueError, TypeError):
-            continue
-        if name in {'run', 'spawn_subagent'} and isinstance(result, dict) and result.get('subagent_run_id'):
-            worker = result['subagent_run_id']
-            spawned.add(worker)
-            active.add(worker)
-            peak = max(peak, len(active))
-        elif name == 'wait' and isinstance(result, list):
-            for report in result:
-                if isinstance(report, dict):
-                    active.discard(report.get('subagent_run_id'))
-    return len(spawned), peak
 
 
 @lru_cache(maxsize=4096)
@@ -57,14 +35,19 @@ def display(root, run=None):
     manifest = json.loads(path.read_text())
     directory = path.parent
     settings = manifest["settings"]
+    scheduler_path = directory / 'scheduler.json'
+    scheduler = json.loads(scheduler_path.read_text()) if scheduler_path.exists() else None
     total = len(settings["tasks"]) * settings["repetitions"] * len(settings["modes"])
     rows = []
     counts = {}
     for result in directory.glob("*/*/attempt-*/result.json"):
         try:
             row = json.loads(result.read_text())
+            row['trace_available'] = (result.parent / row.get('execution_directory', '') / 'trace.json').is_file()
             rows.append(row)
-            if row['mode'] == 'simple':
+            if 'subagent_statistics' in row:
+                counts[id(row)] = row['subagent_statistics']
+            elif row['mode'] == 'simple':
                 counts[id(row)] = (0, 0)
             else:
                 trace = result.parent / row.get('execution_directory', '') / 'trace.json'
@@ -84,14 +67,24 @@ def display(root, run=None):
                 active = True
     now = time.time()
     done = len(rows)
-    finished = done >= total
+    ended = {(r['task_id'], r['attempt']) for r in rows}
+    wave = scheduler['waves'][-1]['jobs'] if scheduler and scheduler['waves'] else []
+    pending = [job for job in wave if tuple(job) not in ended]
+    finished = scheduler['phase'] == 'complete' if scheduler else done >= total
     end = max((r["finished_at"] for r in rows), default=now) if finished else now
     elapsed = max(1, end - manifest["started_at"])
     print(f"WIDESEEK  {directory.name}  ({datetime.now(timezone.utc):%H:%M:%S UTC})")
     print("-" * 76)
     print(f"Status: {'completed' if finished else 'running' if active else 'STOPPED / interrupted'} | concurrency {settings['concurrency']}")
-    print(f"Elapsed: {duration(elapsed)} | Attempts ended: {done}/{total} ({100*done/total:.1f}%)")
-    print(f"Tasks: {len(settings['tasks'])} | attempts per task/mode: {settings['repetitions']}")
+    if scheduler:
+        covered = {r['task_id'] for r in rows if qualifies(r, scheduler['success_threshold'])}
+        culled = len(scheduler['culled_tasks'])
+        print(f"Elapsed: {duration(elapsed)} | Attempts ended: {done}")
+        print(f"Tasks: {len(settings['tasks'])} | coverage {len(covered)}/{len(settings['tasks'])} | exhausted {culled}")
+        print(f"Phase: {scheduler['phase']} | wave {len(scheduler['waves'])}: {len(wave)-len(pending)}/{len(wave)} ended | goal {scheduler['target_successes']} traces/task")
+    else:
+        print(f"Elapsed: {duration(elapsed)} | Attempts ended: {done}/{total} ({100*done/total:.1f}%)")
+        print(f"Tasks: {len(settings['tasks'])} | attempts per task/mode: {settings['repetitions']}")
     judge = settings['judge']
     print(f"Agent: {settings['model']} | Judge: {judge.get('model') if isinstance(judge, dict) else judge}")
     if 'decomposer' in settings['modes'] and 'model_profiles' in settings:
@@ -118,7 +111,20 @@ def display(root, run=None):
             print(f"Subagents/attempt: {sum(s[0] for s in samples)/len(samples):.2f} | Peak unawaited/attempt: {sum(s[1] for s in samples)/len(samples):.2f} (mean over {len(samples)} ended attempts)")
         else:
             print("Subagents/attempt: -- | Peak unawaited/attempt: --")
-    if finished:
+    if scheduler:
+        seconds = [r['finished_at']-r['started_at'] for r in rows]
+        if finished:
+            eta = '0h 00m — collection budgets/targets exhausted'
+        elif not active:
+            eta = f"-- ({scheduler.get('status', 'interrupted')}; no active collector)"
+        elif seconds and pending:
+            eta = f"~{duration(len(pending)*statistics.mean(seconds)/settings['concurrency'])} | episode-time estimate"
+        else:
+            eta = '-- (warming up)'
+        print(f"ETA current wave: {eta}")
+        if not finished:
+            print("ETA whole collection: -- (later waves depend on scores)")
+    elif finished:
         eta = '0h 00m — all scheduled episodes completed'
     elif not active:
         eta = '-- (no active run process holding its lock)'
@@ -128,14 +134,18 @@ def display(root, run=None):
         remaining = (total-done) * elapsed / done
         finish = datetime.fromtimestamp(now+remaining, timezone.utc)
         eta = f"{duration(remaining)} | finish {finish:%Y-%m-%d %H:%M UTC} | {done*3600/elapsed:.1f} episodes/hour"
-    print(f"ETA whole run: {eta}")
-    print("ETA uses observed wall throughput including judging; approximate, not a deadline.")
+    if not scheduler:
+        print(f"ETA whole run: {eta}")
+        print("ETA uses observed wall throughput including judging; approximate, not a deadline.")
     if done:
         print(f"Last completion: {duration(now-max(r['finished_at'] for r in rows))} ago")
     print(f"Artifacts: {directory}")
     if (directory / 'collection.json').exists():
         collection = json.loads((directory / 'collection.json').read_text())
-        print(f"Traces: {collection['successful_traces']} successful | coverage {collection['covered_tasks']}/{collection['tasks']}")
+        if scheduler:
+            print(f"Indexed traces (last completed wave): {collection['successful_traces']}")
+        else:
+            print(f"Traces: {collection['successful_traces']} successful | coverage {collection['covered_tasks']}/{collection['tasks']}")
 
 
 if __name__ == '__main__':

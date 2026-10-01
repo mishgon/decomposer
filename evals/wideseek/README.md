@@ -29,6 +29,10 @@ run name to select one explicitly. It shows completed attempts, normal finishes,
 early stops, unscored results, mean native score, worker counts and whole-run ETA.
 Historical combined-run artifacts remain readable.
 
+For adaptive SFT collection, the watcher shows live task coverage, exhausted
+tasks, current phase and wave progress. ETA covers the current wave; it does not
+pretend to know how many future attempts will succeed.
+
 See [Gym setup and scoring](../../gyms/wideseek/README.md) and
 [SFT collection](../../sft/wideseek/README.md). Table item-F1 and development-set
 results are not binary benchmark pass rates or public WideSearch scores.
