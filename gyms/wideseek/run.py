@@ -18,6 +18,7 @@ from langgraph_sdk import get_client
 
 from decomposer.core import create_decomposer_agent
 from gyms.wideseek.evaluate import evaluate
+from gyms.wideseek.metrics import subagent_counts
 from gyms.wideseek.prepare import agent_input
 from gyms.wideseek.runtime import (BudgetExceeded, Context, DEFAULT_MODEL, DEFAULT_SUBAGENT,
     DEFAULT_TEACHER, MODEL_PROFILES, ModelLog, close_model, init_budget, model, model_metadata, save)
@@ -71,7 +72,8 @@ async def episode(task, mode, attempt, root, args):
             context_schema=Context, middleware=[ModelLog("researcher")], checkpointer=checkpoint)
     config = {"recursion_limit": 410, "configurable": {"thread_id": uuid4().hex}}
     result = {"task_id": task["task_id"], "mode": mode, "attempt": attempt,
-              "execution_directory": path.name, "started_at": time.time()}
+              "execution_directory": path.name, "started_at": time.time(),
+              "revision": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()}
     state = {}
     try:
         state = await asyncio.wait_for(agent.ainvoke(agent_input(task), config=config,
@@ -98,7 +100,9 @@ async def episode(task, mode, attempt, root, args):
         await close_model(policy)
         result["agent_finished_at"] = time.time()
         messages = state.get("messages", [])
-        save(path / "trace.json", {**state, "messages": [m.model_dump(mode="json") for m in messages]})
+        trace = {**state, "messages": [m.model_dump(mode="json") for m in messages]}
+        save(path / "trace.json", trace)
+        result["subagent_statistics"] = subagent_counts(trace["messages"])
     answer = messages[-1].content if messages and messages[-1].type == "ai" and not messages[-1].tool_calls else ""
     result["answer"] = answer
     try:
@@ -113,7 +117,8 @@ async def episode(task, mode, attempt, root, args):
     print(json.dumps({k: result[k] for k in ("mode", "task_id", "attempt", "status", "evaluation")}), flush=True)
 
 
-async def main(args):
+async def prepare_run(args):
+    """Validate services and create or resume a raw run, without scheduling tasks."""
     asyncio.get_running_loop().add_signal_handler(signal.SIGTERM, asyncio.current_task().cancel)
     root = args.output.resolve()
     os.environ.setdefault("WS_ARTIFACT_ROOT", str(Path("artifacts").resolve()))
@@ -152,8 +157,20 @@ async def main(args):
                for p in base.rglob("*") if p.is_file() and p.suffix in {".py", ".sh", ".json", ".txt"}}
     if args.resume:
         previous = json.loads((root / "manifest.json").read_text())
-        if previous["settings"] != settings or previous["source_sha256"] != sources:
-            raise ValueError("Resume settings or source code differ from the saved run")
+        if previous["settings"] != settings:
+            raise ValueError("Resume settings differ from the saved run")
+        if previous["source_sha256"] != sources:
+            if not args.allow_source_change:
+                raise ValueError("Resume source code differs; use --allow-source-change for a Gym-only migration")
+            original_core = {p: h for p, h in previous["source_sha256"].items() if p.startswith("src/decomposer/")}
+            current_core = {p: h for p, h in sources.items() if p.startswith("src/decomposer/")}
+            if original_core != current_core:
+                raise ValueError("Cannot migrate a run between different Decomposer harness versions")
+            previous.setdefault("source_history", []).append({
+                "previous_source_sha256": previous["source_sha256"], "changed_at": time.time(),
+                "revision": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()})
+            previous["source_sha256"] = sources
+            save(root / "manifest.json", previous)
     else:
         root.mkdir(parents=True, exist_ok=False)
         save(root / "manifest.json", {"settings": settings, "started_at": time.time(),
@@ -162,13 +179,24 @@ async def main(args):
                  ("langchain", "langchain-openai", "langgraph", "langgraph-api", "httpx", "pandas")},
              "source_sha256": sources})
         (root / "source.diff").write_bytes(subprocess.check_output(["git", "diff", "HEAD"]))
+    return tasks, root
+
+
+async def run_jobs(tasks, jobs, root, args):
+    """Run explicit (task ID, attempt number) pairs at bounded concurrency."""
+    by_id = {task["task_id"]: task for task in tasks}
     semaphore = asyncio.Semaphore(args.concurrency)
 
-    async def bounded(task, mode, attempt):
+    async def bounded(task_id, attempt):
         async with semaphore:
-            await episode(task, mode, attempt, root, args)
+            await episode(by_id[task_id], args.mode, attempt, root, args)
 
-    await asyncio.gather(*(bounded(t, args.mode, n) for n in range(1, args.n + 1) for t in tasks))
+    await asyncio.gather(*(bounded(task, attempt) for task, attempt in jobs))
+
+
+async def main(args):
+    tasks, root = await prepare_run(args)
+    await run_jobs(tasks, ((t["task_id"], n) for n in range(1, args.n + 1) for t in tasks), root, args)
 
 
 def create_parser():
@@ -189,6 +217,8 @@ def create_parser():
     parser.add_argument("--subagent-model", choices=(DEFAULT_MODEL, DEFAULT_SUBAGENT), default=DEFAULT_MODEL)
     parser.add_argument("--judge-model", choices=MODEL_PROFILES, default=DEFAULT_TEACHER)
     parser.add_argument("--resume", action="store_true")
+    parser.add_argument("--allow-source-change", action="store_true",
+                        help="Record an explicit Gym-source migration on resume; core/model/data must match")
     return parser
 
 
@@ -197,6 +227,8 @@ def cli(run=main, argv=None, *, parser=None):
     args = parser.parse_args(argv)
     if args.harness is not None:
         args.mode = "simple" if args.harness == "react" else "decomposer"
+    if args.allow_source_change and not args.resume:
+        parser.error("--allow-source-change requires --resume")
     if min(v for v in (args.limit, args.n, args.concurrency, args.model_calls, args.output_tokens, args.timeout) if v is not None) < 1:
         parser.error("Counts and budgets must be positive")
     # Lock outside the run directory so first-launch mkdir remains exclusive.

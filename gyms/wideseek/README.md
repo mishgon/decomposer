@@ -63,6 +63,11 @@ Use `--resume` with identical settings/data/source to skip saved results. An
 interrupted attempt gets a fresh execution directory, preserving its old logs.
 A file lock prevents concurrent writers to one run.
 
+`--allow-source-change` explicitly records a Gym-code migration during resume.
+Data, models, limits and concurrency must still match. Different core Decomposer
+harness versions are rejected. Workflows can reuse `prepare_run()` and
+`run_jobs()` to schedule explicit task/attempt pairs without adding policy here.
+
 `manifest.json` records data/source hashes, registry settings, retrieval revisions
 and package versions. Each `simple|decomposer/<task>/attempt-NNN/result.json`
 references an execution directory with model/tool/judge logs, final graph state,

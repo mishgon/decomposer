@@ -37,6 +37,7 @@ def test_collection_indexes_only_finished_scored_traces(tmp_path):
     from sft.wideseek.run import successful_traces
     for task, status, score, cleanup, has_trace in (
         ("good", "finished", .95, [], True),
+        ("threshold", "finished", .9, [], True),
         ("partial", "finished", .8, [], True),
         ("unscored", "finished", None, [], True),
         ("stopped", "timeout", 1., [], True),
@@ -47,7 +48,7 @@ def test_collection_indexes_only_finished_scored_traces(tmp_path):
         execution = attempt / "execution-test"
         execution.mkdir(parents=True)
         (attempt / "result.json").write_text(json.dumps({
-            "task_id": task, "attempt": 1, "status": status, "evaluation": {"score": score},
+            "task_id": task, "attempt": 1, "status": status, "evaluation": {"status": "scored", "score": score},
             "cleanup_errors": cleanup, "execution_directory": execution.name}))
         if has_trace:
             (execution / "trace.json").write_text('{}')

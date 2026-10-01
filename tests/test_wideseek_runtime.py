@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 from gyms.wideseek.runtime import BudgetExceeded, init_budget, reserve, refund
 from gyms.wideseek.evaluate import validate_judge, evaluate
-from gyms.wideseek.run import usage, episode
+from gyms.wideseek.run import usage, episode, create_parser, prepare_run
 from gyms.wideseek.vendor.table_reward import extract_final_answer, evaluate_markdown
 
 
@@ -36,6 +36,45 @@ class BudgetTests(unittest.TestCase):
 
 
 class ScoreTests(unittest.IsolatedAsyncioTestCase):
+    async def test_source_migration_is_explicit_and_cannot_change_core_or_models(self):
+        import json
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            data = root / "tasks.jsonl"
+            data.write_text(json.dumps({"task_id": "test", "question": "Q"}) + "\n")
+            args = create_parser().parse_args(["--harness", "react", "--output", str(root / "run"),
+                                              "--data", str(data), "--limit", "1"])
+            args.mode = "simple"
+            policy = SimpleNamespace(model_name="qwen", temperature=.6, top_p=.95)
+            response = MagicMock()
+            response.json.return_value = {"status": "ready"}
+            http = MagicMock()
+            http.__aenter__ = AsyncMock(return_value=SimpleNamespace(get=AsyncMock(return_value=response)))
+            http.__aexit__ = AsyncMock()
+            with patch("gyms.wideseek.run.model", return_value=policy), \
+                    patch("gyms.wideseek.run.httpx.AsyncClient", return_value=http), \
+                    patch("gyms.wideseek.run.importlib.metadata.version", return_value="test-version"):
+                await prepare_run(args)
+                manifest = args.output / "manifest.json"
+                row = json.loads(manifest.read_text())
+                row["source_sha256"]["gyms/wideseek/run.py"] = "old gym code"
+                manifest.write_text(json.dumps(row))
+                args.resume = True
+                with self.assertRaisesRegex(ValueError, "source code differs"):
+                    await prepare_run(args)
+                args.allow_source_change = True
+                await prepare_run(args)
+                row = json.loads(manifest.read_text())
+                self.assertEqual(row["source_history"][0]["previous_source_sha256"]["gyms/wideseek/run.py"], "old gym code")
+                row["source_sha256"]["src/decomposer/core.py"] = "old harness"
+                manifest.write_text(json.dumps(row))
+                with self.assertRaisesRegex(ValueError, "different Decomposer harness"):
+                    await prepare_run(args)
+                row["settings"]["model"] = "another model"
+                manifest.write_text(json.dumps(row))
+                with self.assertRaisesRegex(ValueError, "settings differ"):
+                    await prepare_run(args)
+
     async def test_rescore_preserves_original_and_selects_judge(self):
         import hashlib, json
         from evals.wideseek.rescore import main
