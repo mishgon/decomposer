@@ -10,7 +10,7 @@ from langchain.agents import create_agent
 from langchain.tools import tool, ToolRuntime
 from pydantic import Field
 
-from gyms.wideseek.runtime import Context, ModelLog, directory, model, save
+from gyms.wideseek.runtime import Context, DEFAULT_MODEL, DEFAULT_SUBAGENT, ModelLog, directory, model, save
 
 
 async def request_tool(endpoint, payload, runtime):
@@ -57,6 +57,11 @@ SYSTEM_PROMPT = (
     "Do not invent facts or claim to have checked sources you did not read.")
 
 
-def graph():
-    return create_agent(model(), tools=[search, access], context_schema=Context,
+def thinking_graph():
+    return create_agent(model(DEFAULT_SUBAGENT), tools=[search, access], context_schema=Context,
+        middleware=[ModelLog("researcher")], system_prompt=SYSTEM_PROMPT)
+
+
+def non_thinking_graph():
+    return create_agent(model(DEFAULT_MODEL), tools=[search, access], context_schema=Context,
         middleware=[ModelLog("researcher")], system_prompt=SYSTEM_PROMPT)

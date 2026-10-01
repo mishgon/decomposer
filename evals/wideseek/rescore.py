@@ -8,7 +8,7 @@ import subprocess
 import time
 
 from gyms.wideseek.evaluate import evaluate
-from gyms.wideseek.runtime import GENERATION, save
+from gyms.wideseek.runtime import MODEL_PROFILES, close_model, model, model_metadata, save
 
 
 async def main(args):
@@ -20,10 +20,15 @@ async def main(args):
     paths = sorted(args.run.glob("*/*/attempt-???/result.json"))
     if not paths:
         raise ValueError("No completed attempt results found")
+    judge = model(args.judge_model)
+    try:
+        generation = {**model_metadata(judge), "temperature": 0., "presence_penalty": 0.}
+    finally:
+        await close_model(judge)
     args.output.mkdir(parents=True, exist_ok=False)
     save(args.output / "manifest.json", {"source_run": str(args.run.resolve()),
         "source_manifest": manifest, "judge_model": args.judge_model,
-        "generation": {**GENERATION, "temperature": 0., "presence_penalty": 0.},
+        "generation": generation,
         "revision": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
         "started_at": time.time(), "attempts": len(paths)})
     semaphore = asyncio.Semaphore(args.concurrency)
@@ -63,7 +68,7 @@ if __name__ == "__main__":
     parser.add_argument("--run", type=Path, required=True)
     parser.add_argument("--data", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--judge-model", required=True)
+    parser.add_argument("--judge-model", choices=MODEL_PROFILES, required=True)
     parser.add_argument("--concurrency", type=int, default=2)
     args = parser.parse_args()
     if args.concurrency < 1:

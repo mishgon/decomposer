@@ -38,7 +38,7 @@ def main(args):
 
 if __name__ == '__main__':
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument('--root', type=Path, default=Path('artifacts/gyms/wideseek/runs'))
+    p.add_argument('--root', type=Path, default=Path('artifacts/evals/wideseek/runs'))
     p.add_argument('--name', required=True)
     p.add_argument('--limit', type=int, default=100)
     p.add_argument('-n', type=int, default=3)

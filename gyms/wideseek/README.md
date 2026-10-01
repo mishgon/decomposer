@@ -1,173 +1,90 @@
-# WideSeek gym
+# WideSeek Gym
 
-Simple agent vs Decomposer using hosted Qwen3.5-4B non-thinking and fixed
-Wiki-2018 retrieval. Based on `dev`; no Toolathlon/RL changes are required.
-The first comparison uses **width/table tasks**. Depth and hybrid data are also
-supported: QA tasks receive upstream's boxed-answer format instruction and native
-equivalence judge. This is not a full WideSeek benchmark reproduction.
+Reusable task loading, fixed Wiki-2018 search/access tools, ReAct or Decomposer
+execution, raw trajectory capture and native judging. Workflows live in
+[`evals/wideseek`](../../evals/wideseek/README.md) and
+[`sft/wideseek`](../../sft/wideseek/README.md).
 
 ## Setup
 
-On a Linux host with about 160 GB of disk available for the corpus/index and
-ample RAM (the page lookup loads the 27 GB JSONL into memory):
+Configure the shared [lmrouter access](../../README.md) once. Models use the named
+registry in `src/decomposer/models.py`, including its optional Unix-socket tunnel,
+provider settings and retries. No local model GPU or OpenRouter is needed.
+
+On Linux, allow about 160 GB for the corpus/index and enough RAM to load the 27 GB
+page file. Retrieval uses CPU FP32 E5; upstream uses GPU FP16, so retrieval is not
+bit-for-bit identical. Existing downloaded assets are reused.
 
 ```bash
 UV_BIN="$HOME/.local/bin/uv" bash gyms/wideseek/setup.sh
-source .venv/bin/activate
 export WS_ASSETS=/large/disk/wideseek/assets
-python -m gyms.wideseek.assets --root "$WS_ASSETS"
+.venv/bin/python -m gyms.wideseek.assets --root "$WS_ASSETS"
 ```
 
-The corpus and upstream implementation revisions are pinned. The E5 revision is
-resolved once and recorded. Downloads resume using the Hugging Face cache.
-All LLM calls use the hosted router; no local GPU inference, CUDA build, or
-OpenRouter is used. The encoder runs on CPU with FP32, versus upstream's GPU
-FP16: same corpus/index/E5 pipeline, not bit-for-bit retrieval equivalence.
-
-Start these three foreground services in separate terminals (or with your usual
-`nohup`/tmux wrapper and logs under `artifacts/gyms/wideseek/setup/`):
+Start each service in its own terminal or tmux session, saving stdout/stderr under
+`artifacts/gyms/wideseek/setup/`:
 
 ```bash
-WS_ASSETS=/large/disk/wideseek/assets bash gyms/wideseek/serve.sh qdrant
-WS_ASSETS=/large/disk/wideseek/assets bash gyms/wideseek/serve.sh retrieval
+bash gyms/wideseek/serve.sh qdrant
+bash gyms/wideseek/serve.sh retrieval
 bash gyms/wideseek/serve.sh workers
 ```
 
-They bind localhost ports 16333/16334 (Qdrant), 18080 (retrieval), 18081 (workers).
-`env.sh` loads `LMROUTER_ENV`, defaulting to the home environment file. Override
-`WS_MODEL_URL`/`WS_MODEL_HOST` for another deployment. The optional host/IP
-mapping retains TLS hostname verification; it does not disable TLS validation.
+Local ports are 16333/16334 (Qdrant), 18080 (retrieval) and 18081 (workers).
+`env.sh` loads credentials from `LMROUTER_ENV` or the home environment file.
+Export `LLM_PROXY_UNIX_SOCKET` when using the relay. Model parameters are not read
+from Gym environment variables. `WS_SEARCH_URL`, `WS_ASSETS` and
+`WS_ARTIFACT_ROOT` configure services/storage only.
 
-## Data
-
-```bash
-python3 -m gyms.wideseek.prepare --source width
-python3 -m unittest discover -s tests -p 'test_wideseek_data.py'
-```
-
-Uses only the Python standard library. Source choices: `width`, `depth`, `hybrid`.
-Each has 20,000 examples; hybrid mixes the other sources, so do not concatenate
-them as independent data. Preparation pins the HF revision, preserves raw rows,
-checks the schema, and records file hashes. It refuses to overwrite a directory;
-only a completed dataset has `manifest.json`.
-
-Artifacts: `artifacts/gyms/wideseek/data/<source>/`. References stay in dataset
-files for scoring; `agent_input` supplies only the question. Split future held-out
-panels by question hash (and inspect paraphrase overlap), not by file membership.
-Evaluation on this training dataset is a development measurement, not a published
-WideSearch benchmark result.
-
-## Run and resume
+## Tasks and Raw Execution
 
 ```bash
+.venv/bin/python -m gyms.wideseek.prepare --source width
 source gyms/wideseek/env.sh
-.venv/bin/python -m evals.wideseek.run \
-  --output artifacts/gyms/wideseek/runs/qwen4b-simple-smoke \
-  --harness react --limit 2 -n 3 --concurrency 2
+.venv/bin/python -m gyms.wideseek.run --harness react \
+  --output artifacts/gyms/wideseek/runs/raw-smoke --limit 2 -n 1 --concurrency 2
 ```
 
-Repeat the exact command with `--resume` to skip completed attempts. Interrupted
-executions are retained and retried in a fresh `execution-<id>` directory, so
-surviving workers cannot contaminate a retry. SIGTERM requests cleanup; a killed
-process cannot guarantee worker cancellation, but execution paths remain isolated.
-For width collection,
-choose `--mode decomposer --limit 20000` and the desired `-n`; the default is only
-a two-task smoke, not a full dataset run. A file lock prevents two writers on the same output.
+Preparation supports `width`, `depth` and `hybrid`, each with 20,000 rows. Hybrid
+mixes the other sources; it is not an independent held-out set. Preparation pins
+the dataset revision, preserves reference answers for judging, records hashes
+and refuses to overwrite an existing directory. Agents receive only the question
+and output-format instructions. Split future held-out sets by question hash.
 
-Each run requires exactly one `--mode`: `simple` or `decomposer`. For a comparison,
-finish the simple run, then launch `--mode decomposer` with a different output
-directory and the same task/budget settings. No implicit second job is scheduled.
-The watcher (`~/watch-wideseek.sh [run-name]`) selects the latest run by default
-and shows a single setup's progress and whole-run ETA. Historical combined runs
-remain readable; new combined runs are not supported.
+`--harness react|decomposer` selects one setup per run. `--model`,
+`--subagent-model` and `--judge-model` accept named registry profiles. Raw execution
+defaults to non-thinking Qwen4B for agent/subagent and Flash Next for the judge.
+The SFT workflow selects its teacher and thinking subagent separately.
 
-Each attempt uses Toolathlon Gym's 45-minute agent timeout and recursion limit
-410 for every agent. There is no default shared call/token budget or per-response
-completion cap. The hosted endpoint still enforces its own context/output limits
-(observed context: 131,072 tokens). Optional `--model-calls` / `--output-tokens`
-restore explicit smoke budgets; a token budget reserves up to 4,096 per call.
-Both modes receive the same limits and researcher tools.
-Sampling follows Qwen's general non-thinking recommendation: temperature .7,
-top_p .8, top_k 20, min_p 0, presence penalty 1.5, repetition penalty 1.
-Judge calls are greedy and separately accounted, outside the agent budget.
+Each agent has recursion limit 410; task execution timeout is 45 minutes.
+Optional `--model-calls` and `--output-tokens` provide shared smoke budgets.
+The Gym adds no default completion cap; hosted context/output limits still apply.
+Use `--resume` with identical settings/data/source to skip saved results. An
+interrupted attempt gets a fresh execution directory, preserving its old logs.
+A file lock prevents concurrent writers to one run.
 
-To schedule separate evaluations sequentially:
+`manifest.json` records data/source hashes, registry settings, retrieval revisions
+and package versions. Each `simple|decomposer/<task>/attempt-NNN/result.json`
+references an execution directory with model/tool/judge logs, final graph state,
+worker states and provider usage. Failed attempts remain available for analysis.
+No aggregate evaluation or collection policy lives in this directory.
+
+## Native Scoring and Tests
+
+Width tasks use upstream's strict Markdown-table extraction and item-F1. Depth
+tasks use boxed-answer extraction and equivalence judging. Judge/API failures
+remain unscored. Flash Next judging is a development diagnostic; this training
+dataset run is not a published WideSearch benchmark reproduction.
 
 ```bash
-source gyms/wideseek/env.sh
-export WS_JUDGE_MODEL=Qwen/Qwen3.6-35B-A3B-FP8
-.venv/bin/python -m evals.wideseek.sequence --name qwen4b-width100-gym-limits \
-  --limit 100 -n 3 --concurrency 2
+PYTHONPATH=src .venv/bin/pytest tests/test_wideseek*.py -q
 ```
 
-The queue stops on process failure. Use a new sequence name; existing artifacts
-are never overwritten. The watcher independently shows the latest run (or the
-explicitly selected run); its ETA covers that run only, regardless of scheduling.
+The vendored scorer retains upstream functions and Apache license. Tests cover
+scoring, invalid-tool feedback, shared budgets, interrupted executions, model
+profiles and workflow separation. Live retrieval and model/tool smokes must also
+pass before bulk collection.
 
-Under one run directory:
-
-- `manifest.json`: task IDs, data/source hashes, code revision, package versions,
-  model/generation/retrieval settings and budgets.
-- `<mode>/<task>/attempt-NNN/result.json`: outcome and selected execution directory.
-  Its `execution-<id>/` contains full model requests/responses (including provider
-  usage), tool I/O, final graph state, subagent states and judge I/O.
-- `<mode>-summary.json`: native score (table item-F1 or QA accuracy) and completion/error accounting. Judge failures
-  remain unscored; the explicitly named `infra_zero` aggregate also counts them
-  as zero. Native table partial score is not a binary pass rate. Mixed hybrid
-  scores average different native metrics, explicitly listed in the summary.
-
-The judge defaults to the agent model; set `WS_JUDGE_MODEL` independently. The
-validated hosted alternative is `Qwen/Qwen3.6-35B-A3B-FP8`. Its scores remain
-**diagnostic, not directly paper-comparable** (upstream uses a different judge).
-Reference answers never enter agent inputs. The scorer keeps
-upstream strict Markdown extraction: an unfenced table may score zero even if it
-looks readable. Do not silently relax this between agent modes.
-
-Re-score existing answers without rerunning agents or modifying original traces:
-
-```bash
-source gyms/wideseek/env.sh
-.venv/bin/python -m evals.wideseek.rescore \
-  --run artifacts/gyms/wideseek/runs/qwen4b-width-smoke-n3-v2 \
-  --data artifacts/gyms/wideseek/data/width/tasks.jsonl \
-  --output artifacts/gyms/wideseek/rejudged/qwen35b/qwen4b-width-smoke-n3-v2 \
-  --judge-model Qwen/Qwen3.6-35B-A3B-FP8 --concurrency 2
-```
-
-The output must be a new directory. It retains previous scores, source-result
-hashes, exact judge settings, full judge responses, and separate summaries.
-
-## Tests and upstream references
-
-```bash
-.venv/bin/python -m unittest discover -s tests -p 'test_wideseek*.py'
-```
-
-- Data: https://huggingface.co/datasets/RLinf/WideSeek-R1-train-data
-- Tools: https://rlinf.readthedocs.io/en/latest/rst_source/examples/agentic/wideseek_r1/tools.html
-- Scoring: `rlinf/agents/wideseek_r1/utils/reward.py` in https://github.com/RLinf/RLinf
-- Benchmark: https://github.com/RLinf/WideSeek-R1-Eval
-
-`vendor/table_reward.py` copies the table-scoring functions unchanged from the
-pinned RLinf revision, retaining its Apache license. The wrapper detects malformed
-judge replies/API errors instead of accepting upstream's silent zero fallback.
-Tests cover perfect, incomplete, wrong and malformed answers and shared-budget
-concurrency. Live retrieval and two-agent smoke must also pass before collection.
-
-## Verified integration (2026-09-21)
-
-- Offline service: 26,134,257 indexed passages and 5,903,530 pages; real search
-  and page access passed. The first search probe took 0.18 seconds.
-- Thirteen tests pass, including invalid-tool feedback, cancelled-execution isolation,
-  and non-destructive re-scoring.
-- `qwen4b-width-smoke-n3-v2`: two width tasks, three attempts per mode, completed.
-  `qwen4b-final-integration`: one depth task, three attempts per mode, completed on
-  the final execution-isolation code. These are plumbing checks, not benchmark claims.
-- Resume left all 96 final-integration files byte-identical and issued no new model
-  calls. A held run lock rejected a second writer. Evidence is saved under
-  `artifacts/gyms/wideseek/setup/final-integration-proof.json`.
-- The hosted endpoint reported a **131,072-token context limit** in the width smoke.
-  This is a deployment limit, not Qwen's advertised native context capacity.
-- Qwen4B is unreliable as a table judge: the smoke exposed invalid and semantically
-  wrong primary-key mappings. Use a stronger validated judge before interpreting
-  quality differences or selecting training traces. No bulk collection was launched.
+Sources: [training data](https://huggingface.co/datasets/RLinf/WideSeek-R1-train-data),
+[RLinf implementation](https://github.com/RLinf/RLinf), and
+[public evaluation](https://github.com/RLinf/WideSeek-R1-Eval).

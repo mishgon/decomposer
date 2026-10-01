@@ -6,7 +6,7 @@ import tempfile
 import time
 import unittest
 
-from scripts.watch_wideseek import display, subagent_counts
+from evals.wideseek.watch import display, subagent_counts
 
 
 class WatchTest(unittest.TestCase):
@@ -45,6 +45,20 @@ class WatchTest(unittest.TestCase):
                 self.assertIn("0 = 0 returned an answer + 0 stopped early", text)
                 self.assertIn("STOPPED / interrupted", text)
                 self.assertEqual("Legacy combined run" in text, len(modes) > 1)
+
+    def test_finds_collection_under_sft_artifacts(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            run = root / 'sft/wideseek/runs/smoke'
+            run.mkdir(parents=True)
+            (run / 'manifest.json').write_text(json.dumps({
+                'started_at': time.time(), 'settings': {'tasks': ['task'], 'repetitions': 1,
+                'modes': ['decomposer'], 'concurrency': 2, 'model': 'teacher',
+                'judge': {'model': 'judge'}}}))
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                display(root)
+            self.assertIn('WIDESEEK  smoke', output.getvalue())
 
 
 if __name__ == "__main__":

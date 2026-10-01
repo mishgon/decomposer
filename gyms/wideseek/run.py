@@ -19,7 +19,8 @@ from langgraph_sdk import get_client
 from decomposer.core import create_decomposer_agent
 from gyms.wideseek.evaluate import evaluate
 from gyms.wideseek.prepare import agent_input
-from gyms.wideseek.runtime import BudgetExceeded, Context, GENERATION, ModelLog, init_budget, model, save
+from gyms.wideseek.runtime import (BudgetExceeded, Context, DEFAULT_MODEL, DEFAULT_SUBAGENT,
+    DEFAULT_TEACHER, MODEL_PROFILES, ModelLog, close_model, init_budget, model, model_metadata, save)
 
 
 def usage(path):
@@ -53,11 +54,13 @@ async def episode(task, mode, attempt, root, args):
     init_budget(path, args.model_calls, args.output_tokens)
     checkpoint = InMemorySaver()
     client = get_client(url=args.worker_url)
-    policy = model()
+    policy = model(getattr(args, "model", DEFAULT_MODEL))
+    subagent = getattr(args, "subagent_model", DEFAULT_MODEL)
     if mode == "decomposer":
         agent = create_decomposer_agent(decomposer_model=policy,
-            subagent_types=[{"subagent_type_id": "researcher", "description": "Qwen3.5-4B researcher with offline Wiki-2018 search and access tools.",
-              "assistant_id": "researcher", "url": args.worker_url}],
+            subagent_types=[{"subagent_type_id": subagent,
+              "description": "Qwen3.5-4B unlooped researcher with offline Wiki-2018 search and access tools.",
+              "assistant_id": subagent, "url": args.worker_url}],
             checkpointer=checkpoint, middleware=[ModelLog("decomposer")],
             context_schema=Context, subagent_recursion_limit=410)
     else:
@@ -92,14 +95,15 @@ async def episode(task, mode, attempt, root, args):
                 save(path / "subagents" / f"{run['run_id']}.json", worker_state)
             except Exception as exc:
                 result.setdefault("cleanup_errors", []).append(str(exc))
-        await policy.http_async_client.aclose()
+        await close_model(policy)
         result["agent_finished_at"] = time.time()
         messages = state.get("messages", [])
         save(path / "trace.json", {**state, "messages": [m.model_dump(mode="json") for m in messages]})
     answer = messages[-1].content if messages and messages[-1].type == "ai" and not messages[-1].tool_calls else ""
     result["answer"] = answer
     try:
-        result["evaluation"] = await asyncio.wait_for(evaluate(task, answer, path), timeout=600)
+        result["evaluation"] = await asyncio.wait_for(evaluate(task, answer, path,
+            judge_model_id=getattr(args, "judge_model", DEFAULT_TEACHER)), timeout=600)
     except Exception as exc:
         result["evaluation"] = {"status": "evaluation_error", "score": None,
                                 "error": f"{type(exc).__name__}: {exc}"}
@@ -112,7 +116,7 @@ async def episode(task, mode, attempt, root, args):
 async def main(args):
     asyncio.get_running_loop().add_signal_handler(signal.SIGTERM, asyncio.current_task().cancel)
     root = args.output.resolve()
-    os.environ.setdefault("WS_ARTIFACT_ROOT", str(root.parent))
+    os.environ.setdefault("WS_ARTIFACT_ROOT", str(Path("artifacts").resolve()))
     raw = args.data.read_bytes()
     tasks = [json.loads(line) for line in raw.splitlines()][:args.limit]
     if not tasks:
@@ -127,14 +131,21 @@ async def main(args):
         if "decomposer" in modes:
             response = await http.get(args.worker_url + "/ok")
             response.raise_for_status()
+    profiles = {}
+    for role, profile in (("agent", args.model), ("subagent", args.subagent_model), ("judge", args.judge_model)):
+        policy = model(profile)
+        try:
+            profiles[role] = {"profile": profile, **model_metadata(policy)}
+        finally:
+            await close_model(policy)
     settings = {"tasks": [t["task_id"] for t in tasks], "data_sha256": hashlib.sha256(raw).hexdigest(),
                 "modes": modes, "repetitions": args.n, "concurrency": args.concurrency,
-                "model": os.environ.get("WS_MODEL", "Qwen/Qwen3.5-4B"),
-                "generation": GENERATION, "recursion_limit": 410,
-                "model_url": os.environ["LLM_PROXY_URL"], "retrieval": retrieval,
+                "model": profiles["agent"]["model_name"], "model_profiles": profiles,
+                "generation": profiles["agent"], "recursion_limit": 410,
+                "retrieval": retrieval,
                 "model_calls": args.model_calls, "output_tokens": args.output_tokens,
                 "timeout": args.timeout,
-                "judge": {"model": os.environ.get("WS_JUDGE_MODEL") or os.environ.get("WS_MODEL", "Qwen/Qwen3.5-4B"),
+                "judge": {"model": profiles["judge"]["model_name"], "profile": args.judge_model,
                           "temperature": 0., "thinking": False, "paper_comparable": False}}
     sources = {str(p): hashlib.sha256(p.read_bytes()).hexdigest()
                for base in (Path("gyms/wideseek"), Path("src/decomposer"))
@@ -174,12 +185,15 @@ def create_parser():
     parser.add_argument("--output-tokens", type=int, default=None, help="Optional shared token cap; default uncapped")
     parser.add_argument("--timeout", type=int, default=2700)
     parser.add_argument("--worker-url", default="http://127.0.0.1:18081")
+    parser.add_argument("--model", choices=MODEL_PROFILES, default=DEFAULT_MODEL)
+    parser.add_argument("--subagent-model", choices=(DEFAULT_MODEL, DEFAULT_SUBAGENT), default=DEFAULT_MODEL)
+    parser.add_argument("--judge-model", choices=MODEL_PROFILES, default=DEFAULT_TEACHER)
     parser.add_argument("--resume", action="store_true")
     return parser
 
 
-def cli(run=main, argv=None):
-    parser = create_parser()
+def cli(run=main, argv=None, *, parser=None):
+    parser = parser or create_parser()
     args = parser.parse_args(argv)
     if args.harness is not None:
         args.mode = "simple" if args.harness == "react" else "decomposer"
