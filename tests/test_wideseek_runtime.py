@@ -88,6 +88,38 @@ class ScoreTests(unittest.IsolatedAsyncioTestCase):
             result = json.loads((parent / "result.json").read_text())
             self.assertNotEqual(result["execution_directory"], old.name)
 
+    async def test_context_overflow_saves_partial_trace_and_other_attempt_continues(self):
+        import json
+        import httpx
+        from langchain_core.messages import AIMessage, HumanMessage
+        from langchain_openai.chat_models.base import OpenAIContextOverflowError
+        overflow = OpenAIContextOverflowError("128k context exceeded",
+            response=httpx.Response(400, request=httpx.Request("POST", "http://unused")), body={})
+        graph = MagicMock()
+        graph.ainvoke = AsyncMock(side_effect=[overflow, {"messages": [AIMessage(content="done")]}])
+        graph.aget_state = AsyncMock(return_value=SimpleNamespace(
+            values={"messages": [HumanMessage(content="unfinished task")]}))
+        policy = MagicMock()
+        policy.http_async_client.aclose = AsyncMock()
+        args = SimpleNamespace(model_calls=None, output_tokens=None, worker_url="http://unused", timeout=1)
+        tasks = [{"task_id": name, "question": "Question", "answer": "Answer", "unique_columns": []}
+                 for name in ("limited", "healthy")]
+        judge = AsyncMock(return_value={"score": 0.})
+        with tempfile.TemporaryDirectory() as folder, patch("gyms.wideseek.run.model", return_value=policy), \
+                patch("langchain.agents.create_agent", return_value=graph), \
+                patch("gyms.wideseek.run.evaluate", new=judge):
+            root = Path(folder)
+            await asyncio.gather(*(episode(task, "simple", 1, root, args) for task in tasks))
+            limited = root / "simple/limited/attempt-001"
+            failed = json.loads((limited / "result.json").read_text())
+            healthy = json.loads((root / "simple/healthy/attempt-001/result.json").read_text())
+            self.assertEqual(failed["status"], "context_exceeded")
+            self.assertEqual(healthy["status"], "finished")
+            trace = json.loads((limited / failed["execution_directory"] / "trace.json").read_text())
+            self.assertEqual(trace["messages"][0]["content"], "unfinished task")
+            self.assertEqual(judge.await_count, 2)
+            self.assertCountEqual([c.args[1] for c in judge.await_args_list], ["", "done"])
+
     async def test_invalid_tool_arguments_are_feedback_not_episode_crash(self):
         from langchain_core.messages import AIMessage
         from langgraph.prebuilt import ToolNode
