@@ -53,12 +53,13 @@ class ScoreTests(unittest.IsolatedAsyncioTestCase):
             (run / "manifest.json").write_text(json.dumps({"settings": {
                 "data_sha256": hashlib.sha256(data.read_bytes()).hexdigest()}}))
             judge = AsyncMock(return_value={"score": .5, "status": "scored"})
-            args = SimpleNamespace(data=data, run=run, output=root/"new-scores", judge_model="large-judge", concurrency=2)
+            args = SimpleNamespace(data=data, run=run, output=root/"new-scores",
+                                   judge_model="qwen_3_8_flash_next_non_thinking", concurrency=2)
             with patch("evals.wideseek.rescore.evaluate", new=judge), \
                     patch("evals.wideseek.rescore.subprocess.check_output", return_value="test-revision"):
                 await main(args)
             self.assertEqual(path.read_bytes(), before)
-            self.assertEqual(judge.await_args.kwargs["judge_model_id"], "large-judge")
+            self.assertEqual(judge.await_args.kwargs["judge_model_id"], args.judge_model)
             saved = json.loads((args.output / "simple/t/attempt-001/result.json").read_text())
             self.assertEqual(saved["previous_evaluation"], original["evaluation"])
             self.assertEqual(saved["evaluation"]["score"], .5)

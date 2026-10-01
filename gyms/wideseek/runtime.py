@@ -8,15 +8,28 @@ import time
 from typing import TypedDict
 from uuid import uuid4
 
-import httpx
 from langchain.agents.middleware import AgentMiddleware
-from langchain_openai import ChatOpenAI
 from langchain_core.utils.function_calling import convert_to_openai_tool
+from decomposer.models import create_model as model
 
 
-GENERATION = {"temperature": .7, "top_p": .8, "presence_penalty": 1.5,
-              "extra_body": {"top_k": 20, "min_p": 0.,
-              "repetition_penalty": 1., "chat_template_kwargs": {"enable_thinking": False}}}
+DEFAULT_MODEL = "qwen_3_5_4b_unlooped_non_thinking"
+DEFAULT_SUBAGENT = "qwen_3_5_4b_unlooped_thinking"
+DEFAULT_TEACHER = "qwen_3_8_flash_next_non_thinking"
+MODEL_PROFILES = (DEFAULT_MODEL, DEFAULT_SUBAGENT, DEFAULT_TEACHER)
+
+
+def model_metadata(policy):
+    return {name: getattr(policy, name, None) for name in (
+        "model_name", "temperature", "top_p", "presence_penalty", "extra_body",
+        "max_tokens", "preserve_reasoning", "max_retries")}
+
+
+async def close_model(policy):
+    if client := getattr(policy, "http_client", None):
+        client.close()
+    if client := getattr(policy, "http_async_client", None):
+        await client.aclose()
 
 
 class Context(TypedDict):
@@ -29,7 +42,7 @@ class BudgetExceeded(RuntimeError):
 
 def directory(context):
     path = Path(context["directory"]).resolve()
-    root = Path(os.environ.get("WS_ARTIFACT_ROOT", "artifacts/gyms/wideseek/runs")).resolve()
+    root = Path(os.environ.get("WS_ARTIFACT_ROOT", "artifacts")).resolve()
     if not path.is_relative_to(root) or path == root:
         raise ValueError("Episode directory must be beneath WS_ARTIFACT_ROOT")
     return path
@@ -65,33 +78,6 @@ def refund(path, amount):
         db.execute("UPDATE budget SET tokens=tokens+?", (amount,))
 
 
-class HostTransport(httpx.AsyncBaseTransport):
-    """Connect to a configured IP without disabling hostname TLS verification."""
-    def __init__(self):
-        self.inner = httpx.AsyncHTTPTransport(retries=1)
-
-    async def handle_async_request(self, request):
-        mapping = os.environ.get("WS_MODEL_HOST", "")
-        if mapping:
-            host, ip = mapping.split(":", 1)
-            if request.url.host == host:
-                request.extensions["sni_hostname"] = host
-                request.headers["Host"] = host
-                request.url = request.url.copy_with(host=ip)
-        return await self.inner.handle_async_request(request)
-
-    async def aclose(self):
-        await self.inner.aclose()
-
-
-def model(model_id=None):
-    return ChatOpenAI(model=model_id or os.environ.get("WS_MODEL", "Qwen/Qwen3.5-4B"),
-        base_url=os.environ["LLM_PROXY_URL"], api_key=os.environ["LLM_PROXY_MASTER_KEY"],
-        **GENERATION,
-        timeout=180, max_retries=2, use_responses_api=False,
-        http_async_client=httpx.AsyncClient(transport=HostTransport(), trust_env=False))
-
-
 class ModelLog(AgentMiddleware):
     def __init__(self, role):
         self.role = role
@@ -101,7 +87,7 @@ class ModelLog(AgentMiddleware):
         limit = await asyncio.to_thread(reserve, path)
         log = path / "model_calls" / f"{uuid4().hex}.json"
         row = {"role": self.role, "started_at": time.time(), "max_tokens": limit,
-               "generation": {**GENERATION, **request.model_settings, "max_tokens": limit},
+               "generation": {**model_metadata(request.model), **request.model_settings},
                "tools": [convert_to_openai_tool(t) for t in request.tools],
                "messages": [m.model_dump(mode="json") for m in request.messages]}
         if request.system_message:

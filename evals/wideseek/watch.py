@@ -46,8 +46,10 @@ def trace_counts(path):
 
 
 def display(root, run=None):
-    manifests = list(root.glob("*/manifest.json"))
-    path = (root / run / "manifest.json") if run else max(
+    roots = [root, *(root / stage / "wideseek/runs" for stage in ("gyms", "evals", "sft"))]
+    manifests = [p for base in roots for p in base.glob("*/manifest.json")]
+    path = next((base / run / "manifest.json" for base in roots
+                 if (base / run / "manifest.json").exists()), None) if run else max(
         manifests, key=lambda p: p.stat().st_mtime, default=None)
     if path is None or not path.exists():
         print(f"No run manifest under {root}")
@@ -92,6 +94,9 @@ def display(root, run=None):
     print(f"Tasks: {len(settings['tasks'])} | attempts per task/mode: {settings['repetitions']}")
     judge = settings['judge']
     print(f"Agent: {settings['model']} | Judge: {judge.get('model') if isinstance(judge, dict) else judge}")
+    if 'decomposer' in settings['modes'] and 'model_profiles' in settings:
+        profile = settings['model_profiles']['subagent']
+        print(f"Subagents: {profile['model_name']} | preserve reasoning: {profile['preserve_reasoning']}")
     print()
     legacy = len(settings['modes']) > 1
     if legacy:
@@ -128,6 +133,9 @@ def display(root, run=None):
     if done:
         print(f"Last completion: {duration(now-max(r['finished_at'] for r in rows))} ago")
     print(f"Artifacts: {directory}")
+    if (directory / 'collection.json').exists():
+        collection = json.loads((directory / 'collection.json').read_text())
+        print(f"Traces: {collection['successful_traces']} successful | coverage {collection['covered_tasks']}/{collection['tasks']}")
 
 
 if __name__ == '__main__':

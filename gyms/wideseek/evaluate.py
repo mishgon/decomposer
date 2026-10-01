@@ -2,12 +2,11 @@
 import ast
 import asyncio
 import json
-import os
 import re
 import time
 from uuid import uuid4
 
-from gyms.wideseek.runtime import model, save
+from gyms.wideseek.runtime import DEFAULT_TEACHER, close_model, model, save
 from gyms.wideseek.vendor.table_reward import evaluate_markdown, extract_final_answer
 from gyms.wideseek.vendor.qa_prompt import LLM_JUDGE_PROMPT
 
@@ -43,7 +42,7 @@ async def evaluate(task, answer, path, *, judge_model_id=None):
     parsed = extract_final_answer(answer, mode="markdown" if is_table else "boxed", strict=True)
     if parsed is None or (is_table and parsed.empty):
         return {"status": "scored", "metric": metric, "score": 0., "format_ok": False}
-    judge_model_id = judge_model_id or os.environ.get("WS_JUDGE_MODEL") or os.environ.get("WS_MODEL", "Qwen/Qwen3.5-4B")
+    judge_model_id = judge_model_id or DEFAULT_TEACHER
     judge_model = model(judge_model_id)
     semaphore = asyncio.Semaphore(2)
     errors = []
@@ -83,6 +82,6 @@ async def evaluate(task, answer, path, *, judge_model_id=None):
             score = float("correct" in reply.strip().lower() and "incorrect" not in reply.strip().lower())
             format_ok = True
     finally:
-        await judge_model.http_async_client.aclose()
+        await close_model(judge_model)
     return ({"status": "judge_error", "metric": metric, "score": None, "errors": errors} if errors else
             {"status": "scored", "metric": metric, "score": float(score), "format_ok": bool(format_ok)})
