@@ -264,6 +264,39 @@ def test_wait_stores_tool_calls_from_error_run(async_invocation: bool) -> None:
 
 
 @pytest.mark.parametrize("async_invocation", [False, True])
+def test_context_overflow_retires_worker_and_allows_replacement(async_invocation) -> None:
+    client = _completed_client(async_invocation, status="error")
+    context_error = {"error": "OpenAIContextOverflowError", "message": "128k context exceeded"}
+    client.threads.get.return_value = {"error": context_error}
+    cache = _client_cache(client)
+    runtime = _wait_runtime()
+    runtime.context = None
+    tool = _build_wait_tool(cache)
+    command = asyncio.run(tool.coroutine(runtime)) if async_invocation else tool.func(runtime)
+    runtime.state["subagent_runs"].update(command.update["subagent_runs"])
+    report = json.loads(command.update["messages"][0].content)[0]
+    assert report["status"] == "error"
+    assert json.loads(report["error"]) == context_error
+
+    for tool, args in (
+        (_build_run_tool(cache, 410), {"subagent_id": "run_a_thread", "prompt": "try again"}),
+        (_build_fork_tool(cache), {"subagent_id": "run_a_thread"}),
+    ):
+        result = (asyncio.run(tool.coroutine(**args, runtime=runtime)) if async_invocation
+                  else tool.func(**args, runtime=runtime))
+        assert "status `\"error\"`" in result
+    client.runs.create.assert_not_called()
+    client.threads.copy.assert_not_called()
+
+    client.threads.create.return_value = {"thread_id": "fresh_worker"}
+    tool = _build_new_tool({SUBAGENT_TYPE["subagent_type_id"]: SUBAGENT_TYPE}, cache)
+    args = {"subagent_type_id": SUBAGENT_TYPE["subagent_type_id"], "runtime": runtime}
+    replacement = asyncio.run(tool.coroutine(**args)) if async_invocation else tool.func(**args)
+    assert "fresh_worker" in replacement.update["subagents"]
+    client.threads.create.assert_called_once()
+
+
+@pytest.mark.parametrize("async_invocation", [False, True])
 @pytest.mark.parametrize(
     ("empty_history", "thread", "expected_error"),
     [

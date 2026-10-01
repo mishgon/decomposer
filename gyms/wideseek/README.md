@@ -69,6 +69,13 @@ references an execution directory with model/tool/judge logs, final graph state,
 worker states and provider usage. Failed attempts remain available for analysis.
 No aggregate evaluation or collection policy lives in this directory.
 
+The current hosted Qwen4B deployment has a 128k context limit. Overflow stops that
+worker and `wait()` reports its error to the Decomposer. `run()` and `fork()` reject
+failed workers; `new()` creates a replacement with empty history. Other workers
+and tasks continue. Controller overflow is saved as `context_exceeded`, with its
+partial trace and native evaluation, without aborting the collection. The Gym
+does not expand the provider limit or silently truncate the conversation.
+
 ## Native Scoring and Tests
 
 Width tasks use upstream's strict Markdown-table extraction and item-F1. Depth
