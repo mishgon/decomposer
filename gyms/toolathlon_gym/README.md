@@ -12,11 +12,11 @@ Podman wrapper, first run `export PATH="$HOME/.local/bin:$PATH"`.
 
 ```bash
 PYTHONPATH=src:. python -m gyms.toolathlon_gym.run \
-  --tasks task-a task-b --harness decomposer --concurrency 8 -n 1
+  --tasks task-a task-b --agent decomposer --concurrency 8 -n 1
 ```
 
-Use `--harness react` for the same tool-equipped worker acting directly on the
-task, without a Decomposer. Its model is selected by `--subagent-api-model`.
+Use `--agent qwen_3_5_4b_unlooped_thinking` for the same tool-equipped worker acting directly on the
+task, without a Decomposer. Its model is configured in `agents.py`.
 Use a positional task for one task, `--tasks` for a subset, or `--all`.
 The fixed executor has no coverage policy, culling, adaptive retries or resume.
 
@@ -28,12 +28,12 @@ in artifacts. Sampling does not depend on environment variables.
 
 | Role | Deployment | Generation Settings |
 | --- | --- | --- |
-| Teacher | `Qwen/Qwen3.8-Flash-Next-NVFP4` | Non-thinking; temperature 0.7, top-p 0.8, top-k 20, min-p 0, presence penalty 1.5, repetition penalty 1 |
-| Subagent / ReAct | `Qwen/Qwen3.5-4B-unlooped` | Thinking; temperature 0.6, top-p 0.95, top-k 20; other sampling parameters use defaults |
+| Decomposer | `Qwen/Qwen3.8-Flash-Next-NVFP4` | Low thinking; temperature 1, top-p 0.95, top-k 20, min-p 0, presence penalty 0, repetition penalty 1 |
+| Agent / ReAct | `Qwen/Qwen3.5-4B-unlooped` | Thinking; temperature 0.6, top-p 0.95, top-k 20; other sampling parameters use defaults |
 
-The subagent profile follows the checkpoint's `SAMPLING.md` and `eval_sampling.yaml`.
-Worker reasoning is saved and replayed between tool calls. Teacher settings follow
-the [official non-thinking profile](https://huggingface.co/Qwen/Qwen3.8-Flash-Next#api-usage).
+The agent profile follows the checkpoint's `SAMPLING.md` and `eval_sampling.yaml`.
+Reasoning is saved and replayed between model calls. Decomposer settings follow
+the [official thinking profile](https://huggingface.co/Qwen/Qwen3.8-Flash-Next#api-usage).
 For a private inference network, follow the [shared lmrouter setup](../../README.md#hosted-models-and-private-lmrouter-access).
 The same factory runs on the host and inside Docker through the mounted socket.
 
@@ -46,7 +46,7 @@ limit 410. Decomposer uses upstream's `new / fork / run / wait` interface.
 gets a new run ID with:
 
 - `manifest.json`: selected tasks, repetitions, completion and process outcomes.
-- `traces/<task>/<episode>/`: raw messages, subagent histories, usage, answer,
+- `traces/<task>/<episode>/`: raw messages, agent histories, usage, answer,
   task workspace and cleanup records.
 - `evals/<task>/<episode>/result.json`: native evaluator output.
 - `logs/<task>/<repetition>/`: process stdout and stderr.
@@ -66,7 +66,7 @@ sanitize them before sharing.
 
 `gyms/toolathlon_gym/build.sh` builds the task adapter on top of
 `toolathlon-pack:latest`. Native tools run in `/opt/venv`; LangGraph workers
-use `/opt/subagents`. Rebuild the adapter after changing packaged code.
+use `/opt/agents`. Rebuild the adapter after changing packaged code.
 
 ## Workflows
 
@@ -79,3 +79,22 @@ Python MCP servers launch directly from their preinstalled per-project virtual
 environments. Task startup never resolves or rebuilds those dependencies. A missing
 executable is an image-build problem and fails explicitly. Numerical thread pools
 are capped to one thread in the runtime image.
+
+## Agent Server
+
+This container-local LangGraph server exposes two assistants:
+
+- `qwen_3_5_4b_unlooped_thinking`: a tool-equipped agent.
+- `decomposer`: orchestrates agents on the same server.
+
+The tool-equipped agent's model is created by `create_model("qwen_3_5_4b_unlooped_thinking")` in
+[models.py](../../src/decomposer/models.py). Temperature is 0.6, top-p 0.95,
+top-k 20. Thinking and reasoning preservation are enabled;
+other sampling parameters retain provider defaults. Decomposer defaults to
+`qwen_3_8_flash_next_low_thinking`; `--model` selects its profile through
+`TOOLATHLON_DECOMPOSER_MODEL`. Both factories are declared in `agents.py`.
+
+The server reads the prepared task configuration from
+`$TOOLATHLON_DATA_DIR/runtime.json`. When it starts, it opens one persistent
+stdio session for each required MCP server and shares the loaded tools between
+the graphs. It closes every session when it stops.

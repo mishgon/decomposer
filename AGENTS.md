@@ -7,20 +7,20 @@ Build Decomposer, an agent that orchestrates other agents to solve tasks faster,
 - Parallelizing work across multiple agents.
 - Routing tasks to cheaper models according to task difficulty.
 - Reducing each agent's context.
-- Handling subagent errors.
+- Handling agent errors.
 
 We aim to demonstrate improvements in speed, cost, and task-solving quality over standalone agents on Gaia2, Toolathlon, BrowseComp, and WideSearch.
 
 ## Methodology
 
-Decomposer uses a minimal harness: a standard tool-calling loop with four tools for orchestrating subagents:
+Decomposer uses a minimal harness: a standard tool-calling loop with four tools for orchestrating agents:
 
-- `new(subagent_type_id) -> subagent_id`: creates a subagent of the specified type with an empty conversation history.
-- `fork(subagent_id) -> subagent_id`: creates a subagent of the same type with a copy of its conversation history and state. The external environment remains shared.
-- `run(subagent_id, prompt) -> subagent_run_id`: starts a run of an existing subagent and immediately returns its run ID. The same subagent can run multiple times, retaining its conversation history across runs.
-- `wait() -> [...]`: waits for at least one new run to finish and returns all newly available subagent responses since the previous `wait` call. Each result includes the run status and any error. Waiting is bounded by a timeout.
+- `new(agent_type_id) -> agent_id`: creates an agent of the specified type with an empty conversation history.
+- `fork(agent_id) -> agent_id`: creates an agent of the same type with a copy of its conversation history and state. The external environment remains shared.
+- `run(agent_id, prompt) -> agent_run_id`: starts a run of an existing agent and immediately returns its run ID. The same agent can run multiple times, retaining its conversation history across runs.
+- `wait() -> [...]`: waits for at least one new run to finish and returns all newly available agent responses since the previous `wait` call. Each result includes the run status and any error. Waiting is bounded by a timeout.
 
-This loop enables fully asynchronous orchestration and execution: Decomposer can launch newly unblocked subtasks without waiting for unrelated subagent runs to finish. It can also adapt its decomposition as subagent results arrive. See `src/decomposer/core.py` for the implementation.
+This loop enables fully asynchronous orchestration and execution: Decomposer can launch newly unblocked subtasks without waiting for unrelated agent runs to finish. It can also adapt its decomposition as agent results arrive. See `src/decomposer/core.py` for the implementation.
 
 We plan to train the orchestration model in two stages:
 
@@ -44,48 +44,56 @@ Evaluation and training workflows reuse `gyms/<gym_name>/`.
 
 ## Private lmrouter Access
 
-The **application host** is the machine where lmrouter access is needed.
-The **gateway** already reaches lmrouter and has `LLM_PROXY_URL` and
-`LLM_PROXY_MASTER_KEY` in its environment. The **Codex host** runs the
-current session.
+Codex performs setup, shutdown, restart, file transfer, and verification.
+Ask only for missing connection details; do not delegate these steps to the user.
 
-When asked to configure lmrouter, ask the user to specify the application
-host and gateway unless they have already done so. Use the gateway specified
-by the user. If the request says "this machine", use the Codex host as the
-application host.
+### Hosts and Access
 
-Ask only for missing SSH details for gateway → application host and,
-if Codex runs elsewhere, Codex host → gateway. Accept an existing alias
-on the connecting host or a hostname, username, and port, together with
-any required authentication details. Test these supplied connections.
-If authentication fails, explain which connection the user needs to
-configure. If Codex host → gateway access is impossible, ask the user
-to run Codex on the gateway.
+The **application host** runs the model clients. The **gateway** reaches lmrouter
+and provides `LLM_PROXY_URL` and `LLM_PROXY_MASTER_KEY`. The **Codex host** runs
+this session. Reuse hosts and SSH details established in the conversation.
+If unspecified, ask for the application host and gateway. “This machine” means
+the Codex host.
 
-Activate the gateway's configured user environment. Inspect the supplied alias's
-effective SSH settings, including `RemoteCommand` and `RequestTTY`, before
-running remote commands. A launcher such as `sweethome` may activate the
-environment that provides `LLM_PROXY_MASTER_KEY` and changes the user's home.
-Connect using the configured launcher. If activation requires a terminal,
-use `ssh -tt GATEWAY_ALIAS` and run commands inside the activated shell.
-Confirm that `LLM_PROXY_MASTER_KEY` is nonempty without displaying its value.
-Use this activated environment for setup and credential transfer.
+Test gateway → application host SSH access and, if needed, Codex host → gateway.
+Accept an existing SSH alias or hostname, username, port, and authentication details.
+Verify unfamiliar host keys through trusted access. If authentication fails,
+identify the connection that needs repair. If Codex cannot reach the gateway,
+ask the user to run Codex there.
 
-Use a reverse tunnel and a private Unix socket relay:
+Inspect the gateway alias's effective `RemoteCommand` and `RequestTTY` settings.
+Use its configured launcher to activate the environment, for example
+`ssh -tt GATEWAY_ALIAS` for a terminal-based `sweethome` launcher.
+Confirm the router key is nonempty without displaying it. Use this activated
+environment for gateway commands, tmux sessions, and credential transfer.
+Run application-host commands over ordinary SSH from the gateway.
+
+### Connection Path
 
 ```text
 Application / container → private Unix socket → application loopback :18443
-                        → SSH reverse tunnel → gateway → lmrouter.2a2i.org:443
+                        → SSH reverse tunnel → gateway loopback :18445
+                        → MSS-capped gateway relay → router :443
 ```
 
-Clients keep `https://lmrouter.2a2i.org/v1` and verify its TLS certificate.
-The relay forwards encrypted bytes and has no API key. Reuse working
-listeners and relays. If the application host already reaches lmrouter
-and has the key, use direct access without a tunnel or socket variable.
+Clients use `https://lmrouter.2a2i.org/v1` and verify its TLS certificate.
+Both relays forward encrypted bytes and have no API key. The gateway relay sets
+`TCP_MAXSEG=1460` before connecting upstream to avoid the reproduced MTU-related
+TLS stalls without root access. If the application host reaches lmrouter directly
+and has the key, use direct access without these services or a socket variable.
 
-Before setting up the tunnel, read `LLM_PROXY_URL` in the activated gateway
-environment. Use its hostname or IP as the tunnel destination.
-Verify the destination with TLS for `lmrouter.2a2i.org` before proceeding:
+### Start
+
+Inspect existing tmux sessions, processes, listeners, and the Unix socket first.
+Reuse services only if they use the current scripts and the MSS-capped path.
+Do not start duplicate services or replace a socket with an active listener.
+Locate repository checkouts on both hosts. Transfer missing or outdated scripts
+from `scripts/lmrouter/` over SSH, preserving other checkout changes.
+The gateway needs `router_tunnel.sh` and `gateway_relay.py`; the application host
+needs `socket_relay.py` and its Python environment. Both hosts need OpenSSH and
+tmux. The Linux gateway also needs Python 3 and Bash with `wait -n -p` support.
+
+Read the upstream destination from the activated gateway environment and check TLS:
 
 ```bash
 router_host=$(python3 -c 'import os; from urllib.parse import urlsplit; print(urlsplit(os.environ["LLM_PROXY_URL"]).hostname)')
@@ -94,57 +102,47 @@ curl --noproxy '*' --connect-timeout 10 --max-time 20 \
   https://lmrouter.2a2i.org/v1/models
 ```
 
-HTTP 401 confirms connectivity and successful TLS verification without a key.
-Keep certificate verification enabled. If `LLM_PROXY_URL` is missing or the
-check fails, ask the user for the gateway's working router configuration.
+HTTP 401 confirms TLS connectivity without credentials. If the URL is missing
+or the check fails, request the gateway's working router configuration.
+Small curl handshakes can succeed while Python model handshakes stall;
+verify a real model call before reporting success.
 
-Run commands from repository checkouts on the corresponding hosts. Locate
-existing checkouts or copy the two tunnel scripts if needed. Execute
-application-host commands over ordinary SSH from the gateway.
-
-On the gateway, reuse an existing dedicated tunnel key or create one:
+On the gateway, reuse a dedicated tunnel key or create one if absent:
 
 ```bash
+install -d -m 700 "$HOME/.ssh"
 ssh-keygen -t ed25519 -f "$HOME/.ssh/lmrouter_tunnel" -N '' -C lmrouter-tunnel
 ```
 
 Using ordinary SSH access, add its public key to the application user's
-`~/.ssh/authorized_keys` with these restrictions on the same line. Preserve
-existing keys and avoid duplicate entries:
+`~/.ssh/authorized_keys`. Preserve existing keys and avoid duplicate entries.
+Apply these restrictions on the same line:
 
 ```text
 restrict,port-forwarding,permitlisten="127.0.0.1:18443",permitopen="reserved.invalid:1",command="/bin/false" ssh-ed25519 PUBLIC_KEY lmrouter-tunnel
 ```
 
-Keep the private key on the gateway. Configure an SSH alias there for the
-application host using the supplied hostname, user, and port if no suitable
-alias exists. Verify unfamiliar SSH host keys through trusted access.
-Start the tunnel with that alias, the dedicated key, and the destination
-derived from `LLM_PROXY_URL`:
+Create the application user's SSH directory and authorized-keys file if absent,
+with permissions `0700` and `0600`, respectively.
+
+Keep the private key on the gateway. Configure `APPLICATION_ALIAS` there if needed.
+From the gateway checkout, start the launcher with the verified destination:
 
 ```bash
 tmux -L lmrouter new-session -d -s tunnel \
   "bash '$PWD/scripts/lmrouter/router_tunnel.sh' APPLICATION_ALIAS '$HOME/.ssh/lmrouter_tunnel' '$router_host'"
 ```
 
-The launcher reconnects automatically. Use ordinary SSH access, rather than
-the restricted tunnel key, to transfer `LLM_PROXY_MASTER_KEY` from the gateway
-environment to `~/.local/share/environment/lmrouter.env` on the application
-host. Store a shell-safe assignment, with directory permissions `0700` and
-file permissions `0600`. Never expose the key in messages, logs, or command
-arguments. If the variable is unavailable after activating the configured
-environment, ask the user how to load it.
+The launcher starts the gateway relay on `127.0.0.1:18445`, reconnects SSH,
+and stops both processes when terminated.
 
-On the application host, check the TLS route without credentials:
+Transfer `LLM_PROXY_MASTER_KEY` through ordinary SSH to
+`~/.local/share/environment/lmrouter.env` on the application host.
+Store a shell-safe assignment with directory permissions `0700` and file
+permissions `0600`. Never expose the key in output, logs, or command arguments.
+If the activated gateway environment lacks the key, ask how to load it.
 
-```bash
-curl --noproxy '*' --connect-timeout 10 --max-time 20 \
-  --connect-to lmrouter.2a2i.org:443:127.0.0.1:18443 \
-  https://lmrouter.2a2i.org/v1/models
-```
-
-HTTP 401 confirms that the request reached the router. Start the relay and
-load the model environment:
+From the application checkout, start the Unix socket relay and load credentials:
 
 ```bash
 tmux -L lmrouter new-session -d -s relay \
@@ -156,25 +154,59 @@ set +a
 export LLM_PROXY_UNIX_SOCKET="$HOME/.local/share/lmrouter-relay/router.sock"
 ```
 
-Persist credential loading and the socket export in the user's shell startup
-file for future sessions. New processes must inherit both variables.
-Toolathlon Gym mounts the socket directory automatically; other container
-launchers need the directory mount, key, and container-side socket path.
+Persist credential loading and the socket export in the user's shell startup file.
+New client processes must inherit both variables. Toolathlon Gym mounts the socket
+directory automatically; other container launchers need that mount, the key,
+and the container-side socket path.
 
-Verify a real model call on the application host:
+Verify the gateway relay listens on loopback `18445`, the application tunnel
+listens on loopback `18443`, and the Unix socket has an active listener.
+Load the model environment and run this from the application checkout:
 
 ```bash
 PYTHONPATH=src .venv/bin/python - <<'PYTHON'
 from decomposer.models import create_model
 
-model = create_model("qwen_3_8_flash_next_non_thinking")
-print(model.invoke("Say hello.").content)
+print(create_model("qwen_3_8_flash_next_non_thinking").invoke("Say hello.").content)
 PYTHON
 ```
 
-Report success only after receiving a model response. Both tmux sessions
-normally survive Codex termination and SSH disconnection. Restart them
-after host reboot.
+Report success only after receiving a model response. The services normally
+survive Codex termination and SSH disconnection; start them again after host reboot.
+
+### Stop
+
+For tunnel-only shutdown, stop the gateway launcher in its activated environment:
+
+```bash
+tmux -L lmrouter send-keys -t tunnel C-c
+```
+
+For full shutdown, also stop the application Unix socket relay:
+
+```bash
+tmux -L lmrouter send-keys -t relay C-c
+```
+
+Skip services already stopped. Wait for shutdown and verify the relevant sessions
+and processes have exited. Tunnel shutdown must release gateway port `18445` and
+application port `18443`; full shutdown must also remove the Unix socket listener.
+If a process remains, terminate only the identified lmrouter service process.
+Remove a stale socket file only after confirming it has no listener.
+Preserve credentials, tunnel keys, SSH configuration, and shell startup settings.
+
+### Restart
+
+Update the affected scripts in the corresponding checkout, transferring the local
+versions over SSH when needed. Stop the old gateway launcher using **Stop**,
+verify its ports are released, then start it using **Start** with the destination
+from the activated gateway's `LLM_PROXY_URL`.
+
+Keep a healthy application Unix socket relay running during a tunnel restart.
+Restart it only if its script changed or the relay is unhealthy. If it is already
+stopped, start it. Verify the listeners and a real model response as in **Start**.
+For a full restart, perform full **Stop**, then **Start**. Codex completes all steps
+before reporting success; it does not ask the user to transfer files or restart services.
 
 <!-- BEGIN agent-style v0.4.2 -->
 <!-- SPDX-License-Identifier: CC-BY-4.0 -->

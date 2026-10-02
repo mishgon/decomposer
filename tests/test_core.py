@@ -12,7 +12,7 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from decomposer import create_decomposer_agent
 from decomposer.core import (
     DecomposerAgentMiddleware,
-    SubagentType,
+    AgentType,
     _build_new_tool,
     _build_fork_tool,
     _build_run_tool,
@@ -28,18 +28,18 @@ from decomposer.prompts import (
 )
 
 
-SUBAGENT_TYPE: SubagentType = {
-    "subagent_type_id": "test",
-    "description": "Test subagent",
+AGENT_TYPE: AgentType = {
+    "agent_type_id": "test",
+    "description": "Test agent",
     "assistant_id": "test_assistant",
-    "url": "http://subagents.test",
+    "url": "http://agents.test",
 }
 
 
-SUBAGENT_TYPES = [
+AGENT_TYPES = [
     {
-        "subagent_type_id": "dummy",
-        "description": "Dummy subagent for smoke testing.",
+        "agent_type_id": "dummy",
+        "description": "Dummy agent for smoke testing.",
         "assistant_id": "dummy",
         "url": "http://unused",
     }
@@ -54,24 +54,24 @@ class ToolCallingFakeModel(FakeMessagesListChatModel):
 def test_new_rejects_unknown_type() -> None:
     client = MagicMock()
     tool = _build_new_tool(
-        {"test": SUBAGENT_TYPE},
+        {"test": AGENT_TYPE},
         _client_cache(client),
     )
     runtime = SimpleNamespace(tool_call_id="create_1")
 
     result = tool.func("unknown", runtime)
 
-    assert "Unknown subagent type ID `unknown`" in result
+    assert "Unknown agent type ID `unknown`" in result
     client.threads.create.assert_not_called()
 
 
 @pytest.mark.parametrize("async_invocation", [False, True])
-def test_fork_copies_thread_and_preserves_subagent_type(async_invocation: bool) -> None:
+def test_fork_copies_thread_and_preserves_agent_type(async_invocation: bool) -> None:
     client = AsyncMock() if async_invocation else MagicMock()
     client.threads.copy.return_value = {"thread_id": "copied_thread"}
-    source = _subagent("source_thread")
+    source = _agent("source_thread")
     runtime = SimpleNamespace(
-        state={"subagents": {"source_thread": source}, "subagent_runs": {}},
+        state={"agents": {"source_thread": source}, "agent_runs": {}},
         tool_call_id="fork_1",
     )
     tool = _build_fork_tool(_client_cache(client))
@@ -82,17 +82,17 @@ def test_fork_copies_thread_and_preserves_subagent_type(async_invocation: bool) 
         command = tool.func("source_thread", runtime)
 
     client.threads.copy.assert_called_once_with("source_thread")
-    assert command.update["subagents"] == {
+    assert command.update["agents"] == {
         "copied_thread": {
             **source,
-            "subagent_id": "copied_thread",
+            "agent_id": "copied_thread",
             "thread_id": "copied_thread",
         }
     }
-    assert source == _subagent("source_thread")
+    assert source == _agent("source_thread")
     message = command.update["messages"][0]
     assert message.tool_call_id == "fork_1"
-    assert json.loads(message.content) == {"subagent_id": "copied_thread"}
+    assert json.loads(message.content) == {"agent_id": "copied_thread"}
 
 
 @pytest.mark.parametrize("async_invocation", [False, True])
@@ -102,7 +102,7 @@ def test_run_records_run_and_passes_context(async_invocation: bool) -> None:
     tool = _build_run_tool(_client_cache(client), 1)
     context = {"value": 42}
     runtime = SimpleNamespace(
-        state={"subagents": {"thread_1": _subagent("thread_1")}, "subagent_runs": {}},
+        state={"agents": {"thread_1": _agent("thread_1")}, "agent_runs": {}},
         context=context,
         tool_call_id="prompt_1",
     )
@@ -120,31 +120,31 @@ def test_run_records_run_and_passes_context(async_invocation: bool) -> None:
         context=context,
         multitask_strategy="reject",
     )
-    assert "subagents" not in command.update
-    assert command.update["subagent_runs"] == {
+    assert "agents" not in command.update
+    assert command.update["agent_runs"] == {
         "run_1": {
-            "subagent_run_id": "run_1",
-            "subagent_id": "thread_1",
+            "agent_run_id": "run_1",
+            "agent_id": "thread_1",
             "run_id": "run_1",
             "status": "pending",
             "prompt": "do the task",
         }
     }
     assert json.loads(command.update["messages"][0].content) == {
-        "subagent_run_id": "run_1",
+        "agent_run_id": "run_1",
     }
 
 
 @pytest.mark.parametrize(
     ("status", "collected", "expected_error"),
     [
-        (None, False, "Unknown subagent ID `run_1_thread`"),
+        (None, False, "Unknown agent ID `run_1_thread`"),
         ("running", False, "active run `run_1`"),
         ("error", True, "status `\"error\"`"),
     ],
 )
 @pytest.mark.parametrize("tool_name", ["run", "fork"])
-def test_subagent_tools_reject_unavailable_subagent(
+def test_agent_tools_reject_unavailable_agent(
     status: str | None, collected: bool, expected_error: str, tool_name: str
 ) -> None:
     client = MagicMock()
@@ -153,15 +153,15 @@ def test_subagent_tools_reject_unavailable_subagent(
         if tool_name == "run"
         else _build_fork_tool(_client_cache(client))
     )
-    state = {"subagents": {}, "subagent_runs": {}}
+    state = {"agents": {}, "agent_runs": {}}
     if status is not None:
-        state["subagents"]["run_1_thread"] = _subagent("run_1_thread")
-        run = _completed_subagent_run("run_1") if collected else _subagent_run("run_1")
+        state["agents"]["run_1_thread"] = _agent("run_1_thread")
+        run = _completed_agent_run("run_1") if collected else _agent_run("run_1")
         run["status"] = status
-        state["subagent_runs"]["run_1"] = run
+        state["agent_runs"]["run_1"] = run
     runtime = SimpleNamespace(state=state, context=None, tool_call_id="prompt_1")
 
-    args = {"subagent_id": "run_1_thread", "runtime": runtime}
+    args = {"agent_id": "run_1_thread", "runtime": runtime}
     if tool_name == "run":
         args["prompt"] = "follow up"
     result = tool.func(**args)
@@ -177,19 +177,19 @@ def test_wait_stores_tool_calls_in_returned_response_order() -> None:
     tool = _build_wait_tool(_client_cache(client))
     runtime = SimpleNamespace(
         state={
-            "subagents": {
-                f"{run_id}_thread": _subagent(f"{run_id}_thread")
+            "agents": {
+                f"{run_id}_thread": _agent(f"{run_id}_thread")
                 for run_id in ("run_c", "run_b", "run_a")
             },
-            "subagent_runs": {
+            "agent_runs": {
                 "run_c": {
-                    **_subagent_run("run_c"),
+                    **_agent_run("run_c"),
                     "status": "responded",
                     "response": "earlier response",
                     "response_sequence_number": 0,
                 },
-                "run_b": _subagent_run("run_b"),
-                "run_a": _subagent_run("run_a"),
+                "run_b": _agent_run("run_b"),
+                "run_a": _agent_run("run_a"),
             }
         },
         tool_call_id="wait_1",
@@ -197,18 +197,18 @@ def test_wait_stores_tool_calls_in_returned_response_order() -> None:
 
     command = tool.func(runtime=runtime)
 
-    assert command.update["subagent_runs"]["run_b"]["response_sequence_number"] == 1
-    assert command.update["subagent_runs"]["run_a"]["response_sequence_number"] == 2
-    assert command.update["subagent_runs"]["run_b"]["tool_calls"] == [
+    assert command.update["agent_runs"]["run_b"]["response_sequence_number"] == 1
+    assert command.update["agent_runs"]["run_a"]["response_sequence_number"] == 2
+    assert command.update["agent_runs"]["run_b"]["tool_calls"] == [
         {"id": "run_b_call", "name": "resource_tool", "args": {"run": "run_b"}},
     ]
-    assert command.update["subagent_runs"]["run_a"]["tool_calls"] == [
+    assert command.update["agent_runs"]["run_a"]["tool_calls"] == [
         {"id": "run_a_call", "name": "resource_tool", "args": {"run": "run_a"}},
     ]
     assert json.loads(command.update["messages"][0].content) == [
         {
-            "subagent_id": f"{run_id}_thread",
-            "subagent_run_id": run_id,
+            "agent_id": f"{run_id}_thread",
+            "agent_run_id": run_id,
             "status": "responded",
             "response": f"response from {run_id}",
             "error": None,
@@ -252,7 +252,7 @@ def test_wait_accepts_empty_final_response() -> None:
 
     command = tool.func(runtime)
 
-    run = command.update["subagent_runs"]["run_a"]
+    run = command.update["agent_runs"]["run_a"]
     assert run["status"] == "responded"
     assert run["response"] == ""
     assert json.loads(command.update["messages"][0].content)[0]["response"] == ""
@@ -265,13 +265,13 @@ def test_wait_stores_tool_calls_from_error_run() -> None:
 
     command = tool.func(runtime)
 
-    subagent_run = command.update["subagent_runs"]["run_a"]
-    assert subagent_run["tool_calls"] == [
+    agent_run = command.update["agent_runs"]["run_a"]
+    assert agent_run["tool_calls"] == [
         {"id": "run_a_call", "name": "resource_tool", "args": {"run": "run_a"}},
     ]
-    assert subagent_run["response"] is None
-    assert json.loads(subagent_run["error"]) == {
-        "error": "RuntimeError", "message": "subagent failed",
+    assert agent_run["response"] is None
+    assert json.loads(agent_run["error"]) == {
+        "error": "RuntimeError", "message": "agent failed",
     }
 
 
@@ -299,19 +299,19 @@ def test_wait_formats_thread_error(empty_history, thread, expected_error) -> Non
 
     command = tool.func(runtime=runtime)
 
-    run = command.update["subagent_runs"]["run_a"]
+    run = command.update["agent_runs"]["run_a"]
     assert run["status"] == "error"
     assert run["response"] is None
     assert run["error"] == expected_error
     assert run["response_sequence_number"] == 0
     assert json.loads(command.update["messages"][0].content) == [{
-        "subagent_id": "run_a_thread", "subagent_run_id": "run_a",
+        "agent_id": "run_a_thread", "agent_run_id": "run_a",
         "status": "error", "response": None, "error": expected_error,
     }]
-    runtime.state["subagent_runs"].update(command.update["subagent_runs"])
-    assert core._get_current_subagent_runs(runtime.state["subagent_runs"]) == {}
-    assert "status `\"error\"`" in core._get_subagent_error("run_a_thread", runtime.state)
-    middleware = DecomposerAgentMiddleware([SUBAGENT_TYPE], 1)
+    runtime.state["agent_runs"].update(command.update["agent_runs"])
+    assert core._get_current_agent_runs(runtime.state["agent_runs"]) == {}
+    assert "status `\"error\"`" in core._get_agent_error("run_a_thread", runtime.state)
+    middleware = DecomposerAgentMiddleware([AGENT_TYPE], 1)
     assert middleware.after_model(
         {**runtime.state, "messages": [AIMessage(content="Failed.")]}, SimpleNamespace()
     ) is None
@@ -338,10 +338,10 @@ def test_await_wait_retries_until_completion(monkeypatch, first_result) -> None:
     command = asyncio.run(tool.coroutine(runtime))
 
     assert client.runs.get.await_count == 2
-    assert command.update["subagent_runs"]["run_a"]["response"] == "response from run_a"
+    assert command.update["agent_runs"]["run_a"]["response"] == "response from run_a"
 
 
-def test_decomposer_waits_before_creating_subagents() -> None:
+def test_decomposer_waits_before_creating_agents() -> None:
     agent = create_decomposer_agent(
         decomposer_model=ToolCallingFakeModel(
             responses=[
@@ -352,14 +352,14 @@ def test_decomposer_waits_before_creating_subagents() -> None:
                 AIMessage(content="done"),
             ]
         ),
-        subagent_types=SUBAGENT_TYPES,
+        agent_types=AGENT_TYPES,
     )
     inputs = {"messages": [{"role": "user", "content": "Hello"}]}
 
     result = agent.invoke(inputs)
 
-    assert result["subagents"] == {}
-    assert result["subagent_runs"] == {}
+    assert result["agents"] == {}
+    assert result["agent_runs"] == {}
     assert any(
         isinstance(message, ToolMessage)
         and message.tool_call_id == "wait-call"
@@ -406,7 +406,7 @@ def test_decomposer_delegates(monkeypatch, async_invocation: bool) -> None:
                 AIMessage(
                     content="",
                     tool_calls=[
-                        _call("new", f"create-call-{i}", subagent_type_id="dummy")
+                        _call("new", f"create-call-{i}", agent_type_id="dummy")
                         for i in range(2)
                     ],
                 ),
@@ -415,7 +415,7 @@ def test_decomposer_delegates(monkeypatch, async_invocation: bool) -> None:
                     tool_calls=[
                         _call(
                             "run", f"prompt-call-{i}",
-                            subagent_id=f"thread_{i}", prompt="Say hello.",
+                            agent_id=f"thread_{i}", prompt="Say hello.",
                         )
                         for i in range(2)
                     ],
@@ -428,7 +428,7 @@ def test_decomposer_delegates(monkeypatch, async_invocation: bool) -> None:
                 AIMessage(content="dummy"),
             ]
         ),
-        subagent_types=SUBAGENT_TYPES,
+        agent_types=AGENT_TYPES,
     )
 
     inputs = {"messages": [{"role": "user", "content": "Hello"}]}
@@ -439,19 +439,19 @@ def test_decomposer_delegates(monkeypatch, async_invocation: bool) -> None:
         call.kwargs["config"] is None
         for call in client.runs.create.call_args_list
     )
-    assert result["subagents"] == {
+    assert result["agents"] == {
         f"thread_{i}": {
-            "subagent_id": f"thread_{i}",
-            "subagent_type_id": "dummy",
+            "agent_id": f"thread_{i}",
+            "agent_type_id": "dummy",
             "assistant_id": "dummy",
             "thread_id": f"thread_{i}",
         }
         for i in range(2)
     }
-    assert len(result["subagent_runs"]) == 2
+    assert len(result["agent_runs"]) == 2
     for i in range(2):
-        run = result["subagent_runs"][f"thread_{i}_run"]
-        assert run["subagent_id"] == f"thread_{i}"
+        run = result["agent_runs"][f"thread_{i}_run"]
+        assert run["agent_id"] == f"thread_{i}"
         assert run["prompt"] == "Say hello."
         assert run["status"] == "responded"
         assert run["response"] == "hello"
@@ -461,7 +461,7 @@ def test_decomposer_delegates(monkeypatch, async_invocation: bool) -> None:
         for message in result["messages"]
         if isinstance(message, ToolMessage) and message.tool_call_id == "wait-call"
     )
-    assert {response["subagent_id"] for response in responses} == set(result["subagents"])
+    assert {response["agent_id"] for response in responses} == set(result["agents"])
     assert any(
         isinstance(message, HumanMessage) and message.content == EARLY_RESPONSE_ERROR
         for message in result["messages"]
@@ -469,7 +469,7 @@ def test_decomposer_delegates(monkeypatch, async_invocation: bool) -> None:
     assert result["messages"][-1].content == "dummy"
 
 
-def test_decomposer_rejects_parallel_wait_and_finishes_with_idle_subagent(monkeypatch) -> None:
+def test_decomposer_rejects_parallel_wait_and_finishes_with_idle_agent(monkeypatch) -> None:
     client = _mock_client(monkeypatch, False)
     client.threads.create.return_value = {"thread_id": "dummy-thread"}
     agent = create_decomposer_agent(
@@ -479,13 +479,13 @@ def test_decomposer_rejects_parallel_wait_and_finishes_with_idle_subagent(monkey
                     content="",
                     tool_calls=[
                         _call("wait", "wait-call"),
-                        _call("new", "create-call", subagent_type_id="dummy"),
+                        _call("new", "create-call", agent_type_id="dummy"),
                     ],
                 ),
                 AIMessage(content="done"),
             ]
         ),
-        subagent_types=SUBAGENT_TYPES,
+        agent_types=AGENT_TYPES,
     )
     inputs = {"messages": [{"role": "user", "content": "Hello"}]}
 
@@ -494,8 +494,8 @@ def test_decomposer_rejects_parallel_wait_and_finishes_with_idle_subagent(monkey
     client.threads.create.assert_called_once_with()
     client.runs.create.assert_not_called()
     client.runs.get.assert_not_called()
-    assert list(result["subagents"]) == ["dummy-thread"]
-    assert result["subagent_runs"] == {}
+    assert list(result["agents"]) == ["dummy-thread"]
+    assert result["agent_runs"] == {}
     rejected_calls = [
         message
         for message in result["messages"]
@@ -511,18 +511,18 @@ def test_decomposer_rejects_duplicate_runs_and_parallel_waits(monkeypatch) -> No
     client.threads.create.return_value = {"thread_id": "thread_1"}
     agent = create_decomposer_agent(
         decomposer_model=ToolCallingFakeModel(responses=[
-            AIMessage(content="", tool_calls=[_call("new", "create", subagent_type_id="dummy")]),
+            AIMessage(content="", tool_calls=[_call("new", "create", agent_type_id="dummy")]),
             AIMessage(content="", tool_calls=[
                 _call("wait", "wait_0"),
                 _call("wait", "wait_1"),
                 *[
-                    _call("run", f"prompt_{i}", subagent_id="thread_1", prompt=f"Task {i}")
+                    _call("run", f"prompt_{i}", agent_id="thread_1", prompt=f"Task {i}")
                     for i in range(2)
                 ],
             ]),
             AIMessage(content="done"),
         ]),
-        subagent_types=SUBAGENT_TYPES,
+        agent_types=AGENT_TYPES,
     )
     inputs = {"messages": [{"role": "user", "content": "Hello"}]}
 
@@ -530,7 +530,7 @@ def test_decomposer_rejects_duplicate_runs_and_parallel_waits(monkeypatch) -> No
 
     client.runs.create.assert_not_called()
     client.runs.get.assert_not_called()
-    assert result["subagent_runs"] == {}
+    assert result["agent_runs"] == {}
     rejections = {
         message.tool_call_id: message.content
         for message in result["messages"]
@@ -553,7 +553,7 @@ def test_decomposer_retries_empty_response_asynchronously() -> None:
                 AIMessage(content="done"),
             ]
         ),
-        subagent_types=SUBAGENT_TYPES,
+        agent_types=AGENT_TYPES,
     )
 
     result = asyncio.run(
@@ -567,28 +567,28 @@ def test_decomposer_retries_empty_response_asynchronously() -> None:
     assert result["messages"][-1].content == "done"
 
 
-def _subagent(subagent_id: str) -> dict[str, Any]:
+def _agent(agent_id: str) -> dict[str, Any]:
     return {
-        "subagent_id": subagent_id,
-        "subagent_type_id": "test",
+        "agent_id": agent_id,
+        "agent_type_id": "test",
         "assistant_id": "test_assistant",
-        "thread_id": subagent_id,
+        "thread_id": agent_id,
     }
 
 
-def _subagent_run(run_id: str) -> dict[str, Any]:
+def _agent_run(run_id: str) -> dict[str, Any]:
     return {
-        "subagent_run_id": run_id,
-        "subagent_id": f"{run_id}_thread",
+        "agent_run_id": run_id,
+        "agent_id": f"{run_id}_thread",
         "run_id": run_id,
         "status": "running",
         "prompt": "do the task",
     }
 
 
-def _completed_subagent_run(run_id: str) -> dict[str, Any]:
+def _completed_agent_run(run_id: str) -> dict[str, Any]:
     return {
-        **_subagent_run(run_id),
+        **_agent_run(run_id),
         "status": "responded",
         "response": "done",
         "response_sequence_number": 0,
@@ -605,7 +605,7 @@ def _completed_client(async_invocation=False, status="success"):
         "thread_id": thread_id, "run_id": run_id, "status": status,
     }
     client.threads.get.return_value = {
-        "error": {"error": "RuntimeError", "message": "subagent failed"},
+        "error": {"error": "RuntimeError", "message": "agent failed"},
     }
     client.threads.get_history.side_effect = (
         lambda thread_id, limit, metadata: _run_history(metadata["run_id"])
@@ -634,8 +634,8 @@ def _run_history(run_id):
 def _wait_runtime():
     return SimpleNamespace(
         state={
-            "subagents": {"run_a_thread": _subagent("run_a_thread")},
-            "subagent_runs": {"run_a": _subagent_run("run_a")},
+            "agents": {"run_a_thread": _agent("run_a_thread")},
+            "agent_runs": {"run_a": _agent_run("run_a")},
         },
         tool_call_id="wait_1",
     )
@@ -659,16 +659,16 @@ def test_decomposer_rejects_parallel_fork_and_run(monkeypatch) -> None:
     agent = create_decomposer_agent(
         decomposer_model=ToolCallingFakeModel(responses=[
             AIMessage(content="", tool_calls=[
-                _call("run", "run", subagent_id="thread_1", prompt="Task"),
-                _call("fork", "fork", subagent_id="thread_1"),
+                _call("run", "run", agent_id="thread_1", prompt="Task"),
+                _call("fork", "fork", agent_id="thread_1"),
             ]),
             AIMessage(content="done"),
         ]),
-        subagent_types=SUBAGENT_TYPES,
+        agent_types=AGENT_TYPES,
     )
     inputs = {
         "messages": [HumanMessage("Hello")],
-        "subagents": {"thread_1": _subagent("thread_1")},
+        "agents": {"thread_1": _agent("thread_1")},
     }
     result = agent.invoke(inputs)
     client.runs.create.assert_not_called()

@@ -1,4 +1,4 @@
-"""Crash-resistant append-only logging for subagent model calls."""
+"""Crash-resistant append-only logging for agent model calls."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from langchain.agents.middleware import wrap_model_call
 from langchain_core.messages import message_to_dict
 
 
-LOG_PATH_ENV = "TOOLATHLON_SUBAGENT_CALL_LOG"
+LOG_PATH_ENV = "TOOLATHLON_AGENT_CALL_LOG"
 
 
 def _request_delta(messages):

@@ -38,6 +38,14 @@ def render_decomposer_messages(messages: Sequence[BaseMessage]) -> str:
             heading = message.type.replace("_", " ").title()
         lines.extend([f"## {index}. {heading}", ""])
 
+        reasoning = message.additional_kwargs.get("reasoning_content")
+        if reasoning:
+            lines.extend(["### Thinking", "", str(reasoning).strip(), ""])
+
+        tool_calls = getattr(message, "tool_calls", None) or []
+        if message.type == "ai" and (message.content or tool_calls):
+            lines.extend(["### Message", ""])
+
         if message.content:
             if message.type == "tool":
                 lines.extend(
@@ -46,10 +54,10 @@ def render_decomposer_messages(messages: Sequence[BaseMessage]) -> str:
             else:
                 lines.extend([str(message.content), ""])
 
-        for tool_call in getattr(message, "tool_calls", None) or []:
+        for tool_call in tool_calls:
             lines.extend(
                 [
-                    f"### Call `{tool_call['name']}`",
+                    f"#### Call `{tool_call['name']}`",
                     "",
                     f"ID: `{tool_call['id']}`",
                     "",

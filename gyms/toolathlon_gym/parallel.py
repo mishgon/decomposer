@@ -58,7 +58,7 @@ def episode_command(args, task, run_id, repetition, root):
     }
     command = [sys.executable, str(Path(gym.__file__)), task]
     for name, value in values.items():
-        if name in {"task", "tasks", "all", "concurrency", "repetitions", "output_dir"} or value is None or value is False:
+        if name in {"task", "tasks", "all", "concurrency", "repetitions", "output_dir", "harness"} or value is None or value is False:
             continue
         command.append("--" + name.replace("_", "-"))
         if value is not True:
@@ -74,7 +74,8 @@ def run(args):
     run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ-") + uuid.uuid4().hex[:8]
     root = args.output_dir.resolve() / run_id
     root.mkdir(parents=True, exist_ok=False)
-    manifest = {"run_id": run_id, "status": "running", "harness": args.harness,
+    manifest = {"run_id": run_id, "status": "running", "harness": "decomposer" if args.agent == "decomposer" else "react",
+                "assistant_id": args.agent,
                 "tasks": tasks, "repetitions": args.repetitions, "episodes": [],
                 "config": {k: str(v) if isinstance(v, Path) else v for k, v in vars(args).items()}}
     def save():
@@ -87,9 +88,9 @@ def run(args):
     executor = concurrent.futures.ThreadPoolExecutor(max_workers=args.concurrency)
     futures = {}
     try:
-        if not args.subagent_base_url:
-            server = gym.start_vllm(model=args.subagent_model, served_model_name=args.subagent_api_model,
-                port=args.subagent_port, gpu=args.subagent_gpu, max_model_len=args.vllm_max_model_len,
+        if not args.agent_base_url:
+            server = gym.start_vllm(model=args.agent_model, served_model_name=args.agent_api_model,
+                port=args.agent_port, gpu=args.agent_gpu, max_model_len=args.vllm_max_model_len,
                 gpu_memory_utilization=args.vllm_gpu_memory_utilization, timeout=args.vllm_startup_timeout,
                 log_path=root / "vllm.log", reuse=args.reuse_vllm, data_parallel_size=args.vllm_data_parallel_size)
         for task in tasks:

@@ -1,8 +1,10 @@
 import argparse
+import asyncio
 import json
 import os
 import shlex
 import shutil
+import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -83,6 +85,7 @@ def main() -> None:
     subparsers = parser.add_subparsers(dest="command", required=True)
     serve_parser = subparsers.add_parser("serve")
     serve_parser.add_argument("--skip-preprocess", action="store_true")
+    subparsers.add_parser("server")
     args = parser.parse_args()
 
     if args.command == "serve":
@@ -101,8 +104,26 @@ def main() -> None:
         )
         print(f"Prepared {task_name}: {runtime_path}", flush=True)
 
-        server = Path(__file__).parent / "subagents" / "serve.sh"
-        os.execv(server, [str(server)])
+        python = Path(os.environ.get("AGENT_VENV", "/opt/agents")) / "bin/python"
+        os.execv(python, [str(python), __file__, "server"])
+    elif args.command == "server":
+        asyncio.run(serve())
+
+
+async def serve() -> None:
+    from utils import agent_server
+
+    stopped = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    for signum in (signal.SIGINT, signal.SIGTERM):
+        loop.add_signal_handler(signum, stopped.set)
+    async with agent_server(
+        Path(__file__).with_name("langgraph.json"),
+        host="0.0.0.0",
+        startup_timeout=180,
+        n_jobs_per_worker=int(os.environ.get("N_JOBS_PER_WORKER", "16")),
+    ):
+        await stopped.wait()
 
 
 if __name__ == "__main__":

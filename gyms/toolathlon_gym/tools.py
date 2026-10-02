@@ -201,5 +201,5 @@ app = FastAPI(lifespan=lifespan)
 def get_tools() -> list[BaseTool]:
     tools = getattr(app.state, "tools", None)
     if tools is None:
-        raise RuntimeError("Subagent tools have not started")
+        raise RuntimeError("Agent tools have not started")
     return tools.copy()

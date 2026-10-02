@@ -17,10 +17,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from langchain_core.messages import message_to_dict
-from langgraph.checkpoint.memory import InMemorySaver
 
 from decomposer.models import create_model
-from decomposer.core import create_decomposer_agent
 
 try:
     from .usage import build_usage_summary
@@ -34,10 +32,10 @@ DEFAULT_GYM_ARTIFACTS_DIR = REPO_ROOT / "artifacts" / "gyms" / "toolathlon_gym"
 DEFAULT_ARTIFACTS_DIR = DEFAULT_GYM_ARTIFACTS_DIR / "traces"
 DEFAULT_EVALS_DIR = DEFAULT_GYM_ARTIFACTS_DIR / "evals"
 DEFAULT_IMAGE = "decomposer-toolathlon:latest"
-DEFAULT_MODEL = "qwen_3_8_flash_next_non_thinking"
-DEFAULT_SUBAGENT_MODEL = "Qwen/Qwen3.5-4B-unlooped"
-DEFAULT_SUBAGENT_API_MODEL = "Qwen/Qwen3.5-4B-unlooped"
-DEFAULT_SUBAGENT_PORT = 8023
+DEFAULT_MODEL = "qwen_3_8_flash_next_low_thinking"
+DEFAULT_AGENT_MODEL = "Qwen/Qwen3.5-4B-unlooped"
+DEFAULT_AGENT_API_MODEL = "Qwen/Qwen3.5-4B-unlooped"
+DEFAULT_AGENT_PORT = 8023
 POSTGRES_IMAGE = "docker.io/library/postgres:15"
 POSTGRES_ENV = {
     "PGHOST": "postgres",
@@ -47,7 +45,7 @@ POSTGRES_ENV = {
     "PGPASSWORD": "camel",
     "PGDATABASE": "toolathlon_gym",
 }
-SUBAGENT_TYPE_ID = "qwen_3_5_4b_unlooped_thinking"
+AGENT_TYPE_ID = "qwen_3_5_4b_unlooped_thinking"
 
 
 def _docker(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -174,7 +172,7 @@ def vllm_command(
     model: str,
     port: int,
     *,
-    served_model_name: str = DEFAULT_SUBAGENT_API_MODEL,
+    served_model_name: str = DEFAULT_AGENT_API_MODEL,
     max_model_len: int,
     gpu_memory_utilization: float,
     data_parallel_size: int = 1,
@@ -251,7 +249,7 @@ def wait_for_vllm(
 def start_vllm(
     *,
     model: str,
-    served_model_name: str = DEFAULT_SUBAGENT_API_MODEL,
+    served_model_name: str = DEFAULT_AGENT_API_MODEL,
     port: int,
     gpu: str,
     max_model_len: int,
@@ -290,7 +288,7 @@ def start_vllm(
         reservation.close()
         raise RuntimeError(
             f"Refusing to start vLLM: port {port} is already in use; choose a "
-            "dedicated --subagent-port or pass --reuse-vllm intentionally"
+            "dedicated --agent-port or pass --reuse-vllm intentionally"
         ) from error
 
     log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -366,7 +364,8 @@ def create_parser() -> argparse.ArgumentParser:
     parser.add_argument("task", nargs="?")
     parser.add_argument("--tasks", nargs="+")
     parser.add_argument("--all", action="store_true")
-    parser.add_argument("--harness", choices=("react", "decomposer"), default="decomposer")
+    assistants = json.loads(Path(__file__).with_name("langgraph.json").read_text())["graphs"]
+    parser.add_argument("--agent", choices=tuple(assistants), default="decomposer")
     parser.add_argument("--concurrency", type=int, default=1)
     parser.add_argument("-n", "--repetitions", type=int, default=1)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_GYM_ARTIFACTS_DIR / "raw")
@@ -376,14 +375,14 @@ def create_parser() -> argparse.ArgumentParser:
     parser.add_argument("--repetition", type=int, help=argparse.SUPPRESS)
     parser.add_argument("--attempt", type=int, help=argparse.SUPPRESS)
     parser.add_argument("--purpose", default="raw", help=argparse.SUPPRESS)
-    parser.add_argument("--model", choices=(DEFAULT_MODEL, SUBAGENT_TYPE_ID, "qwen_3_5_4b_unlooped_non_thinking"), default=DEFAULT_MODEL)
-    parser.add_argument("--subagent-model", default=DEFAULT_SUBAGENT_MODEL)
-    parser.add_argument("--subagent-api-model", choices=(DEFAULT_SUBAGENT_API_MODEL,), default=DEFAULT_SUBAGENT_API_MODEL)
-    parser.add_argument("--subagent-port", type=int, default=DEFAULT_SUBAGENT_PORT)
-    parser.add_argument("--subagent-base-url", default=create_model(SUBAGENT_TYPE_ID).openai_api_base,
+    parser.add_argument("--model", default=DEFAULT_MODEL)
+    parser.add_argument("--agent-model", default=DEFAULT_AGENT_MODEL)
+    parser.add_argument("--agent-api-model", choices=(DEFAULT_AGENT_API_MODEL,), default=DEFAULT_AGENT_API_MODEL)
+    parser.add_argument("--agent-port", type=int, default=DEFAULT_AGENT_PORT)
+    parser.add_argument("--agent-base-url", default=create_model(AGENT_TYPE_ID).openai_api_base,
                         help="Registered hosted endpoint; skips local vLLM.")
-    parser.add_argument("--subagent-host", help="Optional container DNS mapping, hostname:IP.")
-    parser.add_argument("--subagent-gpu", default="0")
+    parser.add_argument("--agent-host", help="Optional container DNS mapping, hostname:IP.")
+    parser.add_argument("--agent-gpu", default="0")
     parser.add_argument("--vllm-max-model-len", type=int, default=256000)
     parser.add_argument("--vllm-gpu-memory-utilization", type=float, default=0.9)
     parser.add_argument("--vllm-data-parallel-size", type=int, default=1)
@@ -401,16 +400,17 @@ def create_parser() -> argparse.ArgumentParser:
 
 def run_episode(args) -> None:
     parser = create_parser()
+    args.harness = "decomposer" if args.agent == "decomposer" else "react"
     if args.n_jobs_per_worker < 1:
         parser.error("--n-jobs-per-worker must be at least 1")
     if args.agent_timeout <= 0:
         parser.error("--agent-timeout must be positive")
     if args.vllm_data_parallel_size < 1:
         parser.error("--vllm-data-parallel-size must be at least 1")
-    visible_gpus = [item for item in args.subagent_gpu.split(",") if item]
+    visible_gpus = [item for item in args.agent_gpu.split(",") if item]
     if len(visible_gpus) != args.vllm_data_parallel_size:
         parser.error(
-            "--subagent-gpu must list exactly --vllm-data-parallel-size GPU IDs"
+            "--agent-gpu must list exactly --vllm-data-parallel-size GPU IDs"
         )
 
     tasks_dir = (TOOLATHLON_ROOT / "tasks" / "finalpool").resolve()
@@ -419,9 +419,9 @@ def run_episode(args) -> None:
         raise ValueError(f"Unknown Toolathlon task: {args.task!r}")
     if not os.environ.get("LLM_PROXY_MASTER_KEY"):
         raise RuntimeError("Set LLM_PROXY_MASTER_KEY for the registered lmrouter models")
-    subagent_model = create_model(SUBAGENT_TYPE_ID)
-    if args.subagent_base_url != subagent_model.openai_api_base:
-        raise ValueError("Set the subagent endpoint in src/decomposer/models.py")
+    agent_model = create_model(AGENT_TYPE_ID)
+    if args.agent_base_url != agent_model.openai_api_base:
+        raise ValueError("Set the agent endpoint in src/decomposer/models.py")
 
     proxy_mount = []
     proxy_socket = os.environ.get("LLM_PROXY_UNIX_SOCKET")
@@ -452,12 +452,12 @@ def run_episode(args) -> None:
         / episode_id
         / "vllm.log"
     )
-    print("Using hosted subagents." if args.subagent_base_url else f"Starting vLLM on GPU {args.subagent_gpu}...", flush=True)
-    vllm_process = None if args.subagent_base_url else start_vllm(
-        model=args.subagent_model,
-        served_model_name=args.subagent_api_model,
-        port=args.subagent_port,
-        gpu=args.subagent_gpu,
+    print("Using hosted agents." if args.agent_base_url else f"Starting vLLM on GPU {args.agent_gpu}...", flush=True)
+    vllm_process = None if args.agent_base_url else start_vllm(
+        model=args.agent_model,
+        served_model_name=args.agent_api_model,
+        port=args.agent_port,
+        gpu=args.agent_gpu,
         max_model_len=args.vllm_max_model_len,
         gpu_memory_utilization=args.vllm_gpu_memory_utilization,
         timeout=args.vllm_startup_timeout,
@@ -476,7 +476,6 @@ def run_episode(args) -> None:
         dump = (TOOLATHLON_ROOT / "db" / "init.sql.gz").resolve()
         _docker(
             "run",
-            "--http-proxy=false",
             "--detach",
             "--name",
             pg_container,
@@ -577,7 +576,6 @@ def run_episode(args) -> None:
         ]
         _docker(
             "run",
-            "--http-proxy=false",
             "--detach",
             "--name",
             task_container,
@@ -585,7 +583,7 @@ def run_episode(args) -> None:
             network,
             "--add-host",
             "host.docker.internal:host-gateway",
-            *(["--add-host", args.subagent_host] if args.subagent_host else []),
+            *(["--add-host", args.agent_host] if args.agent_host else []),
             "--publish",
             "127.0.0.1::2024",
             "--env",
@@ -593,7 +591,9 @@ def run_episode(args) -> None:
             "--env",
             f"N_JOBS_PER_WORKER={args.n_jobs_per_worker}",
             "--env",
-            "TOOLATHLON_SUBAGENT_CALL_LOG=/artifacts/data/subagent_model_calls.jsonl",
+            f"TOOLATHLON_DECOMPOSER_MODEL={args.model}",
+            "--env",
+            "TOOLATHLON_AGENT_CALL_LOG=/artifacts/data/agent_model_calls.jsonl",
             "--env",
             "LLM_PROXY_MASTER_KEY",
             *proxy_mount,
@@ -618,11 +618,11 @@ def run_episode(args) -> None:
                 + logs.stdout
                 + logs.stderr
             )
-        subagent_url = f"http://127.0.0.1:{mapping.rsplit(':', 1)[1]}"
+        agent_url = f"http://127.0.0.1:{mapping.rsplit(':', 1)[1]}"
         deadline = time.monotonic() + args.startup_timeout
         while time.monotonic() < deadline:
             try:
-                with urllib.request.urlopen(f"{subagent_url}/ok", timeout=2) as response:
+                with urllib.request.urlopen(f"{agent_url}/ok", timeout=2) as response:
                     if response.status == 200:
                         break
             except OSError:
@@ -644,7 +644,7 @@ def run_episode(args) -> None:
             time.sleep(1)
         else:
             raise TimeoutError(
-                f"{subagent_url}/ok did not become ready within "
+                f"{agent_url}/ok did not become ready within "
                 f"{args.startup_timeout:g}s"
             )
 
@@ -653,53 +653,52 @@ def run_episode(args) -> None:
 
         runtime = json.loads((episode_dir / "runtime.json").read_text(encoding="utf-8"))
         print(f"Running {args.harness}...", flush=True)
-        checkpointer = InMemorySaver()
         decomposer_model = create_model(args.model) if args.harness == "decomposer" else None
-        agent, agent_config = make_agent(args.harness, decomposer_model, subagent_url,
-                                        args.subagent_api_model, episode_id, checkpointer)
+        thread_id = str(uuid.uuid5(uuid.NAMESPACE_URL, episode_id))
         state, agent_exception = asyncio.run(invoke_and_capture(
-            agent,
+            agent_url,
+            args.agent,
             {"messages": [{"role": "user", "content": runtime["task_config"]["task_str"]}]},
-            agent_config,
+            thread_id,
             args.agent_timeout,
-            subagent_url,
         ))
         agent_error = repr(agent_exception) if agent_exception is not None else None
         messages = state.get("messages", [])
         serialized_messages = serialize_messages(messages)
-        subagent_runs = state.get("subagent_runs", {})
-        subagents = state.get("subagents", {})
-        usage = build_usage_summary(serialized_messages, subagent_runs, subagents)
+        agent_runs = state.get("agent_runs", {})
+        agents = state.get("agents", {})
+        usage = build_usage_summary(serialized_messages, agent_runs, agents)
         if args.harness == "react":
             usage["react"] = usage.pop("decomposer")
         (episode_dir / "trace.json").write_text(
             json.dumps(
                 {
                     "episode_id": episode_id,
-                    "thread_id": agent_config["configurable"]["thread_id"],
+                    "thread_id": thread_id,
                     "run_id": args.run_id,
                     "task": args.task,
                     "repetition": args.repetition,
                     "attempt": args.attempt,
                     "purpose": args.purpose,
                     "harness": args.harness,
-                    "model": args.model if args.harness == "decomposer" else args.subagent_api_model,
+                    "assistant_id": args.agent,
+                    "model": args.model if args.harness == "decomposer" else args.agent_api_model,
                     "decomposer_model": args.model if args.harness == "decomposer" else None,
-                    "teacher_backend": "lmrouter" if decomposer_model else "subagent",
+                    "teacher_backend": "lmrouter" if decomposer_model else "agent",
                     "model_proxy_unix_socket": proxy_socket,
                     "decomposer_generation_config": model_metadata(decomposer_model) if decomposer_model else None,
-                    "subagent_model": args.subagent_model,
-                    "subagent_api_model": args.subagent_api_model,
-                    "subagent_base_url": args.subagent_base_url,
-                    "subagent_generation_config": model_metadata(subagent_model),
-                    "subagent_shutdown": state.get("subagent_shutdown"),
-                    "subagent_shutdown_error": state.get("subagent_shutdown_error"),
+                    "agent_model": args.agent_model,
+                    "agent_api_model": args.agent_api_model,
+                    "agent_base_url": args.agent_base_url,
+                    "agent_generation_config": model_metadata(agent_model),
+                    "agent_shutdown": state.get("agent_shutdown"),
+                    "agent_shutdown_error": state.get("agent_shutdown_error"),
                     "started_at": started_at,
                     "finished_at": datetime.now(timezone.utc).isoformat(),
                     "agent_error": agent_error,
                     "messages": serialized_messages,
-                    "subagents": subagents,
-                    "subagent_runs": subagent_runs,
+                    "agents": agents,
+                    "agent_runs": agent_runs,
                 },
                 indent=2,
                 ensure_ascii=False,
@@ -718,12 +717,12 @@ def run_episode(args) -> None:
         print("Running native evaluation...", flush=True)
         config = runtime["task_config"]
         command = config["evaluation"]["evaluation_command"]
-        if state.get("subagent_shutdown_error"):
+        if state.get("agent_shutdown_error"):
             evaluation = {
                 "episode_id": episode_id, "task": args.task, "pass": False,
                 "native_pass": None, "agent_error": agent_error,
-                "details": "Evaluation skipped: subagents could not be confirmed stopped",
-                "subagent_shutdown_error": state["subagent_shutdown_error"],
+                "details": "Evaluation skipped: agents could not be confirmed stopped",
+                "agent_shutdown_error": state["agent_shutdown_error"],
             }
         elif command is None:
             evaluation = {
@@ -811,27 +810,6 @@ def run_episode(args) -> None:
 
 
 
-def make_agent(harness, model, url, subagent_model, episode_id, checkpointer):
-    thread_id = str(uuid.uuid5(uuid.NAMESPACE_URL, episode_id))
-    config = {"recursion_limit": 410, "configurable": {"thread_id": thread_id}}
-    if harness == "decomposer":
-        agent = create_decomposer_agent(
-            decomposer_model=model,
-            subagent_types=[{
-                "subagent_type_id": SUBAGENT_TYPE_ID,
-                "description": f"{subagent_model} thinking agent with all task tools.",
-                "assistant_id": SUBAGENT_TYPE_ID, "url": url,
-            }],
-            checkpointer=checkpointer, subagent_recursion_limit=410,
-        )
-        return agent, config
-    from langgraph.pregel.remote import RemoteGraph
-    from langgraph_sdk import get_sync_client
-    with get_sync_client(url=url) as client:
-        client.threads.create(thread_id=thread_id)
-    return RemoteGraph(SUBAGENT_TYPE_ID, url=url), config
-
-
 def serialize_messages(messages):
     return [message if isinstance(message, dict) else message_to_dict(message) for message in messages]
 
@@ -845,7 +823,7 @@ def model_metadata(model):
     return values
 
 
-async def cancel_subagent_runs(url):
+async def cancel_agent_runs(url):
     """Stop all runs in this episode's dedicated server, including uncheckpointed runs."""
     from langgraph_sdk import get_client
     stopped = []
@@ -862,7 +840,7 @@ async def cancel_subagent_runs(url):
                             await client.runs.cancel(thread_id, run["run_id"], wait=True, action="interrupt")
                             final = await client.runs.get(thread_id, run["run_id"])
                             if final["status"] in {"pending", "running"}:
-                                raise RuntimeError(f"Subagent run still active: {run['run_id']}")
+                                raise RuntimeError(f"Agent run still active: {run['run_id']}")
                             stopped.append({"thread_id": thread_id, "run_id": run["run_id"],
                                             "status": final["status"]})
             if len(threads) < 100:
@@ -870,24 +848,39 @@ async def cancel_subagent_runs(url):
             offset += len(threads)
 
 
-async def invoke_and_capture(agent, inputs, config, timeout, subagent_url=None):
-    """Capture partial state in the same event loop as the model clients."""
-    try:
-        state = await asyncio.wait_for(agent.ainvoke(inputs, config=config), timeout)
-    except BaseException as error:
+async def invoke_and_capture(url, assistant_id, inputs, thread_id, timeout):
+    """Run an assistant and retain its checkpoint after stopping active runs."""
+    from langgraph_sdk import get_client
+
+    state = {}
+    agent_error = None
+    async with get_client(url=url, timeout=timeout) as client:
+        await client.threads.create(thread_id=thread_id)
         try:
-            state = dict((await agent.aget_state(config)).values)
-        except BaseException:
-            state = {}
-        agent_error = error
-    else:
-        agent_error = None
-    if subagent_url:
+            state = await asyncio.wait_for(client.runs.wait(
+                thread_id, assistant_id, input=inputs, config={"recursion_limit": 410},
+            ), timeout)
+            if "__error__" in state:
+                agent_error = RuntimeError(str(state["__error__"]))
+        except BaseException as error:
+            agent_error = error
+
         try:
-            state["subagent_shutdown"] = await asyncio.wait_for(cancel_subagent_runs(subagent_url), 60)
-        except BaseException as shutdown_error:
-            state["subagent_shutdown_error"] = repr(shutdown_error)
-            agent_error = agent_error or shutdown_error
+            shutdown = await asyncio.wait_for(cancel_agent_runs(url), 60)
+        except BaseException as error:
+            shutdown_error = repr(error)
+            agent_error = agent_error or error
+        else:
+            shutdown_error = None
+
+        try:
+            state = (await client.threads.get_state(thread_id))["values"]
+        except BaseException as error:
+            agent_error = agent_error or error
+        if shutdown_error:
+            state["agent_shutdown_error"] = shutdown_error
+        else:
+            state["agent_shutdown"] = shutdown
     return state, agent_error
 
 

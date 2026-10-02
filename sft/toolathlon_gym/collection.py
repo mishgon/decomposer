@@ -47,13 +47,13 @@ OPENROUTER_TRANSIENT_MARKERS = (
 )
 RESUME_CONFIG_FIELDS = (
     "model",
-    "subagent_model",
-    "subagent_api_model",
-    "subagent_base_url",
-    "subagent_host",
-    "subagent_port",
-    "subagent_ports",
-    "subagent_gpu",
+    "agent_model",
+    "agent_api_model",
+    "agent_base_url",
+    "agent_host",
+    "agent_port",
+    "agent_ports",
+    "agent_gpu",
     "image",
     "reuse_vllm",
     "vllm_max_model_len",
@@ -214,17 +214,17 @@ def parse_args(argv: Sequence[str], defaults: dict[str, Any]) -> argparse.Namesp
     parser.add_argument("-n", "--repetitions", type=int, default=1)
     parser.add_argument("--purpose", choices=("trace-generation",), default="trace-generation")
     parser.add_argument("--model", default=defaults["model"])
-    parser.add_argument("--subagent-model", default=defaults["subagent_model"])
+    parser.add_argument("--agent-model", default=defaults["agent_model"])
     parser.add_argument(
-        "--subagent-api-model",
-        default=defaults.get("subagent_api_model", defaults["subagent_model"]),
+        "--agent-api-model",
+        default=defaults.get("agent_api_model", defaults["agent_model"]),
     )
-    parser.add_argument("--subagent-port", type=int, default=defaults["subagent_port"])
-    parser.add_argument("--subagent-base-url", default=defaults.get("subagent_base_url"),
+    parser.add_argument("--agent-port", type=int, default=defaults["agent_port"])
+    parser.add_argument("--agent-base-url", default=defaults.get("agent_base_url"),
                         help="Registered hosted endpoint; skips local vLLM.")
-    parser.add_argument("--subagent-host", help="Optional container DNS mapping, hostname:IP.")
+    parser.add_argument("--agent-host", help="Optional container DNS mapping, hostname:IP.")
     parser.add_argument(
-        "--subagent-ports",
+        "--agent-ports",
         type=int,
         nargs="+",
         help=(
@@ -232,7 +232,7 @@ def parse_args(argv: Sequence[str], defaults: dict[str, Any]) -> argparse.Namesp
             "assigned round-robin; implies --reuse-vllm."
         ),
     )
-    parser.add_argument("--subagent-gpu", default="0")
+    parser.add_argument("--agent-gpu", default="0")
     parser.add_argument("--vllm-max-model-len", type=int, default=256000)
     parser.add_argument("--vllm-gpu-memory-utilization", type=float, default=0.9)
     parser.add_argument("--vllm-data-parallel-size", type=int, default=1)
@@ -288,8 +288,8 @@ def parse_args(argv: Sequence[str], defaults: dict[str, Any]) -> argparse.Namesp
         help="Maximum total wall-clock seconds for one episode (default: 3300).",
     )
     args = parser.parse_args(argv)
-    if args.subagent_base_url and args.subagent_ports:
-        parser.error("--subagent-base-url cannot be combined with --subagent-ports")
+    if args.agent_base_url and args.agent_ports:
+        parser.error("--agent-base-url cannot be combined with --agent-ports")
     if args.resume and (args.all or args.tasks):
         parser.error("--resume cannot be combined with --all or --tasks")
     if not args.resume and not (args.all or args.tasks):
@@ -323,17 +323,17 @@ def parse_args(argv: Sequence[str], defaults: dict[str, Any]) -> argparse.Namesp
         parser.error("--agent-timeout and --episode-timeout must be positive")
     if args.vllm_data_parallel_size < 1:
         parser.error("--vllm-data-parallel-size must be at least 1")
-    visible_gpus = [item for item in args.subagent_gpu.split(",") if item]
+    visible_gpus = [item for item in args.agent_gpu.split(",") if item]
     if len(visible_gpus) != args.vllm_data_parallel_size:
         parser.error(
-            "--subagent-gpu must list exactly --vllm-data-parallel-size GPU IDs"
+            "--agent-gpu must list exactly --vllm-data-parallel-size GPU IDs"
         )
-    if args.subagent_ports:
-        if len(set(args.subagent_ports)) != len(args.subagent_ports):
-            parser.error("--subagent-ports must not contain duplicates")
+    if args.agent_ports:
+        if len(set(args.agent_ports)) != len(args.agent_ports):
+            parser.error("--agent-ports must not contain duplicates")
         args.reuse_vllm = True
     else:
-        args.subagent_ports = [args.subagent_port]
+        args.agent_ports = [args.agent_port]
     return args
 
 
@@ -484,23 +484,23 @@ def episode_command(
     attempt: int,
     episode_id: str,
     root: Path,
-    subagent_port: int | None = None,
+    agent_port: int | None = None,
     container_slot: int = 0,
 ) -> list[str]:
-    port = args.subagent_port if subagent_port is None else subagent_port
+    port = args.agent_port if agent_port is None else agent_port
     container_slots = getattr(args, "container_slots", 1)
     return [
         sys.executable, str(runner_path), task,
         "--episode-id", episode_id, "--run-id", run_id,
         "--repetition", str(repetition), "--attempt", str(attempt),
         "--purpose", args.purpose, "--model", args.model,
-        "--subagent-model", args.subagent_model,
-        "--subagent-api-model",
-        getattr(args, "subagent_api_model", args.subagent_model),
-        "--subagent-port", str(port),
-        *(["--subagent-base-url", args.subagent_base_url] if getattr(args, "subagent_base_url", None) else []),
-        *(["--subagent-host", args.subagent_host] if getattr(args, "subagent_host", None) else []),
-        "--subagent-gpu", args.subagent_gpu,
+        "--agent-model", args.agent_model,
+        "--agent-api-model",
+        getattr(args, "agent_api_model", args.agent_model),
+        "--agent-port", str(port),
+        *(["--agent-base-url", args.agent_base_url] if getattr(args, "agent_base_url", None) else []),
+        *(["--agent-host", args.agent_host] if getattr(args, "agent_host", None) else []),
+        "--agent-gpu", args.agent_gpu,
         "--vllm-max-model-len", str(args.vllm_max_model_len),
         "--vllm-gpu-memory-utilization", str(args.vllm_gpu_memory_utilization),
         "--vllm-data-parallel-size", str(getattr(args, "vllm_data_parallel_size", 1)),
@@ -533,7 +533,7 @@ def execute_episode(
     episode: dict[str, Any],
     attempt: int,
     stop_event: threading.Event | None = None,
-    subagent_port: int | None = None,
+    agent_port: int | None = None,
     container_slot: int = 0,
 ) -> dict[str, Any]:
     task, repetition = episode["task"], episode["repetition"]
@@ -549,7 +549,7 @@ def execute_episode(
         attempt,
         episode_id,
         root,
-        subagent_port,
+        agent_port,
         container_slot,
     )
     started_at, started = utc_now(), time.monotonic()
@@ -703,27 +703,27 @@ def main(
     default_artifacts_dir: Path,
     default_image: str,
     default_model: str,
-    default_subagent_model: str,
-    default_subagent_api_model: str | None = None,
-    default_subagent_port: int,
+    default_agent_model: str,
+    default_agent_api_model: str | None = None,
+    default_agent_port: int,
     start_vllm: Callable[..., subprocess.Popen[bytes] | None],
     stop_vllm: Callable[[subprocess.Popen[bytes] | None], None],
     docker: Callable[..., subprocess.CompletedProcess[str]],
 ) -> dict[str, Any]:
     from decomposer.models import create_model
-    subagent = (
+    agent = (
         create_model("qwen_3_5_4b_unlooped_thinking")
-        if (default_subagent_api_model or default_subagent_model) == "Qwen/Qwen3.5-4B-unlooped"
+        if (default_agent_api_model or default_agent_model) == "Qwen/Qwen3.5-4B-unlooped"
         else None
     )
     defaults = {
         "artifacts_dir": default_artifacts_dir,
         "image": default_image,
         "model": default_model,
-        "subagent_model": default_subagent_model,
-        "subagent_api_model": default_subagent_api_model or default_subagent_model,
-        "subagent_port": default_subagent_port,
-        "subagent_base_url": subagent.openai_api_base if subagent else None,
+        "agent_model": default_agent_model,
+        "agent_api_model": default_agent_api_model or default_agent_model,
+        "agent_port": default_agent_port,
+        "agent_base_url": agent.openai_api_base if agent else None,
     }
     args = parse_args(argv, defaults)
     root = args.gym_artifacts_dir.resolve()
@@ -747,10 +747,10 @@ def _run_collection(args, run_dir, *, repo_root, toolathlon_root,
         if args.purpose != manifest["config"]["purpose"]:
             raise ValueError("Resume purpose does not match the manifest")
         for name in RESUME_CONFIG_FIELDS:
-            if name in {"subagent_base_url", "subagent_host"} and name not in manifest["config"]:
+            if name in {"agent_base_url", "agent_host"} and name not in manifest["config"]:
                 setattr(args, name, None)
-            elif name == "subagent_ports" and name not in manifest["config"]:
-                setattr(args, name, [manifest["config"]["subagent_port"]])
+            elif name == "agent_ports" and name not in manifest["config"]:
+                setattr(args, name, [manifest["config"]["agent_port"]])
             elif name == "vllm_data_parallel_size" and name not in manifest["config"]:
                 setattr(args, name, 1)
             elif name == "container_slots" and name not in manifest["config"]:
@@ -806,13 +806,13 @@ def _run_collection(args, run_dir, *, repo_root, toolathlon_root,
     processes: list[subprocess.Popen[bytes] | None] = []
     interrupted = False
     try:
-        for port in ([] if args.subagent_base_url else args.subagent_ports):
+        for port in ([] if args.agent_base_url else args.agent_ports):
             processes.append(
                 start_vllm(
-                    model=args.subagent_model,
-                    served_model_name=args.subagent_api_model,
+                    model=args.agent_model,
+                    served_model_name=args.agent_api_model,
                     port=port,
-                    gpu=args.subagent_gpu,
+                    gpu=args.agent_gpu,
                     max_model_len=args.vllm_max_model_len,
                     gpu_memory_utilization=args.vllm_gpu_memory_utilization,
                     timeout=args.vllm_startup_timeout,
@@ -823,9 +823,9 @@ def _run_collection(args, run_dir, *, repo_root, toolathlon_root,
             )
         append_event(
             run_dir,
-            "hosted_subagents_selected" if args.subagent_base_url else "vllm_ready",
+            "hosted_agents_selected" if args.agent_base_url else "vllm_ready",
             externally_managed=args.reuse_vllm,
-            ports=args.subagent_ports,
+            ports=args.agent_ports,
         )
         provider_backoff = ProviderBackoffBarrier()
         next_endpoint = 0
@@ -926,10 +926,10 @@ def _run_collection(args, run_dir, *, repo_root, toolathlon_root,
                     episode=episode,
                     attempt=attempt,
                     stop_event=stop_event,
-                    subagent_port=args.subagent_ports[next_endpoint],
+                    agent_port=args.agent_ports[next_endpoint],
                     container_slot=(index - 1) % args.container_slots,
                 )
-                next_endpoint = (next_endpoint + 1) % len(args.subagent_ports)
+                next_endpoint = (next_endpoint + 1) % len(args.agent_ports)
                 active[future] = (index, episode, attempt, provider_generation)
                 return True
 
@@ -1022,7 +1022,7 @@ def _run_collection(args, run_dir, *, repo_root, toolathlon_root,
             run_dir,
             "vllm_stopped",
             externally_managed=args.reuse_vllm,
-            ports=args.subagent_ports,
+            ports=args.agent_ports,
         )
         incomplete = any(item["status"] != "completed" for item in manifest["episodes"])
         manifest["status"] = (

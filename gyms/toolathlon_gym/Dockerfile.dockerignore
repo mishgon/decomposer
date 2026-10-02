@@ -3,6 +3,7 @@
 !pyproject.toml
 !src/
 src/**
+!src/utils.py
 !src/decomposer/
 !src/decomposer/**
 src/decomposer/**/__pycache__/

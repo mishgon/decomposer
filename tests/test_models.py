@@ -84,6 +84,28 @@ def test_flash_next_uses_nonthinking_sampling():
     assert "max_completion_tokens" not in payload
 
 
+@pytest.mark.parametrize("effort", ["low", "medium"])
+def test_flash_next_uses_thinking_sampling(effort):
+    model = create_model(f"qwen_3_8_flash_next_{effort}_thinking")
+    payload = model._get_request_payload("test")
+    assert model.openai_api_base == "https://lmrouter.2a2i.org/v1"
+    assert payload["model"] == "Qwen/Qwen3.8-Flash-Next-NVFP4"
+    assert payload["reasoning_effort"] == effort
+    assert payload["temperature"] == 1.0
+    assert payload["top_p"] == .95
+    assert payload["presence_penalty"] == 0.0
+    assert payload["extra_body"] == {
+        "allowed_openai_params": ["reasoning_effort"],
+        "top_k": 20, "min_p": 0.0, "repetition_penalty": 1.0,
+        "chat_template_kwargs": {
+            "enable_thinking": True, "preserve_thinking": True,
+        },
+    }
+    assert model.preserve_reasoning is True
+    assert "max_tokens" not in payload
+    assert "max_completion_tokens" not in payload
+
+
 @pytest.mark.parametrize("profile, thinking, temperature, top_p", [
     ("qwen_3_5_4b_unlooped_thinking", True, .6, .95),
     ("qwen_3_5_4b_unlooped_non_thinking", False, .7, .8),

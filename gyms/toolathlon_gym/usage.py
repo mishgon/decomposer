@@ -65,20 +65,20 @@ def summarize_messages(messages: Iterable[dict[str, Any]]) -> dict[str, Any]:
 
 def build_usage_summary(
     decomposer_messages: list[dict[str, Any]],
-    subagent_runs: dict[str, dict[str, Any]],
+    agent_runs: dict[str, dict[str, Any]],
     agents: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     decomposer = summarize_messages(decomposer_messages)
-    subagents = {
+    agents = {
         run_id: {
-            "subagent_id": run.get("subagent_id"),
-            "subagent_type_id": (agents or {}).get(
-                run.get("subagent_id"), {}
-            ).get("subagent_type_id", run.get("subagent_type_id")),
+            "agent_id": run.get("agent_id"),
+            "agent_type_id": (agents or {}).get(
+                run.get("agent_id"), {}
+            ).get("agent_type_id", run.get("agent_type_id")),
             "status": run.get("status"),
             **summarize_messages(run.get("messages") or []),
         }
-        for run_id, run in subagent_runs.items()
+        for run_id, run in agent_runs.items()
     }
     totals: dict[str, Any] = {field: decomposer[field] for field in TOKEN_FIELDS}
     totals.update(
@@ -87,7 +87,7 @@ def build_usage_summary(
         cost=decomposer["cost"] or 0.0,
     )
     cost_reported = decomposer["cost"] is not None
-    for usage in subagents.values():
+    for usage in agents.values():
         for field in (*TOKEN_FIELDS, "model_responses", "responses_with_usage"):
             totals[field] += usage[field]
         if usage["cost"] is not None:
@@ -95,5 +95,5 @@ def build_usage_summary(
             cost_reported = True
     if not cost_reported:
         totals["cost"] = None
-    totals["subagent_runs"] = len(subagents)
-    return {"decomposer": decomposer, "subagents": subagents, "totals": totals}
+    totals["agent_runs"] = len(agents)
+    return {"decomposer": decomposer, "agents": agents, "totals": totals}

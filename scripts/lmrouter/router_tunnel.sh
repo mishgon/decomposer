@@ -13,25 +13,36 @@ if [[ ! "$listen_port" =~ ^[0-9]{1,5}$ ]] || (( 10#$listen_port < 1 || 10#$liste
     exit 2
 fi
 
+relay=
 child=
 stop() {
-    trap - INT TERM
+    trap - INT TERM HUP
     if [[ -n "$child" ]]; then
         kill "$child" 2>/dev/null || true
         wait "$child" 2>/dev/null || true
     fi
-    exit 0
+    if [[ -n "$relay" ]]; then
+        kill "$relay" 2>/dev/null || true
+        wait "$relay" 2>/dev/null || true
+    fi
+    exit "${1:-0}"
 }
-trap stop INT TERM
+trap stop INT TERM HUP
+python3 "$(dirname "$0")/gateway_relay.py" --host "$router_host" &
+relay=$!
 delay=2
 while true; do
     started=$SECONDS
     ssh -N -T -i "$2" -o IdentitiesOnly=yes -o IdentityAgent=none -o BatchMode=yes \
         -o StrictHostKeyChecking=yes -o ConnectTimeout=10 \
         -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 \
-        -R "127.0.0.1:$listen_port:$router_host:443" "$1" &
+        -R "127.0.0.1:$listen_port:127.0.0.1:18445" "$1" &
     child=$!
-    wait "$child" || true
+    finished=
+    wait -n -p finished "$relay" "$child" || true
+    if [[ "$finished" == "$relay" ]]; then
+        stop 1
+    fi
     child=
     # Keep retries short after a healthy session, bounded after repeated failures.
     if (( SECONDS - started >= 60 )); then delay=2; fi

@@ -5,8 +5,8 @@ scheduler. This is Toolathlon Gym, not the separate Toolathlon benchmark.
 
 ```bash
 PYTHONPATH=src:. python -m evals.toolathlon_gym.run \
-  --tasks task-a task-b --harness react -n 3 --concurrency 8 \
-  --subagent-api-model "$SUBAGENT_MODEL" --subagent-base-url "$LLM_PROXY_URL"
+  --tasks task-a task-b --agent qwen_3_5_4b_unlooped_thinking -n 3 --concurrency 8 \
+  --agent-api-model "$AGENT_MODEL" --agent-base-url "$LLM_PROXY_URL"
 ```
 
 The other model and environment options match `gyms.toolathlon_gym.run`.

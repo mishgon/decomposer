@@ -1,0 +1,8 @@
+{
+  "dependencies": ["../.."],
+  "graphs": {
+    "qwen_3_5_4b_unlooped_thinking": "./agents.py:qwen_3_5_4b_unlooped_thinking",
+    "decomposer": "./agents.py:decomposer"
+  },
+  "python_version": "3.12"
+}

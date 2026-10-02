@@ -7,20 +7,20 @@ Build Decomposer, an agent that orchestrates other agents to solve tasks faster,
 - Parallelizing work across multiple agents.
 - Routing tasks to cheaper models according to task difficulty.
 - Reducing each agent's context.
-- Handling subagent errors.
+- Handling agent errors.
 
 We aim to demonstrate improvements in speed, cost, and task-solving quality over standalone agents on Gaia2, Toolathlon, BrowseComp, and WideSearch.
 
 ## Methodology
 
-Decomposer uses a minimal harness: a standard tool-calling loop with four tools for orchestrating subagents:
+Decomposer uses a minimal harness: a standard tool-calling loop with four tools for orchestrating agents:
 
-- `new(subagent_type_id) -> subagent_id`: creates a subagent of the specified type with an empty conversation history.
-- `fork(subagent_id) -> subagent_id`: creates a subagent of the same type with a copy of the source conversation and state. Subsequent conversations are independent; the external environment remains shared.
-- `run(subagent_id, prompt) -> subagent_run_id`: starts a run of an existing subagent and immediately returns its run ID. The same subagent can run multiple times, retaining its conversation history across runs.
-- `wait() -> [...]`: waits for at least one new run to finish and returns all newly available subagent responses since the previous `wait` call. Each result includes the run status and any error. Waiting is bounded by a timeout.
+- `new(agent_type_id) -> agent_id`: creates an agent of the specified type with an empty conversation history.
+- `fork(agent_id) -> agent_id`: creates an agent of the same type with a copy of the source conversation and state. Subsequent conversations are independent; the external environment remains shared.
+- `run(agent_id, prompt) -> agent_run_id`: starts a run of an existing agent and immediately returns its run ID. The same agent can run multiple times, retaining its conversation history across runs.
+- `wait() -> [...]`: waits for at least one new run to finish and returns all newly available agent responses since the previous `wait` call. Each result includes the run status and any error. Waiting is bounded by a timeout.
 
-This loop enables fully asynchronous orchestration and execution: Decomposer can launch newly unblocked subtasks without waiting for unrelated subagent runs to finish. It can also adapt its decomposition as subagent results arrive. See `src/decomposer/core.py` for the implementation.
+This loop enables fully asynchronous orchestration and execution: Decomposer can launch newly unblocked subtasks without waiting for unrelated agent runs to finish. It can also adapt its decomposition as agent results arrive. See `src/decomposer/core.py` for the implementation.
 
 We plan to train the orchestration model in two stages:
 
@@ -38,13 +38,8 @@ From the repository root, install the development environment:
 uv sync
 ```
 
-With `LLM_PROXY_MASTER_KEY` set, start the subagent server in another terminal:
-
-```bash
-scripts/subagents/serve.sh
-```
-
-Then run Decomposer from the repository root:
+With `LLM_PROXY_MASTER_KEY` set, run the example. It starts a local LangGraph
+server hosting Decomposer and its agents, then stops it when the run finishes:
 
 ```bash
 uv run python examples/minimal/run.py

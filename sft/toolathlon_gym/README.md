@@ -12,13 +12,13 @@ Confirm exact deployment IDs and perform a one-task smoke before a full run.
 ```bash
 PYTHONPATH=src:. python -m sft.toolathlon_gym.run \
   --all --adaptive -n 1 --concurrency 8 \
-  --subagent-base-url https://lmrouter.2a2i.org/v1
+  --agent-base-url https://lmrouter.2a2i.org/v1
 ```
 
 Teacher and workers: `LLM_PROXY_MASTER_KEY`, using the explicit entries in
 [models.py](../../src/decomposer/models.py).
 No local GPU server is started for hosted workers. Add
-`--subagent-host hostname:IP` if containers need an explicit DNS mapping.
+`--agent-host hostname:IP` if containers need an explicit DNS mapping.
 Shared tunnel tools live under `scripts/lmrouter/`. The Gym image refresh remains
 under `inference/`.
 
@@ -84,7 +84,7 @@ PYTHONPATH=src:. python -m sft.toolathlon_gym.run --resume RUN_ID --adaptive
 
 For an existing artifact root, also pass `--gym-artifacts-dir PATH`.
 Completed attempts are not repeated on resume. Do not mix pre-migration
-`spawn_subagent` traces and new-harness traces under a new collection identity.
+`spawn_agent` traces and new-harness traces under a new collection identity.
 
 A run lock rejects a second collector for the same run ID. After a crash, resume
 recovers saved `attempt.json` records before scheduling work. Do not delete the
