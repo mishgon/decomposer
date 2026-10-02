@@ -46,6 +46,37 @@ def usage(path):
     return roles
 
 
+async def cleanup_workers(client, state, path):
+    """Discover orphan runs, stop workers, then archive and release each thread."""
+    async def list_runs(thread_id):
+        runs = []
+        while True:
+            page = await asyncio.wait_for(client.runs.list(thread_id, limit=100, offset=len(runs)), 30)
+            runs.extend(page)
+            if len(page) < 100:
+                return runs
+
+    errors = []
+    thread_ids = dict.fromkeys(s["thread_id"] for s in state.get("subagents", {}).values())
+    for thread_id in thread_ids:
+        try:
+            # A runs.create response can be lost before its ID reaches parent state.
+            runs = await list_runs(thread_id)
+            for run in runs:
+                if run["status"] in {"pending", "running"}:
+                    await asyncio.wait_for(client.runs.cancel(thread_id, run["run_id"], wait=True), 30)
+            runs = await list_runs(thread_id)
+            if any(r["status"] in {"pending", "running"} for r in runs):
+                raise RuntimeError("Worker still active after cancellation")
+            worker_state = await asyncio.wait_for(client.threads.get_state(thread_id), 30)
+            save(path / "subagents" / f"{thread_id}.json", {**worker_state, "runs": runs})
+            # Never discard remote checkpoints unless the archive was saved successfully.
+            await asyncio.wait_for(client.threads.delete(thread_id), 30)
+        except Exception as exc:
+            errors.append(f"{thread_id}: {type(exc).__name__}: {exc}")
+    return errors
+
+
 async def episode(task, mode, attempt, root, args):
     attempt_path = root / mode / task["task_id"] / f"attempt-{attempt:03d}"
     if (attempt_path / "result.json").exists():
@@ -87,16 +118,8 @@ async def episode(task, mode, attempt, root, args):
     finally:
         snapshot = await agent.aget_state(config)
         state = state or dict(snapshot.values)
-        for run in state.get("subagent_runs", {}).values():
-            try:
-                thread_id = state["subagents"][run["subagent_id"]]["thread_id"]
-                live = await asyncio.wait_for(client.runs.get(thread_id, run["run_id"]), 30)
-                if live["status"] in {"pending", "running"}:
-                    await asyncio.wait_for(client.runs.cancel(thread_id, run["run_id"], wait=True), 30)
-                worker_state = await asyncio.wait_for(client.threads.get_state(thread_id), 30)
-                save(path / "subagents" / f"{run['run_id']}.json", worker_state)
-            except Exception as exc:
-                result.setdefault("cleanup_errors", []).append(str(exc))
+        if errors := await cleanup_workers(client, state, path):
+            result["cleanup_errors"] = errors
         await close_model(policy)
         result["agent_finished_at"] = time.time()
         messages = state.get("messages", [])

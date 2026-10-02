@@ -74,6 +74,13 @@ references an execution directory with model/tool/judge logs, final graph state,
 worker states and provider usage. Failed attempts remain available for analysis.
 No aggregate evaluation or collection policy lives in this directory.
 
+At episode end, cleanup discovers runs on every known subagent thread, including
+runs whose launch response was lost. It cancels active runs and waits for them,
+then saves one `subagents/<thread_id>.json` archive containing final state and run
+metadata before deleting the remote thread/checkpoints. Model/tool logs remain
+in the execution directory. Failed cancellation or archiving retains the remote
+thread and records a cleanup error, excluding that attempt from SFT successes.
+
 The current hosted Qwen4B deployment has a 128k context limit. Overflow stops that
 worker and `wait()` reports its error to the Decomposer. `run()` and `fork()` reject
 failed workers; `new()` creates a replacement with empty history. Other workers
