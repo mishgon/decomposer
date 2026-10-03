@@ -5,7 +5,7 @@ defaults:
 trainer:
   experiment_name: smoke
   val_before_train: false
-  test_freq: -1
+  # Keep full's positive interval: -1 skips veRL's final metrics flush.
 rollout:
   total_rollout_steps: 1
 async_training:

@@ -34,6 +34,7 @@ def test_smoke_is_one_update_with_same_loss_and_optimizer():
     assert smoke.distillation == full.distillation
     assert smoke.rollout.total_rollout_steps == 1
     assert not smoke.trainer.val_before_train
+    assert smoke.trainer.test_freq > smoke.rollout.total_rollout_steps
     assert smoke.trainer.save_freq == 1
     assert smoke.distillation.distillation_loss.use_task_rewards is False
     assert smoke.actor_rollout_ref.rollout.n == 1
