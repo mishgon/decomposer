@@ -71,7 +71,8 @@ def main():
             saved = json.loads(manifest.read_text())
             if saved['identity'] != identity:
                 raise ValueError('Resume source, configuration or data differs')
-            if not (output / 'checkpoints/latest_checkpointed_iteration.txt').exists():
+            checkpoint_dir = Path(resolved['trainer']['default_local_dir'])
+            if not (checkpoint_dir / 'latest_checkpointed_iteration.txt').exists():
                 raise ValueError('No saved checkpoint to resume')
         else:
             output.mkdir(parents=True, exist_ok=False)
