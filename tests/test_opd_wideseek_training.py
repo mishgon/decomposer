@@ -22,7 +22,8 @@ def config(name):
     with patch.dict(os.environ, {'OPD_ROOT': str(ROOT), 'OPD_DATA': '/tmp/data',
                                  'OPD_ARTIFACTS': '/tmp/run', 'MODEL_PATH': '/tmp/student'}), \
             initialize_config_dir(config_dir=str(ROOT / 'opd/wideseek'), version_base=None):
-        c = compose(config_name=name, overrides=['hydra.searchpath=[pkg://verl.trainer.config]'])
+        c = compose(config_name=name, overrides=['hydra.searchpath=[pkg://verl.trainer.config]',
+                                                'trainer.experiment_name=config-test'])
         OmegaConf.resolve(c)
         return c
 
