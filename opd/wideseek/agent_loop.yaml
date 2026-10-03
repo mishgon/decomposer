@@ -1,0 +1,2 @@
+- name: wideseek_decomposer
+  _target_: opd.wideseek.agent_loop.WideSeekAgentLoop

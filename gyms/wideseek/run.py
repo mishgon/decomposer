@@ -77,7 +77,7 @@ async def cleanup_workers(client, state, path):
     return errors
 
 
-async def episode(task, mode, attempt, root, args):
+async def episode(task, mode, attempt, root, args, *, policy=None):
     attempt_path = root / mode / task["task_id"] / f"attempt-{attempt:03d}"
     if (attempt_path / "result.json").exists():
         return
@@ -86,7 +86,7 @@ async def episode(task, mode, attempt, root, args):
     init_budget(path, args.model_calls, args.output_tokens)
     checkpoint = InMemorySaver()
     client = get_client(url=args.worker_url)
-    policy = model(getattr(args, "model", DEFAULT_MODEL))
+    policy = policy if policy is not None else model(getattr(args, "model", DEFAULT_MODEL))
     subagent = getattr(args, "subagent_model", DEFAULT_MODEL)
     if mode == "decomposer":
         agent = create_decomposer_agent(decomposer_model=policy,
@@ -138,6 +138,7 @@ async def episode(task, mode, attempt, root, args):
     result["usage"] = usage(path)
     save(attempt_path / "result.json", result)
     print(json.dumps({k: result[k] for k in ("mode", "task_id", "attempt", "status", "evaluation")}), flush=True)
+    return result
 
 
 async def prepare_run(args):

@@ -1,0 +1,146 @@
+# Shared optimizer recipe: tau2 champion + agentic-rag (see README).
+defaults:
+  - ppo_trainer
+  - _self_
+
+hydra:
+  run:
+    dir: ${oc.env:OPD_ARTIFACTS}/hydra
+  job:
+    chdir: false
+
+algorithm:
+  adv_estimator: grpo
+  norm_adv_by_std_in_grpo: false
+  rollout_correction:
+    bypass_mode: true
+
+data:
+  train_files: ${oc.env:OPD_DATA}/train.parquet
+  val_files: ${oc.env:OPD_DATA}/evaluation.parquet
+  return_raw_chat: true
+  train_batch_size: 0
+  gen_batch_size: 1
+  val_batch_size: 2
+  max_prompt_length: 4096
+  max_response_length: 12288
+  apply_chat_template_kwargs:
+    enable_thinking: false
+
+actor_rollout_ref:
+  hybrid_engine: false
+  model:
+    lora:
+      merge: true
+    path: ${oc.env:MODEL_PATH}
+    lora_rank: 32
+    lora_alpha: 64
+    target_modules: all-linear
+    override_config:
+      attn_implementation: sdpa
+    use_remove_padding: false
+  actor:
+    optim:
+      lr: 1.5e-5
+    ppo_mini_batch_size: 1
+    ppo_epochs: 2
+    use_rollout_log_probs: true
+    ppo_micro_batch_size_per_gpu: 1
+    use_dynamic_bsz: false
+    loss_agg_mode: seq-mean-token-mean
+    checkpoint:
+      save_contents: [model, optimizer, extra]
+  ref:
+    log_prob_micro_batch_size_per_gpu: 1
+  rollout:
+    name: vllm
+    mode: async
+    tensor_model_parallel_size: 1
+    gpu_memory_utilization: 0.45
+    n: 1
+    multi_turn:
+      enable: true
+    checkpoint_engine:
+      backend: nccl
+    temperature: 0.7
+    top_p: 0.8
+    top_k: 20
+    calculate_log_probs: true
+    log_prob_micro_batch_size_per_gpu: 1
+    enforce_eager: true
+    enable_prefix_caching: false
+    load_format: safetensors
+    engine_kwargs:
+      vllm:
+        language_model_only: true
+        additional_config:
+          gdn_prefill_backend: triton
+    agent:
+      agent_loop_config_path: ${oc.env:OPD_ROOT}/opd/wideseek/agent_loop.yaml
+      default_agent_loop: wideseek_decomposer
+      num_workers: 2
+    val_kwargs:
+      n: 8
+      do_sample: true
+      temperature: 0.7
+      top_p: 0.8
+      top_k: 20
+
+trainer:
+  use_v1: true
+  n_gpus_per_node: 1
+  nnodes: 1
+  total_training_steps: null
+  total_epochs: 10
+  # Save resumable state immediately after every optimizer update, before eval.
+  save_freq: 1
+  # Keep evaluated checkpoints too; latest-only eviction could delete the best.
+  max_actor_ckpt_to_keep: -1
+  max_critic_ckpt_to_keep: -1
+  test_freq: 8
+  val_before_train: true
+  default_local_dir: ${oc.env:OPD_ARTIFACTS}/checkpoints
+  project_name: decomposer-wideseek-opd
+  experiment_name: wideseek
+  logger: [console, tensorboard, clearml]
+
+rollout:
+  nnodes: 1
+  n_gpus_per_node: 1
+  n: ${actor_rollout_ref.rollout.n}
+  total_rollout_steps: null
+
+async_training:
+  require_batches: 1
+  trigger_parameter_sync_step: 1
+  staleness_threshold: 1.0
+  concurrent_samples_per_replica: 2
+  teacher_manager_class: opd.manager.HostedTeacherManager
+  partial_rollout: true
+  use_trainer_do_validate: false
+  use_dynamic_resource_scheduling: false
+  dynamic_schedule_policy: default
+  dynamic_schedule_deactivate_ratio: 0.3
+  dynamic_schedule_enable_rebalance: true
+
+wideseek:
+  worker_url: http://127.0.0.1:18082
+  timeout: 2700
+  subagent_model: qwen_3_5_4b_unlooped_thinking
+  judge_model: qwen_3_8_flash_next_non_thinking
+
+distillation:
+  enabled: true
+  n_gpus_per_node: 0
+  nnodes: 0
+  teacher_models:
+    teacher_model:
+      model_path: Qwen/Qwen3.8-Flash-Next-NVFP4
+      inference:
+        temperature: 1.0
+  distillation_loss:
+    loss_mode: k1
+    use_policy_gradient: true
+    use_task_rewards: false
+    loss_max_clamp: 10.0
+    log_prob_min_clamp: -10.0

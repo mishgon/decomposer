@@ -1,0 +1,12 @@
+# One optimizer update to verify execution, checkpoints and logging.
+defaults:
+  - full
+  - _self_
+trainer:
+  experiment_name: smoke
+  val_before_train: false
+  test_freq: -1
+rollout:
+  total_rollout_steps: 1
+async_training:
+  concurrent_samples_per_replica: 1
