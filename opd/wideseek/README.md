@@ -29,11 +29,12 @@ port and LangGraph storage. It does not load a local subagent model:
 
 ```bash
 source gyms/wideseek/env.sh
-.venv-opd/bin/langgraph dev --config gyms/wideseek/langgraph.json \
+.venv/bin/langgraph dev --config gyms/wideseek/langgraph.json \
   --host 127.0.0.1 --port 18082 --no-browser --no-reload --n-jobs-per-worker 4
 ```
 
-Start it in a terminal or tmux session and keep its logs under `artifacts/`.
+Use the Gym's `.venv` for this service and `.venv-opd` for training. Start it in
+a terminal or tmux session and keep its logs under `artifacts/`.
 Export the same `WS_ARTIFACT_ROOT` for workers and training if using another
 artifact location. Corpus/index files stay in their existing cache.
 
