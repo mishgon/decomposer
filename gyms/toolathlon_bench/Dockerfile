@@ -3,6 +3,7 @@ FROM ${TOOLATHLON_BASE_IMAGE}
 
 ARG PYTHON_VERSION=3.12
 ENV AGENT_VENV=/opt/agents
+ENV RAYON_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 POLARS_MAX_THREADS=1
 
 # The base image predates the pinned benchmark; keep its .venv and lockfile.
 COPY external/toolathlon/scripts/ /workspace/scripts/

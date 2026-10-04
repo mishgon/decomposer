@@ -9,6 +9,7 @@ helpers for reading full outputs after Toolathlon's 100K truncation boundary.
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import sys
 from typing import Any
@@ -66,10 +67,13 @@ class ContainerToolGateway(upstream.ContainerToolGateway):
 
         callback = self._local_callbacks[tool_record.exposed_name]
         workspace = self.bundle["container_paths"]["agent_workspace"]
-        result = await callback(
+        # Toolathlon's local tools block inside their coroutines (python_execute
+        # waits on subprocess.run, sleep on time.sleep). Run them in a thread so
+        # the gateway keeps serving other agents' calls.
+        result = await asyncio.to_thread(asyncio.run, callback(
             RunContextWrapper(context={"_agent_workspace": workspace}),
             json.dumps(arguments, ensure_ascii=False),
-        )
+        ))
         text = result if isinstance(result, str) else json.dumps(
             result, ensure_ascii=False, default=str
         )

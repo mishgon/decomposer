@@ -5,6 +5,7 @@ import json
 import os
 import signal
 import sys
+import threading
 import types
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -598,7 +599,6 @@ def test_lanes_group_repetitions_and_conflicting_tasks():
 
 
 def test_parallel_never_overlaps_episodes_that_share_state(tmp_path, monkeypatch):
-    import threading
     import time
 
     task_pool(tmp_path / "toolathlon", ["a", "b", "c", "k1", "k2"], [["a", "b"]])
@@ -669,7 +669,6 @@ def test_parallel_runs_each_repetition_as_an_episode(tmp_path, monkeypatch):
 
 
 def test_execute_preserves_logs_and_times_out(tmp_path):
-    import threading
 
     code, timed_out = parallel.execute([sys.executable, "-c", "print('hi')"], tmp_path, 30, threading.Event())
     assert (code, timed_out) == (0, False)
@@ -935,7 +934,8 @@ def gateway_module(monkeypatch):
 
     def local_tool(name, result):
         async def invoke(context, params):
-            return {"context": context.context, "params": json.loads(params), "result": result}
+            return {"context": context.context, "params": json.loads(params), "result": result,
+                    "thread": threading.get_ident()}
         return SimpleNamespace(name=name, description=f"{name} tool",
                                params_json_schema={"type": "object"}, on_invoke_tool=invoke)
 
@@ -988,6 +988,7 @@ def test_gateway_exposes_requested_native_local_tools(gateway_module, tmp_path):
     result = asyncio.run(gateway._remote_call(record, {"code": "print(1)"}))
     assert result["isError"] is False
     payload = json.loads(result["content"][0]["text"])
+    assert payload.pop("thread") != threading.get_ident()
     assert payload == {"context": {"_agent_workspace": "/workspace/dumps/workspace"},
                        "params": {"code": "print(1)"}, "result": "ran"}
 
