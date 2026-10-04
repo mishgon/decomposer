@@ -111,7 +111,14 @@ def main() -> None:
 
 
 async def serve() -> None:
-    from utils import agent_server
+    from agents import DECOMPOSER_MODEL_ID, QWEN_3_5_4B_THINKING_MODEL_ID
+    from decomposer.agent_server import agent_server
+
+    runtime_path = Path(os.environ.get("TOOLATHLON_DATA_DIR", "/artifacts/data")) / "runtime.json"
+    runtime = json.loads(runtime_path.read_text(encoding="utf-8"))
+    runtime["agent_model"] = model_metadata(QWEN_3_5_4B_THINKING_MODEL_ID)
+    runtime["decomposer_model"] = model_metadata(DECOMPOSER_MODEL_ID)
+    runtime_path.write_text(json.dumps(runtime, indent=2), encoding="utf-8")
 
     stopped = asyncio.Event()
     loop = asyncio.get_running_loop()
@@ -124,6 +131,26 @@ async def serve() -> None:
         n_jobs_per_worker=int(os.environ.get("N_JOBS_PER_WORKER", "16")),
     ):
         await stopped.wait()
+
+
+def model_metadata(model_id):
+    """Describe the image's model configuration without credentials or clients."""
+    from decomposer.models import create_model
+
+    model = create_model(model_id)
+    values = model.model_dump(include={
+        "model_name", "openai_api_base", "openrouter_api_base", "temperature", "top_p",
+        "presence_penalty", "max_tokens", "extra_body", "model_kwargs", "reasoning",
+        "reasoning_effort", "request_timeout", "max_retries",
+    }, exclude_none=True)
+    if hasattr(model, "preserve_reasoning"):
+        values["preserve_reasoning"] = model.preserve_reasoning
+    return {
+        "model_id": model_id,
+        "api_model": values["model_name"],
+        "base_url": values.get("openai_api_base", values.get("openrouter_api_base")),
+        "generation_config": values,
+    }
 
 
 if __name__ == "__main__":

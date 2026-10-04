@@ -11,36 +11,19 @@ Confirm exact deployment IDs and perform a one-task smoke before a full run.
 
 ```bash
 PYTHONPATH=src:. python -m sft.toolathlon_gym.run \
-  --all --adaptive -n 1 --concurrency 8 \
-  --agent-base-url https://lmrouter.2a2i.org/v1
+  --all --adaptive -n 1 --concurrency 8
 ```
 
 Teacher and workers: `LLM_PROXY_MASTER_KEY`, using the explicit entries in
 [models.py](../../src/decomposer/models.py).
-No local GPU server is started for hosted workers. Add
-`--agent-host hostname:IP` if containers need an explicit DNS mapping.
-Shared tunnel tools live under `scripts/lmrouter/`. The Gym image refresh remains
-under `inference/`.
+Models use their registered endpoints; collection does not start a local GPU server.
+The Gym image refresh remains under `inference/`.
 
-### Private Router Tunnel
-
-Follow [the shared setup instructions](../../README.md#hosted-models-and-private-lmrouter-access)
-to create the restricted SSH key and start the tunnel and relay once per host:
-
-```bash
-python scripts/lmrouter/socket_relay.py \
-  --socket "$HOME/.local/share/lmrouter-relay/router.sock" --port 18443
-```
-
-Set `LLM_PROXY_UNIX_SOCKET` to that path. The runner mounts its directory
-read-only into task containers. HTTP clients still use the original HTTPS URL
-and verify its certificate; the relay never decrypts traffic or stores keys.
-The directory should contain only the relay socket. Run the relay separately
-from collection and keep it alive when resuming.
-
-`collect_hosted.sh` selects Flash Next non-thinking and Qwen4B-unlooped thinking
-with native tool calling. It loads credentials from `LMROUTER_ENV` and requires
-a validated `COLLECTION_IMAGE` plus `LLM_PROXY_UNIX_SOCKET`. Example:
+Models are configured in [Gym agents.py](../../gyms/toolathlon_gym/agents.py).
+Rebuild the Gym image after changing them. For `vllm/` models, start the local
+server before collection. `collect_hosted.sh` loads credentials from
+`LMROUTER_ENV` (default: `~/.local/share/environment/lmrouter.env`) and requires
+a validated `COLLECTION_IMAGE`. Example:
 
 ```bash
 bash sft/toolathlon_gym/collect_hosted.sh --all --adaptive -n 1 --concurrency 8

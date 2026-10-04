@@ -1,0 +1,516 @@
+<!doctype html>
+<html lang="ru">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Моська: трейс</title><style>
+* { box-sizing: border-box; }
+body { margin: 0; padding: 32px; background: #f5f7f8; color: #23343d;
+       font: 15px/1.5 system-ui, sans-serif; }
+.chart { overflow-x: auto; background: white; border: 1px solid #dce4e7;
+         border-radius: 12px; }
+svg { display: block; width: 100%; min-width: 1000px; height: auto; }
+svg text { font-family: system-ui, sans-serif; fill: #23343d; }
+.tick { font-size: 12px; fill: #60717b; }
+.grid { stroke: #e4eaed; stroke-dasharray: 3 5; }
+.lifeline, .fork { stroke: #d7e0e4; }
+.agent-name { font-size: 14px; font-weight: 600; }
+.animal { font-size: 23px; }
+.fork { fill: none; }
+.created { fill: white; stroke: #60717b; stroke-width: 2; }
+.run-line { stroke: #338b79; stroke-width: 6; stroke-linecap: round; }
+.failed .run-line, .failed .event:hover circle, .failed .event:focus circle {
+  stroke: #bc5252; }
+.uncollected .run-line { stroke: #a38145; stroke-dasharray: 5 6; }
+.event { cursor: pointer; outline: none; }
+.event circle { fill: white; stroke: #dce4e7; }
+.event:hover circle, .event:focus circle { stroke: #338b79; stroke-width: 2; }
+#tooltip { position: fixed; z-index: 1; width: min(560px, calc(100vw - 24px));
+           max-height: min(440px, calc(100vh - 24px)); overflow: auto;
+           padding: 16px 20px; border: 1px solid #c8d5da; border-radius: 18px 18px 18px 4px;
+           background: white; box-shadow: 0 8px 32px #23343d26; }
+.message { overflow-wrap: anywhere; line-height: 1.6; }
+.message > :first-child { margin-top: 0; }
+.message > :last-child { margin-bottom: 0; }
+.message p, .message ul, .message ol, .message pre, .message blockquote,
+.message table { margin: 0 0 12px; }
+.message h1, .message h2, .message h3, .message h4, .message h5, .message h6 {
+  margin: 20px 0 10px; line-height: 1.3; }
+.message h1 { font-size: 22px; }
+.message h2 { font-size: 20px; }
+.message h3 { font-size: 17px; }
+.message h4, .message h5, .message h6 { font-size: 15px; }
+.message ul, .message ol { padding-left: 24px; }
+.message li + li { margin-top: 4px; }
+.message li > p { margin: 0; }
+.message code { padding: 2px 5px; border-radius: 4px; background: #f0f4f6;
+                font: 13px/1.5 ui-monospace, monospace; }
+.message pre { padding: 12px; border-radius: 8px; background: #f0f4f6;
+               overflow-x: auto; }
+.message pre code { padding: 0; background: none; white-space: pre; }
+.message blockquote { padding-left: 12px; border-left: 3px solid #c8d5da; color: #60717b; }
+.message blockquote > :last-child { margin-bottom: 0; }
+.message table { border-collapse: collapse; display: block; max-width: 100%; overflow-x: auto; }
+.message th, .message td { padding: 6px 10px; border: 1px solid #dce4e7; text-align: left; }
+.message th { background: #f0f4f6; }
+.message a { color: #247360; text-underline-offset: 2px; }
+.message hr { border: 0; border-top: 1px solid #dce4e7; margin: 16px 0; }
+.message img { max-width: 100%; }
+@media (max-width: 600px) { body { padding: 16px; } }
+</style></head>
+<body>
+<div class="chart"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 692" aria-label="Временная шкала агентов Моськи">
+<g class="moska"><text class="animal" x="24" y="107">🐶</text><text class="agent-name" x="60" y="105">Моська</text><line class="lifeline" x1="260" x2="1168" y1="100" y2="100"/></g>
+<g class="agent" data-agent-id="27c4f187-0ec4-459d-a6c7-3645291bfc2d"><rect x="0" y="144" width="1200" height="88" fill="#f8fafb"/><text class="animal" x="24" y="195">🦅</text><text class="agent-name" x="60" y="193">Весёлый орёл</text><line class="lifeline" x1="272.33" x2="1168" y1="188" y2="188"/></g>
+<g class="agent" data-agent-id="ae0affe2-52e8-42bb-a95d-70322188eec2"><rect x="0" y="232" width="1200" height="88" fill="#ffffff"/><text class="animal" x="24" y="283">🐧</text><text class="agent-name" x="60" y="281">Ловкий пингвин</text><line class="lifeline" x1="282.45" x2="1168" y1="276" y2="276"/></g>
+<g class="agent" data-agent-id="cae3f516-c035-473a-ae81-286f48d0c6fa"><rect x="0" y="320" width="1200" height="88" fill="#f8fafb"/><text class="animal" x="24" y="371">🦗</text><text class="agent-name" x="60" y="369">Сонный сверчок</text><line class="lifeline" x1="293.00" x2="1168" y1="364" y2="364"/></g>
+<g class="agent" data-agent-id="f30b9cc5-cc6b-499c-abe5-d6c6d589701e"><rect x="0" y="408" width="1200" height="88" fill="#ffffff"/><text class="animal" x="24" y="459">🦎</text><text class="agent-name" x="60" y="457">Резвая ящерица</text><line class="lifeline" x1="623.14" x2="1168" y1="452" y2="452"/></g>
+<g class="agent" data-agent-id="da781e92-9f3e-4add-82a0-d17fe6c1defd"><rect x="0" y="496" width="1200" height="88" fill="#f8fafb"/><text class="animal" x="24" y="547">🐦</text><text class="agent-name" x="60" y="545">Зоркая птица</text><line class="lifeline" x1="623.14" x2="1168" y1="540" y2="540"/></g>
+<g class="agent" data-agent-id="f62f94d9-29cc-4816-98a8-99f8a7beed67"><rect x="0" y="584" width="1200" height="88" fill="#ffffff"/><text class="animal" x="24" y="635">🦆</text><text class="agent-name" x="60" y="633">Смелая утка</text><line class="lifeline" x1="623.15" x2="1168" y1="628" y2="628"/></g>
+<line class="grid" x1="260.00" x2="260.00" y1="52" y2="672"/><text class="tick" x="260.00" y="30" text-anchor="middle">0 с</text>
+<line class="grid" x1="441.60" x2="441.60" y1="52" y2="672"/><text class="tick" x="441.60" y="30" text-anchor="middle">8.29 с</text>
+<line class="grid" x1="623.20" x2="623.20" y1="52" y2="672"/><text class="tick" x="623.20" y="30" text-anchor="middle">16.6 с</text>
+<line class="grid" x1="804.80" x2="804.80" y1="52" y2="672"/><text class="tick" x="804.80" y="30" text-anchor="middle">24.9 с</text>
+<line class="grid" x1="986.40" x2="986.40" y1="52" y2="672"/><text class="tick" x="986.40" y="30" text-anchor="middle">33.2 с</text>
+<line class="grid" x1="1168.00" x2="1168.00" y1="52" y2="672"/><text class="tick" x="1168.00" y="30" text-anchor="middle">41.5 с</text>
+<g class="invocation " data-run-id="01a102d0-0442-7360-a352-0a38b6f7c6a9"><line class="run-line" x1="260.00" x2="1168.00" y1="100" y2="100"/><g class="event" data-tooltip="tip-0" tabindex="0" role="img" aria-label="Запрос пользователя" aria-describedby="tooltip" transform="translate(260.00 80)"><circle r="16"/><text class="animal" text-anchor="middle" dominant-baseline="central">🧑</text></g><g class="event" data-tooltip="tip-1" tabindex="0" role="img" aria-label="Ответ Моськи" aria-describedby="tooltip" transform="translate(1168.00 120)"><circle r="16"/><text class="animal" text-anchor="middle" dominant-baseline="central">🐶</text></g></g>
+<path class="fork" d="M 623.14 188 V 452"><title>Форк от агента «Весёлый орёл»</title></path>
+<path class="fork" d="M 623.14 276 V 540"><title>Форк от агента «Ловкий пингвин»</title></path>
+<path class="fork" d="M 623.15 364 V 628"><title>Форк от агента «Сонный сверчок»</title></path>
+<g class="run " data-run-id="01a102d0-1c97-7610-b698-bcdd513238c9"><line class="run-line" x1="365.07" x2="595.51" y1="188" y2="188"/><g class="event" data-tooltip="tip-2" tabindex="0" role="img" aria-label="Сообщение Моськи" aria-describedby="tooltip" transform="translate(365.07 168)"><circle r="16"/><text class="animal" text-anchor="middle" dominant-baseline="central">🐶</text></g><g class="event" data-tooltip="tip-3" tabindex="0" role="img" aria-label="Ответ агента «Весёлый орёл»" aria-describedby="tooltip" transform="translate(595.51 208)"><circle r="16"/><text class="animal" text-anchor="middle" dominant-baseline="central">🦅</text></g></g>
+<g class="run " data-run-id="01a102d0-1c9f-73b3-a5d5-84fe08288992"><line class="run-line" x1="365.08" x2="595.51" y1="276" y2="276"/><g class="event" data-tooltip="tip-4" tabindex="0" role="img" aria-label="Сообщение Моськи" aria-describedby="tooltip" transform="translate(365.08 256)"><circle r="16"/><text class="animal" text-anchor="middle" dominant-baseline="central">🐶</text></g><g class="event" data-tooltip="tip-5" tabindex="0" role="img" aria-label="Ответ агента «Ловкий пингвин»" aria-describedby="tooltip" transform="translate(595.51 296)"><circle r="16"/><text class="animal" text-anchor="middle" dominant-baseline="central">🐧</text></g></g>
+<g class="run " data-run-id="01a102d0-1ca3-7160-a6fc-7353e1cf3f19"><line class="run-line" x1="365.11" x2="595.51" y1="364" y2="364"/><g class="event" data-tooltip="tip-6" tabindex="0" role="img" aria-label="Сообщение Моськи" aria-describedby="tooltip" transform="translate(365.11 344)"><circle r="16"/><text class="animal" text-anchor="middle" dominant-baseline="central">🐶</text></g><g class="event" data-tooltip="tip-7" tabindex="0" role="img" aria-label="Ответ агента «Сонный сверчок»" aria-describedby="tooltip" transform="translate(595.51 384)"><circle r="16"/><text class="animal" text-anchor="middle" dominant-baseline="central">🦗</text></g></g>
+<g class="run " data-run-id="01a102d0-6896-7c91-80f8-bdbbfd228abc"><line class="run-line" x1="790.83" x2="1031.59" y1="452" y2="452"/><g class="event" data-tooltip="tip-8" tabindex="0" role="img" aria-label="Сообщение Моськи" aria-describedby="tooltip" transform="translate(790.83 432)"><circle r="16"/><text class="animal" text-anchor="middle" dominant-baseline="central">🐶</text></g><g class="event" data-tooltip="tip-9" tabindex="0" role="img" aria-label="Ответ агента «Резвая ящерица»" aria-describedby="tooltip" transform="translate(1031.59 472)"><circle r="16"/><text class="animal" text-anchor="middle" dominant-baseline="central">🦎</text></g></g>
+<g class="run " data-run-id="01a102d0-6890-7ec2-9a45-dd7a6ba1c4fd"><line class="run-line" x1="790.84" x2="911.57" y1="540" y2="540"/><g class="event" data-tooltip="tip-10" tabindex="0" role="img" aria-label="Сообщение Моськи" aria-describedby="tooltip" transform="translate(790.84 520)"><circle r="16"/><text class="animal" text-anchor="middle" dominant-baseline="central">🐶</text></g><g class="event" data-tooltip="tip-11" tabindex="0" role="img" aria-label="Ответ агента «Зоркая птица»" aria-describedby="tooltip" transform="translate(911.57 560)"><circle r="16"/><text class="animal" text-anchor="middle" dominant-baseline="central">🐦</text></g></g>
+<g class="run " data-run-id="01a102d0-6893-7581-98e5-a09b500348bc"><line class="run-line" x1="790.84" x2="911.57" y1="628" y2="628"/><g class="event" data-tooltip="tip-12" tabindex="0" role="img" aria-label="Сообщение Моськи" aria-describedby="tooltip" transform="translate(790.84 608)"><circle r="16"/><text class="animal" text-anchor="middle" dominant-baseline="central">🐶</text></g><g class="event" data-tooltip="tip-13" tabindex="0" role="img" aria-label="Ответ агента «Смелая утка»" aria-describedby="tooltip" transform="translate(911.57 648)"><circle r="16"/><text class="animal" text-anchor="middle" dominant-baseline="central">🦆</text></g></g>
+<circle class="created" cx="272.33" cy="188" r="4"><title>Создание: 0.563124 с</title></circle>
+<circle class="created" cx="282.45" cy="276" r="4"><title>Создание: 1.02515 с</title></circle>
+<circle class="created" cx="293.00" cy="364" r="4"><title>Создание: 1.50707 с</title></circle>
+<circle class="created" cx="623.14" cy="452" r="4"><title>Создание: 16.5857 с</title></circle>
+<circle class="created" cx="623.14" cy="540" r="4"><title>Создание: 16.5857 с</title></circle>
+<circle class="created" cx="623.15" cy="628" r="4"><title>Создание: 16.5858 с</title></circle>
+</svg></div>
+<div id="tooltip" role="tooltip" tabindex="0" hidden></div>
+<template id="tip-0"><div class="message"><p>Составь тест для начинающих из трёх разделов: Python, SQL и машинное обучение. В каждом разделе должно быть три вопроса с вариантами ответа: один на понимание понятия, один по короткому фрагменту кода или конкретному примеру и один о типичной ошибке.</p>
+<p>У каждого вопроса должно быть ровно четыре варианта ответа, один правильный ответ и объяснение в одном предложении. Объём каждого раздела должен быть меньше 300 слов. Примеры должны быть самодостаточными и не требовать внешних ресурсов. В конце приведи полный тест и ключ с ответами. Все задания агентам и итоговый ответ напиши по-русски.</p>
+</div></template><template id="tip-1"><div class="message"><p>Все три раздела прошли рецензию без замечаний. Вот итоговый тест:</p>
+<hr />
+<h2>📘 Тест для начинающих: Python, SQL, Машинное обучение</h2>
+<hr />
+<h3>Раздел 1. Python</h3>
+<p><strong>Вопрос 1.</strong> Как Python определяет блоки кода?<br />
+A) Символы фигурных скобок <code>{}</code><br />
+B) Специальные ключевые слова<br />
+C) Отступы (ввода)<br />
+D) Символы двоеточия <code>:</code></p>
+<p><strong>Правильный ответ: C</strong><br />
+Объяснение: В Python используется индентация для разделения блоков кода.</p>
+<p><strong>Вопрос 2.</strong> Результат выполнения: <code>print([1, 2, 3][1])</code>?<br />
+A) 1<br />
+B) 2<br />
+C) Error<br />
+D) Список</p>
+<p><strong>Правильный ответ: B</strong><br />
+Объяснение: Индекс 1 выбирает второй элемент списка.</p>
+<p><strong>Вопрос 3.</strong> Почему возникает ошибка <code>NameError: name 'x' is not defined</code>?<br />
+A) Переменная <code>x</code> не была объявлена ранее<br />
+B) Переменная <code>x</code> имеет неверный тип<br />
+C) Переменная <code>x</code> слишком длинная<br />
+D) Синтаксическая ошибка в коде</p>
+<p><strong>Правильный ответ: A</strong><br />
+Объяснение: Интерпретатор не может найти имя переменной в памяти.</p>
+<hr />
+<h3>Раздел 2. SQL</h3>
+<p><strong>Вопрос 4.</strong> Что такое SQL JOIN?<br />
+A) Создание новой таблицы<br />
+B) Объединение данных из нескольких таблиц<br />
+C) Удаление записей из базы<br />
+D) Сортировка результата</p>
+<p><strong>Правильный ответ: B</strong><br />
+Объяснение: JOIN используется для соединения строк из двух или более таблиц по условию связи.</p>
+<p><strong>Вопрос 5.</strong> Что выведет запрос <code>SELECT name FROM students WHERE age &gt; 18</code>?<br />
+A) Счёт всех студентов<br />
+B) Имена студентов старше 18 лет<br />
+C) Список всех студентов без условий<br />
+D) Ошибку компиляции</p>
+<p><strong>Правильный ответ: B</strong><br />
+Объяснение: Запрос выбирает только имена, соответствующие условию фильтра по возрасту.</p>
+<p><strong>Вопрос 6.</strong> Какая строка содержит типичную ошибку синтаксиса?<br />
+A) <code>SELECT * FROM users WHERE name = 'Иван'</code><br />
+B) <code>SELECT * FROM users WHERE name == 'Иван'</code><br />
+C) <code>SELECT name FROM users</code><br />
+D) <code>SELECT * FROM users ORDER BY name</code></p>
+<p><strong>Правильный ответ: B</strong><br />
+Объяснение: В SQL для сравнения используется оператор равенства <code>=</code>, а не <code>==</code>.</p>
+<hr />
+<h3>Раздел 3. Машинное обучение</h3>
+<p><strong>Вопрос 7.</strong> Что такое машинное обучение?<br />
+A) Написание сложных алгоритмов вручную<br />
+B) Обучение компьютеров на основе данных<br />
+C) Создание роботов, похожих на людей<br />
+D) Автоматическая замена программистов</p>
+<p><strong>Правильный ответ: B</strong><br />
+Объяснение: ML — это область ИИ, где алгоритмы улучшают свои навыки через опыт работы с данными.</p>
+<p><strong>Вопрос 8.</strong> Фильтр спама помечает письма «Спам» или «Не спам». Как он работает?<br />
+A) Система блокирует все письма с ключевыми словами<br />
+B) Система учится различать письма по истории<br />
+C) Пользователь вручную удаляет подозрительные письма<br />
+D) Компьютер генерирует случайные ответы</p>
+<p><strong>Правильный ответ: B</strong><br />
+Объяснение: Модель анализирует примеры, выявляя закономерности, а не просто следуя жёстким правилам.</p>
+<p><strong>Вопрос 9.</strong> Что такое переобучение модели?<br />
+A) Модель слишком проста и не учится<br />
+B) Модель запоминает тренировочные данные наизусть<br />
+C) Модель работает слишком медленно<br />
+D) Данные слишком велики для компьютера</p>
+<p><strong>Правильный ответ: B</strong><br />
+Объяснение: Переобучение означает низкую способность модели обобщать знания на новые данные.</p>
+<hr />
+<h2>🔑 Ключ с ответами</h2>
+<table>
+<thead>
+<tr>
+<th>Вопрос</th>
+<th>Ответ</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>C</td>
+</tr>
+<tr>
+<td>2</td>
+<td>B</td>
+</tr>
+<tr>
+<td>3</td>
+<td>A</td>
+</tr>
+<tr>
+<td>4</td>
+<td>B</td>
+</tr>
+<tr>
+<td>5</td>
+<td>B</td>
+</tr>
+<tr>
+<td>6</td>
+<td>B</td>
+</tr>
+<tr>
+<td>7</td>
+<td>B</td>
+</tr>
+<tr>
+<td>8</td>
+<td>B</td>
+</tr>
+<tr>
+<td>9</td>
+<td>B</td>
+</tr>
+</tbody>
+</table>
+</div></template><template id="tip-2"><div class="message"><p>Составь раздел «Python» для теста начинающих. Три вопроса: 1) на понимание понятия, 2) по короткому самодостаточному фрагменту кода, 3) о типичной ошибке. У каждого вопроса ровно 4 варианта ответа (A-D), один правильный и объяснение в одном предложении. Весь раздел &lt; 300 слов. Примеры не требуют внешних ресурсов. Ответ на русском. Формат: вопрос, варианты, &quot;Правильный ответ: X&quot;, объяснение.</p>
+</div></template><template id="tip-3"><div class="message"><p><strong>Вопрос 1.</strong> Как Python определяет блоки кода?<br />
+A) Символы фигурных скобок {}<br />
+B) Специальные ключевые слова<br />
+C) Отступы (ввода)<br />
+D) Символы двоеточия :</p>
+<p>Правильный ответ: C<br />
+Объяснение: В Python используется индентация для разделения блоков кода.</p>
+<p><strong>Вопрос 2.</strong> Результат выполнения: <code>print([1, 2, 3][1])</code>?<br />
+A) 1<br />
+B) 2<br />
+C) Error<br />
+D) Список</p>
+<p>Правильный ответ: B<br />
+Объяснение: Индекс 1 выбирает второй элемент списка.</p>
+<p><strong>Вопрос 3.</strong> Почему возникает ошибка <code>NameError: name 'x' is not defined</code>?<br />
+A) Переменная <code>x</code> не была объявлена ранее<br />
+B) Переменная <code>x</code> имеет неверный тип<br />
+C) Переменная <code>x</code> слишком длинная<br />
+D) Синтаксическая ошибка в коде</p>
+<p>Правильный ответ: A<br />
+Объяснение: Интерпретатор не может найти имя переменной в памяти.</p>
+</div></template><template id="tip-4"><div class="message"><p>Составь раздел «SQL» для теста начинающих. Три вопроса: 1) на понимание понятия, 2) по короткому самодостаточному примеру запроса или таблицы, 3) о типичной ошибке. У каждого вопроса ровно 4 варианта ответа (A-D), один правильный и объяснение в одном предложении. Весь раздел &lt; 300 слов. Примеры не требуют внешних ресурсов. Ответ на русском. Формат: вопрос, варианты, &quot;Правильный ответ: X&quot;, объяснение.</p>
+</div></template><template id="tip-5"><div class="message"><ol>
+<li>
+<p>Что такое SQL JOIN?<br />
+A) Создание новой таблицы<br />
+B) Объединение данных из нескольких таблиц<br />
+C) Удаление записей из базы<br />
+D) Сортировка результата<br />
+Правильный ответ: B<br />
+Объяснение: JOIN используется для соединения строк из двух или более таблиц по условию связи.</p>
+</li>
+<li>
+<p>Что выведет запрос <code>SELECT name FROM students WHERE age &gt; 18</code>?<br />
+A) Счёт всех студентов<br />
+B) Имена студентов старше 18 лет<br />
+C) Список всех студентов без условий<br />
+D) Ошибку компиляции<br />
+Правильный ответ: B<br />
+Объяснение: Запрос выбирает только имена, соответствующие условию фильтра по возрасту.</p>
+</li>
+<li>
+<p>Какая строка содержит типичную ошибку синтаксиса?<br />
+A) <code>SELECT * FROM users WHERE name = 'Иван'</code><br />
+B) <code>SELECT * FROM users WHERE name == 'Иван'</code><br />
+C) <code>SELECT name FROM users</code><br />
+D) <code>SELECT * FROM users ORDER BY name</code><br />
+Правильный ответ: B<br />
+Объяснение: В SQL для сравнения используется оператор равенства <code>=</code>, а не <code>==</code>.</p>
+</li>
+</ol>
+</div></template><template id="tip-6"><div class="message"><p>Составь раздел «Машинное обучение» для теста начинающих. Три вопроса: 1) на понимание понятия, 2) по конкретному короткому примеру, 3) о типичной ошибке. У каждого вопроса ровно 4 варианта ответа (A-D), один правильный и объяснение в одном предложении. Весь раздел &lt; 300 слов. Примеры не требуют внешних ресурсов. Ответ на русском. Формат: вопрос, варианты, &quot;Правильный ответ: X&quot;, объяснение.</p>
+</div></template><template id="tip-7"><div class="message"><p><strong>Раздел: Машинное обучение</strong></p>
+<ol>
+<li>Что такое машинное обучение?<br />
+A) Написание сложных алгоритмов вручную.<br />
+B) Обучение компьютеров на основе данных.<br />
+C) Создание роботов, похожих на людей.<br />
+D) Автоматическая замена программистов.</li>
+</ol>
+<p><strong>Правильный ответ: B.</strong><br />
+<strong>Объяснение:</strong> ML — это область ИИ, где алгоритмы улучшают свои навыки через опыт работы с данными.</p>
+<ol start="2">
+<li>Пример: Фильтр спама. Система помечает письма «Спам» или «Не спам».<br />
+A) Система блокирует все письма с ключевыми словами.<br />
+B) Система учится различать письма по истории.<br />
+C) Пользователь вручную удаляет подозрительные письма.<br />
+D) Компьютер генерирует случайные ответы.</li>
+</ol>
+<p><strong>Правильный ответ: B.</strong><br />
+<strong>Объяснение:</strong> Модель анализирует примеры, выявляя закономерности, а не просто следуя жестким правилам.</p>
+<ol start="3">
+<li>Типичная ошибка: Переобучение.<br />
+A) Модель слишком проста и не учится.<br />
+B) Модель запоминает тренировочные данные наизусть.<br />
+C) Модель работает слишком медленно.<br />
+D) Данные слишком велики для компьютера.</li>
+</ol>
+<p><strong>Правильный ответ: B.</strong><br />
+<strong>Объяснение:</strong> Переобучение означает низкую способность модели обобщать знания на новые данные.</p>
+</div></template><template id="tip-8"><div class="message"><p>Проверь ТОЛЬКО как рецензент (не изменяй ничего). Критерии: 3 вопроса, у каждого ровно 4 варианта A-D, один правильный ответ, объяснение в одном предложении, раздел &lt; 300 слов, примеры самодостаточны. Оцени текст ниже по этим критериям и укажи, что не так. Ответ на русском.</p>
+<p>Текст:<br />
+<strong>Вопрос 1.</strong> Как Python определяет блоки кода?<br />
+A) Символы фигурных скобок {}<br />
+B) Специальные ключевые слова<br />
+C) Отступы (ввода)<br />
+D) Символы двоеточия :<br />
+Правильный ответ: C<br />
+Объяснение: В Python используется индентация для разделения блоков кода.</p>
+<p><strong>Вопрос 2.</strong> Результат выполнения: <code>print([1, 2, 3][1])</code>?<br />
+A) 1<br />
+B) 2<br />
+C) Error<br />
+D) Список<br />
+Правильный ответ: B<br />
+Объяснение: Индекс 1 выбирает второй элемент списка.</p>
+<p><strong>Вопрос 3.</strong> Почему возникает ошибка <code>NameError: name 'x' is not defined</code>?<br />
+A) Переменная <code>x</code> не была объявлена ранее<br />
+B) Переменная <code>x</code> имеет неверный тип<br />
+C) Переменная <code>x</code> слишком длинная<br />
+D) Синтаксическая ошибка в коде<br />
+Правильный ответ: A<br />
+Объяснение: Интерпретатор не может найти имя переменной в памяти.</p>
+</div></template><template id="tip-9"><div class="message"><p>Текст соответствует всем поставленным критериям.</p>
+<p><strong>Оценка:</strong></p>
+<ol>
+<li><strong>Количество вопросов:</strong> 3 (Совпадает).</li>
+<li><strong>Варианты ответов:</strong> У каждого вопроса ровно 4 варианта (A-D) (Совпадает).</li>
+<li><strong>Правильный ответ:</strong> Указан один правильный вариант для каждого вопроса (Совпадает).</li>
+<li><strong>Объяснение:</strong> Для каждого вопроса объяснение дано в одном предложении (Совпадает).</li>
+<li><strong>Объем текста:</strong> Раздел содержит примерно 150 слов, что меньше 300 слов (Совпадает).</li>
+<li><strong>Примеры:</strong> Код и примеры являются самодостаточными (Совпадает).</li>
+<li><strong>Язык:</strong> Русский (Совпадает).</li>
+</ol>
+<p><strong>Вывод:</strong> В тексте нет ошибок, он полностью соответствует требованиям.</p>
+</div></template><template id="tip-10"><div class="message"><p>Проверь ТОЛЬКО как рецензент (не изменяй ничего). Критерии: 3 вопроса, у каждого ровно 4 варианта A-D, один правильный ответ, объяснение в одном предложении, раздел &lt; 300 слов, примеры самодостаточны. Оцени текст ниже по этим критериям и укажи, что не так. Ответ на русском.</p>
+<p>Текст:</p>
+<ol>
+<li>
+<p>Что такое SQL JOIN?<br />
+A) Создание новой таблицы<br />
+B) Объединение данных из нескольких таблиц<br />
+C) Удаление записей из базы<br />
+D) Сортировка результата<br />
+Правильный ответ: B<br />
+Объяснение: JOIN используется для соединения строк из двух или более таблиц по условию связи.</p>
+</li>
+<li>
+<p>Что выведет запрос <code>SELECT name FROM students WHERE age &gt; 18</code>?<br />
+A) Счёт всех студентов<br />
+B) Имена студентов старше 18 лет<br />
+C) Список всех студентов без условий<br />
+D) Ошибку компиляции<br />
+Правильный ответ: B<br />
+Объяснение: Запрос выбирает только имена, соответствующие условию фильтра по возрасту.</p>
+</li>
+<li>
+<p>Какая строка содержит типичную ошибку синтаксиса?<br />
+A) <code>SELECT * FROM users WHERE name = 'Иван'</code><br />
+B) <code>SELECT * FROM users WHERE name == 'Иван'</code><br />
+C) <code>SELECT name FROM users</code><br />
+D) <code>SELECT * FROM users ORDER BY name</code><br />
+Правильный ответ: B<br />
+Объяснение: В SQL для сравнения используется оператор равенства <code>=</code>, а не <code>==</code>.</p>
+</li>
+</ol>
+</div></template><template id="tip-11"><div class="message"><h2>Оценка по критериям</h2>
+<p><strong>Критерий 1: 3 вопроса</strong> ✅</p>
+<ul>
+<li>Есть ровно 3 вопроса.</li>
+</ul>
+<p><strong>Критерий 2: 4 варианта A-D у каждого вопроса</strong> ✅</p>
+<ul>
+<li>Все вопросы имеют варианты A, B, C, D.</li>
+</ul>
+<p><strong>Критерий 3: Один правильный ответ</strong> ✅</p>
+<ul>
+<li>В каждом вопросе указан только один правильный ответ (B).</li>
+</ul>
+<p><strong>Критерий 4: Объяснение в одном предложении</strong> ✅</p>
+<ul>
+<li>Объяснения в каждом вопросе составлены в одном предложении.</li>
+</ul>
+<p><strong>Критерий 5: Раздел &lt; 300 слов</strong> ✅</p>
+<ul>
+<li>Объём текста составляет около 180 слов (всё в пределах лимита).</li>
+</ul>
+<p><strong>Критерий 6: Примеры самодостаточны</strong> ✅</p>
+<ul>
+<li>Все SQL-запросы и таблицы в примерах не требуют внешних ресурсов.</li>
+</ul>
+<hr />
+<h2>Итог</h2>
+<p><strong>Текст соответствует всем критериям.</strong> Ничего не нужно исправлять.</p>
+</div></template><template id="tip-12"><div class="message"><p>Проверь ТОЛЬКО как рецензент (не изменяй ничего). Критерии: 3 вопроса, у каждого ровно 4 варианта A-D, один правильный ответ, объяснение в одном предложении, раздел &lt; 300 слов, примеры самодостаточны. Оцени текст ниже по этим критериям и укажи, что не так. Ответ на русском.</p>
+<p>Текст:<br />
+<strong>Раздел: Машинное обучение</strong></p>
+<ol>
+<li>
+<p>Что такое машинное обучение?<br />
+A) Написание сложных алгоритмов вручную.<br />
+B) Обучение компьютеров на основе данных.<br />
+C) Создание роботов, похожих на людей.<br />
+D) Автоматическая замена программистов.<br />
+Правильный ответ: B.<br />
+Объяснение: ML — это область ИИ, где алгоритмы улучшают свои навыки через опыт работы с данными.</p>
+</li>
+<li>
+<p>Пример: Фильтр спама. Система помечает письма «Спам» или «Не спам».<br />
+A) Система блокирует все письма с ключевыми словами.<br />
+B) Система учится различать письма по истории.<br />
+C) Пользователь вручную удаляет подозрительные письма.<br />
+D) Компьютер генерирует случайные ответы.<br />
+Правильный ответ: B.<br />
+Объяснение: Модель анализирует примеры, выявляя закономерности, а не просто следуя жестким правилам.</p>
+</li>
+<li>
+<p>Типичная ошибка: Переобучение.<br />
+A) Модель слишком проста и не учится.<br />
+B) Модель запоминает тренировочные данные наизусть.<br />
+C) Модель работает слишком медленно.<br />
+D) Данные слишком велики для компьютера.<br />
+Правильный ответ: B.<br />
+Объяснение: Переобучение означает низкую способность модели обобщать знания на новые данные.</p>
+</li>
+</ol>
+</div></template><template id="tip-13"><div class="message"><h2>Оценка текста рецензентом</h2>
+<p><strong>Критерии проверки:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Критерий</th>
+<th>Оценка</th>
+<th>Комментарий</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>3 вопроса</td>
+<td>✅</td>
+<td>Все 3 вопроса присутствуют</td>
+</tr>
+<tr>
+<td>4 варианта A-D</td>
+<td>✅</td>
+<td>У каждого вопроса ровно 4 варианта</td>
+</tr>
+<tr>
+<td>Один правильный ответ</td>
+<td>✅</td>
+<td>У каждого вопроса указан один правильный</td>
+</tr>
+<tr>
+<td>Объяснение в одном предложении</td>
+<td>✅</td>
+<td>Все объяснения — одно предложение</td>
+</tr>
+<tr>
+<td>Раздел &lt; 300 слов</td>
+<td>✅</td>
+<td>Примерно 250 слов</td>
+</tr>
+<tr>
+<td>Примеры самодостаточны</td>
+<td>✅</td>
+<td>Примеры не требуют внешних ресурсов</td>
+</tr>
+</tbody>
+</table>
+<h2>Итог</h2>
+<p><strong>Текст соответствует всем критериям.</strong></p>
+<p>Все требования выполнены:</p>
+<ul>
+<li>Количество вопросов = 3</li>
+<li>Варианты ответов = 4 (A-D) у каждого вопроса</li>
+<li>Правильный ответ указан для каждого вопроса</li>
+<li>Объяснения краткие и в одном предложении</li>
+<li>Объём текста укладывается в лимит в 300 слов</li>
+<li>Примеры понятны без дополнительных ресурсов</li>
+</ul>
+<p><strong>Ничего исправить не требуется.</strong></p>
+</div></template>
+<script>
+const tooltip = document.getElementById("tooltip");
+let hideTimer;
+function hide() { tooltip.hidden = true; }
+function delayHide() { hideTimer = setTimeout(hide, 180); }
+function show(event) {
+  clearTimeout(hideTimer);
+  const marker = event.currentTarget;
+  tooltip.replaceChildren(
+    document.getElementById(marker.dataset.tooltip).content.cloneNode(true)
+  );
+  tooltip.hidden = false;
+  tooltip.scrollTop = 0;
+  const anchor = marker.getBoundingClientRect();
+  const left = Math.max(12, Math.min(anchor.left, innerWidth - tooltip.offsetWidth - 12));
+  const top = anchor.bottom + 8 + tooltip.offsetHeight <= innerHeight - 12
+    ? anchor.bottom + 8 : Math.max(12, anchor.top - tooltip.offsetHeight - 8);
+  tooltip.style.left = left + "px";
+  tooltip.style.top = top + "px";
+}
+for (const marker of document.querySelectorAll("[data-tooltip]")) {
+  marker.addEventListener("mouseenter", show);
+  marker.addEventListener("focus", show);
+  marker.addEventListener("click", show);
+  marker.addEventListener("mouseleave", delayHide);
+  marker.addEventListener("blur", delayHide);
+}
+tooltip.addEventListener("mouseenter", () => clearTimeout(hideTimer));
+tooltip.addEventListener("mouseleave", delayHide);
+tooltip.addEventListener("focus", () => clearTimeout(hideTimer));
+tooltip.addEventListener("blur", delayHide);
+document.addEventListener("keydown", event => { if (event.key === "Escape") hide(); });
+document.addEventListener("click", event => {
+  if (!event.target.closest("[data-tooltip], #tooltip")) hide();
+});
+document.querySelector(".chart").addEventListener("scroll", hide);
+window.addEventListener("resize", hide);
+window.addEventListener("scroll", hide);
+</script>
+</body></html>

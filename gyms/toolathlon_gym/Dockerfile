@@ -68,7 +68,6 @@ RUN uv pip install \
 COPY gyms/toolathlon_gym/requirements.txt /tmp/agent-requirements.txt
 COPY pyproject.toml README.md /tmp/decomposer/
 COPY src/decomposer /tmp/decomposer/src/decomposer
-COPY src/utils.py /tmp/decomposer/src/utils.py
 
 RUN uv python install "${PYTHON_VERSION}" \
     && uv venv --python "${PYTHON_VERSION}" "${AGENT_VENV}" \

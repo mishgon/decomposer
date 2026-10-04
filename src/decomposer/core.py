@@ -4,6 +4,7 @@ import asyncio
 import logging
 from collections import Counter
 from typing import Annotated, Any, NotRequired, Sequence
+from uuid import uuid4
 
 from httpx import ReadError, RemoteProtocolError
 from langchain.agents import create_agent
@@ -78,6 +79,8 @@ class Agent(TypedDict):
     agent_type_id: str
     assistant_id: str
     thread_id: str
+    created_at: float  # Unix timestamp in seconds.
+    forked_from: NotRequired[str]
 
 
 class AgentRun(TypedDict):
@@ -86,6 +89,9 @@ class AgentRun(TypedDict):
     run_id: str
     status: str
     prompt: str
+    started_at: float  # Unix timestamp when starting the run.
+    # Unix timestamp when returning the result: from wait() or the invocation.
+    collected_at: NotRequired[float]
     messages: NotRequired[list[dict[str, Any]]]
     tool_calls: NotRequired[list[AgentToolCall]]
     response: NotRequired[str | None]
@@ -169,6 +175,7 @@ class RunSchema(BaseModel):
 
 
 class DecomposerAgentState(AgentState[ResponseT]):
+    decomposer_agent_runs: NotRequired[list[AgentRun]]
     agents: Annotated[
         NotRequired[dict[str, Agent]], _agents_reducer
     ]
@@ -287,6 +294,7 @@ def _build_new_tool(
             "agent_type_id": agent_type_id,
             "assistant_id": agent_type["assistant_id"],
             "thread_id": thread["thread_id"],
+            "created_at": time.time(),
         }
         tool_output: dict[str, Any] = {
             "agent_id": agent_id,
@@ -322,6 +330,7 @@ def _build_new_tool(
             "agent_type_id": agent_type_id,
             "assistant_id": agent_type["assistant_id"],
             "thread_id": thread["thread_id"],
+            "created_at": time.time(),
         }
         tool_output: dict[str, Any] = {
             "agent_id": agent_id,
@@ -386,6 +395,8 @@ def _build_fork_tool(clients: _ClientCache) -> StructuredTool:
             **source,
             "agent_id": agent_id,
             "thread_id": thread["thread_id"],
+            "created_at": time.time(),
+            "forked_from": source["agent_id"],
         }
         return Command(
             update={
@@ -412,6 +423,8 @@ def _build_fork_tool(clients: _ClientCache) -> StructuredTool:
             **source,
             "agent_id": agent_id,
             "thread_id": thread["thread_id"],
+            "created_at": time.time(),
+            "forked_from": source["agent_id"],
         }
         return Command(
             update={
@@ -455,6 +468,7 @@ def _build_run_tool(
 
         agent = runtime.state["agents"][agent_id]
         client = clients.get_sync(agent["agent_type_id"])
+        started_at = time.time()
         run = client.runs.create(
             thread_id=agent["thread_id"],
             assistant_id=agent["assistant_id"],
@@ -476,6 +490,7 @@ def _build_run_tool(
             "run_id": run["run_id"],
             "status": status,
             "prompt": prompt,
+            "started_at": started_at,
         }
         tool_output: dict[str, Any] = {
             "agent_run_id": agent_run_id,
@@ -507,6 +522,7 @@ def _build_run_tool(
 
         agent = runtime.state["agents"][agent_id]
         client = clients.get_async(agent["agent_type_id"])
+        started_at = time.time()
         run = await client.runs.create(
             thread_id=agent["thread_id"],
             assistant_id=agent["assistant_id"],
@@ -528,6 +544,7 @@ def _build_run_tool(
             "run_id": run["run_id"],
             "status": status,
             "prompt": prompt,
+            "started_at": started_at,
         }
         tool_output: dict[str, Any] = {
             "agent_run_id": agent_run_id,
@@ -653,6 +670,9 @@ def _build_wait_tool(
                 }
 
             if tool_output:
+                collected_at = time.time()
+                for result in tool_output:
+                    updated_runs[result["agent_run_id"]]["collected_at"] = collected_at
                 return Command(
                     update={
                         "messages": [
@@ -788,6 +808,9 @@ def _build_wait_tool(
                 }
 
             if tool_output:
+                collected_at = time.time()
+                for result in tool_output:
+                    updated_runs[result["agent_run_id"]]["collected_at"] = collected_at
                 return Command(
                     update={
                         "messages": [
@@ -866,6 +889,42 @@ class DecomposerAgentMiddleware(AgentMiddleware[DecomposerAgentState, ContextT, 
         self.tools = _build_decomposer_agent_tools(
             agent_types, agent_recursion_limit
         )
+
+    def before_agent(
+        self,
+        state: DecomposerAgentState,
+        runtime: Runtime[ContextT],
+    ) -> dict[str, Any]:
+        run_id = runtime.execution_info.run_id or str(uuid4())
+        prompt = next(
+            message.text for message in reversed(state["messages"])
+            if isinstance(message, HumanMessage)
+        )
+        run: AgentRun = {
+            "agent_run_id": run_id,
+            "agent_id": runtime.execution_info.thread_id or "decomposer",
+            "run_id": run_id,
+            "status": "running",
+            "prompt": prompt,
+            "started_at": time.time(),
+        }
+        return {"decomposer_agent_runs": [*state.get("decomposer_agent_runs", []), run]}
+
+    def after_agent(
+        self,
+        state: DecomposerAgentState,
+        runtime: Runtime[ContextT],
+    ) -> dict[str, Any]:
+        runs = state["decomposer_agent_runs"]
+        return {"decomposer_agent_runs": [
+            *runs[:-1],
+            {
+                **runs[-1],
+                "status": "responded",
+                "response": state["messages"][-1].text,
+                "collected_at": time.time(),
+            },
+        ]}
 
     def after_model(
         self,

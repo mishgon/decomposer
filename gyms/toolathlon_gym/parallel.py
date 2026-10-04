@@ -52,7 +52,7 @@ def episode_command(args, task, run_id, repetition, root):
     values = vars(args) | {
         "task": task, "run_id": run_id,
         "episode_id": f"{run_id}-{task}-r{repetition:03d}",
-        "repetition": repetition, "attempt": 1, "reuse_vllm": True,
+        "repetition": repetition, "attempt": 1,
         "artifacts_dir": root / "traces", "evals_dir": root / "evals",
         "container_lock_file": root / "container.lock",
     }
@@ -84,15 +84,9 @@ def run(args):
         temporary.replace(root / "manifest.json")
     save()
     stop = threading.Event()
-    server = None
     executor = concurrent.futures.ThreadPoolExecutor(max_workers=args.concurrency)
     futures = {}
     try:
-        if not args.agent_base_url:
-            server = gym.start_vllm(model=args.agent_model, served_model_name=args.agent_api_model,
-                port=args.agent_port, gpu=args.agent_gpu, max_model_len=args.vllm_max_model_len,
-                gpu_memory_utilization=args.vllm_gpu_memory_utilization, timeout=args.vllm_startup_timeout,
-                log_path=root / "vllm.log", reuse=args.reuse_vllm, data_parallel_size=args.vllm_data_parallel_size)
         for task in tasks:
             for repetition in range(1, args.repetitions + 1):
                 command = episode_command(args, task, run_id, repetition, root)
@@ -117,7 +111,6 @@ def run(args):
     finally:
         stop.set()
         executor.shutdown(wait=True, cancel_futures=True)
-        gym.stop_vllm(server)
         save()
     print(f"Raw results: {root}", flush=True)
     return root

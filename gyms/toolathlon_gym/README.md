@@ -15,27 +15,20 @@ PYTHONPATH=src:. python -m gyms.toolathlon_gym.run \
   --tasks task-a task-b --agent decomposer --concurrency 8 -n 1
 ```
 
-Use `--agent qwen_3_5_4b_unlooped_thinking` for the same tool-equipped worker acting directly on the
+Use `--agent qwen_3_5_4b_thinking` for the same tool-equipped worker acting directly on the
 task, without a Decomposer. Its model is configured in `agents.py`.
 Use a positional task for one task, `--tasks` for a subset, or `--all`.
 The fixed executor has no coverage policy, culling, adaptive retries or resume.
 
-Both roles use `create_model(model)` from [models.py](../../src/decomposer/models.py).
+Both roles use `create_model(model_id)` from [models.py](../../src/decomposer/models.py).
 Each entry declares its provider, URL, sampling parameters and reasoning behavior
 directly. Set `LLM_PROXY_MASTER_KEY` before creating models; the runner passes the
 key into the task container by its environment variable name, without storing it
 in artifacts. Sampling does not depend on environment variables.
 
-| Role | Deployment | Generation Settings |
-| --- | --- | --- |
-| Decomposer | `Qwen/Qwen3.8-Flash-Next-NVFP4` | Low thinking; temperature 1, top-p 0.95, top-k 20, min-p 0, presence penalty 0, repetition penalty 1 |
-| Agent / ReAct | `Qwen/Qwen3.5-4B-unlooped` | Thinking; temperature 0.6, top-p 0.95, top-k 20; other sampling parameters use defaults |
-
-The agent profile follows the checkpoint's `SAMPLING.md` and `eval_sampling.yaml`.
-Reasoning is saved and replayed between model calls. Decomposer settings follow
-the [official thinking profile](https://huggingface.co/Qwen/Qwen3.8-Flash-Next#api-usage).
-For a private inference network, follow the [shared lmrouter setup](../../README.md#hosted-models-and-private-lmrouter-access).
-The same factory runs on the host and inside Docker through the mounted socket.
+Choose models in [agents.py](agents.py); their sampling settings are defined in
+[models.py](../../src/decomposer/models.py). The container records its model IDs
+and settings in `runtime.json`, which the runner copies into `trace.json`.
 
 Defaults: 45-minute agent timeout, 55-minute total episode timeout, recursion
 limit 410. Decomposer uses upstream's `new / fork / run / wait` interface.
@@ -50,6 +43,10 @@ gets a new run ID with:
   task workspace and cleanup records.
 - `evals/<task>/<episode>/result.json`: native evaluator output.
 - `logs/<task>/<repetition>/`: process stdout and stderr.
+
+After saving the native evaluation, Decomposer episodes generate `trace.html`
+next to `trace.json` using `decomposer.visualization.write_trace_html`.
+A visualization error produces a warning and preserves the episode's result.
 
 An agent timeout/model failure retains partial messages, cancels active remote
 runs and waits for them to stop before native evaluation. This also covers ReAct
@@ -84,15 +81,18 @@ are capped to one thread in the runtime image.
 
 This container-local LangGraph server exposes two assistants:
 
-- `qwen_3_5_4b_unlooped_thinking`: a tool-equipped agent.
+- `qwen_3_5_4b_thinking`: a tool-equipped agent.
 - `decomposer`: orchestrates agents on the same server.
 
-The tool-equipped agent's model is created by `create_model("qwen_3_5_4b_unlooped_thinking")` in
-[models.py](../../src/decomposer/models.py). Temperature is 0.6, top-p 0.95,
-top-k 20. Thinking and reasoning preservation are enabled;
-other sampling parameters retain provider defaults. Decomposer defaults to
-`qwen_3_8_flash_next_low_thinking`; `--model` selects its profile through
-`TOOLATHLON_DECOMPOSER_MODEL`. Both factories are declared in `agents.py`.
+Model IDs and agent factories are defined in [agents.py](agents.py).
+Change its constants to select models, then rebuild the adapter image.
+`--agent` selects an assistant ID from `langgraph.json`.
+The tool-equipped agent is used for standalone runs and by Decomposer.
+
+When selecting a `vllm/` model, start its server on the host before running tasks.
+It must listen on a container-accessible interface at port 8024.
+The runner sets `VLLM_HOST=host.docker.internal` inside the task container;
+it does not start or stop vLLM.
 
 The server reads the prepared task configuration from
 `$TOOLATHLON_DATA_DIR/runtime.json`. When it starts, it opens one persistent

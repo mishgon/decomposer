@@ -1,12 +1,10 @@
 import asyncio
+import json
 import logging
 from pathlib import Path
 
-from langchain_core.messages import convert_to_messages
-from langgraph_sdk import get_client
-from utils import agent_server
-
-from render_messages import render_decomposer_messages
+from decomposer.agent_server import agent_server, invoke_and_capture
+from decomposer.visualization import write_trace_html
 
 logging.basicConfig(level=logging.INFO)
 
@@ -14,39 +12,42 @@ logging.basicConfig(level=logging.INFO)
 async def main() -> None:
     config_path = Path(__file__).with_name("langgraph.json")
     async with agent_server(config_path) as url:
-        client = get_client(url=url)
-        final_state = await client.runs.wait(
-            None,
+        final_state, error = await invoke_and_capture(
+            url,
             "decomposer",
-            input={
+            {
                 "messages": [
                     {
                         "role": "user",
                         "content": (
-                            "Create a beginner quiz with three sections: Python, SQL, and "
-                            "machine learning. Each section must contain three multiple-choice "
-                            "questions: one conceptual question, one question about a short "
-                            "code snippet or concrete example, and one question about a "
-                            "common mistake.\n\n"
-                            "Each question must have exactly four options, one correct "
-                            "answer, and a one-sentence explanation. Keep each section "
-                            "under 300 words. Use self-contained examples, require no "
-                            "external resources, and finish with the complete quiz and "
-                            "answer key."
+                            "Составь тест для начинающих из трёх разделов: Python, SQL "
+                            "и машинное обучение. В каждом разделе должно быть три вопроса "
+                            "с вариантами ответа: один на понимание понятия, один по короткому "
+                            "фрагменту кода или конкретному примеру и один о типичной ошибке.\n\n"
+                            "У каждого вопроса должно быть ровно четыре варианта ответа, "
+                            "один правильный ответ и объяснение в одном предложении. "
+                            "Объём каждого раздела должен быть меньше 300 слов. "
+                            "Примеры должны быть самодостаточными и не требовать внешних "
+                            "ресурсов. В конце приведи полный тест и ключ с ответами. "
+                            "Все задания агентам и итоговый ответ напиши по-русски."
                         ),
                     }
                 ]
             }
         )
-    messages = convert_to_messages(final_state["messages"])
-    print(messages[-1].content)
-
-    output_path = Path(__file__).with_name("messages.md")
-    output_path.write_text(
-        render_decomposer_messages(messages),
+    trace_path = Path(__file__).with_name("trace.json")
+    trace_path.write_text(
+        json.dumps(final_state, indent=2, ensure_ascii=False),
         encoding="utf-8",
     )
-    print(f"\nSaved messages to {output_path}")
+    html_path = trace_path.with_suffix(".html")
+    rendered = write_trace_html(final_state, html_path)
+    print(f"\nТрейс сохранён в {trace_path}")
+    if rendered:
+        print(f"Визуализация сохранена в {html_path}")
+    if error is not None:
+        raise error
+    print(final_state["decomposer_agent_runs"][-1]["response"])
 
 
 if __name__ == "__main__":

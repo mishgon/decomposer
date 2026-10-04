@@ -7,9 +7,7 @@ import json
 import os
 import signal
 import shlex
-import socket
 import subprocess
-import sys
 import time
 import urllib.request
 import uuid
@@ -18,7 +16,8 @@ from pathlib import Path
 
 from langchain_core.messages import message_to_dict
 
-from decomposer.models import create_model
+from decomposer.agent_server import invoke_and_capture
+from decomposer.visualization import write_trace_html
 
 try:
     from .usage import build_usage_summary
@@ -32,10 +31,6 @@ DEFAULT_GYM_ARTIFACTS_DIR = REPO_ROOT / "artifacts" / "gyms" / "toolathlon_gym"
 DEFAULT_ARTIFACTS_DIR = DEFAULT_GYM_ARTIFACTS_DIR / "traces"
 DEFAULT_EVALS_DIR = DEFAULT_GYM_ARTIFACTS_DIR / "evals"
 DEFAULT_IMAGE = "decomposer-toolathlon:latest"
-DEFAULT_MODEL = "qwen_3_8_flash_next_low_thinking"
-DEFAULT_AGENT_MODEL = "Qwen/Qwen3.5-4B-unlooped"
-DEFAULT_AGENT_API_MODEL = "Qwen/Qwen3.5-4B-unlooped"
-DEFAULT_AGENT_PORT = 8023
 POSTGRES_IMAGE = "docker.io/library/postgres:15"
 POSTGRES_ENV = {
     "PGHOST": "postgres",
@@ -45,7 +40,6 @@ POSTGRES_ENV = {
     "PGPASSWORD": "camel",
     "PGDATABASE": "toolathlon_gym",
 }
-AGENT_TYPE_ID = "qwen_3_5_4b_unlooped_thinking"
 
 
 def _docker(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -168,197 +162,6 @@ def _cleanup_episode(
         pass
 
 
-def vllm_command(
-    model: str,
-    port: int,
-    *,
-    served_model_name: str = DEFAULT_AGENT_API_MODEL,
-    max_model_len: int,
-    gpu_memory_utilization: float,
-    data_parallel_size: int = 1,
-) -> list[str]:
-    command = [
-        str(Path(sys.executable).with_name("vllm")),
-        "serve",
-        model,
-        "--served-model-name",
-        served_model_name,
-        "--host",
-        "0.0.0.0",
-        "--port",
-        str(port),
-        "--max-model-len",
-        str(max_model_len),
-        "--gpu-memory-utilization",
-        str(gpu_memory_utilization),
-        "--language-model-only",
-        "--enable-auto-tool-choice",
-        "--tool-call-parser",
-        "qwen3_xml",
-        "--reasoning-parser",
-        "qwen3",
-        "--default-chat-template-kwargs",
-        '{"enable_thinking":true}',
-        "--enable-prefix-caching",
-    ]
-    if data_parallel_size > 1:
-        command.extend(
-            [
-                "--data-parallel-size",
-                str(data_parallel_size),
-                # Keep one frontend so turns from persistent episode clients
-                # can be dispatched across all data-parallel engines.
-                "--api-server-count",
-                "1",
-            ]
-        )
-    return command
-
-
-def wait_for_vllm(
-    process: subprocess.Popen[bytes] | None,
-    *,
-    port: int,
-    expected_model: str,
-    timeout: float,
-    log_path: Path,
-) -> None:
-    url = f"http://127.0.0.1:{port}/v1/models"
-    deadline = time.monotonic() + timeout
-    last_error: Exception | None = None
-    while time.monotonic() < deadline:
-        if process is not None and process.poll() is not None:
-            raise RuntimeError(
-                f"vLLM exited with code {process.returncode}; inspect {log_path}"
-            )
-        try:
-            with urllib.request.urlopen(url, timeout=2) as response:
-                models = json.load(response)["data"]
-            if expected_model in {model["id"] for model in models}:
-                return
-            last_error = RuntimeError(f"{url} does not serve {expected_model}")
-        except (OSError, KeyError, json.JSONDecodeError) as error:
-            last_error = error
-        time.sleep(1)
-    raise TimeoutError(
-        f"vLLM did not become ready at {url} within {timeout:g}s; "
-        f"inspect {log_path}"
-    ) from last_error
-
-
-def start_vllm(
-    *,
-    model: str,
-    served_model_name: str = DEFAULT_AGENT_API_MODEL,
-    port: int,
-    gpu: str,
-    max_model_len: int,
-    gpu_memory_utilization: float,
-    timeout: float,
-    log_path: Path,
-    reuse: bool,
-    data_parallel_size: int = 1,
-) -> subprocess.Popen[bytes] | None:
-    no_proxy = {
-        item
-        for item in (
-            os.environ.get("NO_PROXY", "") + "," + os.environ.get("no_proxy", "")
-        ).split(",")
-        if item
-    }
-    no_proxy.update({"127.0.0.1", "localhost", "host.docker.internal"})
-    no_proxy_value = ",".join(sorted(no_proxy))
-    os.environ["NO_PROXY"] = no_proxy_value
-    os.environ["no_proxy"] = no_proxy_value
-
-    if reuse:
-        wait_for_vllm(
-            None,
-            port=port,
-            expected_model=served_model_name,
-            timeout=2,
-            log_path=log_path,
-        )
-        return None
-
-    reservation = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    try:
-        reservation.bind(("127.0.0.1", port))
-    except OSError as error:
-        reservation.close()
-        raise RuntimeError(
-            f"Refusing to start vLLM: port {port} is already in use; choose a "
-            "dedicated --agent-port or pass --reuse-vllm intentionally"
-        ) from error
-
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-    command = vllm_command(
-        model,
-        port,
-        served_model_name=served_model_name,
-        max_model_len=max_model_len,
-        gpu_memory_utilization=gpu_memory_utilization,
-        data_parallel_size=data_parallel_size,
-    )
-    environment = {
-        **os.environ,
-        "CUDA_VISIBLE_DEVICES": gpu,
-        "VLLM_ENGINE_READY_TIMEOUT_S": str(max(1, int(timeout))),
-    }
-    # vLLM and FlashInfer invoke helpers such as ``ninja`` by name. Preserve
-    # the virtualenv tool directory in detached/non-interactive launches.
-    executable_dir = str(Path(sys.executable).parent)
-    environment["PATH"] = os.pathsep.join(
-        part for part in (executable_dir, environment.get("PATH", "")) if part
-    )
-    with log_path.open("ab") as log:
-        reservation.close()
-        process = subprocess.Popen(
-            command,
-            env=environment,
-            stdout=log,
-            stderr=subprocess.STDOUT,
-            start_new_session=True,
-        )
-    try:
-        wait_for_vllm(
-            process,
-            port=port,
-            expected_model=served_model_name,
-            timeout=timeout,
-            log_path=log_path,
-        )
-    except BaseException:
-        stop_vllm(process)
-        raise
-    return process
-
-
-def stop_vllm(process: subprocess.Popen[bytes] | None) -> None:
-    if process is None:
-        return
-    try:
-        os.killpg(process.pid, signal.SIGTERM)
-    except ProcessLookupError:
-        return
-    if process.poll() is None:
-        try:
-            process.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            pass
-    deadline = time.monotonic() + 20
-    while time.monotonic() < deadline:
-        try:
-            os.killpg(process.pid, 0)
-        except ProcessLookupError:
-            return
-        time.sleep(0.1)
-    try:
-        os.killpg(process.pid, signal.SIGKILL)
-    except ProcessLookupError:
-        return
-
-
 def create_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run raw Toolathlon Gym episodes.")
     parser.add_argument("task", nargs="?")
@@ -375,19 +178,6 @@ def create_parser() -> argparse.ArgumentParser:
     parser.add_argument("--repetition", type=int, help=argparse.SUPPRESS)
     parser.add_argument("--attempt", type=int, help=argparse.SUPPRESS)
     parser.add_argument("--purpose", default="raw", help=argparse.SUPPRESS)
-    parser.add_argument("--model", default=DEFAULT_MODEL)
-    parser.add_argument("--agent-model", default=DEFAULT_AGENT_MODEL)
-    parser.add_argument("--agent-api-model", choices=(DEFAULT_AGENT_API_MODEL,), default=DEFAULT_AGENT_API_MODEL)
-    parser.add_argument("--agent-port", type=int, default=DEFAULT_AGENT_PORT)
-    parser.add_argument("--agent-base-url", default=create_model(AGENT_TYPE_ID).openai_api_base,
-                        help="Registered hosted endpoint; skips local vLLM.")
-    parser.add_argument("--agent-host", help="Optional container DNS mapping, hostname:IP.")
-    parser.add_argument("--agent-gpu", default="0")
-    parser.add_argument("--vllm-max-model-len", type=int, default=256000)
-    parser.add_argument("--vllm-gpu-memory-utilization", type=float, default=0.9)
-    parser.add_argument("--vllm-data-parallel-size", type=int, default=1)
-    parser.add_argument("--vllm-startup-timeout", type=float, default=1800)
-    parser.add_argument("--reuse-vllm", action="store_true")
     parser.add_argument("--image", default=DEFAULT_IMAGE)
     parser.add_argument("--artifacts-dir", type=Path, default=DEFAULT_ARTIFACTS_DIR)
     parser.add_argument("--evals-dir", type=Path, default=DEFAULT_EVALS_DIR)
@@ -405,24 +195,12 @@ def run_episode(args) -> None:
         parser.error("--n-jobs-per-worker must be at least 1")
     if args.agent_timeout <= 0:
         parser.error("--agent-timeout must be positive")
-    if args.vllm_data_parallel_size < 1:
-        parser.error("--vllm-data-parallel-size must be at least 1")
-    visible_gpus = [item for item in args.agent_gpu.split(",") if item]
-    if len(visible_gpus) != args.vllm_data_parallel_size:
-        parser.error(
-            "--agent-gpu must list exactly --vllm-data-parallel-size GPU IDs"
-        )
-
     tasks_dir = (TOOLATHLON_ROOT / "tasks" / "finalpool").resolve()
     task_dir = (tasks_dir / args.task).resolve()
     if task_dir.parent != tasks_dir or not task_dir.is_dir():
         raise ValueError(f"Unknown Toolathlon task: {args.task!r}")
     if not os.environ.get("LLM_PROXY_MASTER_KEY"):
         raise RuntimeError("Set LLM_PROXY_MASTER_KEY for the registered lmrouter models")
-    agent_model = create_model(AGENT_TYPE_ID)
-    if args.agent_base_url != agent_model.openai_api_base:
-        raise ValueError("Set the agent endpoint in src/decomposer/models.py")
-
     proxy_mount = []
     proxy_socket = os.environ.get("LLM_PROXY_UNIX_SOCKET")
     if proxy_socket:
@@ -445,27 +223,6 @@ def run_episode(args) -> None:
     pg_container = f"{network}-pg"
     task_container = f"{network}-task"
     started_at = datetime.now(timezone.utc).isoformat()
-    vllm_log = (
-        args.artifacts_dir.resolve().parent
-        / "logs"
-        / args.task
-        / episode_id
-        / "vllm.log"
-    )
-    print("Using hosted agents." if args.agent_base_url else f"Starting vLLM on GPU {args.agent_gpu}...", flush=True)
-    vllm_process = None if args.agent_base_url else start_vllm(
-        model=args.agent_model,
-        served_model_name=args.agent_api_model,
-        port=args.agent_port,
-        gpu=args.agent_gpu,
-        max_model_len=args.vllm_max_model_len,
-        gpu_memory_utilization=args.vllm_gpu_memory_utilization,
-        timeout=args.vllm_startup_timeout,
-        log_path=vllm_log,
-        reuse=args.reuse_vllm,
-        data_parallel_size=args.vllm_data_parallel_size,
-    )
-
     container_lock = _open_container_lock(args.container_lock_file)
     container_lock_held = False
     try:
@@ -583,15 +340,14 @@ def run_episode(args) -> None:
             network,
             "--add-host",
             "host.docker.internal:host-gateway",
-            *(["--add-host", args.agent_host] if args.agent_host else []),
             "--publish",
             "127.0.0.1::2024",
+            "--env",
+            "VLLM_HOST=host.docker.internal",
             "--env",
             f"TOOLATHLON_TASK={args.task}",
             "--env",
             f"N_JOBS_PER_WORKER={args.n_jobs_per_worker}",
-            "--env",
-            f"TOOLATHLON_DECOMPOSER_MODEL={args.model}",
             "--env",
             "TOOLATHLON_AGENT_CALL_LOG=/artifacts/data/agent_model_calls.jsonl",
             "--env",
@@ -653,14 +409,17 @@ def run_episode(args) -> None:
 
         runtime = json.loads((episode_dir / "runtime.json").read_text(encoding="utf-8"))
         print(f"Running {args.harness}...", flush=True)
-        decomposer_model = create_model(args.model) if args.harness == "decomposer" else None
+        agent_model = runtime["agent_model"]
+        decomposer_model = runtime["decomposer_model"] if args.harness == "decomposer" else None
+        selected_model = decomposer_model or agent_model
         thread_id = str(uuid.uuid5(uuid.NAMESPACE_URL, episode_id))
         state, agent_exception = asyncio.run(invoke_and_capture(
             agent_url,
             args.agent,
             {"messages": [{"role": "user", "content": runtime["task_config"]["task_str"]}]},
-            thread_id,
-            args.agent_timeout,
+            thread_id=thread_id,
+            timeout=args.agent_timeout,
+            config={"recursion_limit": 410},
         ))
         agent_error = repr(agent_exception) if agent_exception is not None else None
         messages = state.get("messages", [])
@@ -682,19 +441,22 @@ def run_episode(args) -> None:
                     "purpose": args.purpose,
                     "harness": args.harness,
                     "assistant_id": args.agent,
-                    "model": args.model if args.harness == "decomposer" else args.agent_api_model,
-                    "decomposer_model": args.model if args.harness == "decomposer" else None,
-                    "teacher_backend": "lmrouter" if decomposer_model else "agent",
+                    "model": selected_model["model_id"],
+                    "decomposer_model": decomposer_model["model_id"] if decomposer_model else None,
+                    "teacher_backend": decomposer_model["model_id"].split("/", 1)[0] if decomposer_model else "agent",
                     "model_proxy_unix_socket": proxy_socket,
-                    "decomposer_generation_config": model_metadata(decomposer_model) if decomposer_model else None,
-                    "agent_model": args.agent_model,
-                    "agent_api_model": args.agent_api_model,
-                    "agent_base_url": args.agent_base_url,
-                    "agent_generation_config": model_metadata(agent_model),
+                    "decomposer_generation_config": decomposer_model["generation_config"] if decomposer_model else None,
+                    "agent_model_id": agent_model["model_id"],
+                    "agent_model": agent_model["api_model"],
+                    "agent_api_model": agent_model["api_model"],
+                    "agent_base_url": agent_model["base_url"],
+                    "agent_generation_config": agent_model["generation_config"],
                     "agent_shutdown": state.get("agent_shutdown"),
                     "agent_shutdown_error": state.get("agent_shutdown_error"),
+                    "agent_capture_error": state.get("agent_capture_error"),
                     "started_at": started_at,
                     "finished_at": datetime.now(timezone.utc).isoformat(),
+                    "decomposer_agent_runs": state.get("decomposer_agent_runs", []),
                     "agent_error": agent_error,
                     "messages": serialized_messages,
                     "agents": agents,
@@ -781,6 +543,7 @@ def run_episode(args) -> None:
             json.dumps(evaluation, indent=2, ensure_ascii=False),
             encoding="utf-8",
         )
+        write_trace_html(state, episode_dir / "trace.html")
 
         # Preserve diagnostic scores, but keep interrupted agents unsuccessful.
         if agent_exception is not None:
@@ -806,82 +569,11 @@ def run_episode(args) -> None:
             _release_container_lock(container_lock)
             if container_lock is not None:
                 container_lock.close()
-            stop_vllm(vllm_process)
 
 
 
 def serialize_messages(messages):
     return [message if isinstance(message, dict) else message_to_dict(message) for message in messages]
-
-
-def model_metadata(model):
-    """Record the configured model without credentials or HTTP client objects."""
-    values = model.model_dump(include={"model_name", "openai_api_base", "temperature", "top_p", "presence_penalty",
-                                       "max_tokens", "extra_body", "request_timeout", "max_retries"},
-                              exclude_none=True)
-    values["preserve_reasoning"] = model.preserve_reasoning
-    return values
-
-
-async def cancel_agent_runs(url):
-    """Stop all runs in this episode's dedicated server, including uncheckpointed runs."""
-    from langgraph_sdk import get_client
-    stopped = []
-    async with get_client(url=url, timeout=60) as client:
-        offset = 0
-        while True:
-            threads = await client.threads.search(limit=100, offset=offset)
-            for thread in threads:
-                thread_id = thread["thread_id"]
-                for status in ("pending", "running"):
-                    # Cancellation removes a run from this query; keep offset zero.
-                    while runs := await client.runs.list(thread_id, status=status, limit=100):
-                        for run in runs:
-                            await client.runs.cancel(thread_id, run["run_id"], wait=True, action="interrupt")
-                            final = await client.runs.get(thread_id, run["run_id"])
-                            if final["status"] in {"pending", "running"}:
-                                raise RuntimeError(f"Agent run still active: {run['run_id']}")
-                            stopped.append({"thread_id": thread_id, "run_id": run["run_id"],
-                                            "status": final["status"]})
-            if len(threads) < 100:
-                return stopped
-            offset += len(threads)
-
-
-async def invoke_and_capture(url, assistant_id, inputs, thread_id, timeout):
-    """Run an assistant and retain its checkpoint after stopping active runs."""
-    from langgraph_sdk import get_client
-
-    state = {}
-    agent_error = None
-    async with get_client(url=url, timeout=timeout) as client:
-        await client.threads.create(thread_id=thread_id)
-        try:
-            state = await asyncio.wait_for(client.runs.wait(
-                thread_id, assistant_id, input=inputs, config={"recursion_limit": 410},
-            ), timeout)
-            if "__error__" in state:
-                agent_error = RuntimeError(str(state["__error__"]))
-        except BaseException as error:
-            agent_error = error
-
-        try:
-            shutdown = await asyncio.wait_for(cancel_agent_runs(url), 60)
-        except BaseException as error:
-            shutdown_error = repr(error)
-            agent_error = agent_error or error
-        else:
-            shutdown_error = None
-
-        try:
-            state = (await client.threads.get_state(thread_id))["values"]
-        except BaseException as error:
-            agent_error = agent_error or error
-        if shutdown_error:
-            state["agent_shutdown_error"] = shutdown_error
-        else:
-            state["agent_shutdown"] = shutdown
-    return state, agent_error
 
 
 def main(argv=None):

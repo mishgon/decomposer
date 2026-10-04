@@ -3,7 +3,7 @@
     "."
   ],
   "graphs": {
-    "qwen_3_5_4b_unlooped_thinking": "./agents.py:qwen_3_5_4b_unlooped_thinking",
+    "qwen_3_5_4b_thinking": "./agents.py:qwen_3_5_4b_thinking",
     "decomposer": "./agents.py:decomposer"
   },
   "http": {

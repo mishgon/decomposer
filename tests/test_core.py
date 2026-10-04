@@ -3,12 +3,14 @@ import json
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
+from uuid import UUID
 
 import decomposer.core as core
 import pytest
 from httpx import ReadError, RemoteProtocolError
 from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langgraph.checkpoint.memory import InMemorySaver
 from decomposer import create_decomposer_agent
 from decomposer.core import (
     DecomposerAgentMiddleware,
@@ -25,6 +27,7 @@ from decomposer.prompts import (
     EMPTY_RESPONSE_ERROR,
     NO_ACTIVE_RUNS_ERROR,
     PARALLEL_WAIT_CALL_ERROR,
+    WAIT_TIMEOUT_ERROR,
 )
 
 
@@ -51,6 +54,74 @@ class ToolCallingFakeModel(FakeMessagesListChatModel):
         return self
 
 
+@pytest.mark.parametrize("async_invocation", [False, True])
+def test_decomposer_runs_preserve_invocations_in_one_thread(monkeypatch, async_invocation):
+    clock = SimpleNamespace(now=100.0)
+    monkeypatch.setattr(core.time, "time", lambda: clock.now)
+
+    class TimedModel(ToolCallingFakeModel):
+        def _generate(self, *args, **kwargs):
+            clock.now += 100.0
+            return super()._generate(*args, **kwargs)
+
+    agent = create_decomposer_agent(
+        decomposer_model=TimedModel(responses=[
+            AIMessage(content="First answer."),
+            AIMessage(content=[{"type": "text", "text": "Second answer."}]),
+            AIMessage(content="Other thread."),
+        ]),
+        agent_types=AGENT_TYPES,
+        checkpointer=InMemorySaver(),
+    )
+
+    def invoke(messages, config):
+        inputs = {"messages": messages}
+        return asyncio.run(agent.ainvoke(inputs, config)) if async_invocation else agent.invoke(inputs, config)
+
+    config = {"configurable": {"thread_id": "conversation"}}
+    first_id = UUID("00000000-0000-0000-0000-000000000001")
+    first = invoke(
+        [HumanMessage(content="Old request."), AIMessage(content="Old answer."),
+         HumanMessage(content="First request.")],
+        {**config, "run_id": first_id},
+    )
+    expected_first = {
+        "agent_run_id": str(first_id), "agent_id": "conversation", "run_id": str(first_id),
+        "status": "responded", "prompt": "First request.", "response": "First answer.",
+        "started_at": 100.0, "collected_at": 200.0,
+    }
+    assert first["decomposer_agent_runs"] == [expected_first]
+
+    clock.now = 300.0
+    second = invoke([HumanMessage(content=[{"type": "text", "text": "Second request."}])], config)
+    runs = second["decomposer_agent_runs"]
+    assert len(runs) == 2
+    assert runs[0] == expected_first
+    assert first["decomposer_agent_runs"] == [expected_first]
+    second_id = str(UUID(runs[1]["agent_run_id"]))
+    assert second_id != str(first_id)
+    assert runs[1] == {
+        "agent_run_id": second_id, "agent_id": "conversation", "run_id": second_id,
+        "status": "responded", "prompt": "Second request.", "response": "Second answer.",
+        "started_at": 300.0, "collected_at": 400.0,
+    }
+    pending = next(
+        snapshot.values["decomposer_agent_runs"]
+        for snapshot in agent.get_state_history(config)
+        if len(snapshot.values.get("decomposer_agent_runs", [])) == 2
+        and snapshot.values["decomposer_agent_runs"][-1]["status"] == "running"
+    )
+    assert pending[0] == expected_first
+    assert pending[1]["agent_run_id"] == second_id
+    assert "collected_at" not in pending[1]
+    assert "response" not in pending[1]
+
+    other = invoke([HumanMessage(content="Other request.")], {"configurable": {"thread_id": "other"}})
+    assert len(other["decomposer_agent_runs"]) == 1
+    assert other["decomposer_agent_runs"][0]["agent_id"] == "other"
+    assert agent.get_state(config).values["decomposer_agent_runs"] == runs
+
+
 def test_new_rejects_unknown_type() -> None:
     client = MagicMock()
     tool = _build_new_tool(
@@ -66,10 +137,47 @@ def test_new_rejects_unknown_type() -> None:
 
 
 @pytest.mark.parametrize("async_invocation", [False, True])
-def test_fork_copies_thread_and_preserves_agent_type(async_invocation: bool) -> None:
+def test_new_records_creation_time(monkeypatch, async_invocation: bool) -> None:
+    clock = SimpleNamespace(now=100.0)
+    monkeypatch.setattr(core.time, "time", lambda: clock.now)
     client = AsyncMock() if async_invocation else MagicMock()
-    client.threads.copy.return_value = {"thread_id": "copied_thread"}
+
+    def create_thread():
+        clock.now = 200.0
+        return {"thread_id": "thread_1"}
+
+    client.threads.create.side_effect = create_thread
+    tool = _build_new_tool({"test": AGENT_TYPE}, _client_cache(client))
+    runtime = SimpleNamespace(tool_call_id="create_1")
+
+    if async_invocation:
+        command = asyncio.run(tool.coroutine("test", runtime))
+    else:
+        command = tool.func("test", runtime)
+
+    assert command.update["agents"] == {
+        "thread_1": {**_agent("thread_1"), "created_at": 200.0},
+    }
+
+
+@pytest.mark.parametrize("async_invocation", [False, True])
+@pytest.mark.parametrize("forked_from", [None, "original_thread"])
+def test_fork_copies_thread_and_preserves_agent_type(
+    monkeypatch, async_invocation: bool, forked_from: str | None,
+) -> None:
+    clock = SimpleNamespace(now=100.0)
+    monkeypatch.setattr(core.time, "time", lambda: clock.now)
+    client = AsyncMock() if async_invocation else MagicMock()
+
+    def copy_thread(thread_id):
+        clock.now = 200.0
+        return {"thread_id": "copied_thread"}
+
+    client.threads.copy.side_effect = copy_thread
     source = _agent("source_thread")
+    if forked_from is not None:
+        source["forked_from"] = forked_from
+    original_source = source.copy()
     runtime = SimpleNamespace(
         state={"agents": {"source_thread": source}, "agent_runs": {}},
         tool_call_id="fork_1",
@@ -87,18 +195,27 @@ def test_fork_copies_thread_and_preserves_agent_type(async_invocation: bool) -> 
             **source,
             "agent_id": "copied_thread",
             "thread_id": "copied_thread",
+            "created_at": 200.0,
+            "forked_from": "source_thread",
         }
     }
-    assert source == _agent("source_thread")
+    assert source == original_source
     message = command.update["messages"][0]
     assert message.tool_call_id == "fork_1"
     assert json.loads(message.content) == {"agent_id": "copied_thread"}
 
 
 @pytest.mark.parametrize("async_invocation", [False, True])
-def test_run_records_run_and_passes_context(async_invocation: bool) -> None:
+def test_run_records_run_and_passes_context(monkeypatch, async_invocation: bool) -> None:
+    clock = SimpleNamespace(now=100.0)
+    monkeypatch.setattr(core.time, "time", lambda: clock.now)
     client = AsyncMock() if async_invocation else MagicMock()
-    client.runs.create.return_value = {"run_id": "run_1", "status": "pending"}
+
+    def create_run(**kwargs):
+        clock.now = 200.0
+        return {"run_id": "run_1", "status": "pending"}
+
+    client.runs.create.side_effect = create_run
     tool = _build_run_tool(_client_cache(client), 1)
     context = {"value": 42}
     runtime = SimpleNamespace(
@@ -128,6 +245,7 @@ def test_run_records_run_and_passes_context(async_invocation: bool) -> None:
             "run_id": "run_1",
             "status": "pending",
             "prompt": "do the task",
+            "started_at": 100.0,
         }
     }
     assert json.loads(command.update["messages"][0].content) == {
@@ -172,14 +290,30 @@ def test_agent_tools_reject_unavailable_agent(
     client.threads.copy.assert_not_called()
 
 
-def test_wait_stores_tool_calls_in_returned_response_order() -> None:
-    client = _completed_client()
+@pytest.mark.parametrize("async_invocation", [False, True])
+def test_wait_stores_tool_calls_in_returned_response_order(
+    monkeypatch, async_invocation: bool,
+) -> None:
+    clock = SimpleNamespace(now=100.0)
+    monkeypatch.setattr(core.time, "time", lambda: clock.now)
+    client = _completed_client(async_invocation)
+    client.runs.get.side_effect = lambda thread_id, run_id: {
+        "thread_id": thread_id,
+        "run_id": run_id,
+        "status": "running" if run_id == "run_d" else "success",
+    }
+
+    def get_history(thread_id, limit, metadata):
+        clock.now += 10.0
+        return _run_history(metadata["run_id"])
+
+    client.threads.get_history.side_effect = get_history
     tool = _build_wait_tool(_client_cache(client))
     runtime = SimpleNamespace(
         state={
             "agents": {
                 f"{run_id}_thread": _agent(f"{run_id}_thread")
-                for run_id in ("run_c", "run_b", "run_a")
+                for run_id in ("run_c", "run_b", "run_a", "run_d")
             },
             "agent_runs": {
                 "run_c": {
@@ -187,18 +321,28 @@ def test_wait_stores_tool_calls_in_returned_response_order() -> None:
                     "status": "responded",
                     "response": "earlier response",
                     "response_sequence_number": 0,
+                    "collected_at": 3.0,
                 },
                 "run_b": _agent_run("run_b"),
                 "run_a": _agent_run("run_a"),
+                "run_d": {**_agent_run("run_d"), "status": "pending"},
             }
         },
         tool_call_id="wait_1",
     )
 
-    command = tool.func(runtime=runtime)
+    if async_invocation:
+        command = asyncio.run(tool.coroutine(runtime))
+    else:
+        command = tool.func(runtime)
 
     assert command.update["agent_runs"]["run_b"]["response_sequence_number"] == 1
     assert command.update["agent_runs"]["run_a"]["response_sequence_number"] == 2
+    assert command.update["agent_runs"]["run_b"]["collected_at"] == 120.0
+    assert command.update["agent_runs"]["run_a"]["collected_at"] == 120.0
+    assert command.update["agent_runs"]["run_d"] == _agent_run("run_d")
+    assert "run_c" not in command.update["agent_runs"]
+    assert runtime.state["agent_runs"]["run_c"]["collected_at"] == 3.0
     assert command.update["agent_runs"]["run_b"]["tool_calls"] == [
         {"id": "run_b_call", "name": "resource_tool", "args": {"run": "run_b"}},
     ]
@@ -258,21 +402,52 @@ def test_wait_accepts_empty_final_response() -> None:
     assert json.loads(command.update["messages"][0].content)[0]["response"] == ""
 
 
-def test_wait_stores_tool_calls_from_error_run() -> None:
-    client = _completed_client(status="error")
+@pytest.mark.parametrize("async_invocation", [False, True])
+@pytest.mark.parametrize("status", ["error", "timeout", "interrupted"])
+def test_wait_stores_tool_calls_from_failed_run(
+    monkeypatch, async_invocation: bool, status: str,
+) -> None:
+    monkeypatch.setattr(core.time, "time", lambda: 200.0)
+    client = _completed_client(async_invocation, status=status)
     tool = _build_wait_tool(_client_cache(client))
     runtime = _wait_runtime()
 
-    command = tool.func(runtime)
+    if async_invocation:
+        command = asyncio.run(tool.coroutine(runtime))
+    else:
+        command = tool.func(runtime)
 
     agent_run = command.update["agent_runs"]["run_a"]
+    assert agent_run["status"] == status
+    assert agent_run["collected_at"] == 200.0
     assert agent_run["tool_calls"] == [
         {"id": "run_a_call", "name": "resource_tool", "args": {"run": "run_a"}},
     ]
     assert agent_run["response"] is None
-    assert json.loads(agent_run["error"]) == {
-        "error": "RuntimeError", "message": "agent failed",
-    }
+    if status == "error":
+        assert json.loads(agent_run["error"]) == {
+            "error": "RuntimeError", "message": "agent failed",
+        }
+    else:
+        assert agent_run["error"] is None
+
+
+@pytest.mark.parametrize("async_invocation", [False, True])
+def test_wait_timeout_leaves_run_uncollected(monkeypatch, async_invocation: bool) -> None:
+    monkeypatch.setattr(core, "WAIT_TIMEOUT_SECONDS", 0.0)
+    client = _completed_client(async_invocation, status="running")
+    tool = _build_wait_tool(_client_cache(client))
+    runtime = _wait_runtime()
+    runtime.state["agent_runs"]["run_a"]["status"] = "pending"
+
+    if async_invocation:
+        command = asyncio.run(tool.coroutine(runtime))
+    else:
+        command = tool.func(runtime)
+
+    assert command.update["agent_runs"]["run_a"] == _agent_run("run_a")
+    assert command.update["messages"][0].content == WAIT_TIMEOUT_ERROR
+    client.threads.get_history.assert_not_called()
 
 
 @pytest.mark.parametrize(
@@ -371,6 +546,7 @@ def test_decomposer_waits_before_creating_agents() -> None:
 
 @pytest.mark.parametrize("async_invocation", [False, True])
 def test_decomposer_delegates(monkeypatch, async_invocation: bool) -> None:
+    monkeypatch.setattr(core.time, "time", lambda: 100.0)
     client = _mock_client(monkeypatch, async_invocation)
     client.threads.create.side_effect = [
         {"thread_id": f"thread_{i}"} for i in range(2)
@@ -445,6 +621,7 @@ def test_decomposer_delegates(monkeypatch, async_invocation: bool) -> None:
             "agent_type_id": "dummy",
             "assistant_id": "dummy",
             "thread_id": f"thread_{i}",
+            "created_at": 100.0,
         }
         for i in range(2)
     }
@@ -453,6 +630,8 @@ def test_decomposer_delegates(monkeypatch, async_invocation: bool) -> None:
         run = result["agent_runs"][f"thread_{i}_run"]
         assert run["agent_id"] == f"thread_{i}"
         assert run["prompt"] == "Say hello."
+        assert run["started_at"] == 100.0
+        assert run["collected_at"] == 100.0
         assert run["status"] == "responded"
         assert run["response"] == "hello"
         assert run["error"] is None
@@ -573,6 +752,7 @@ def _agent(agent_id: str) -> dict[str, Any]:
         "agent_type_id": "test",
         "assistant_id": "test_assistant",
         "thread_id": agent_id,
+        "created_at": 1.0,
     }
 
 
@@ -583,6 +763,7 @@ def _agent_run(run_id: str) -> dict[str, Any]:
         "run_id": run_id,
         "status": "running",
         "prompt": "do the task",
+        "started_at": 2.0,
     }
 
 
@@ -592,6 +773,7 @@ def _completed_agent_run(run_id: str) -> dict[str, Any]:
         "status": "responded",
         "response": "done",
         "response_sequence_number": 0,
+        "collected_at": 3.0,
     }
 
 
