@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import concurrent.futures
+import fcntl
 import hashlib
 import json
 import os
@@ -13,14 +14,13 @@ import threading
 import time
 import traceback
 import uuid
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
-try:
-    from . import adaptive_scheduler
-except ImportError:  # Executed through gyms/toolathlon_gym/run.py.
-    import adaptive_scheduler
+from . import scheduler as adaptive_scheduler
+from gyms.toolathlon_gym.parallel import execute
 
 
 SCHEMA_VERSION = 1
@@ -191,19 +191,8 @@ def openrouter_transient_failure(result: dict[str, Any]) -> str | None:
 
 
 def validate_teacher_credentials() -> None:
-    if os.environ.get("DECOMPOSER_VLLM_BASE_URL"):
-        return
-    proxy_url = os.environ.get("LLM_PROXY_URL")
-    proxy_key = os.environ.get("LLM_PROXY_MASTER_KEY")
-    if proxy_url or proxy_key:
-        if not (proxy_url and proxy_key):
-            raise RuntimeError("Set both LLM_PROXY_URL and LLM_PROXY_MASTER_KEY")
-        return
-    if not os.environ.get("OPENROUTER_API_KEY"):
-        raise RuntimeError(
-            "Set OPENROUTER_API_KEY, or configure LLM_PROXY_URL and "
-            "LLM_PROXY_MASTER_KEY for the Decomposer model"
-        )
+    if not os.environ.get("LLM_PROXY_MASTER_KEY"):
+        raise RuntimeError("Set LLM_PROXY_MASTER_KEY for the registered lmrouter models")
 
 
 def wants_batch(argv: Sequence[str]) -> bool:
@@ -223,7 +212,7 @@ def parse_args(argv: Sequence[str], defaults: dict[str, Any]) -> argparse.Namesp
     selection.add_argument("--tasks", nargs="+", metavar="TASK")
     parser.add_argument("--resume", metavar="RUN_ID")
     parser.add_argument("-n", "--repetitions", type=int, default=1)
-    parser.add_argument("--purpose", choices=("trace-generation",), required=True)
+    parser.add_argument("--purpose", choices=("trace-generation",), default="trace-generation")
     parser.add_argument("--model", default=defaults["model"])
     parser.add_argument("--subagent-model", default=defaults["subagent_model"])
     parser.add_argument(
@@ -231,7 +220,8 @@ def parse_args(argv: Sequence[str], defaults: dict[str, Any]) -> argparse.Namesp
         default=defaults.get("subagent_api_model", defaults["subagent_model"]),
     )
     parser.add_argument("--subagent-port", type=int, default=defaults["subagent_port"])
-    parser.add_argument("--subagent-base-url", help="Hosted endpoint; skips local vLLM.")
+    parser.add_argument("--subagent-base-url", default=defaults.get("subagent_base_url"),
+                        help="Registered hosted endpoint; skips local vLLM.")
     parser.add_argument("--subagent-host", help="Optional container DNS mapping, hostname:IP.")
     parser.add_argument(
         "--subagent-ports",
@@ -567,39 +557,10 @@ def execute_episode(
         "status": "running", "task": task, "repetition": repetition,
         "attempt": attempt, "command": command, "started_at": started_at,
     })
-    with (attempt_dir / "runner.stdout.log").open("wb") as stdout, (
-        attempt_dir / "runner.stderr.log"
-    ).open("wb") as stderr:
-        process = subprocess.Popen(command, stdout=stdout, stderr=stderr)
-        timed_out = False
-        try:
-            while True:
-                try:
-                    returncode = process.wait(timeout=0.5)
-                    break
-                except subprocess.TimeoutExpired:
-                    if time.monotonic() - started >= getattr(
-                        args, "episode_timeout", 2400
-                    ):
-                        timed_out = True
-                        process.send_signal(signal.SIGINT)
-                        try:
-                            returncode = process.wait(timeout=120)
-                        except subprocess.TimeoutExpired:
-                            process.kill()
-                            returncode = process.wait()
-                        break
-                    if stop_event is not None and stop_event.is_set():
-                        raise KeyboardInterrupt("batch interrupted")
-        except BaseException:
-            if process.poll() is None:
-                process.send_signal(signal.SIGINT)
-                try:
-                    process.wait(timeout=120)
-                except subprocess.TimeoutExpired:
-                    process.kill()
-                    process.wait()
-            raise
+    returncode, timed_out = execute(
+        command, attempt_dir, getattr(args, "episode_timeout", 3300),
+        stop_event if stop_event is not None else threading.Event(),
+    )
 
     artifact_dir = root / "traces" / task / episode_id
     evaluation_path = root / "evals" / task / episode_id / "result.json"
@@ -665,6 +626,21 @@ def next_attempt(run_dir: Path, episode: dict[str, Any]) -> tuple[int, bool]:
             continue
         if number in known:
             continue
+        try:
+            saved = json.loads((path / "attempt.json").read_text())
+        except (OSError, ValueError):
+            saved = None
+        if (
+            isinstance(saved, dict)
+            and saved.get("attempt") == number
+            and saved.get("status") in {"completed", "failed"}
+        ):
+            saved.pop("command", None)
+            episode["attempts"].append(saved)
+            episode.update(saved)
+            known.add(number)
+            changed = True
+            continue
         recovered = {
             "attempt": number,
             "status": "failed",
@@ -705,6 +681,20 @@ def failure(attempt: int, error: BaseException, started_at: str | None) -> dict[
     }
 
 
+@contextmanager
+def run_lock(run_dir: Path):
+    """One collector owns a run; the OS releases the lock even after a crash."""
+    with (run_dir / "collector.lock").open("a") as lock:
+        try:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as error:
+            raise RuntimeError(f"Run is already active: {run_dir.name}") from error
+        try:
+            yield
+        finally:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+
+
 def main(
     argv: Sequence[str],
     *,
@@ -720,6 +710,12 @@ def main(
     stop_vllm: Callable[[subprocess.Popen[bytes] | None], None],
     docker: Callable[..., subprocess.CompletedProcess[str]],
 ) -> dict[str, Any]:
+    from decomposer.models import create_model
+    subagent = (
+        create_model("qwen_3_5_4b_unlooped_thinking")
+        if (default_subagent_api_model or default_subagent_model) == "Qwen/Qwen3.5-4B-unlooped"
+        else None
+    )
     defaults = {
         "artifacts_dir": default_artifacts_dir,
         "image": default_image,
@@ -727,12 +723,26 @@ def main(
         "subagent_model": default_subagent_model,
         "subagent_api_model": default_subagent_api_model or default_subagent_model,
         "subagent_port": default_subagent_port,
+        "subagent_base_url": subagent.openai_api_base if subagent else None,
     }
     args = parse_args(argv, defaults)
     root = args.gym_artifacts_dir.resolve()
     if args.resume:
         validate_run_id(args.resume)
-        run_dir = root / "runs" / args.resume
+    run_dir = root / "runs" / (args.resume or new_run_id())
+    if not args.resume:
+        run_dir.mkdir(parents=True, exist_ok=False)
+    with run_lock(run_dir):
+        return _run_collection(
+            args, run_dir, repo_root=repo_root, toolathlon_root=toolathlon_root,
+            start_vllm=start_vllm, stop_vllm=stop_vllm, docker=docker,
+        )
+
+
+def _run_collection(args, run_dir, *, repo_root, toolathlon_root,
+                    start_vllm, stop_vllm, docker):
+    root = args.gym_artifacts_dir.resolve()
+    if args.resume:
         manifest = load_manifest(run_dir)
         if args.purpose != manifest["config"]["purpose"]:
             raise ValueError("Resume purpose does not match the manifest")
@@ -762,8 +772,6 @@ def main(
         tasks = select_tasks(
             toolathlon_root / "tasks" / "finalpool", args.all, args.tasks
         )
-        run_dir = root / "runs" / new_run_id()
-        run_dir.mkdir(parents=True, exist_ok=False)
         manifest = create_manifest(run_dir.name, tasks, args.repetitions, args)
         save_manifest(run_dir, manifest)
         append_event(run_dir, "run_created", tasks=tasks, repetitions=args.repetitions)

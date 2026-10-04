@@ -29,16 +29,16 @@ We plan to train the orchestration model in two stages:
 
 ## Get started
 
-The minimal example runs Decomposer with DeepSeek V4 Flash 0731 through OpenRouter and
-Qwen3.5-4B non-thinking workers through local vLLM and LangGraph servers.
-From the repository root, install the development environment and start vLLM:
+The minimal example runs Decomposer with Flash Next non-thinking and Qwen3.5-4B
+unlooped thinking workers through lmrouter and a local LangGraph server. Both use
+`create_model(model)` in `src/decomposer/models.py`.
+From the repository root, install the development environment:
 
 ```bash
 uv sync
-scripts/vllm/serve_qwen_3_5_4b.sh
 ```
 
-With `OPENROUTER_API_KEY` set, start the subagent server in another terminal:
+With `LLM_PROXY_MASTER_KEY` set, start the subagent server in another terminal:
 
 ```bash
 scripts/subagents/serve.sh
@@ -52,6 +52,35 @@ uv run python examples/minimal/run.py
 
 The final answer is printed and the complete message history is saved to
 `examples/minimal/messages.md`. See `examples/minimal/README.md` for details.
+
+## Hosted Models and Private lmrouter Access
+
+Models and sampling settings are configured in [models.py](src/decomposer/models.py).
+For private lmrouter access, ask Codex to follow
+[the setup instructions in AGENTS.md](AGENTS.md#private-lmrouter-access).
+
+### Use the Registry Anywhere
+
+The same connection works with synchronous `invoke()` and asynchronous
+`ainvoke()`. No per-gym model setup is required:
+
+```python
+from langchain.agents import create_agent
+from decomposer.models import create_model
+
+agent = create_agent(model=create_model("qwen_3_8_flash_next_non_thinking"), tools=[])
+result = agent.invoke({"messages": [{"role": "user", "content": "Say hello."}]})
+print(result["messages"][-1].content)
+```
+
+Toolathlon Gym automatically mounts the socket directory into task containers
+and passes the key by environment variable name. Other container launchers need
+the same read-only directory mount and the container-side `LLM_PROXY_UNIX_SOCKET`
+path. Load the same key into the container environment without putting it in
+command arguments. Keep the HTTPS registry URL unchanged.
+
+See [Gym usage](gyms/toolathlon_gym/README.md) and
+[SFT collection](sft/toolathlon_gym/README.md) for their launch commands.
 
 ## Repo structure
 

@@ -2,7 +2,7 @@ import json
 import subprocess
 from pathlib import Path
 
-from gyms.toolathlon_gym import adaptive_scheduler as scheduler, batch
+from sft.toolathlon_gym import scheduler, collection as batch
 
 
 def evaluation(tmp_path: Path, name: str, value: dict) -> str:
@@ -50,16 +50,46 @@ def test_extract_partial_score_supports_native_and_common_stdout() -> None:
 def test_extract_partial_score_has_narrow_marker_fallback() -> None:
     markers = scheduler.extract_partial_score(
         {
+            "returncode": 0,
             "native_result": None,
             "stdout": "[PASS] file exists\n[OK] sheet exists\n[FAIL] wrong row",
         }
     )
     status_lines = scheduler.extract_partial_score(
-        {"native_result": None, "stdout": "Checking one\nPASS\nChecking two\nFAIL"}
+        {"returncode": 0, "native_result": None,
+         "stdout": "Checking one\nPASS\nChecking two\nFAIL"}
     )
 
     assert markers and markers.fraction == 2 / 3
     assert status_lines and status_lines.fraction == 1 / 2
+
+
+def test_crashed_evaluator_does_not_qualify_from_truncated_log(tmp_path):
+    for index, marker in enumerate(("[PASS] first check", "PASS")):
+        path = evaluation(tmp_path, str(index), {
+            "pass": False, "returncode": 1, "stdout": marker,
+            "stderr": "Traceback (most recent call last):\nRuntimeError: database unavailable",
+        })
+        outcome = scheduler.load_launch_outcome("task", path)
+        assert outcome.partial_score is None
+        assert not outcome.qualifies(.9)
+
+
+def test_failed_checks_with_explicit_totals_keep_partial_score():
+    score = scheduler.extract_partial_score({
+        "returncode": 1, "stdout": "Results: 19/20 passed",
+    })
+    assert score.fraction == .95
+
+
+def test_agent_timeout_score_is_diagnostic_only(tmp_path):
+    path = evaluation(tmp_path, "timeout", {
+        "pass": False, "agent_error": "TimeoutError()",
+        "native_result": {"passed": 10, "total": 10},
+    })
+    outcome = scheduler.load_launch_outcome("task", path)
+    assert outcome.partial_score.fraction == 1
+    assert not outcome.qualifies(.9)
 
 
 def test_qualification_is_strictly_greater_than_threshold(tmp_path: Path) -> None:
@@ -206,6 +236,30 @@ def test_coverage_first_drops_known_zero_after_six_launches(tmp_path: Path) -> N
     assert manifest["adaptive_scheduler"]["phase"] == "complete"
 
 
+def test_unparseable_results_never_grant_unlimited_retries(tmp_path):
+    unknown = evaluation(tmp_path, "unknown", {"pass": False, "native_result": None})
+    manifest = {"episodes": [episode("alpha", i, attempt(unknown)) for i in range(1, 7)]}
+    state = scheduler.new_scheduler_state(["alpha"], threshold=.9, cull_fraction=.1, target_successes=4)
+    state["protect_unscored_evaluations"] = True  # Old manifests must also be bounded.
+    manifest["adaptive_scheduler"] = state
+    assert scheduler.plan_next_wave(manifest) == []
+    assert state["phase"] == "complete"
+
+
+def test_balancing_stops_after_its_attempt_budget(tmp_path):
+    passed = evaluation(tmp_path, "pass", {"pass": True})
+    failed = evaluation(tmp_path, "fail", {"pass": False})
+    manifest = {"episodes": [episode("alpha", 1, attempt(passed))]}
+    state = scheduler.new_scheduler_state(["alpha"], threshold=.9, cull_fraction=.1, target_successes=4)
+    state["max_balance_launches_per_task"] = 2
+    manifest["adaptive_scheduler"] = state
+    for _ in range(2):
+        assert scheduler.plan_next_wave(manifest)
+        manifest["episodes"][-1].update(status="completed", attempts=[attempt(failed)])
+    assert scheduler.plan_next_wave(manifest) == []
+    assert state["phase"] == "complete"
+
+
 def test_coverage_first_honors_per_task_limits_and_can_cap_unparseable(
     tmp_path: Path,
 ) -> None:
@@ -293,7 +347,7 @@ def test_adaptive_batch_water_fills_without_changing_models(
     for task in tasks:
         (toolathlon_root / "tasks" / "finalpool" / task).mkdir(parents=True)
     artifacts = tmp_path / "artifacts"
-    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    monkeypatch.setenv("LLM_PROXY_MASTER_KEY", "test-key")
     monkeypatch.setattr(batch, "new_run_id", lambda: "adaptive-run")
     calls = []
 

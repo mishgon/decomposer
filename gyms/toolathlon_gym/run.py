@@ -17,18 +17,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from langchain_core.messages import message_to_dict
-from langchain_openrouter import ChatOpenRouter
 from langgraph.checkpoint.memory import InMemorySaver
 
-from decomposer.chat_vllm import ChatVLLM
+from decomposer.models import create_model
 from decomposer.core import create_decomposer_agent
 
 try:
     from .usage import build_usage_summary
-    from .subagents.model_config import generation_config
 except ImportError:  # Executed directly as a script.
     from usage import build_usage_summary
-    from subagents.model_config import generation_config
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -37,9 +34,9 @@ DEFAULT_GYM_ARTIFACTS_DIR = REPO_ROOT / "artifacts" / "gyms" / "toolathlon_gym"
 DEFAULT_ARTIFACTS_DIR = DEFAULT_GYM_ARTIFACTS_DIR / "traces"
 DEFAULT_EVALS_DIR = DEFAULT_GYM_ARTIFACTS_DIR / "evals"
 DEFAULT_IMAGE = "decomposer-toolathlon:latest"
-DEFAULT_MODEL = "deepseek/deepseek-v4-flash-0731"
-DEFAULT_SUBAGENT_MODEL = "google/gemma-4-26B-A4B-it"
-DEFAULT_SUBAGENT_API_MODEL = "google/gemma-4-26B-A4B-it"
+DEFAULT_MODEL = "qwen_3_8_flash_next_non_thinking"
+DEFAULT_SUBAGENT_MODEL = "Qwen/Qwen3.5-4B-unlooped"
+DEFAULT_SUBAGENT_API_MODEL = "Qwen/Qwen3.5-4B-unlooped"
 DEFAULT_SUBAGENT_PORT = 8023
 POSTGRES_IMAGE = "docker.io/library/postgres:15"
 POSTGRES_ENV = {
@@ -50,13 +47,7 @@ POSTGRES_ENV = {
     "PGPASSWORD": "camel",
     "PGDATABASE": "toolathlon_gym",
 }
-SUBAGENT_TYPE_ID = "configured_non_thinking"
-# Retained for compatibility with callers that inspect the historical default.
-SUBAGENT_TYPES = ((
-    "gemma_4_26b_a4b_non_thinking",
-    "gemma_4_26b_a4b_non_thinking",
-    "Gemma-4-26B-A4B non-thinking",
-),)
+SUBAGENT_TYPE_ID = "qwen_3_5_4b_unlooped_thinking"
 
 
 def _docker(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -127,7 +118,25 @@ def _cleanup_episode(
         ):
             try:
                 completed = _docker(*command, check=False)
-                content = completed.stdout + completed.stderr
+                if kind == "inspect.json":
+                    # Container config includes API keys and command arguments.
+                    # Save only the lifecycle fields needed for failure analysis.
+                    inspected = json.loads(completed.stdout)
+                    content = json.dumps([
+                        {
+                            "Id": item.get("Id"),
+                            "Name": item.get("Name"),
+                            "Image": item.get("Image"),
+                            "State": {
+                                key: item.get("State", {}).get(key)
+                                for key in ("Status", "Running", "ExitCode", "OOMKilled",
+                                            "StartedAt", "FinishedAt")
+                            },
+                        }
+                        for item in inspected
+                    ], indent=2)
+                else:
+                    content = completed.stdout + completed.stderr
                 if content:
                     (episode_dir / f"{label}.{kind}").write_text(
                         content, encoding="utf-8"
@@ -187,11 +196,12 @@ def vllm_command(
         "--language-model-only",
         "--enable-auto-tool-choice",
         "--tool-call-parser",
-        "gemma4",
+        "qwen3_xml",
         "--reasoning-parser",
-        "gemma4",
+        "qwen3",
         "--default-chat-template-kwargs",
-        '{"enable_thinking":false}',
+        '{"enable_thinking":true}',
+        "--enable-prefix-caching",
     ]
     if data_parallel_size > 1:
         command.extend(
@@ -351,19 +361,27 @@ def stop_vllm(process: subprocess.Popen[bytes] | None) -> None:
         return
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("task")
+def create_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Run raw Toolathlon Gym episodes.")
+    parser.add_argument("task", nargs="?")
+    parser.add_argument("--tasks", nargs="+")
+    parser.add_argument("--all", action="store_true")
+    parser.add_argument("--harness", choices=("react", "decomposer"), default="decomposer")
+    parser.add_argument("--concurrency", type=int, default=1)
+    parser.add_argument("-n", "--repetitions", type=int, default=1)
+    parser.add_argument("--output-dir", type=Path, default=DEFAULT_GYM_ARTIFACTS_DIR / "raw")
+    parser.add_argument("--episode-timeout", type=float, default=3300)
     parser.add_argument("--episode-id", help=argparse.SUPPRESS)
     parser.add_argument("--run-id", help=argparse.SUPPRESS)
     parser.add_argument("--repetition", type=int, help=argparse.SUPPRESS)
     parser.add_argument("--attempt", type=int, help=argparse.SUPPRESS)
-    parser.add_argument("--purpose", choices=("trace-generation",), required=True)
-    parser.add_argument("--model", default=DEFAULT_MODEL)
+    parser.add_argument("--purpose", default="raw", help=argparse.SUPPRESS)
+    parser.add_argument("--model", choices=(DEFAULT_MODEL, SUBAGENT_TYPE_ID, "qwen_3_5_4b_unlooped_non_thinking"), default=DEFAULT_MODEL)
     parser.add_argument("--subagent-model", default=DEFAULT_SUBAGENT_MODEL)
-    parser.add_argument("--subagent-api-model", default=DEFAULT_SUBAGENT_API_MODEL)
+    parser.add_argument("--subagent-api-model", choices=(DEFAULT_SUBAGENT_API_MODEL,), default=DEFAULT_SUBAGENT_API_MODEL)
     parser.add_argument("--subagent-port", type=int, default=DEFAULT_SUBAGENT_PORT)
-    parser.add_argument("--subagent-base-url", help="Hosted OpenAI-compatible endpoint; skips local vLLM.")
+    parser.add_argument("--subagent-base-url", default=create_model(SUBAGENT_TYPE_ID).openai_api_base,
+                        help="Registered hosted endpoint; skips local vLLM.")
     parser.add_argument("--subagent-host", help="Optional container DNS mapping, hostname:IP.")
     parser.add_argument("--subagent-gpu", default="0")
     parser.add_argument("--vllm-max-model-len", type=int, default=256000)
@@ -378,7 +396,11 @@ def main() -> None:
     parser.add_argument("--n-jobs-per-worker", type=int, default=1000)
     parser.add_argument("--agent-timeout", type=float, default=2700)
     parser.add_argument("--container-lock-file", type=Path, help=argparse.SUPPRESS)
-    args = parser.parse_args()
+    return parser
+
+
+def run_episode(args) -> None:
+    parser = create_parser()
     if args.n_jobs_per_worker < 1:
         parser.error("--n-jobs-per-worker must be at least 1")
     if args.agent_timeout <= 0:
@@ -395,25 +417,20 @@ def main() -> None:
     task_dir = (tasks_dir / args.task).resolve()
     if task_dir.parent != tasks_dir or not task_dir.is_dir():
         raise ValueError(f"Unknown Toolathlon task: {args.task!r}")
-    decomposer_vllm_url = os.environ.get("DECOMPOSER_VLLM_BASE_URL")
-    llm_proxy_url = os.environ.get("LLM_PROXY_URL")
-    llm_proxy_key = os.environ.get("LLM_PROXY_MASTER_KEY")
-    if args.subagent_base_url:
-        os.environ.setdefault("VLLM_API_KEY", llm_proxy_key or "")
-        if not os.environ["VLLM_API_KEY"]:
-            raise RuntimeError("Hosted subagents require VLLM_API_KEY or LLM_PROXY_MASTER_KEY")
-    if decomposer_vllm_url:
-        pass
-    elif llm_proxy_url:
-        if not llm_proxy_key:
-            raise RuntimeError(
-                "Set LLM_PROXY_MASTER_KEY when LLM_PROXY_URL is configured"
-            )
-    elif not os.environ.get("OPENROUTER_API_KEY"):
-        raise RuntimeError(
-            "Set OPENROUTER_API_KEY, or configure LLM_PROXY_URL and "
-            "LLM_PROXY_MASTER_KEY for the Decomposer model"
-        )
+    if not os.environ.get("LLM_PROXY_MASTER_KEY"):
+        raise RuntimeError("Set LLM_PROXY_MASTER_KEY for the registered lmrouter models")
+    subagent_model = create_model(SUBAGENT_TYPE_ID)
+    if args.subagent_base_url != subagent_model.openai_api_base:
+        raise ValueError("Set the subagent endpoint in src/decomposer/models.py")
+
+    proxy_mount = []
+    proxy_socket = os.environ.get("LLM_PROXY_UNIX_SOCKET")
+    if proxy_socket:
+        socket_path = Path(proxy_socket).resolve()
+        if not socket_path.is_socket():
+            raise RuntimeError(f"Model proxy socket is missing: {socket_path}")
+        proxy_mount = ["--volume", f"{socket_path.parent}:/run/model-proxy:ro",
+                       "--env", f"LLM_PROXY_UNIX_SOCKET=/run/model-proxy/{socket_path.name}"]
 
     _docker("image", "inspect", args.image)
 
@@ -578,13 +595,8 @@ def main() -> None:
             "--env",
             "TOOLATHLON_SUBAGENT_CALL_LOG=/artifacts/data/subagent_model_calls.jsonl",
             "--env",
-            f"DECOMPOSER_SUBAGENT_MODEL={args.subagent_api_model}",
-            "--env",
-            (
-                "DECOMPOSER_SUBAGENT_BASE_URL="
-                + (args.subagent_base_url or f"http://host.docker.internal:{args.subagent_port}/v1")
-            ),
-            "--env", "VLLM_API_KEY",
+            "LLM_PROXY_MASTER_KEY",
+            *proxy_mount,
             *postgres_env,
             "--volume",
             f"{episode_dir.resolve()}:/artifacts/data",
@@ -640,174 +652,48 @@ def main() -> None:
         container_lock_held = False
 
         runtime = json.loads((episode_dir / "runtime.json").read_text(encoding="utf-8"))
-        print("Running Decomposer...", flush=True)
+        print(f"Running {args.harness}...", flush=True)
         checkpointer = InMemorySaver()
-        openrouter_provider = os.environ.get("DECOMPOSER_OPENROUTER_PROVIDER")
-        reasoning_effort = os.environ.get(
-            "DECOMPOSER_REASONING_EFFORT", "max"
-        ).lower()
-        configured_max_tokens = os.environ.get("DECOMPOSER_MAX_TOKENS")
-        decomposer_max_tokens = (
-            int(configured_max_tokens) if configured_max_tokens else None
-        )
-        max_tokens_kwargs = (
-            {"max_tokens": decomposer_max_tokens}
-            if decomposer_max_tokens is not None
-            else {}
-        )
-        request_timeout_seconds = float(
-            os.environ.get("DECOMPOSER_OPENROUTER_TIMEOUT", "600")
-        )
-        openrouter_max_retries = int(
-            os.environ.get("DECOMPOSER_OPENROUTER_MAX_RETRIES", "5")
-        )
-        reasoning = (
-            {"enabled": False}
-            if reasoning_effort in {"none", "off", "disabled"}
-            else {"effort": reasoning_effort}
-        )
-        if decomposer_vllm_url:
-            decomposer_model = ChatVLLM(
-                model=args.model,
-                base_url=decomposer_vllm_url,
-                api_key=os.environ.get("VLLM_API_KEY", "EMPTY"),
-                temperature=1.0,
-                top_p=0.95,
-                **max_tokens_kwargs,
-                timeout=request_timeout_seconds,
-                max_retries=openrouter_max_retries,
-                disable_streaming=True,
-                use_responses_api=False,
-                preserve_reasoning=True,
-                preserve_reasoning_on_tool_calls_only=True,
-                extra_body={
-                    "top_k": 64,
-                    "chat_template_kwargs": {"enable_thinking": True},
-                },
-            )
-            teacher_backend = "vllm"
-        elif llm_proxy_url:
-            decomposer_model = ChatVLLM(
-                model=args.model,
-                base_url=llm_proxy_url,
-                api_key=llm_proxy_key,
-                temperature=1.0,
-                top_p=0.95,
-                **max_tokens_kwargs,
-                timeout=request_timeout_seconds,
-                max_retries=openrouter_max_retries,
-                disable_streaming=True,
-                use_responses_api=False,
-                preserve_reasoning=True,
-                parse_qwen_xml_tool_calls=True,
-                extra_body={
-                    "top_k": 20,
-                    "min_p": 0.0,
-                    "repetition_penalty": 1.0,
-                    "include_reasoning": True,
-                    "chat_template_kwargs": {"enable_thinking": True},
-                },
-            )
-            teacher_backend = "llm_proxy"
-        else:
-            decomposer_model = ChatOpenRouter(
-                model=args.model,
-                temperature=1.0,
-                top_p=0.95,
-                reasoning=reasoning,
-                **max_tokens_kwargs,
-                # DeepSeek V4 high-reasoning decompositions can legitimately
-                # take several minutes. Preserve that response window while
-                # allowing transient backend failures to retry; the outer
-                # agent timeout still caps total episode wall-clock time.
-                # langchain-openrouter/OpenRouter SDK timeouts are milliseconds.
-                timeout=max(1, int(request_timeout_seconds * 1000)),
-                max_retries=openrouter_max_retries,
-                openrouter_provider=(
-                    {
-                        "order": [openrouter_provider],
-                        "allow_fallbacks": False,
-                    }
-                    if openrouter_provider
-                    else None
-                ),
-            )
-            teacher_backend = "openrouter"
-        agent = create_decomposer_agent(
-            decomposer_model=decomposer_model,
-            subagent_types=[{
-                "subagent_type_id": SUBAGENT_TYPE_ID,
-                "description": (
-                    f"Tool-calling agent based on {args.subagent_api_model} in "
-                    "non-thinking mode. Has access to all the available tools."
-                ),
-                "assistant_id": SUBAGENT_TYPE_ID,
-                "url": subagent_url,
-            }],
-            checkpointer=checkpointer,
-            subagent_recursion_limit=410,
-        )
-        agent_config = {
-            "recursion_limit": 410,
-            "configurable": {"thread_id": episode_id},
-        }
-        agent_error: str | None = None
-        agent_exception: BaseException | None = None
-        try:
-            state = asyncio.run(
-                asyncio.wait_for(
-                    agent.ainvoke(
-                        {
-                            "messages": [
-                                {
-                                    "role": "user",
-                                    "content": runtime["task_config"]["task_str"],
-                                }
-                            ]
-                        },
-                        config=agent_config,
-                    ),
-                    timeout=args.agent_timeout,
-                )
-            )
-        except BaseException as error:
-            agent_exception = error
-            agent_error = repr(error)
-            try:
-                snapshot = asyncio.run(agent.aget_state(agent_config))
-                state = dict(snapshot.values)
-            except BaseException:
-                state = {}
+        decomposer_model = create_model(args.model) if args.harness == "decomposer" else None
+        agent, agent_config = make_agent(args.harness, decomposer_model, subagent_url,
+                                        args.subagent_api_model, episode_id, checkpointer)
+        state, agent_exception = asyncio.run(invoke_and_capture(
+            agent,
+            {"messages": [{"role": "user", "content": runtime["task_config"]["task_str"]}]},
+            agent_config,
+            args.agent_timeout,
+            subagent_url,
+        ))
+        agent_error = repr(agent_exception) if agent_exception is not None else None
         messages = state.get("messages", [])
-        serialized_messages = [message_to_dict(message) for message in messages]
+        serialized_messages = serialize_messages(messages)
         subagent_runs = state.get("subagent_runs", {})
         subagents = state.get("subagents", {})
         usage = build_usage_summary(serialized_messages, subagent_runs, subagents)
+        if args.harness == "react":
+            usage["react"] = usage.pop("decomposer")
         (episode_dir / "trace.json").write_text(
             json.dumps(
                 {
                     "episode_id": episode_id,
+                    "thread_id": agent_config["configurable"]["thread_id"],
                     "run_id": args.run_id,
                     "task": args.task,
                     "repetition": args.repetition,
                     "attempt": args.attempt,
                     "purpose": args.purpose,
-                    "decomposer_model": args.model,
-                    "teacher_backend": teacher_backend,
-                    "openrouter_provider": openrouter_provider,
-                    "reasoning_effort": reasoning_effort,
-                    "decomposer_generation_config": {
-                        "temperature": 1.0,
-                        "top_p": 0.95,
-                        "reasoning": reasoning,
-                    },
-                    "decomposer_max_tokens": decomposer_max_tokens,
-                    "request_timeout_seconds": request_timeout_seconds,
-                    "openrouter_max_retries": openrouter_max_retries,
+                    "harness": args.harness,
+                    "model": args.model if args.harness == "decomposer" else args.subagent_api_model,
+                    "decomposer_model": args.model if args.harness == "decomposer" else None,
+                    "teacher_backend": "lmrouter" if decomposer_model else "subagent",
+                    "model_proxy_unix_socket": proxy_socket,
+                    "decomposer_generation_config": model_metadata(decomposer_model) if decomposer_model else None,
                     "subagent_model": args.subagent_model,
                     "subagent_api_model": args.subagent_api_model,
                     "subagent_base_url": args.subagent_base_url,
-                    "subagent_generation_config": generation_config(args.subagent_api_model),
+                    "subagent_generation_config": model_metadata(subagent_model),
+                    "subagent_shutdown": state.get("subagent_shutdown"),
+                    "subagent_shutdown_error": state.get("subagent_shutdown_error"),
                     "started_at": started_at,
                     "finished_at": datetime.now(timezone.utc).isoformat(),
                     "agent_error": agent_error,
@@ -825,16 +711,21 @@ def main() -> None:
             json.dumps(usage, indent=2, ensure_ascii=False),
             encoding="utf-8",
         )
-        answer = str(messages[-1].content) if messages else ""
+        last = serialized_messages[-1] if serialized_messages else {}
+        answer = str(last.get("data", last).get("content", ""))
         (episode_dir / "answer.txt").write_text(answer, encoding="utf-8")
-
-        if agent_exception is not None:
-            raise RuntimeError(f"Decomposer agent loop failed: {agent_error}") from agent_exception
 
         print("Running native evaluation...", flush=True)
         config = runtime["task_config"]
         command = config["evaluation"]["evaluation_command"]
-        if command is None:
+        if state.get("subagent_shutdown_error"):
+            evaluation = {
+                "episode_id": episode_id, "task": args.task, "pass": False,
+                "native_pass": None, "agent_error": agent_error,
+                "details": "Evaluation skipped: subagents could not be confirmed stopped",
+                "subagent_shutdown_error": state["subagent_shutdown_error"],
+            }
+        elif command is None:
             evaluation = {
                 "episode_id": episode_id,
                 "task": args.task,
@@ -878,7 +769,9 @@ def main() -> None:
             evaluation = {
                 "episode_id": episode_id,
                 "task": args.task,
-                "pass": completed.returncode == 0,
+                "pass": completed.returncode == 0 and agent_exception is None,
+                "native_pass": completed.returncode == 0,
+                "agent_error": agent_error,
                 "returncode": completed.returncode,
                 "native_result": native_result,
                 "stdout": completed.stdout,
@@ -889,6 +782,10 @@ def main() -> None:
             json.dumps(evaluation, indent=2, ensure_ascii=False),
             encoding="utf-8",
         )
+
+        # Preserve diagnostic scores, but keep interrupted agents unsuccessful.
+        if agent_exception is not None:
+            raise RuntimeError(f"Agent loop failed: {agent_error}") from agent_exception
 
         print(answer)
         print(f"\nArtifacts: {episode_dir}")
@@ -913,24 +810,95 @@ def main() -> None:
             stop_vllm(vllm_process)
 
 
-if __name__ == "__main__":
-    import batch
 
-    signal.signal(signal.SIGTERM, _handle_termination)
-    if batch.wants_batch(sys.argv[1:]):
-        batch.main(
-            sys.argv[1:],
-            repo_root=REPO_ROOT,
-            toolathlon_root=TOOLATHLON_ROOT,
-            default_artifacts_dir=DEFAULT_GYM_ARTIFACTS_DIR,
-            default_image=DEFAULT_IMAGE,
-            default_model=DEFAULT_MODEL,
-            default_subagent_model=DEFAULT_SUBAGENT_MODEL,
-            default_subagent_api_model=DEFAULT_SUBAGENT_API_MODEL,
-            default_subagent_port=DEFAULT_SUBAGENT_PORT,
-            start_vllm=start_vllm,
-            stop_vllm=stop_vllm,
-            docker=_docker,
+def make_agent(harness, model, url, subagent_model, episode_id, checkpointer):
+    thread_id = str(uuid.uuid5(uuid.NAMESPACE_URL, episode_id))
+    config = {"recursion_limit": 410, "configurable": {"thread_id": thread_id}}
+    if harness == "decomposer":
+        agent = create_decomposer_agent(
+            decomposer_model=model,
+            subagent_types=[{
+                "subagent_type_id": SUBAGENT_TYPE_ID,
+                "description": f"{subagent_model} thinking agent with all task tools.",
+                "assistant_id": SUBAGENT_TYPE_ID, "url": url,
+            }],
+            checkpointer=checkpointer, subagent_recursion_limit=410,
         )
+        return agent, config
+    from langgraph.pregel.remote import RemoteGraph
+    from langgraph_sdk import get_sync_client
+    with get_sync_client(url=url) as client:
+        client.threads.create(thread_id=thread_id)
+    return RemoteGraph(SUBAGENT_TYPE_ID, url=url), config
+
+
+def serialize_messages(messages):
+    return [message if isinstance(message, dict) else message_to_dict(message) for message in messages]
+
+
+def model_metadata(model):
+    """Record the configured model without credentials or HTTP client objects."""
+    values = model.model_dump(include={"model_name", "openai_api_base", "temperature", "top_p", "presence_penalty",
+                                       "max_tokens", "extra_body", "request_timeout", "max_retries"},
+                              exclude_none=True)
+    values["preserve_reasoning"] = model.preserve_reasoning
+    return values
+
+
+async def cancel_subagent_runs(url):
+    """Stop all runs in this episode's dedicated server, including uncheckpointed runs."""
+    from langgraph_sdk import get_client
+    stopped = []
+    async with get_client(url=url, timeout=60) as client:
+        offset = 0
+        while True:
+            threads = await client.threads.search(limit=100, offset=offset)
+            for thread in threads:
+                thread_id = thread["thread_id"]
+                for status in ("pending", "running"):
+                    # Cancellation removes a run from this query; keep offset zero.
+                    while runs := await client.runs.list(thread_id, status=status, limit=100):
+                        for run in runs:
+                            await client.runs.cancel(thread_id, run["run_id"], wait=True, action="interrupt")
+                            final = await client.runs.get(thread_id, run["run_id"])
+                            if final["status"] in {"pending", "running"}:
+                                raise RuntimeError(f"Subagent run still active: {run['run_id']}")
+                            stopped.append({"thread_id": thread_id, "run_id": run["run_id"],
+                                            "status": final["status"]})
+            if len(threads) < 100:
+                return stopped
+            offset += len(threads)
+
+
+async def invoke_and_capture(agent, inputs, config, timeout, subagent_url=None):
+    """Capture partial state in the same event loop as the model clients."""
+    try:
+        state = await asyncio.wait_for(agent.ainvoke(inputs, config=config), timeout)
+    except BaseException as error:
+        try:
+            state = dict((await agent.aget_state(config)).values)
+        except BaseException:
+            state = {}
+        agent_error = error
     else:
-        main()
+        agent_error = None
+    if subagent_url:
+        try:
+            state["subagent_shutdown"] = await asyncio.wait_for(cancel_subagent_runs(subagent_url), 60)
+        except BaseException as shutdown_error:
+            state["subagent_shutdown_error"] = repr(shutdown_error)
+            agent_error = agent_error or shutdown_error
+    return state, agent_error
+
+
+def main(argv=None):
+    args = create_parser().parse_args(argv)
+    if args.episode_id:
+        return run_episode(args)
+    from gyms.toolathlon_gym.parallel import run
+    return run(args)
+
+
+if __name__ == "__main__":
+    signal.signal(signal.SIGTERM, _handle_termination)
+    main()

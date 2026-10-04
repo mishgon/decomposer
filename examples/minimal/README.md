@@ -1,18 +1,15 @@
 # Minimal example
 
 This example runs Decomposer directly and exposes one general-purpose subagent
-through a local LangGraph server. Decomposer uses DeepSeek V4 Flash 0731 through OpenRouter;
-the subagent uses Qwen3.5-4B with thinking disabled through a local vLLM server.
+through a local LangGraph server. Both model roles use hosted lmrouter inference.
 
-Set `OPENROUTER_API_KEY` in the environment before running the example.
+Set `LLM_PROXY_MASTER_KEY` before starting Python. The example uses the explicit
+Flash Next non-thinking teacher and Qwen4B-unlooped thinking worker in
+`src/decomposer/models.py`.
+If inference requires a tunnel, use the [shared lmrouter setup](../../README.md#hosted-models-and-private-lmrouter-access)
+before starting either process.
 
-From the repository root, start vLLM for the subagent:
-
-```bash
-scripts/vllm/serve_qwen_3_5_4b.sh
-```
-
-In another terminal, start the subagent server from the repository root:
+Start the subagent server from the repository root:
 
 ```bash
 scripts/subagents/serve.sh

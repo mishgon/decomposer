@@ -86,6 +86,25 @@ def load_connections(
 
         params = _resolve(config.get("params", {}), replacements)
         env = {**params.get("env", {}), **os.environ}
+        # Dependencies are baked into the image. Do not run package resolution
+        # (or spawn uv's host-sized thread pool) for every task startup.
+        if Path(params.get("command", "")).name == "uv":
+            arguments = params["args"]
+            run_index = arguments.index("run")
+            command, *remaining = arguments[run_index + 1:]
+            project = (Path(arguments[arguments.index("--directory") + 1])
+                       if "--directory" in arguments else Path(command).parent)
+            executable = project / ".venv" / "bin" / (
+                "python" if command.endswith(".py") else command
+            )
+            if not executable.is_file():
+                raise RuntimeError(f"Preinstalled MCP executable missing: {executable}")
+            params["command"] = str(executable)
+            params["args"] = ([command] if command.endswith(".py") else []) + remaining
+            if "--directory" in arguments:
+                params["cwd"] = str(project)
+            env["VIRTUAL_ENV"] = str(project / ".venv")
+            env["PATH"] = str(project / ".venv/bin") + os.pathsep + env.get("PATH", "")
         pg_env = {
             "PGHOST": "PG_HOST",
             "PGPORT": "PG_PORT",

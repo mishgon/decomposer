@@ -18,6 +18,32 @@ sys.path.insert(0, str(SUBAGENTS_DIR))
 import webapp
 
 
+@pytest.mark.parametrize("script", [False, True])
+def test_uv_mcp_launch_uses_preinstalled_environment(tmp_path, monkeypatch, script):
+    import yaml
+    root = tmp_path / "gym"
+    config_dir = root / "configs/mcp_servers"
+    config_dir.mkdir(parents=True)
+    project = tmp_path / "servers/example"
+    binary = project / ".venv/bin" / ("python" if script else "example-mcp")
+    binary.parent.mkdir(parents=True)
+    binary.touch()
+    arguments = (["run", str(project / "server.py")] if script else
+                 ["--directory", str(project), "run", "example-mcp", "--stdio"])
+    (config_dir / "example.yaml").write_text(yaml.safe_dump({
+        "name": "example", "params": {"command": "uv", "args": arguments},
+    }))
+    config = {"needed_mcp_servers": ["example"], "agent_workspace": str(tmp_path / "work"),
+              "task_dir": "fixture"}
+    connection = webapp.load_connections(config, root)["example"]
+    assert connection["command"] == str(binary)
+    assert connection["args"] == ([str(project / "server.py")] if script else ["--stdio"])
+    assert connection["env"]["VIRTUAL_ENV"] == str(project / ".venv")
+    binary.unlink()
+    with pytest.raises(RuntimeError, match="Preinstalled MCP executable missing"):
+        webapp.load_connections(config, root)
+
+
 def test_load_connections(tmp_path: Path, monkeypatch) -> None:
     toolathlon_root = tmp_path / "toolathlon"
     config_dir = toolathlon_root / "configs" / "mcp_servers"

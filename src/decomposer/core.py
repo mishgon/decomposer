@@ -86,8 +86,8 @@ class SubagentRun(TypedDict):
     run_id: str
     status: str
     prompt: str
-    tool_calls: NotRequired[list[SubagentToolCall]]
     messages: NotRequired[list[dict[str, Any]]]
+    tool_calls: NotRequired[list[SubagentToolCall]]
     response: NotRequired[str | None]
     # Zero-based order in which wait() returned this run's response.
     response_sequence_number: NotRequired[int]
@@ -197,9 +197,9 @@ def _truncate_text(text: str | None, max_tokens: int) -> tuple[str | None, bool]
     return text[:lo].rstrip() + suffix, True
 
 
-def _extract_subagent_tool_calls(run_messages: list[dict[str, Any]]) -> list[SubagentToolCall]:
+def _extract_subagent_tool_calls(messages: list[dict[str, Any]]) -> list[SubagentToolCall]:
     tool_calls: list[SubagentToolCall] = []
-    for message in run_messages:
+    for message in messages:
         if message["type"] != "ai":
             continue
         for tool_call in message["tool_calls"]:
@@ -601,21 +601,21 @@ def _build_wait_tool(
 
                     before_messages = history[-1]["values"]["messages"]
                     after_messages = history[0]["values"]["messages"]
-                    run_messages = after_messages[len(before_messages) :]
+                    messages = after_messages[len(before_messages) :]
                 else:
-                    run_messages = []
+                    messages = []
 
-                if status == "responded" and not run_messages:
+                if status == "responded" and not messages:
                     raise ValueError(
                         f"No messages found for run `{run['run_id']}`."
                     )
 
-                tool_calls = _extract_subagent_tool_calls(run_messages)
+                tool_calls = _extract_subagent_tool_calls(messages)
 
                 response = None
                 error = None
                 if status == "responded":
-                    last_message = run_messages[-1]
+                    last_message = messages[-1]
                     if (
                         last_message["type"] != "ai"
                         or last_message["tool_calls"]
@@ -646,7 +646,7 @@ def _build_wait_tool(
                     **subagent_run,
                     "status": status,
                     "tool_calls": tool_calls,
-                    "messages": run_messages,
+                    "messages": messages,
                     "response": response,
                     "error": error,
                     "response_sequence_number": response_sequence_number,
@@ -738,19 +738,19 @@ def _build_wait_tool(
 
                     before_messages = history[-1]["values"]["messages"]
                     after_messages = history[0]["values"]["messages"]
-                    run_messages = after_messages[len(before_messages) :]
+                    messages = after_messages[len(before_messages) :]
                 else:
-                    run_messages = []
+                    messages = []
 
-                if status == "responded" and not run_messages:
+                if status == "responded" and not messages:
                     raise ValueError(f"No messages found for run `{run['run_id']}`.")
 
-                tool_calls = _extract_subagent_tool_calls(run_messages)
+                tool_calls = _extract_subagent_tool_calls(messages)
 
                 response = None
                 error = None
                 if status == "responded":
-                    last_message = run_messages[-1]
+                    last_message = messages[-1]
                     if (
                         last_message["type"] != "ai"
                         or last_message["tool_calls"]
@@ -781,7 +781,7 @@ def _build_wait_tool(
                     **subagent_run,
                     "status": status,
                     "tool_calls": tool_calls,
-                    "messages": run_messages,
+                    "messages": messages,
                     "response": response,
                     "error": error,
                     "response_sequence_number": response_sequence_number,

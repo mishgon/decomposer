@@ -10,27 +10,42 @@ from types import SimpleNamespace
 
 import pytest
 
-from gyms.toolathlon_gym import batch, mlspace_serve, run, usage
-from gyms.toolathlon_gym.subagents.model_config import generation_config
+from gyms.toolathlon_gym import run, usage
+from sft.toolathlon_gym import collection as batch
+from decomposer.models import create_model
 
 
-def test_qwen_settings_preserve_upstream_profile() -> None:
-    settings = generation_config("Qwen/Qwen3.5-4B")
-    assert settings["temperature"] == 0.7
-    assert settings["top_p"] == 0.8
-    assert settings["presence_penalty"] == 1.5
-    assert settings["extra_body"]["top_k"] == 20
-    assert "reasoning_effort" not in settings["extra_body"]
-    assert settings["extra_body"]["chat_template_kwargs"] == {"enable_thinking": False}
+def test_flash_next_teacher_sends_official_nonthinking_sampling():
+    model = create_model(run.DEFAULT_MODEL)
+    payload = model._get_request_payload("test")
+    assert "reasoning_effort" not in payload
+    assert payload["temperature"] == .7
+    assert payload["top_p"] == .8
+    assert payload["presence_penalty"] == 1.5
+    assert payload["extra_body"] == {
+        "top_k": 20, "min_p": 0.0, "repetition_penalty": 1.0,
+        "chat_template_kwargs": {"enable_thinking": False},
+    }
+    assert model.preserve_reasoning is False
+    assert "max_tokens" not in payload
+    assert "max_completion_tokens" not in payload
 
 
-def test_gemma_settings_preserve_collection_profile() -> None:
-    settings = generation_config("google/gemma-4-26B-A4B-it")
-    assert settings["temperature"] == 1.0
-    assert settings["top_p"] == 0.95
-    assert settings["extra_body"]["top_k"] == 64
-    assert settings["extra_body"]["reasoning_effort"] == "none"
-    assert settings["preserve_reasoning"] is False
+@pytest.mark.parametrize("profile, thinking, temperature, top_p", [
+    ("qwen_3_5_4b_unlooped_thinking", True, .6, .95),
+    ("qwen_3_5_4b_unlooped_non_thinking", False, .7, .8),
+])
+def test_unlooped_uses_checkpoint_sampling(profile, thinking, temperature, top_p):
+    model = create_model(profile)
+    payload = model._get_request_payload("test")
+    assert payload["model"] == "Qwen/Qwen3.5-4B-unlooped"
+    assert payload["temperature"] == temperature
+    assert payload["top_p"] == top_p
+    assert "presence_penalty" not in payload
+    assert payload["extra_body"] == {"top_k": 20, "chat_template_kwargs": {"enable_thinking": thinking}}
+    assert model.preserve_reasoning is thinking
+    assert run.model_metadata(model)["preserve_reasoning"] is thinking
+    assert "openai_api_key" not in run.model_metadata(model)
 
 
 def test_configured_subagents_are_registered() -> None:
@@ -38,12 +53,7 @@ def test_configured_subagents_are_registered() -> None:
         (Path(run.__file__).parent / "subagents" / "langgraph.json").read_text()
     )["graphs"]
 
-    assert {
-        assistant_id for _, assistant_id, _ in run.SUBAGENT_TYPES
-    } <= registered.keys()
-    assert [item[0] for item in run.SUBAGENT_TYPES] == [
-        "gemma_4_26b_a4b_non_thinking"
-    ]
+    assert list(registered) == [run.SUBAGENT_TYPE_ID]
 
 
 def test_docker(monkeypatch) -> None:
@@ -76,23 +86,24 @@ def test_docker_error_includes_container_runtime_output(monkeypatch) -> None:
         run._docker("ps")
 
 
-def test_vllm_command_uses_current_environment_and_gemma_parsers() -> None:
+def test_vllm_command_uses_qwen_parsers_and_prefix_caching() -> None:
     command = run.vllm_command(
-        "/models/gemma",
+        "/models/qwen-unlooped",
         8023,
         max_model_len=32768,
         gpu_memory_utilization=0.8,
     )
 
     assert command[0] == str(Path(sys.executable).with_name("vllm"))
-    assert command[1:3] == ["serve", "/models/gemma"]
+    assert command[1:3] == ["serve", "/models/qwen-unlooped"]
     assert command[command.index("--served-model-name") + 1] == (
         run.DEFAULT_SUBAGENT_MODEL
     )
-    assert command[command.index("--tool-call-parser") + 1] == "gemma4"
-    assert command[command.index("--reasoning-parser") + 1] == "gemma4"
+    assert command[command.index("--tool-call-parser") + 1] == "qwen3_xml"
+    assert command[command.index("--reasoning-parser") + 1] == "qwen3"
+    assert "--enable-prefix-caching" in command
     assert command[command.index("--default-chat-template-kwargs") + 1] == (
-        '{"enable_thinking":false}'
+        '{"enable_thinking":true}'
     )
 
     data_parallel_command = run.vllm_command(
@@ -161,11 +172,11 @@ def test_postgres_environment_uses_container_ip_instead_of_dns(monkeypatch) -> N
     assert environment["PGDATABASE"] == "toolathlon_gym"
 
 
-def test_main_requires_explicit_trace_generation_purpose(monkeypatch) -> None:
-    monkeypatch.setattr(sys, "argv", ["run.py", "example"])
-
-    with pytest.raises(SystemExit):
-        run.main()
+def test_raw_runner_has_no_collection_policy() -> None:
+    args = run.create_parser().parse_args(["example", "--harness", "react"])
+    assert args.purpose == "raw"
+    assert args.harness == "react"
+    assert not hasattr(args, "adaptive")
 
 
 def test_main_rejects_path_traversal(monkeypatch) -> None:
@@ -175,7 +186,7 @@ def test_main_rejects_path_traversal(monkeypatch) -> None:
         ["run.py", "../finalpool", "--purpose", "trace-generation"],
     )
 
-    with pytest.raises(ValueError, match="Unknown Toolathlon task"):
+    with pytest.raises(ValueError, match="Tasks must be unique"):
         run.main()
 
 
@@ -258,13 +269,14 @@ def test_teacher_credentials_accept_lmrouter(monkeypatch) -> None:
     batch.validate_teacher_credentials()
 
 
-def test_teacher_credentials_accept_local_vllm(monkeypatch) -> None:
+def test_teacher_credentials_do_not_fall_back_to_local_vllm(monkeypatch) -> None:
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     monkeypatch.delenv("LLM_PROXY_URL", raising=False)
     monkeypatch.delenv("LLM_PROXY_MASTER_KEY", raising=False)
     monkeypatch.setenv("DECOMPOSER_VLLM_BASE_URL", "http://127.0.0.1:8031/v1")
 
-    batch.validate_teacher_credentials()
+    with pytest.raises(RuntimeError, match="LLM_PROXY_MASTER_KEY"):
+        batch.validate_teacher_credentials()
 
 
 def test_teacher_credentials_require_complete_lmrouter_config(monkeypatch) -> None:
@@ -272,7 +284,7 @@ def test_teacher_credentials_require_complete_lmrouter_config(monkeypatch) -> No
     monkeypatch.setenv("LLM_PROXY_URL", "https://lmrouter.example/v1")
     monkeypatch.delenv("LLM_PROXY_MASTER_KEY", raising=False)
 
-    with pytest.raises(RuntimeError, match="both LLM_PROXY_URL"):
+    with pytest.raises(RuntimeError, match="LLM_PROXY_MASTER_KEY"):
         batch.validate_teacher_credentials()
 
 
@@ -281,7 +293,7 @@ def test_batch_repetitions_and_resume_skip_completed(tmp_path, monkeypatch) -> N
     for task in ("alpha", "beta"):
         (toolathlon_root / "tasks" / "finalpool" / task).mkdir(parents=True)
     artifacts = tmp_path / "artifacts"
-    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    monkeypatch.setenv("LLM_PROXY_MASTER_KEY", "test-key")
     monkeypatch.setattr(batch, "new_run_id", lambda: "test-run")
 
     vllm_starts = []
@@ -294,6 +306,15 @@ def test_batch_repetitions_and_resume_skip_completed(tmp_path, monkeypatch) -> N
 
     def fake_execute_episode(args, **kwargs):
         episode_calls.append(kwargs)
+        if len(episode_calls) == 1:
+            manifest_path = artifacts / "runs/test-run/manifest.json"
+            before = manifest_path.read_bytes()
+            with pytest.raises(RuntimeError, match="already active"):
+                batch.main([
+                    "--resume", "test-run", "--purpose", "trace-generation",
+                    "--gym-artifacts-dir", str(artifacts),
+                ], **common)
+            assert manifest_path.read_bytes() == before
         task = kwargs["episode"]["task"]
         repetition = kwargs["episode"]["repetition"]
         attempt = kwargs["attempt"]
@@ -373,7 +394,7 @@ def test_batch_runs_episodes_with_requested_concurrency(tmp_path, monkeypatch, h
     for task in tasks:
         (toolathlon_root / "tasks" / "finalpool" / task).mkdir(parents=True)
     artifacts = tmp_path / "artifacts"
-    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    monkeypatch.setenv("LLM_PROXY_MASTER_KEY", "test-key")
     monkeypatch.setattr(batch, "new_run_id", lambda: "concurrent-run")
 
     lock = threading.Lock()
@@ -497,7 +518,7 @@ def test_batch_distributes_episodes_across_external_vllm_ports(
     for task in tasks:
         (toolathlon_root / "tasks" / "finalpool" / task).mkdir(parents=True)
     artifacts = tmp_path / "artifacts"
-    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    monkeypatch.setenv("LLM_PROXY_MASTER_KEY", "test-key")
     monkeypatch.setattr(batch, "new_run_id", lambda: "endpoint-pool-run")
 
     ports = []
@@ -553,46 +574,6 @@ def test_batch_distributes_episodes_across_external_vllm_ports(
     assert manifest["config"]["subagent_ports"] == [18100, 18101, 18102]
 
 
-def test_mlspace_serve_builds_one_replica_and_reverse_forward_per_gpu() -> None:
-    args = SimpleNamespace(
-        model="/models/gemma",
-        max_model_len=65536,
-        gpu_memory_utilization=0.9,
-        ssh_key=Path("/secrets/key"),
-        known_hosts=Path("/secrets/known_hosts"),
-        hertz_port=44444,
-        gpu_count=2,
-        remote_port_start=18108,
-        local_port_start=8023,
-        hertz_user="matrosov",
-        hertz_host="135.106.169.8",
-    )
-
-    vllm = mlspace_serve.vllm_command(args, 8024)
-    tunnel = mlspace_serve.tunnel_command(args)
-
-    assert vllm[vllm.index("--served-model-name") + 1] == mlspace_serve.SERVED_MODEL
-    assert vllm[vllm.index("--default-chat-template-kwargs") + 1] == (
-        '{"enable_thinking":false}'
-    )
-    forwards = [
-        tunnel[index + 1]
-        for index, value in enumerate(tunnel)
-        if value == "-R"
-    ]
-    assert forwards == [
-        "127.0.0.1:18108:127.0.0.1:8023",
-        "127.0.0.1:18109:127.0.0.1:8024",
-    ]
-
-
-def test_mlspace_wait_fails_immediately_when_vllm_exits() -> None:
-    process = SimpleNamespace(poll=lambda: 1, returncode=1)
-
-    with pytest.raises(RuntimeError, match="vLLM exited with code 1"):
-        mlspace_serve.wait_for_model(8023, mlspace_serve.SERVED_MODEL, 30, process)
-
-
 def test_cleanup_continues_when_log_capture_fails(tmp_path, monkeypatch) -> None:
     calls = []
 
@@ -621,7 +602,7 @@ def test_interrupted_attempt_is_recorded_for_next_resume(tmp_path, monkeypatch) 
     toolathlon_root = tmp_path / "toolathlon"
     (toolathlon_root / "tasks" / "finalpool" / "alpha").mkdir(parents=True)
     artifacts = tmp_path / "artifacts"
-    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    monkeypatch.setenv("LLM_PROXY_MASTER_KEY", "test-key")
     monkeypatch.setattr(batch, "new_run_id", lambda: "interrupted-run")
 
     def interrupt(*args, **kwargs):
@@ -681,6 +662,108 @@ def test_resume_run_id_must_be_one_path_component() -> None:
         batch.validate_run_id("../outside")
 
 
+@pytest.mark.parametrize("status", ["completed", "failed"])
+def test_recovery_reads_saved_attempt_before_retrying(tmp_path, status):
+    directory = tmp_path / "attempts/alpha/rep-001/attempt-001"
+    directory.mkdir(parents=True)
+    saved = {"attempt": 1, "status": status, "score": status == "completed",
+             "evaluation_path": "/saved/result.json", "error": None}
+    (directory / "attempt.json").write_text(json.dumps(saved))
+    episode = {"task": "alpha", "repetition": 1, "status": "running", "attempts": []}
+    assert batch.next_attempt(tmp_path, episode) == (2, True)
+    assert episode["attempts"] == [saved]
+    assert episode["status"] == status
+    assert episode["evaluation_path"] == saved["evaluation_path"]
+    assert batch.next_attempt(tmp_path, episode) == (2, False)
+
+
+def test_run_lock_released_on_exception(tmp_path):
+    with pytest.raises(ValueError):
+        with batch.run_lock(tmp_path):
+            raise ValueError("crash")
+    with batch.run_lock(tmp_path):
+        pass
+
+
+def test_cleanup_inspection_never_saves_container_secrets(tmp_path, monkeypatch):
+    secret = "test-secret-do-not-export"
+    inspect = [{"Id": "id", "Name": "task", "Image": "sha256:test",
+                "State": {"Status": "exited", "ExitCode": 1, "Error": secret},
+                "Config": {"Env": [f"VLLM_API_KEY={secret}"]}, "Args": [secret]}]
+    def docker(*args, **kwargs):
+        return subprocess.CompletedProcess(args, 0,
+            json.dumps(inspect) if args[0] == "inspect" else "", "")
+    monkeypatch.setattr(run, "_docker", docker)
+    run._cleanup_episode(episode_dir=tmp_path, task_container="task",
+                         pg_container="postgres", network="net")
+    for path in tmp_path.iterdir():
+        assert secret not in path.read_text()
+    state = json.loads((tmp_path / "task.inspect.json").read_text())[0]
+    assert state["State"]["ExitCode"] == 1
+    assert "Config" not in state
+
+
+@pytest.mark.parametrize("error", [None, TimeoutError("deadline"), RuntimeError("model failed")])
+@pytest.mark.parametrize("shutdown_failed", [False, True])
+def test_agent_failure_is_evaluated_before_cleanup(tmp_path, monkeypatch, error, shutdown_failed):
+    from contextlib import nullcontext
+    root = tmp_path / "gym"
+    (root / "tasks/finalpool/alpha").mkdir(parents=True)
+    monkeypatch.setattr(run, "TOOLATHLON_ROOT", root)
+    monkeypatch.setenv("LLM_PROXY_MASTER_KEY", "fixture")
+    monkeypatch.delenv("LLM_PROXY_UNIX_SOCKET", raising=False)
+    args = run.create_parser().parse_args([
+        "alpha", "--harness", "react", "--episode-id", "fixture",
+        "--artifacts-dir", str(tmp_path / "traces"),
+        "--evals-dir", str(tmp_path / "evals"),
+    ])
+    evaluated = []
+    result_path = tmp_path / "evals/alpha/fixture/result.json"
+    def docker(*command, **kwargs):
+        output = ""
+        if command[0] == "inspect":
+            output = "healthy" if "--format" in command else "[]"
+        elif "/proc/1/comm" in command:
+            output = "postgres"
+        elif "--tuples-only" in command:
+            output = "t"
+        elif command[0] == "port":
+            output = "127.0.0.1:12345"
+        elif command[0] == "run" and "127.0.0.1::2024" in command:
+            runtime = {"task_config": {"task_str": "fixture", "agent_workspace": "/work",
+                "launch_time": None, "evaluation": {"evaluation_command": "evaluate",
+                                                     "groundtruth_workspace": None}}}
+            (tmp_path / "traces/alpha/fixture/runtime.json").write_text(json.dumps(runtime))
+        elif "--res_log_file" in command:
+            evaluated.append(True)
+        elif "/tmp/decomposer-evaluation.json" in command:
+            output = '{"passed": 10, "total": 10}'
+        elif command[0] == "rm":
+            assert result_path.is_file()
+        return subprocess.CompletedProcess(command, 0, output, "")
+    monkeypatch.setattr(run, "_docker", docker)
+    monkeypatch.setattr(run, "_postgres_environment", lambda container: {})
+    monkeypatch.setattr(run.urllib.request, "urlopen",
+                        lambda *a, **kw: nullcontext(SimpleNamespace(status=200)))
+    monkeypatch.setattr(run, "make_agent", lambda *a: (None, {"configurable": {"thread_id": "t"}}))
+    async def invoke(*a):
+        state = {"messages": []}
+        if shutdown_failed:
+            state["subagent_shutdown_error"] = "Cannot confirm worker shutdown"
+        return state, error or (RuntimeError("shutdown failed") if shutdown_failed else None)
+    monkeypatch.setattr(run, "invoke_and_capture", invoke)
+    with pytest.raises(RuntimeError, match="Agent loop failed") if error or shutdown_failed else nullcontext():
+        run.run_episode(args)
+    assert evaluated == ([] if shutdown_failed else [True])
+    result = json.loads(result_path.read_text())
+    assert result["native_pass"] is (None if shutdown_failed else True)
+    assert result["pass"] is (error is None and not shutdown_failed)
+    if shutdown_failed:
+        assert result["subagent_shutdown_error"] == "Cannot confirm worker shutdown"
+    else:
+        assert result["agent_error"] == (repr(error) if error else None)
+
+
 def test_execute_episode_maps_deterministic_trace_and_eval_paths(
     tmp_path, monkeypatch
 ) -> None:
@@ -695,6 +778,9 @@ def test_execute_episode_maps_deterministic_trace_and_eval_paths(
 
     class FakeProcess:
         def wait(self, timeout=None):
+            return 0
+
+        def poll(self):
             return 0
 
     popen_calls = []
