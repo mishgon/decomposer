@@ -6,7 +6,6 @@ import os
 import signal
 import subprocess
 import time
-from contextlib import suppress
 from pathlib import Path
 
 import httpx
@@ -31,6 +30,9 @@ async def serve() -> None:
         loop.add_signal_handler(signum, stopped.set)
     PID_FILE.write_text(str(os.getpid()), encoding="utf-8")
 
+    # The gateway outlives the Agent Server: evaluators check processes that
+    # agents started through MCP servers, such as a kubectl port-forward.
+    # Removing the task container stops it.
     with (data_dir / "gateway.log").open("ab") as log:
         gateway = await asyncio.create_subprocess_exec(
             "uv", "run", "python", str(Path(__file__).with_name("tool_gateway.py")),
@@ -59,14 +61,6 @@ async def serve() -> None:
         ):
             await stopped.wait()
     finally:
-        with suppress(ProcessLookupError):
-            os.killpg(gateway.pid, signal.SIGTERM)
-        try:
-            await asyncio.wait_for(gateway.wait(), timeout=30)
-        except TimeoutError:
-            with suppress(ProcessLookupError):
-                os.killpg(gateway.pid, signal.SIGKILL)
-            await gateway.wait()
         PID_FILE.unlink(missing_ok=True)
 
 

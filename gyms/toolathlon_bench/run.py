@@ -40,11 +40,17 @@ DEFAULT_IMAGE = "decomposer-toolathlon-bench:latest"
 EVAL_CONFIG = "scripts/formal_run_v0.json"
 MAX_STEPS = 200
 CONTAINER_BUNDLE = "/run/decomposer-task-bundle.json"
+PORT_LOCK_DIR = Path(tempfile.gettempdir()) / "toolathlon-bench-ports"
+# Kind in Kubernetes tasks drives the host engine through the image's older
+# docker CLI, at the Docker or Podman socket path Toolathlon is configured for.
 DOCKER_SOCKET = Path("/var/run/docker.sock")
+CONTAINER_ENGINE_SOCKETS = ("/var/run/docker.sock", "/run/podman/podman.sock")
+DOCKER_API_VERSION = "1.44"
 # Untracked, user-provided credentials that Toolathlon reads from configs/.
 USER_CONFIG_FILES = (
     "configs/global_configs.py",
     "configs/gcp-oauth.keys.json",
+    "configs/gcp-service_account.keys.json",
     "configs/google_credentials.json",
     "configs/token_key_session.py",
     "configs/notion_state.json",
@@ -52,8 +58,15 @@ USER_CONFIG_FILES = (
     "configs/snowflake_rsa_key.p8",
     "configs/snowflake_rsa_key.pub",
 )
+# Gmail and Calendar MCP servers read Google OAuth files from their home directories.
+GOOGLE_MCP_DIRS = ("/root/.gmail-mcp", "/root/.calendar-mcp")
+GOOGLE_MCP_FILES = {
+    "configs/gcp-oauth.keys.json": "gcp-oauth.keys.json",
+    "configs/google_credentials.json": "credentials.json",
+}
 # Kubernetes tasks create Kind clusters on the host engine; their stop
-# scripts delete them.
+# scripts delete them. Cluster creation is flaky, so preprocess is retried.
+K8S_PREPROCESS_ATTEMPTS = 3
 K8S_TASK_CLEANUP_COMMANDS = {
     "k8s-deployment-cleanup": (
         "bash", "tasks/finalpool/k8s-deployment-cleanup/scripts/k8s_deployment_cleanup.sh", "stop",
@@ -116,10 +129,24 @@ def _release_container_lock(lock_file) -> None:
         fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
 
-def _free_port() -> int:
-    with socket.socket() as listener:
-        listener.bind(("127.0.0.1", 0))
-        return listener.getsockname()[1]
+def _reserve_port():
+    """Reserve a free host port for the episode until the returned file is closed.
+
+    Episodes share the host network, and a server may start on its port long
+    after the port was chosen, so a port that looks free can be taken already.
+    """
+    PORT_LOCK_DIR.mkdir(exist_ok=True)
+    while True:
+        with socket.socket() as listener:
+            listener.bind(("127.0.0.1", 0))
+            port = listener.getsockname()[1]
+        reservation = (PORT_LOCK_DIR / f"{port}.lock").open("w")
+        try:
+            fcntl.flock(reservation.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            reservation.close()
+            continue
+        return port, reservation
 
 
 def _prepare_configs() -> None:
@@ -229,6 +256,13 @@ def _cleanup_episode(*, episode_dir: Path, task_container: str, task: str) -> No
             }
         except BaseException as error:
             cleanup["task_cleanup"] = {"command": task_cleanup, "error": repr(error)}
+    # The container runs as root; hand the episode directory back to the host user.
+    owner = f"{os.getuid()}:{os.getgid()}"
+    try:
+        completed = _exec(task_container, "chown", "-R", owner, "/workspace/dumps", check=False)
+        cleanup["ownership"] = {"owner": owner, "returncode": completed.returncode}
+    except BaseException as error:
+        cleanup["ownership"] = {"owner": owner, "error": repr(error)}
     for kind, command in (
         ("log", ("logs", task_container)),
         ("inspect.json", ("inspect", task_container)),
@@ -346,6 +380,7 @@ def run_episode(args) -> None:
     started_at = datetime.now(timezone.utc).isoformat()
     agent_server: subprocess.Popen | None = None
     agent_server_log = None
+    port_reservations = []
     container_lock = _open_container_lock(args.container_lock_file)
     container_lock_held = False
     try:
@@ -361,34 +396,52 @@ def run_episode(args) -> None:
         if notion_patch.is_file():
             mounts += ["--volume", f"{notion_patch}:/workspace/node_modules/"
                        "@notionhq/notion-mcp-server/scripts/notion-openapi.json:ro"]
-        if DOCKER_SOCKET.exists():
-            mounts += ["--volume", f"{DOCKER_SOCKET}:/var/run/docker.sock"]
+        docker_host = os.environ.get("DOCKER_HOST", "")
+        engine_socket = (Path(docker_host.removeprefix("unix://"))
+                         if docker_host.startswith("unix://") else DOCKER_SOCKET)
+        if engine_socket.exists():
+            for target in CONTAINER_ENGINE_SOCKETS:
+                mounts += ["--volume", f"{engine_socket}:{target}"]
         # Toolathlon's local services listen on host loopback.
         _docker(
             "run", "--detach", "--name", task_container, "--network", "host",
-            *mounts, "--env", "LLM_PROXY_MASTER_KEY", *proxy_mount, args.image,
+            *mounts, "--env", "LLM_PROXY_MASTER_KEY", *proxy_mount,
+            "--env", f"DOCKER_API_VERSION={DOCKER_API_VERSION}", args.image,
         )
         for relative in USER_CONFIG_FILES:
             if (TOOLATHLON_ROOT / relative).is_file():
                 _docker("cp", str(TOOLATHLON_ROOT / relative), f"{task_container}:/workspace/{relative}")
+        _exec(task_container, "mkdir", "-p", *GOOGLE_MCP_DIRS)
+        for relative, name in GOOGLE_MCP_FILES.items():
+            if (TOOLATHLON_ROOT / relative).is_file():
+                for directory in GOOGLE_MCP_DIRS:
+                    _docker("cp", str(TOOLATHLON_ROOT / relative), f"{task_container}:{directory}/{name}")
+        _release_container_lock(container_lock)
+        container_lock_held = False
 
         print("Running Toolathlon preprocess...", flush=True)
-        preprocess = _exec(
-            task_container, "uv", "run", "python", "-m", "scripts.decoupled.container_preprocess",
-            "--eval_config", EVAL_CONFIG,
-            "--task_dir", f"finalpool/{args.task}",
-            "--max_steps_under_single_turn_mode", str(MAX_STEPS),
-            "--model_short_name", "decomposer",
-            "--provider", "unified",
-            "--bundle_file", CONTAINER_BUNDLE,
-            "--host_output_folder", str(episode_dir),
-            check=False,
-        )
-        (episode_dir / "preprocess.log").write_text(
-            preprocess.stdout + preprocess.stderr, encoding="utf-8"
-        )
-        failure = _preprocess_failure(preprocess)
-        if failure is not None:
+        attempts = K8S_PREPROCESS_ATTEMPTS if args.task in K8S_TASK_CLEANUP_COMMANDS else 1
+        for attempt in range(1, attempts + 1):
+            preprocess = _exec(
+                task_container, "uv", "run", "python", "-m", "scripts.decoupled.container_preprocess",
+                "--eval_config", EVAL_CONFIG,
+                "--task_dir", f"finalpool/{args.task}",
+                "--max_steps_under_single_turn_mode", str(MAX_STEPS),
+                "--model_short_name", "decomposer",
+                "--provider", "unified",
+                "--bundle_file", CONTAINER_BUNDLE,
+                "--host_output_folder", str(episode_dir),
+                check=False,
+            )
+            with (episode_dir / "preprocess.log").open("a", encoding="utf-8") as log:
+                log.write(f"=== attempt {attempt} ===\n{preprocess.stdout}{preprocess.stderr}")
+            failure = _preprocess_failure(preprocess)
+            if failure is None:
+                break
+            if attempt < attempts:
+                _exec(task_container, *K8S_TASK_CLEANUP_COMMANDS[args.task], check=False)
+                _exec(task_container, "rm", "-rf", "--", "/workspace/dumps/workspace", check=False)
+        else:
             raise RuntimeError(f"{failure}; inspect {episode_dir / 'preprocess.log'}")
         _docker("cp", f"{task_container}:{CONTAINER_BUNDLE}", str(trusted_bundle))
         bundle = json.loads(trusted_bundle.read_text(encoding="utf-8"))
@@ -400,13 +453,16 @@ def run_episode(args) -> None:
         ).stdout.strip()
 
         print("Starting Agent Server...", flush=True)
-        agent_port = _free_port()
+        gateway_port, reservation = _reserve_port()
+        port_reservations.append(reservation)
+        agent_port, reservation = _reserve_port()
+        port_reservations.append(reservation)
         agent_server_log = (episode_dir / "agent_server.log").open("wb")
         agent_server = subprocess.Popen(
             [
                 "docker", "exec", "--workdir", "/workspace",
                 "--env", f"TOOLATHLON_BUNDLE={CONTAINER_BUNDLE}",
-                "--env", f"GATEWAY_PORT={_free_port()}",
+                "--env", f"GATEWAY_PORT={gateway_port}",
                 "--env", f"AGENT_SERVER_PORT={agent_port}",
                 "--env", f"N_JOBS_PER_WORKER={args.n_jobs_per_worker}",
                 "--env", "TOOLATHLON_AGENT_CALL_LOG=/workspace/dumps/agent_model_calls.jsonl",
@@ -435,9 +491,6 @@ def run_episode(args) -> None:
             raise TimeoutError(
                 f"{agent_url}/ok did not become ready within {args.startup_timeout:g}s"
             )
-
-        _release_container_lock(container_lock)
-        container_lock_held = False
 
         runtime = json.loads((episode_dir / "runtime.json").read_text(encoding="utf-8"))
         print(f"Running {args.harness}...", flush=True)
@@ -532,6 +585,8 @@ def run_episode(args) -> None:
                 "--task-path", task_path, "--stash-dir", stash_dir,
             )
             _docker("cp", str(trusted_bundle), f"{task_container}:{CONTAINER_BUNDLE}")
+            # Agents could write this file; only the evaluator may create it.
+            (episode_dir / "eval_res.json").unlink(missing_ok=True)
             # Exit code 0 grades the artifacts even after an agent failure; that
             # failure still keeps the strict pass below false.
             completed = _exec(
@@ -598,6 +653,8 @@ def run_episode(args) -> None:
                 agent_server.wait()
             if agent_server_log is not None:
                 agent_server_log.close()
+            for reservation in port_reservations:
+                reservation.close()
             shutil.rmtree(private_dir, ignore_errors=True)
 
 

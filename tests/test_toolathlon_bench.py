@@ -1,4 +1,5 @@
 import asyncio
+import fcntl
 import importlib.util
 import json
 import os
@@ -86,8 +87,11 @@ def episode(tmp_path, monkeypatch):
     (configs / "global_configs_example.py").write_text("example = True\n")
     (configs / "token_key_session_example.py").write_text("example = True\n")
     (configs / "gcp-oauth.keys.json").write_text("{}")
+    (configs / "gcp-service_account.keys.json").write_text("{}")
     monkeypatch.setattr(bench, "TOOLATHLON_ROOT", root)
     monkeypatch.setattr(bench, "DOCKER_SOCKET", tmp_path / "docker.sock")
+    monkeypatch.setattr(bench, "PORT_LOCK_DIR", tmp_path / "ports")
+    monkeypatch.delenv("DOCKER_HOST", raising=False)
     (tmp_path / "docker.sock").touch()
     private_dir = tmp_path / "private"
     private_dir.mkdir()
@@ -99,6 +103,7 @@ def episode(tmp_path, monkeypatch):
         result_path=tmp_path / "evals/task/episode/result.json",
         events=[], docker=[], preprocess=CompletedProcess([], 0, "Preprocess done.", ""),
         eval_returncode=0, eval_writes_result=True, server_exits_early=False, agent_error=None,
+        lock_path=None, on_invoke=None,
         agent_state={
             "messages": [
                 {"type": "human", "content": "Request"},
@@ -123,12 +128,18 @@ def episode(tmp_path, monkeypatch):
             Path(args[2]).write_text(json.dumps(BUNDLE))
         if "scripts.decoupled.container_preprocess" in args:
             state.events.append(("preprocess",))
+            if state.lock_path is not None:
+                with state.lock_path.open() as lock:
+                    fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            if isinstance(state.preprocess, list):
+                return state.preprocess.pop(0)
             return state.preprocess
         if "scripts.decoupled.container_eval" in args:
             state.events.append(("eval",))
             trajectory = json.loads((state.episode_dir / "traj_log.json").read_text())
             trajectory["status"] = "success"
             (state.episode_dir / "traj_log.json").write_text(json.dumps(trajectory))
+            assert not (state.episode_dir / "eval_res.json").exists()
             if state.eval_writes_result:
                 (state.episode_dir / "eval_res.json").write_text(json.dumps({"pass": state.eval_returncode == 0}))
             return CompletedProcess(args, state.eval_returncode, "Evaluation finished.", "")
@@ -147,6 +158,8 @@ def episode(tmp_path, monkeypatch):
 
     async def capture(*args, **kwargs):
         state.events.append(("invoke", args, kwargs))
+        if state.on_invoke is not None:
+            state.on_invoke()
         return state.agent_state, state.agent_error
 
     response = MagicMock()
@@ -184,12 +197,19 @@ def test_episode_runs_toolathlon_phases_in_trusted_order(episode):
     assert run_args[run_args.index("--network") + 1] == "host"
     assert run_args[run_args.index("--env") + 1] == "LLM_PROXY_MASTER_KEY"
     assert f"{episode.episode_dir}:/workspace/dumps" in run_args
-    assert f"{episode.tmp_path / 'docker.sock'}:/var/run/docker.sock" in run_args
+    for target in ("/var/run/docker.sock", "/run/podman/podman.sock"):
+        assert f"{episode.tmp_path / 'docker.sock'}:{target}" in run_args
+    assert f"DOCKER_API_VERSION={bench.DOCKER_API_VERSION}" in run_args
     assert "test-key" not in " ".join(run_args)
     copied = [args for args in episode.docker if args[0] == "cp" and args[1].startswith(str(episode.root))]
-    assert [args[2].split(":", 1)[1] for args in copied] == ["/workspace/configs/global_configs.py",
-                                                              "/workspace/configs/gcp-oauth.keys.json",
-                                                              "/workspace/configs/token_key_session.py"]
+    assert [args[2].split(":", 1)[1] for args in copied] == [
+        "/workspace/configs/global_configs.py",
+        "/workspace/configs/gcp-oauth.keys.json",
+        "/workspace/configs/gcp-service_account.keys.json",
+        "/workspace/configs/token_key_session.py",
+        "/root/.gmail-mcp/gcp-oauth.keys.json",
+        "/root/.calendar-mcp/gcp-oauth.keys.json",
+    ]
     preprocess = next(args for args in episode.docker if "scripts.decoupled.container_preprocess" in args)
     assert preprocess[preprocess.index("--task_dir") + 1] == "finalpool/task"
     assert preprocess[preprocess.index("--host_output_folder") + 1] == str(episode.episode_dir)
@@ -201,6 +221,9 @@ def test_episode_runs_toolathlon_phases_in_trusted_order(episode):
     command = episode.server.command
     assert command[-2:] == ["/opt/agents/bin/python", "/opt/decomposer/gyms/toolathlon_bench/task.py"]
     assert f"TOOLATHLON_BUNDLE={bench.CONTAINER_BUNDLE}" in command
+    gateway_port = next(item for item in command if item.startswith("GATEWAY_PORT=")).split("=")[1]
+    agent_port = next(item for item in command if item.startswith("AGENT_SERVER_PORT=")).split("=")[1]
+    assert gateway_port != agent_port
 
     invoke = next(event for event in episode.events if event[0] == "invoke")
     url, assistant, inputs = invoke[1]
@@ -267,9 +290,89 @@ def test_preprocess_failure_stops_before_hiding_artifacts(episode, returncode, o
     with pytest.raises(RuntimeError, match=message):
         episode.run_episode()
     assert not any(event[0] in {"guard", "agent_server"} for event in episode.events)
-    assert (episode.episode_dir / "preprocess.log").read_text() == output
+    assert (episode.episode_dir / "preprocess.log").read_text() == f"=== attempt 1 ===\n{output}"
     episode.cleanup.assert_called_once()
     assert not episode.private_dir.exists()
+
+
+def test_kubernetes_preprocess_retries_from_a_clean_cluster(episode):
+    failed = CompletedProcess([], 1, "kind failed", "")
+    episode.preprocess = [failed, failed, CompletedProcess([], 0, "Preprocess done.", "")]
+    episode.episode_dir = episode.tmp_path / "traces/k8s-mysql/episode"
+    episode.run_episode("k8s-mysql")
+    preprocess_calls = [i for i, args in enumerate(episode.docker)
+                        if "scripts.decoupled.container_preprocess" in args]
+    assert len(preprocess_calls) == 3
+    between = episode.docker[preprocess_calls[0] + 1:preprocess_calls[1]]
+    assert between == [
+        ("exec", "--workdir", "/workspace", episode.docker[preprocess_calls[0]][3],
+         *bench.K8S_TASK_CLEANUP_COMMANDS["k8s-mysql"]),
+        ("exec", "--workdir", "/workspace", episode.docker[preprocess_calls[0]][3],
+         "rm", "-rf", "--", "/workspace/dumps/workspace"),
+    ]
+    log = (episode.episode_dir / "preprocess.log").read_text()
+    assert "=== attempt 3 ===" in log
+
+
+def test_kubernetes_preprocess_gives_up_after_three_attempts(episode):
+    episode.preprocess = [CompletedProcess([], 1, "kind failed", "")] * 3
+    with pytest.raises(RuntimeError, match="exited with code 1"):
+        episode.run_episode("k8s-mysql")
+    assert not any(event[0] == "guard" for event in episode.events)
+
+
+def test_preprocess_runs_without_holding_container_lock(episode, tmp_path):
+    episode.lock_path = tmp_path / "container.lock"
+    episode.run_episode("task", "--container-lock-file", str(episode.lock_path))
+    assert ("preprocess",) in episode.events
+
+
+def test_agent_written_eval_result_is_removed_before_grading(episode):
+    episode.on_invoke = lambda: (episode.episode_dir / "eval_res.json").write_text('{"pass": true}')
+    episode.eval_returncode = 1
+    episode.eval_writes_result = False
+    episode.run_episode()
+    evaluation = json.loads(episode.result_path.read_text())
+    assert evaluation["native_result"] is None and evaluation["native_pass"] is False
+
+
+def test_engine_socket_follows_docker_host(episode, monkeypatch, tmp_path):
+    podman = tmp_path / "podman.sock"
+    podman.touch()
+    monkeypatch.setenv("DOCKER_HOST", f"unix://{podman}")
+    episode.run_episode()
+    run_args = next(args for args in episode.docker if args[0] == "run")
+    assert f"{podman}:/var/run/docker.sock" in run_args
+    assert f"{podman}:/run/podman/podman.sock" in run_args
+
+
+def test_reserved_ports_are_skipped_until_released(tmp_path, monkeypatch):
+    monkeypatch.setattr(bench, "PORT_LOCK_DIR", tmp_path)
+    port, reservation = bench._reserve_port()
+    offered = iter([port, port + 1])
+
+    class Listener:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def bind(self, address):
+            pass
+
+        def getsockname(self):
+            return ("127.0.0.1", next(offered))
+
+    monkeypatch.setattr(bench.socket, "socket", Listener)
+    other, other_reservation = bench._reserve_port()
+    assert other == port + 1
+    other_reservation.close()
+    reservation.close()
+    offered = iter([port])
+    again, again_reservation = bench._reserve_port()
+    assert again == port
+    again_reservation.close()
 
 
 def test_agent_server_exit_during_startup_fails_episode(episode):
@@ -406,16 +509,19 @@ def test_cleanup_stops_kubernetes_task_and_redacts_inspection(tmp_path, monkeypa
 
     monkeypatch.setattr(bench, "_docker", docker)
     bench._cleanup_episode(episode_dir=tmp_path, task_container="c", task="k8s-mysql")
+    owner = f"{os.getuid()}:{os.getgid()}"
     assert calls[0] == ("exec", "--workdir", "/workspace", "c", *bench.K8S_TASK_CLEANUP_COMMANDS["k8s-mysql"])
+    assert calls[1] == ("exec", "--workdir", "/workspace", "c", "chown", "-R", owner, "/workspace/dumps")
     assert calls[-1] == ("rm", "--force", "--volumes", "c")
     inspection = (tmp_path / "task.inspect.json").read_text()
     assert "secret" not in inspection and json.loads(inspection)[0]["State"]["Status"] == "running"
     assert (tmp_path / "task.log").read_text() == "log line\n"
     cleanup = json.loads((tmp_path / "cleanup.json").read_text())
     assert cleanup["task_cleanup"]["returncode"] == 0
+    assert cleanup["ownership"] == {"owner": owner, "returncode": 0}
     calls.clear()
     bench._cleanup_episode(episode_dir=tmp_path, task_container="c", task="task")
-    assert calls[0][0] == "logs"
+    assert calls[0][-3:] == ("-R", owner, "/workspace/dumps") and calls[1][0] == "logs"
 
 
 def test_stop_agent_server_signals_only_a_running_server(monkeypatch):
@@ -578,34 +684,18 @@ def test_serve_hides_bundle_then_runs_agent_server_until_signal(serve_env, monke
         "agent_model": {"model_id": "lmrouter/qwen_3_5_4b_unlooped_thinking"},
         "decomposer_model": {"model_id": "lmrouter/qwen_3_8_flash_next_non_thinking"},
     }
-    assert serve_env.killed == [(123, signal.SIGTERM)]
+    assert serve_env.killed == []
     assert not task.PID_FILE.exists()
 
 
-def test_serve_stops_gateway_when_it_never_becomes_ready(serve_env, monkeypatch):
+def test_serve_leaves_gateway_when_it_never_becomes_ready(serve_env, monkeypatch):
     monkeypatch.setattr(task, "wait_ready", AsyncMock(side_effect=TimeoutError("not ready")))
     with pytest.raises(TimeoutError):
         asyncio.run(task.serve())
     assert serve_env.bundle_path.exists()
     assert not (serve_env.tmp_path / "runtime.json").exists()
-    assert serve_env.killed == [(123, signal.SIGTERM)]
+    assert serve_env.killed == []
     assert not task.PID_FILE.exists()
-
-
-def test_serve_kills_gateway_that_ignores_sigterm(serve_env, monkeypatch):
-    monkeypatch.setattr(task, "wait_ready", AsyncMock(side_effect=TimeoutError("not ready")))
-    wait_for = task.asyncio.wait_for
-
-    async def expire(awaitable, timeout):
-        if timeout == 30:
-            awaitable.close()
-            raise TimeoutError
-        return await wait_for(awaitable, timeout)
-
-    monkeypatch.setattr(task.asyncio, "wait_for", expire)
-    with pytest.raises(TimeoutError):
-        asyncio.run(task.serve())
-    assert serve_env.killed == [(123, signal.SIGTERM), (123, signal.SIGKILL)]
 
 
 def _mock_async_client(monkeypatch, handler):

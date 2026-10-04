@@ -31,16 +31,23 @@ Decomposer uses upstream's `new / fork / run / wait` interface.
 1. The task container starts on the host network, because Toolathlon's local
    services (Canvas, WooCommerce, email) listen on host loopback. The episode
    directory is mounted at `/workspace/dumps`. User credentials from
-   `external/toolathlon/configs` are copied in; missing `global_configs.py` and
-   `token_key_session.py` are first created from Toolathlon's examples.
+   `external/toolathlon/configs` are copied in, including the Gmail and Calendar
+   MCP OAuth files; missing `global_configs.py` and `token_key_session.py` are
+   first created from Toolathlon's examples. The host Docker or Podman socket
+   (`DOCKER_HOST`, else `/var/run/docker.sock`) is mounted for Kubernetes tasks.
 2. Toolathlon's `container_preprocess` prepares the workspace and a trusted task
-   bundle, which the runner keeps in a private host directory.
+   bundle, which the runner keeps in a private host directory. Kubernetes tasks
+   get three attempts, each from a deleted cluster.
 3. Toolathlon's `task_artifact_guard` moves the evaluator and ground truth out of
    the container.
 4. [task.py](task.py) starts the MCP [tool gateway](tool_gateway.py) and the Agent
    Server, then deletes the bundle copy that the gateway read.
 5. After the agent loop, the runner stops the Agent Server, writes Toolathlon's
    `traj_log.json`, restores the evaluator and runs Toolathlon's `container_eval`.
+   The gateway and the processes agents started through it keep running until
+   the container is removed, because some evaluators check them.
+6. Cleanup gives the episode directory back to the host user and removes the
+   container.
 
 Tasks whose services are not configured fail; see Toolathlon's
 `global_preparation/how2register_accounts.md`. Run its
