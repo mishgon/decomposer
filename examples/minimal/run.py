@@ -1,56 +1,53 @@
 import asyncio
+import json
 import logging
 from pathlib import Path
 
-from decomposer.models import create_model
-
-from decomposer.core import create_decomposer_agent
-from render_messages import render_decomposer_messages
+from decomposer.agent_server import agent_server, invoke_and_capture
+from decomposer.visualization import write_trace_html
 
 logging.basicConfig(level=logging.INFO)
 
 
 async def main() -> None:
-    decomposer_agent = create_decomposer_agent(
-        decomposer_model=create_model("qwen_3_8_flash_next_non_thinking"),
-        subagent_types=[
+    config_path = Path(__file__).with_name("langgraph.json")
+    async with agent_server(config_path) as url:
+        final_state, error = await invoke_and_capture(
+            url,
+            "decomposer",
             {
-                "subagent_type_id": "qwen_3_5_4b_unlooped_thinking",
-                "description": "Qwen3.5-4B unlooped with thinking enabled, without tools.",
-                "assistant_id": "qwen_3_5_4b_unlooped_thinking",
-                "url": "http://127.0.0.1:2024",
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": (
+                            "Составь тест для начинающих из трёх разделов: Python, SQL "
+                            "и машинное обучение. В каждом разделе должно быть три вопроса "
+                            "с вариантами ответа: один на понимание понятия, один по короткому "
+                            "фрагменту кода или конкретному примеру и один о типичной ошибке.\n\n"
+                            "У каждого вопроса должно быть ровно четыре варианта ответа, "
+                            "один правильный ответ и объяснение в одном предложении. "
+                            "Объём каждого раздела должен быть меньше 300 слов. "
+                            "Примеры должны быть самодостаточными и не требовать внешних "
+                            "ресурсов. В конце приведи полный тест и ключ с ответами. "
+                            "Все задания агентам и итоговый ответ напиши по-русски."
+                        ),
+                    }
+                ]
             }
-        ],
-    )
-    final_state = await decomposer_agent.ainvoke(
-        {
-            "messages": [
-                {
-                    "role": "user",
-                    "content": (
-                        "Create a beginner quiz with three sections: Python, SQL, and "
-                        "machine learning. Each section must contain three multiple-choice "
-                        "questions: one conceptual question, one question about a short "
-                        "code snippet or concrete example, and one question about a "
-                        "common mistake.\n\n"
-                        "Each question must have exactly four options, one correct "
-                        "answer, and a one-sentence explanation. Keep each section "
-                        "under 300 words. Use self-contained examples, require no "
-                        "external resources, and finish with the complete quiz and "
-                        "answer key."
-                    ),
-                }
-            ]
-        }
-    )
-    print(final_state["messages"][-1].content)
-
-    output_path = Path(__file__).with_name("messages.md")
-    output_path.write_text(
-        render_decomposer_messages(final_state["messages"]),
+        )
+    trace_path = Path(__file__).with_name("trace.json")
+    trace_path.write_text(
+        json.dumps(final_state, indent=2, ensure_ascii=False),
         encoding="utf-8",
     )
-    print(f"\nSaved messages to {output_path}")
+    html_path = trace_path.with_suffix(".html")
+    rendered = write_trace_html(final_state, html_path)
+    print(f"\nТрейс сохранён в {trace_path}")
+    if rendered:
+        print(f"Визуализация сохранена в {html_path}")
+    if error is not None:
+        raise error
+    print(final_state["decomposer_agent_runs"][-1]["response"])
 
 
 if __name__ == "__main__":

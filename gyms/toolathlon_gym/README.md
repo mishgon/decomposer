@@ -12,30 +12,23 @@ Podman wrapper, first run `export PATH="$HOME/.local/bin:$PATH"`.
 
 ```bash
 PYTHONPATH=src:. python -m gyms.toolathlon_gym.run \
-  --tasks task-a task-b --harness decomposer --concurrency 8 -n 1
+  --tasks task-a task-b --agent decomposer --concurrency 8 -n 1
 ```
 
-Use `--harness react` for the same tool-equipped worker acting directly on the
-task, without a Decomposer. Its model is selected by `--subagent-api-model`.
+Use `--agent qwen_3_5_4b_thinking` for the same tool-equipped worker acting directly on the
+task, without a Decomposer. Its model is configured in `agents.py`.
 Use a positional task for one task, `--tasks` for a subset, or `--all`.
 The fixed executor has no coverage policy, culling, adaptive retries or resume.
 
-Both roles use `create_model(model)` from [models.py](../../src/decomposer/models.py).
+Both roles use `create_model(model_id)` from [models.py](../../src/decomposer/models.py).
 Each entry declares its provider, URL, sampling parameters and reasoning behavior
 directly. Set `LLM_PROXY_MASTER_KEY` before creating models; the runner passes the
 key into the task container by its environment variable name, without storing it
 in artifacts. Sampling does not depend on environment variables.
 
-| Role | Deployment | Generation Settings |
-| --- | --- | --- |
-| Teacher | `Qwen/Qwen3.8-Flash-Next-NVFP4` | Non-thinking; temperature 0.7, top-p 0.8, top-k 20, min-p 0, presence penalty 1.5, repetition penalty 1 |
-| Subagent / ReAct | `Qwen/Qwen3.5-4B-unlooped` | Thinking; temperature 0.6, top-p 0.95, top-k 20; other sampling parameters use defaults |
-
-The subagent profile follows the checkpoint's `SAMPLING.md` and `eval_sampling.yaml`.
-Worker reasoning is saved and replayed between tool calls. Teacher settings follow
-the [official non-thinking profile](https://huggingface.co/Qwen/Qwen3.8-Flash-Next#api-usage).
-For a private inference network, follow the [shared lmrouter setup](../../README.md#hosted-models-and-private-lmrouter-access).
-The same factory runs on the host and inside Docker through the mounted socket.
+Choose models in [agents.py](agents.py); their sampling settings are defined in
+[models.py](../../src/decomposer/models.py). The container records its model IDs
+and settings in `runtime.json`, which the runner copies into `trace.json`.
 
 Defaults: 45-minute agent timeout, 55-minute total episode timeout, recursion
 limit 410. Decomposer uses upstream's `new / fork / run / wait` interface.
@@ -46,10 +39,14 @@ limit 410. Decomposer uses upstream's `new / fork / run / wait` interface.
 gets a new run ID with:
 
 - `manifest.json`: selected tasks, repetitions, completion and process outcomes.
-- `traces/<task>/<episode>/`: raw messages, subagent histories, usage, answer,
+- `traces/<task>/<episode>/`: raw messages, agent histories, usage, answer,
   task workspace and cleanup records.
 - `evals/<task>/<episode>/result.json`: native evaluator output.
 - `logs/<task>/<repetition>/`: process stdout and stderr.
+
+After saving the native evaluation, Decomposer episodes generate `trace.html`
+next to `trace.json` using `decomposer.visualization.write_trace_html`.
+A visualization error produces a warning and preserves the episode's result.
 
 An agent timeout/model failure retains partial messages, cancels active remote
 runs and waits for them to stop before native evaluation. This also covers ReAct
@@ -66,7 +63,7 @@ sanitize them before sharing.
 
 `gyms/toolathlon_gym/build.sh` builds the task adapter on top of
 `toolathlon-pack:latest`. Native tools run in `/opt/venv`; LangGraph workers
-use `/opt/subagents`. Rebuild the adapter after changing packaged code.
+use `/opt/agents`. Rebuild the adapter after changing packaged code.
 
 ## Workflows
 
@@ -79,3 +76,25 @@ Python MCP servers launch directly from their preinstalled per-project virtual
 environments. Task startup never resolves or rebuilds those dependencies. A missing
 executable is an image-build problem and fails explicitly. Numerical thread pools
 are capped to one thread in the runtime image.
+
+## Agent Server
+
+This container-local LangGraph server exposes two assistants:
+
+- `qwen_3_5_4b_thinking`: a tool-equipped agent.
+- `decomposer`: orchestrates agents on the same server.
+
+Model IDs and agent factories are defined in [agents.py](agents.py).
+Change its constants to select models, then rebuild the adapter image.
+`--agent` selects an assistant ID from `langgraph.json`.
+The tool-equipped agent is used for standalone runs and by Decomposer.
+
+When selecting a `vllm/` model, start its server on the host before running tasks.
+It must listen on a container-accessible interface at port 8024.
+The runner sets `VLLM_HOST=host.docker.internal` inside the task container;
+it does not start or stop vLLM.
+
+The server reads the prepared task configuration from
+`$TOOLATHLON_DATA_DIR/runtime.json`. When it starts, it opens one persistent
+stdio session for each required MCP server and shares the loaded tools between
+the graphs. It closes every session when it stops.

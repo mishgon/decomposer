@@ -7,7 +7,6 @@ import hashlib
 import json
 import os
 import platform
-import signal
 import subprocess
 import sys
 import threading
@@ -46,20 +45,7 @@ OPENROUTER_TRANSIENT_MARKERS = (
     "status code: 504",
 )
 RESUME_CONFIG_FIELDS = (
-    "model",
-    "subagent_model",
-    "subagent_api_model",
-    "subagent_base_url",
-    "subagent_host",
-    "subagent_port",
-    "subagent_ports",
-    "subagent_gpu",
     "image",
-    "reuse_vllm",
-    "vllm_max_model_len",
-    "vllm_gpu_memory_utilization",
-    "vllm_data_parallel_size",
-    "vllm_startup_timeout",
     "startup_timeout",
     "n_jobs_per_worker",
     "container_slots",
@@ -195,14 +181,6 @@ def validate_teacher_credentials() -> None:
         raise RuntimeError("Set LLM_PROXY_MASTER_KEY for the registered lmrouter models")
 
 
-def wants_batch(argv: Sequence[str]) -> bool:
-    flags = {"--all", "--tasks", "--resume", "--repetitions", "-n", "--adaptive"}
-    prefixes = ("--tasks=", "--resume=", "--repetitions=", "-n")
-    return any(
-        argument in flags or argument.startswith(prefixes) for argument in argv
-    )
-
-
 def parse_args(argv: Sequence[str], defaults: dict[str, Any]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Run a resumable Decomposer batch on Toolathlon Gym."
@@ -213,31 +191,6 @@ def parse_args(argv: Sequence[str], defaults: dict[str, Any]) -> argparse.Namesp
     parser.add_argument("--resume", metavar="RUN_ID")
     parser.add_argument("-n", "--repetitions", type=int, default=1)
     parser.add_argument("--purpose", choices=("trace-generation",), default="trace-generation")
-    parser.add_argument("--model", default=defaults["model"])
-    parser.add_argument("--subagent-model", default=defaults["subagent_model"])
-    parser.add_argument(
-        "--subagent-api-model",
-        default=defaults.get("subagent_api_model", defaults["subagent_model"]),
-    )
-    parser.add_argument("--subagent-port", type=int, default=defaults["subagent_port"])
-    parser.add_argument("--subagent-base-url", default=defaults.get("subagent_base_url"),
-                        help="Registered hosted endpoint; skips local vLLM.")
-    parser.add_argument("--subagent-host", help="Optional container DNS mapping, hostname:IP.")
-    parser.add_argument(
-        "--subagent-ports",
-        type=int,
-        nargs="+",
-        help=(
-            "Pool of externally managed vLLM ports on this host. Episodes are "
-            "assigned round-robin; implies --reuse-vllm."
-        ),
-    )
-    parser.add_argument("--subagent-gpu", default="0")
-    parser.add_argument("--vllm-max-model-len", type=int, default=256000)
-    parser.add_argument("--vllm-gpu-memory-utilization", type=float, default=0.9)
-    parser.add_argument("--vllm-data-parallel-size", type=int, default=1)
-    parser.add_argument("--vllm-startup-timeout", type=float, default=1800)
-    parser.add_argument("--reuse-vllm", action="store_true")
     parser.add_argument("--image", default=defaults["image"])
     parser.add_argument(
         "--gym-artifacts-dir", type=Path, default=defaults["artifacts_dir"]
@@ -288,8 +241,6 @@ def parse_args(argv: Sequence[str], defaults: dict[str, Any]) -> argparse.Namesp
         help="Maximum total wall-clock seconds for one episode (default: 3300).",
     )
     args = parser.parse_args(argv)
-    if args.subagent_base_url and args.subagent_ports:
-        parser.error("--subagent-base-url cannot be combined with --subagent-ports")
     if args.resume and (args.all or args.tasks):
         parser.error("--resume cannot be combined with --all or --tasks")
     if not args.resume and not (args.all or args.tasks):
@@ -321,19 +272,6 @@ def parse_args(argv: Sequence[str], defaults: dict[str, Any]) -> argparse.Namesp
         parser.error("--container-slots must be at least 1")
     if args.agent_timeout <= 0 or args.episode_timeout <= 0:
         parser.error("--agent-timeout and --episode-timeout must be positive")
-    if args.vllm_data_parallel_size < 1:
-        parser.error("--vllm-data-parallel-size must be at least 1")
-    visible_gpus = [item for item in args.subagent_gpu.split(",") if item]
-    if len(visible_gpus) != args.vllm_data_parallel_size:
-        parser.error(
-            "--subagent-gpu must list exactly --vllm-data-parallel-size GPU IDs"
-        )
-    if args.subagent_ports:
-        if len(set(args.subagent_ports)) != len(args.subagent_ports):
-            parser.error("--subagent-ports must not contain duplicates")
-        args.reuse_vllm = True
-    else:
-        args.subagent_ports = [args.subagent_port]
     return args
 
 
@@ -484,28 +422,15 @@ def episode_command(
     attempt: int,
     episode_id: str,
     root: Path,
-    subagent_port: int | None = None,
     container_slot: int = 0,
 ) -> list[str]:
-    port = args.subagent_port if subagent_port is None else subagent_port
     container_slots = getattr(args, "container_slots", 1)
     return [
         sys.executable, str(runner_path), task,
         "--episode-id", episode_id, "--run-id", run_id,
         "--repetition", str(repetition), "--attempt", str(attempt),
-        "--purpose", args.purpose, "--model", args.model,
-        "--subagent-model", args.subagent_model,
-        "--subagent-api-model",
-        getattr(args, "subagent_api_model", args.subagent_model),
-        "--subagent-port", str(port),
-        *(["--subagent-base-url", args.subagent_base_url] if getattr(args, "subagent_base_url", None) else []),
-        *(["--subagent-host", args.subagent_host] if getattr(args, "subagent_host", None) else []),
-        "--subagent-gpu", args.subagent_gpu,
-        "--vllm-max-model-len", str(args.vllm_max_model_len),
-        "--vllm-gpu-memory-utilization", str(args.vllm_gpu_memory_utilization),
-        "--vllm-data-parallel-size", str(getattr(args, "vllm_data_parallel_size", 1)),
-        "--vllm-startup-timeout", str(args.vllm_startup_timeout),
-        "--reuse-vllm", "--image", args.image,
+        "--purpose", args.purpose,
+        "--image", args.image,
         "--artifacts-dir", str(root / "traces"),
         "--evals-dir", str(root / "evals"),
         "--startup-timeout", str(args.startup_timeout),
@@ -533,7 +458,6 @@ def execute_episode(
     episode: dict[str, Any],
     attempt: int,
     stop_event: threading.Event | None = None,
-    subagent_port: int | None = None,
     container_slot: int = 0,
 ) -> dict[str, Any]:
     task, repetition = episode["task"], episode["repetition"]
@@ -549,7 +473,6 @@ def execute_episode(
         attempt,
         episode_id,
         root,
-        subagent_port,
         container_slot,
     )
     started_at, started = utc_now(), time.monotonic()
@@ -702,28 +625,11 @@ def main(
     toolathlon_root: Path,
     default_artifacts_dir: Path,
     default_image: str,
-    default_model: str,
-    default_subagent_model: str,
-    default_subagent_api_model: str | None = None,
-    default_subagent_port: int,
-    start_vllm: Callable[..., subprocess.Popen[bytes] | None],
-    stop_vllm: Callable[[subprocess.Popen[bytes] | None], None],
     docker: Callable[..., subprocess.CompletedProcess[str]],
 ) -> dict[str, Any]:
-    from decomposer.models import create_model
-    subagent = (
-        create_model("qwen_3_5_4b_unlooped_thinking")
-        if (default_subagent_api_model or default_subagent_model) == "Qwen/Qwen3.5-4B-unlooped"
-        else None
-    )
     defaults = {
         "artifacts_dir": default_artifacts_dir,
         "image": default_image,
-        "model": default_model,
-        "subagent_model": default_subagent_model,
-        "subagent_api_model": default_subagent_api_model or default_subagent_model,
-        "subagent_port": default_subagent_port,
-        "subagent_base_url": subagent.openai_api_base if subagent else None,
     }
     args = parse_args(argv, defaults)
     root = args.gym_artifacts_dir.resolve()
@@ -735,25 +641,18 @@ def main(
     with run_lock(run_dir):
         return _run_collection(
             args, run_dir, repo_root=repo_root, toolathlon_root=toolathlon_root,
-            start_vllm=start_vllm, stop_vllm=stop_vllm, docker=docker,
+            docker=docker,
         )
 
 
-def _run_collection(args, run_dir, *, repo_root, toolathlon_root,
-                    start_vllm, stop_vllm, docker):
+def _run_collection(args, run_dir, *, repo_root, toolathlon_root, docker):
     root = args.gym_artifacts_dir.resolve()
     if args.resume:
         manifest = load_manifest(run_dir)
         if args.purpose != manifest["config"]["purpose"]:
             raise ValueError("Resume purpose does not match the manifest")
         for name in RESUME_CONFIG_FIELDS:
-            if name in {"subagent_base_url", "subagent_host"} and name not in manifest["config"]:
-                setattr(args, name, None)
-            elif name == "subagent_ports" and name not in manifest["config"]:
-                setattr(args, name, [manifest["config"]["subagent_port"]])
-            elif name == "vllm_data_parallel_size" and name not in manifest["config"]:
-                setattr(args, name, 1)
-            elif name == "container_slots" and name not in manifest["config"]:
+            if name == "container_slots" and name not in manifest["config"]:
                 setattr(args, name, 1)
             elif name == "agent_timeout" and name not in manifest["config"]:
                 setattr(args, name, 1800)
@@ -763,7 +662,7 @@ def _run_collection(args, run_dir, *, repo_root, toolathlon_root,
                 name in {"n_jobs_per_worker", "concurrency"}
                 and name not in manifest["config"]
             ):
-                # Older manifests did not persist these scheduler settings.
+                # Older manifests did not persist these settings.
                 # Keep the resume-time CLI value or parser default.
                 continue
             else:
@@ -803,32 +702,9 @@ def _run_collection(args, run_dir, *, repo_root, toolathlon_root,
     append_event(run_dir, "batch_started", resume=bool(args.resume))
     print(f"Run {run_dir.name}: {manifest['counts']['total']} episode(s)", flush=True)
 
-    processes: list[subprocess.Popen[bytes] | None] = []
     interrupted = False
     try:
-        for port in ([] if args.subagent_base_url else args.subagent_ports):
-            processes.append(
-                start_vllm(
-                    model=args.subagent_model,
-                    served_model_name=args.subagent_api_model,
-                    port=port,
-                    gpu=args.subagent_gpu,
-                    max_model_len=args.vllm_max_model_len,
-                    gpu_memory_utilization=args.vllm_gpu_memory_utilization,
-                    timeout=args.vllm_startup_timeout,
-                    log_path=run_dir / f"vllm-{port}.log",
-                    reuse=args.reuse_vllm,
-                    data_parallel_size=args.vllm_data_parallel_size,
-                )
-            )
-        append_event(
-            run_dir,
-            "hosted_subagents_selected" if args.subagent_base_url else "vllm_ready",
-            externally_managed=args.reuse_vllm,
-            ports=args.subagent_ports,
-        )
         provider_backoff = ProviderBackoffBarrier()
-        next_endpoint = 0
         while True:
             work: list[tuple[int, dict[str, Any], int]] = []
             for index, episode in enumerate(manifest["episodes"], start=1):
@@ -896,7 +772,6 @@ def _run_collection(args, run_dir, *, repo_root, toolathlon_root,
                 )
 
             def submit_next() -> bool:
-                nonlocal next_endpoint
                 try:
                     index, episode, attempt = next(remaining)
                 except StopIteration:
@@ -926,10 +801,8 @@ def _run_collection(args, run_dir, *, repo_root, toolathlon_root,
                     episode=episode,
                     attempt=attempt,
                     stop_event=stop_event,
-                    subagent_port=args.subagent_ports[next_endpoint],
                     container_slot=(index - 1) % args.container_slots,
                 )
-                next_endpoint = (next_endpoint + 1) % len(args.subagent_ports)
                 active[future] = (index, episode, attempt, provider_generation)
                 return True
 
@@ -1016,14 +889,6 @@ def _run_collection(args, run_dir, *, repo_root, toolathlon_root,
         }
         raise
     finally:
-        for process in processes:
-            stop_vllm(process)
-        append_event(
-            run_dir,
-            "vllm_stopped",
-            externally_managed=args.reuse_vllm,
-            ports=args.subagent_ports,
-        )
         incomplete = any(item["status"] != "completed" for item in manifest["episodes"])
         manifest["status"] = (
             "interrupted"
