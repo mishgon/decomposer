@@ -18,6 +18,10 @@ Use `--agent qwen_3_5_4b_thinking` for the same tool-equipped worker acting dire
 on the task, without a Decomposer. Use a positional task for one task, `--tasks` for
 a subset, or `--all`. Task names are directories under `tasks/finalpool`.
 
+Toolathlon's services are shared by all episodes on a host. Repetitions of a
+task, tasks in one group of Toolathlon's `task_conflict.json`, and Kubernetes
+tasks therefore run one after another; `--concurrency` applies across them.
+
 Both roles use `create_model(model_id)` from [models.py](../../src/decomposer/models.py).
 Choose models in [agents.py](agents.py). The runner passes the key into the task
 container by its environment variable name, without storing it in artifacts.

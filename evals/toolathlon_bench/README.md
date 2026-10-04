@@ -26,13 +26,12 @@ treats unselected tasks as failures and must be at least the selected-task count
 Use `--denominator 108` to report a subset against the full benchmark.
 
 Many tasks need app credentials or Toolathlon's local service stack (see
-`gyms/toolathlon_bench/README.md`). These 23 tasks use only MCP servers without
-credentials:
+`gyms/toolathlon_bench/README.md`). These 22 tasks need no credentials:
 
 ```bash
 PYTHONPATH=src:. python -m evals.toolathlon_bench.run --denominator 108 -n 3 --tasks \
   arrange-workspace cooking-guidance courses-ta-hws detect-revised-terms dietary-health \
-  excel-data-transformation excel-market-research fillout-online-forms find-alita-paper \
+  excel-data-transformation excel-market-research find-alita-paper \
   imagenet interview-report invoice-org latex-prompt-box paper-checker ppt-analysis \
   privacy-desensitization reimbursement-form-filler sales-accounting shopping-helper \
   stock-build-position travel-exchange university-course-selection yahoo-analysis

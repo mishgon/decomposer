@@ -582,8 +582,71 @@ def test_select_tasks_from_task_pool(tmp_path):
         parallel.select_tasks(tmp_path, task="a", all_tasks=True)
 
 
+def task_pool(root, tasks, conflict_groups=()):
+    for name in tasks:
+        (root / "tasks/finalpool" / name).mkdir(parents=True)
+    (root / "tasks/finalpool/task_conflict.json").write_text(
+        json.dumps({"conflict_groups": [list(group) for group in conflict_groups]})
+    )
+
+
+def test_lanes_group_repetitions_and_conflicting_tasks():
+    assert parallel.lanes(["a", "b", "c"], 2, [["b", "a"], ["x", "c"]]) == [
+        [("a", 1), ("a", 2), ("b", 1), ("b", 2)],
+        [("c", 1), ("c", 2)],
+    ]
+
+
+def test_parallel_never_overlaps_episodes_that_share_state(tmp_path, monkeypatch):
+    import threading
+    import time
+
+    task_pool(tmp_path / "toolathlon", ["a", "b", "c", "k1", "k2"], [["a", "b"]])
+    monkeypatch.setattr(bench, "TOOLATHLON_ROOT", tmp_path / "toolathlon")
+    monkeypatch.setattr(bench, "K8S_TASK_CLEANUP_COMMANDS", {"k1": (), "k2": ()})
+    running, overlaps, guard = set(), [], threading.Lock()
+
+    def execute(command, directory, timeout, stop_event):
+        task = command[2]
+        shared = {"a": "ab", "b": "ab", "k1": "k8s", "k2": "k8s"}.get(task, task)
+        with guard:
+            if shared in running:
+                overlaps.append(task)
+            running.add(shared)
+        time.sleep(0.05)
+        with guard:
+            running.discard(shared)
+        return 0, False
+
+    monkeypatch.setattr(parallel, "execute", execute)
+    args = bench.create_parser().parse_args(["--all", "-n", "2", "--concurrency", "8",
+                                             "--output-dir", str(tmp_path / "raw")])
+    root = parallel.run(args)
+    assert overlaps == []
+    manifest = json.loads((root / "manifest.json").read_text())
+    assert manifest["status"] == "completed" and len(manifest["episodes"]) == 10
+
+
+def test_parallel_records_executor_errors_and_continues(tmp_path, monkeypatch):
+    task_pool(tmp_path / "toolathlon", ["task"])
+    monkeypatch.setattr(bench, "TOOLATHLON_ROOT", tmp_path / "toolathlon")
+    outcomes = iter([OSError("no docker"), (0, False)])
+
+    def execute(*args):
+        outcome = next(outcomes)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+    monkeypatch.setattr(parallel, "execute", execute)
+    args = bench.create_parser().parse_args(["task", "-n", "2", "--output-dir", str(tmp_path / "raw")])
+    episodes = json.loads((parallel.run(args) / "manifest.json").read_text())["episodes"]
+    assert episodes[0]["returncode"] == -1 and "no docker" in episodes[0]["error"]
+    assert episodes[1]["returncode"] == 0
+
+
 def test_parallel_runs_each_repetition_as_an_episode(tmp_path, monkeypatch):
-    (tmp_path / "toolathlon/tasks/finalpool/task").mkdir(parents=True)
+    task_pool(tmp_path / "toolathlon", ["task"])
     monkeypatch.setattr(bench, "TOOLATHLON_ROOT", tmp_path / "toolathlon")
     commands = []
 

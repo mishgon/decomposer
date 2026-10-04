@@ -18,8 +18,27 @@ def select_tasks(root, task=None, tasks=None, all_tasks=False):
     available = sorted(p.name for p in root.iterdir() if p.is_dir() and not p.name.startswith('.'))
     selected = available if all_tasks else ([task] if task else tasks)
     if len(set(selected)) != len(selected) or any(t not in available for t in selected):
-        raise ValueError("Tasks must be unique names from the Gym task pool")
+        raise ValueError("Tasks must be unique names from the task pool")
     return selected
+
+
+def lanes(tasks, repetitions, conflict_groups):
+    """Group episodes that share external state; each group runs sequentially.
+
+    Repetitions of one task reuse its services, and tasks in a conflict group
+    reset the same services.
+    """
+    lane_of = {task: task for task in tasks}
+    for group in conflict_groups:
+        members = [task for task in tasks if task in group]
+        for task in members:
+            lane_of[task] = members[0]
+    grouped = {}
+    for task in tasks:
+        grouped.setdefault(lane_of[task], []).extend(
+            (task, repetition) for repetition in range(1, repetitions + 1)
+        )
+    return list(grouped.values())
 
 
 def execute(command, directory, timeout, stop_event):
@@ -83,27 +102,37 @@ def run(args):
         temporary.write_text(json.dumps(manifest, indent=2))
         temporary.replace(root / "manifest.json")
     save()
+    # Kind clusters exhaust the host's inotify limits when created concurrently.
+    conflict_groups = [
+        *json.loads((gym.TOOLATHLON_ROOT / "tasks/finalpool/task_conflict.json").read_text())["conflict_groups"],
+        list(gym.K8S_TASK_CLEANUP_COMMANDS),
+    ]
+    total = len(tasks) * args.repetitions
+    saved = threading.Lock()
     stop = threading.Event()
-    executor = concurrent.futures.ThreadPoolExecutor(max_workers=args.concurrency)
-    futures = {}
-    try:
-        for task in tasks:
-            for repetition in range(1, args.repetitions + 1):
-                command = episode_command(args, task, run_id, repetition, root)
-                future = executor.submit(execute, command, root / "logs" / task / str(repetition), args.episode_timeout, stop)
-                futures[future] = (task, repetition)
-        for future in concurrent.futures.as_completed(futures):
-            task, repetition = futures[future]
+
+    def run_lane(lane):
+        for task, repetition in lane:
+            if stop.is_set():
+                return
+            command = episode_command(args, task, run_id, repetition, root)
             try:
-                code, timed_out = future.result()
+                code, timed_out = execute(command, root / "logs" / task / str(repetition), args.episode_timeout, stop)
                 result = {"returncode": code, "timed_out": timed_out}
             except Exception as error:
                 result = {"returncode": -1, "error": repr(error)}
             result.update(task=task, repetition=repetition,
                           episode_id=f"{run_id}-{task}-r{repetition:03d}")
-            manifest["episodes"].append(result)
-            save()
-            print(f"{len(manifest['episodes'])}/{len(futures)} {task}: exit {result['returncode']}", flush=True)
+            with saved:
+                manifest["episodes"].append(result)
+                save()
+                print(f"{len(manifest['episodes'])}/{total} {task}: exit {result['returncode']}", flush=True)
+
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=args.concurrency)
+    try:
+        futures = [executor.submit(run_lane, lane) for lane in lanes(tasks, args.repetitions, conflict_groups)]
+        for future in concurrent.futures.as_completed(futures):
+            future.result()
         manifest["status"] = "completed"
     except BaseException:
         manifest["status"] = "interrupted"
