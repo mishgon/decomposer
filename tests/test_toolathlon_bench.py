@@ -214,6 +214,7 @@ def test_episode_runs_toolathlon_phases_in_trusted_order(episode):
     trace = json.loads((episode.episode_dir / "trace.json").read_text())
     assert trace["harness"] == "decomposer"
     assert trace["model"] == trace["agent_model_id"] == "container/model"
+    assert trace["agent_api_model"] == "image-model" and trace["teacher_backend"] == "container"
     assert trace["agent_runs"] == episode.agent_state["agent_runs"]
     usage_summary = json.loads((episode.episode_dir / "usage.json").read_text())
     assert usage_summary["totals"]["agent_runs"] == 1
@@ -231,6 +232,7 @@ def test_react_episode_reports_react_usage(episode):
     episode.run_episode("task", "--agent", "qwen_3_5_4b_thinking")
     trace = json.loads((episode.episode_dir / "trace.json").read_text())
     assert trace["harness"] == "react" and trace["decomposer_model"] is None
+    assert trace["teacher_backend"] == "agent"
     assert "react" in json.loads((episode.episode_dir / "usage.json").read_text())
 
 

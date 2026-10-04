@@ -71,6 +71,12 @@ The image extends Toolathlon's official task image with the pinned benchmark
 sources and installs the Agent Server in `/opt/agents`. Rebuild it after changing
 packaged code.
 
+## Workflows
+
+- [Evaluation](../../evals/toolathlon_bench/README.md): fixed-sample runs and metrics.
+
+Workflows depend on this benchmark executor, never the reverse.
+
 ## Agent Server
 
 This container-local LangGraph server exposes two assistants:
