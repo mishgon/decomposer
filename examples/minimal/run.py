@@ -20,16 +20,18 @@ async def main() -> None:
                     {
                         "role": "user",
                         "content": (
-                            "Составь тест для начинающих из трёх разделов: Python, SQL "
-                            "и машинное обучение. В каждом разделе должно быть три вопроса "
-                            "с вариантами ответа: один на понимание понятия, один по короткому "
-                            "фрагменту кода или конкретному примеру и один о типичной ошибке.\n\n"
-                            "У каждого вопроса должно быть ровно четыре варианта ответа, "
-                            "один правильный ответ и объяснение в одном предложении. "
-                            "Объём каждого раздела должен быть меньше 300 слов. "
-                            "Примеры должны быть самодостаточными и не требовать внешних "
-                            "ресурсов. В конце приведи полный тест и ключ с ответами. "
-                            "Все задания агентам и итоговый ответ напиши по-русски."
+                            "Create a beginner quiz with three sections: Python, SQL, "
+                            "and machine learning. Each section must contain three "
+                            "multiple-choice questions: one about a concept, one based "
+                            "on a short code snippet or concrete example, and one about "
+                            "a common mistake.\n\n"
+                            "Each question must have exactly four answer choices, "
+                            "one correct answer, and a one-sentence explanation. "
+                            "Each section must contain fewer than 300 words. "
+                            "Examples must be self-contained and require no external "
+                            "resources. At the end, provide the complete quiz and "
+                            "answer key. Write all agent assignments and the final "
+                            "answer in English."
                         ),
                     }
                 ]
@@ -42,9 +44,9 @@ async def main() -> None:
     )
     html_path = trace_path.with_suffix(".html")
     rendered = write_trace_html(final_state, html_path)
-    print(f"\nТрейс сохранён в {trace_path}")
+    print(f"\nTrace saved to {trace_path}")
     if rendered:
-        print(f"Визуализация сохранена в {html_path}")
+        print(f"Visualization saved to {html_path}")
     if error is not None:
         raise error
     print(final_state["decomposer_agent_runs"][-1]["response"])

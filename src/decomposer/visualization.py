@@ -66,10 +66,10 @@ svg { display: block; width: 100%; min-width: 1000px; height: auto; }
 svg text { font-family: system-ui, sans-serif; fill: #23343d; }
 .tick { font-size: 12px; fill: #60717b; }
 .grid { stroke: #e4eaed; stroke-dasharray: 3 5; }
-.lifeline, .fork { stroke: #d7e0e4; }
+.fork, .run-thread { stroke: #d7e0e4; }
 .agent-name { font-size: 14px; font-weight: 600; }
 .animal { font-size: 23px; }
-.fork { fill: none; }
+.fork, .run-thread { fill: none; }
 .created { fill: white; stroke: #60717b; stroke-width: 2; }
 .run-line { stroke: #338b79; stroke-width: 6; stroke-linecap: round; }
 .failed .run-line, .failed .event:hover circle, .failed .event:focus circle {
@@ -232,14 +232,28 @@ def render_trace(trace: dict[str, Any]) -> str:
         start = x(run["started_at"])
         collected = "collected_at" in run
         end = x(run["collected_at"] if collected else last_event)
+        bend = min(12, (end - start) / 4)
+        path = (
+            f'M {start:.2f} {y - 26} V {y - bend:.2f} '
+            f'Q {start:.2f} {y} {start + bend:.2f} {y} '
+        )
+        if collected:
+            path += (
+                f'H {end - bend:.2f} Q {end:.2f} {y} {end:.2f} {y + bend:.2f} '
+                f'V {y + 26}'
+            )
+        else:
+            path += f'H {end:.2f}'
         status = run["status"]
         style = "uncollected" if not collected else "failed" if status != "responded" else ""
         kind = "invocation" if is_decomposer else "run"
         bar = [
             f'<g class="{kind} {style}" data-run-id="{escape(run["agent_run_id"])}">'
-            f'<line class="run-line" x1="{start:.2f}" x2="{end:.2f}" y1="{y}" y2="{y}"/>',
+            f'<path class="run-thread" d="{path}"/>'
+            f'<line class="run-line" x1="{start + bend:.2f}" x2="{end - bend:.2f}" '
+            f'y1="{y}" y2="{y}"/>',
             marker(
-                start, y - 20, "🧑" if is_decomposer else "🐶",
+                start, y - 26, "🧑" if is_decomposer else "🐶",
                 "Запрос пользователя" if is_decomposer else "Сообщение Decomposer", run["prompt"],
             ),
         ]
@@ -248,7 +262,7 @@ def render_trace(trace: dict[str, Any]) -> str:
             if response is None:
                 response = run.get("error") or ""
             bar.append(marker(
-                end, y + 20, "🐶" if is_decomposer else icons[agent_id],
+                end, y + 26, "🐶" if is_decomposer else icons[agent_id],
                 "Ответ Decomposer" if is_decomposer else f"Ответ агента «{names[agent_id]}»", response,
             ))
         else:
@@ -260,8 +274,7 @@ def render_trace(trace: dict[str, Any]) -> str:
         f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 {height}" '
         'aria-label="Временная шкала агентов Decomposer">',
         '<g class="decomposer"><text class="animal" x="24" y="107">🐶</text>'
-        '<text class="agent-name" x="60" y="105">Decomposer</text>'
-        f'<line class="lifeline" x1="{left}" x2="{right}" y1="100" y2="100"/></g>',
+        '<text class="agent-name" x="60" y="105">Decomposer</text></g>',
     ]
     for i, agent in enumerate(agents):
         agent_id = agent["agent_id"]
@@ -272,9 +285,7 @@ def render_trace(trace: dict[str, Any]) -> str:
             f'<rect x="0" y="{y - 44}" width="1200" height="88" '
             f'fill="{"#f8fafb" if i % 2 == 0 else "#ffffff"}"/>'
             f'<text class="animal" x="24" y="{y + 7}">{icons[agent_id]}</text>'
-            f'<text class="agent-name" x="60" y="{y + 5}">{escape(name)}</text>'
-            f'<line class="lifeline" x1="{x(agent["created_at"]):.2f}" '
-            f'x2="{right}" y1="{y}" y2="{y}"/></g>'
+            f'<text class="agent-name" x="60" y="{y + 5}">{escape(name)}</text></g>'
         )
     for i in range(6 if duration else 1):
         seconds = duration * i / 5
@@ -291,10 +302,23 @@ def render_trace(trace: dict[str, Any]) -> str:
     for agent in agents:
         if "forked_from" in agent:
             parent = agent["forked_from"]
+            parent_run = next((
+                run for run in reversed(runs)
+                if run["agent_id"] == parent and "collected_at" in run
+                and run["collected_at"] <= agent["created_at"]
+            ), None)
+            if parent_run is None:
+                start = x(trace["agents"][parent]["created_at"])
+            else:
+                start = x(parent_run["collected_at"])
+                start -= min(12, (start - x(parent_run["started_at"])) / 4)
+            end = x(agent["created_at"])
+            bend = min(12, end - start)
+            parent_y = rows[parent]
             y = rows[agent["agent_id"]]
             parts.append(
-                f'<path class="fork" d="M {x(agent["created_at"]):.2f} {rows[parent]} '
-                f'V {y}">'
+                f'<path class="fork" d="M {start:.2f} {parent_y} H {end - bend:.2f} '
+                f'Q {end:.2f} {parent_y} {end:.2f} {parent_y + bend:.2f} V {y}">'
                 f'<title>Форк от агента «{escape(names[parent])}»</title></path>'
             )
 

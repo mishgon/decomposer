@@ -59,6 +59,13 @@ def _templates(document):
     }
 
 
+def _marker_positions(run):
+    return [
+        tuple(map(float, event.attrib["transform"].removeprefix("translate(").removesuffix(")").split()))
+        for event in run.findall("{*}g[@class='event']")
+    ]
+
+
 def test_optional_html_failure_is_reported(tmp_path, monkeypatch, caplog):
     def fail(trace):
         raise ValueError("broken renderer")
@@ -79,15 +86,19 @@ def test_run_times_rows_and_fork_geometry():
     assert [row.attrib["data-agent-id"] for row in svg.findall("{*}g[@class='agent']")] == [
         "root", "failed", "child", "idle",
     ]
-    line = svg.find("{*}g[@data-run-id='root-1']/{*}line")
-    assert float(line.attrib["x1"]) == pytest.approx(532.4)
-    assert float(line.attrib["x2"]) == pytest.approx(668.6)
-    assert line.attrib["y1"] == line.attrib["y2"] == "188"
-    second = svg.find("{*}g[@data-run-id='root-2']/{*}line")
-    assert second.attrib["y1"] == "188"
-    assert float(second.attrib["x1"]) > float(line.attrib["x2"])
+    first = _marker_positions(svg.find("{*}g[@data-run-id='root-1']"))
+    assert first[0] == pytest.approx((532.4, 162))
+    assert first[1] == pytest.approx((668.6, 214))
+    second = _marker_positions(svg.find("{*}g[@data-run-id='root-2']"))
+    assert [y for _, y in second] == [162, 214]
+    assert second[0][0] > first[1][0]
     fork = svg.find("{*}path[@class='fork']")
-    assert fork.attrib["d"] == "M 714.00 188 V 364"
+    parent_bar = svg.find("{*}g[@data-run-id='root-1']/{*}line[@class='run-line']")
+    assert fork.attrib["d"] == (
+        f'M {parent_bar.attrib["x2"]} 188 H 702.00 '
+        'Q 714.00 188 714.00 200.00 V 364'
+    )
+    assert not svg.findall(".//{*}line[@class='lifeline']")
     parent_name = svg.find("{*}g[@data-agent-id='root']/{*}text[@class='agent-name']").text
     assert fork.find("{*}title").text == f"Форк от агента «{parent_name}»"
     assert len(svg.findall("{*}circle[@class='created']")) == 4
@@ -242,8 +253,7 @@ def test_zero_duration_run():
     trace["decomposer_agent_runs"][0].update(started_at=100.0, collected_at=100.0)
     svg = _svg(render_trace(trace))
     run = svg.find("{*}g[@data-run-id='root-1']")
-    line = run.find("{*}line")
-    assert line.attrib["x1"] == line.attrib["x2"] == "260.00"
+    assert _marker_positions(run) == [(260, 162), (260, 214)]
     events = run.findall("{*}g[@class='event']")
     assert events[0].attrib["transform"] != events[1].attrib["transform"]
 
@@ -258,10 +268,7 @@ def test_decomposer_row_spans_invocation_and_shows_only_messages():
     svg = _svg(document)
     templates = _templates(document)
     invocation = svg.find("{*}g[@class='invocation ']")
-    line = invocation.find("{*}line")
-    assert float(line.attrib["x1"]) == 260.0
-    assert float(line.attrib["x2"]) == 1168.0
-    assert line.attrib["y1"] == line.attrib["y2"] == "100"
+    assert _marker_positions(invocation) == [(260, 74), (1168, 126)]
     events = invocation.findall("{*}g[@class='event']")
     assert [event.find("{*}text").text for event in events] == ["🧑", "🐶"]
     assert ["".join(templates[event.attrib["data-tooltip"]].itertext()).strip() for event in events] == [
@@ -296,12 +303,12 @@ def test_multiple_decomposer_runs_share_one_row_and_keep_their_messages():
         [("Compare two approaches.", "Here is the comparison."),
          ("Check the answer again.", "The answer is correct.")],
     ):
-        line = bar.find("{*}line")
-        assert (float(line.attrib["x1"]), float(line.attrib["x2"])) == pytest.approx(coordinates)
-        assert line.attrib["y1"] == line.attrib["y2"] == "100"
+        positions = _marker_positions(bar)
+        assert tuple(x for x, _ in positions) == pytest.approx(coordinates)
+        assert [y for _, y in positions] == [74, 126]
         events = bar.findall("{*}g[@class='event']")
         assert [event.find("{*}text").text for event in events] == ["🧑", "🐶"]
         assert tuple(
             "".join(templates[event.attrib["data-tooltip"]].itertext()).strip() for event in events
         ) == messages
-    assert svg.find("{*}g[@data-run-id='root-4']/{*}line").attrib["y1"] == "188"
+    assert [y for _, y in _marker_positions(svg.find("{*}g[@data-run-id='root-4']"))] == [162, 214]
