@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 
-from decomposer.chat_vllm import ChatVLLM
+from decomposer.models import ChatVLLM
 
 
 def create_vllm_teacher(

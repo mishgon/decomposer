@@ -2,7 +2,7 @@ import os
 
 import httpx
 from decomposer.prompts import SUBAGENT_SYSTEM_PROMPT
-from decomposer.chat_vllm import ChatVLLM
+from decomposer.models import ChatVLLM
 from langchain.agents import create_agent
 from langgraph.graph.state import CompiledStateGraph
 try:
