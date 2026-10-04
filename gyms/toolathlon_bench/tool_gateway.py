@@ -1,7 +1,7 @@
 """Toolathlon gateway extension for benchmark-requested local tools.
 
 The upstream decoupled gateway exposes MCP servers and ``claim_done`` only.
-Our LangGraph executors do not instantiate Toolathlon's ``TaskAgent``, so they
+Our LangGraph agents do not instantiate Toolathlon's ``TaskAgent``, so they
 otherwise lose native tools such as ``python_execute``, ``web_search``, and the
 helpers for reading full outputs after Toolathlon's 100K truncation boundary.
 """
@@ -13,7 +13,9 @@ import json
 import sys
 from typing import Any
 
-sys.path.insert(0, "/workspace")
+# Python puts this script's directory first on sys.path. Its agents.py would
+# shadow the OpenAI Agents SDK that Toolathlon imports as `agents`.
+sys.path[0] = "/workspace"
 
 from aiohttp import web
 from agents import RunContextWrapper
@@ -32,22 +34,12 @@ EXPOSED_LOCAL_TOOLS = frozenset(
 
 
 class ContainerToolGateway(upstream.ContainerToolGateway):
-    def __init__(
-        self,
-        bundle_file: str,
-        *,
-        include_local_tools: bool = False,
-        debug: bool = False,
-    ) -> None:
-        super().__init__(bundle_file=bundle_file, debug=debug)
-        self.include_local_tools = include_local_tools
+    def __init__(self, bundle_file: str) -> None:
+        super().__init__(bundle_file=bundle_file, debug=True)
         self._local_callbacks: dict[str, Any] = {}
 
     async def startup(self, app: web.Application) -> None:
         await super().startup(app)
-        if not self.include_local_tools:
-            return
-
         requested = set(self.bundle.get("needed_local_tools") or [])
         for config_name in sorted(requested.intersection(EXPOSED_LOCAL_TOOLS)):
             configured = local_tool_mappings[config_name]
@@ -87,24 +79,13 @@ class ContainerToolGateway(upstream.ContainerToolGateway):
         }
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--bundle_file", required=True)
-    parser.add_argument("--host", default="0.0.0.0")
-    parser.add_argument("--port", type=int, default=10086)
-    parser.add_argument("--debug", action="store_true")
-    parser.add_argument("--include_local_tools", action="store_true")
-    return parser.parse_args()
-
-
 def main() -> None:
-    args = parse_args()
-    gateway = ContainerToolGateway(
-        bundle_file=args.bundle_file,
-        include_local_tools=args.include_local_tools,
-        debug=args.debug,
-    )
-    web.run_app(gateway.create_app(), host=args.host, port=args.port)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--bundle-file", required=True)
+    parser.add_argument("--port", type=int, required=True)
+    args = parser.parse_args()
+    gateway = ContainerToolGateway(args.bundle_file)
+    web.run_app(gateway.create_app(), host="127.0.0.1", port=args.port)
 
 
 if __name__ == "__main__":

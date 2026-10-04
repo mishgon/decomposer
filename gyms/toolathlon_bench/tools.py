@@ -6,6 +6,7 @@ from collections.abc import AsyncIterator
 from contextlib import AsyncExitStack, asynccontextmanager
 from datetime import timedelta
 from pathlib import Path
+from typing import Any
 
 from fastapi import FastAPI
 from langchain.agents.middleware import wrap_tool_call
@@ -16,17 +17,13 @@ from mcp import ClientSession
 from mcp.client.sse import sse_client
 
 
-# Match Toolathlon-Verified's own scaffold.  The previous 8K limit discarded
-# most of many search/list results long before the benchmark's 100K cutoff.
-MAX_TOOL_OUTPUT_CHARS = int(
-    os.environ.get("TOOLATHLON_MAX_TOOL_OUTPUT_CHARS", "100000")
-)
+# Toolathlon's own scaffold truncates tool outputs at 100K characters.
+MAX_TOOL_OUTPUT_CHARS = 100_000
 GATEWAY_SSE_READ_TIMEOUT_SECONDS = 30 * 60
 GATEWAY_TOOL_READ_TIMEOUT_SECONDS = 300
 
 
 def _write_overlong_output(path: Path, content: str) -> None:
-    """Persist a large tool result without blocking LangGraph's event loop."""
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
 
@@ -48,25 +45,19 @@ async def truncate_mcp_tool_output(request, handler):
             else json.dumps(response.content, ensure_ascii=False, default=str)
         )
         if len(content) > MAX_TOOL_OUTPUT_CHARS:
+            # Toolathlon's overlong-output tools read the full text back from here.
             output_id = uuid.uuid4().hex
             relative_path = f".overlong_tool_outputs/{output_id}.json"
-            workspace = os.environ.get("TOOLATHLON_AGENT_WORKSPACE")
-            saved_note = ""
-            if workspace:
-                output_path = Path(workspace) / relative_path
-                await asyncio.to_thread(
-                    _write_overlong_output, output_path, content
-                )
-                saved_note = (
-                    " The complete output is available through the overlong-output "
-                    f"tools with shortuuid identifier {output_id}, and at "
-                    f"{relative_path}."
-                )
+            workspace = Path(get_runtime()["agent_workspace"])
+            await asyncio.to_thread(
+                _write_overlong_output, workspace / relative_path, content
+            )
             response = response.model_copy(
                 update={
                     "content": content[:MAX_TOOL_OUTPUT_CHARS]
                     + f"\n...[truncated, total {len(content)} chars]."
-                    + saved_note
+                    + " The complete output is available through the overlong-output "
+                    f"tools with shortuuid identifier {output_id}, and at {relative_path}."
                 }
             )
     return response
@@ -74,14 +65,13 @@ async def truncate_mcp_tool_output(request, handler):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    gateway_url = os.environ.get("TOOLATHLON_GATEWAY_URL")
-    if not gateway_url:
-        raise RuntimeError("Set TOOLATHLON_GATEWAY_URL to the container gateway SSE endpoint.")
+    data_dir = Path(os.environ.get("TOOLATHLON_DATA_DIR", "/workspace/dumps"))
+    runtime = json.loads((data_dir / "runtime.json").read_text(encoding="utf-8"))
 
     async with AsyncExitStack() as stack:
         read_stream, write_stream = await stack.enter_async_context(
             sse_client(
-                gateway_url,
+                runtime["gateway_url"],
                 sse_read_timeout=GATEWAY_SSE_READ_TIMEOUT_SECONDS,
             )
         )
@@ -95,14 +85,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             )
         )
         await session.initialize()
-        tools: list[BaseTool] = await load_mcp_tools(
-            session, server_name="gateway"
-        )
-        app.state.tools = tools
+        app.state.runtime = runtime
+        app.state.tools = await load_mcp_tools(session, server_name="gateway")
         try:
             yield
         finally:
             del app.state.tools
+            del app.state.runtime
 
 
 app = FastAPI(lifespan=lifespan)
@@ -111,5 +100,13 @@ app = FastAPI(lifespan=lifespan)
 def get_tools() -> list[BaseTool]:
     tools = getattr(app.state, "tools", None)
     if tools is None:
-        raise RuntimeError("Subagent tools have not started")
+        raise RuntimeError("Agent tools have not started")
     return tools.copy()
+
+
+def get_runtime() -> dict[str, Any]:
+    """Return the episode runtime read before any agent run could modify it."""
+    runtime = getattr(app.state, "runtime", None)
+    if runtime is None:
+        raise RuntimeError("Agent tools have not started")
+    return runtime

@@ -1,4 +1,4 @@
-"""Crash-resistant append-only logging for subagent model calls."""
+"""Crash-resistant append-only logging for agent model calls."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from langchain.agents.middleware import wrap_model_call
 from langchain_core.messages import message_to_dict
 
 
-LOG_PATH_ENV = "TOOLATHLON_SUBAGENT_CALL_LOG"
+LOG_PATH_ENV = "TOOLATHLON_AGENT_CALL_LOG"
 
 
 def _request_delta(messages):
@@ -57,9 +57,6 @@ async def durable_model_call_log(request, handler):
             or type(request.model).__name__
         ),
         "request_message_count": len(request.messages),
-        # The initial call records the complete prompt. Later calls only need
-        # messages after the preceding AI response (normally tool results), so
-        # the JSONL stream remains reconstructable without quadratic growth.
         "request_delta": [
             message_to_dict(message) for message in _request_delta(request.messages)
         ],
@@ -81,7 +78,7 @@ async def durable_model_call_log(request, handler):
                 "duration_seconds": time.monotonic() - started,
                 "status": "error",
                 "error": repr(error),
-            }
+            },
         )
         raise
     await asyncio.to_thread(
@@ -92,6 +89,6 @@ async def durable_model_call_log(request, handler):
             "duration_seconds": time.monotonic() - started,
             "status": "success",
             "response": [message_to_dict(message) for message in response.result],
-        }
+        },
     )
     return response

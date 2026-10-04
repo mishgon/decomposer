@@ -9,11 +9,11 @@ src/decomposer/**/__pycache__/
 src/decomposer/**/*.py[cod]
 !gyms/
 gyms/**
-!gyms/toolathlon/
-!gyms/toolathlon/**
-gyms/toolathlon/**/__pycache__/
-gyms/toolathlon/**/*.py[cod]
-gyms/toolathlon/subagents/.langgraph_api/
+!gyms/toolathlon_bench/
+!gyms/toolathlon_bench/**
+gyms/toolathlon_bench/**/__pycache__/
+gyms/toolathlon_bench/**/*.py[cod]
+gyms/toolathlon_bench/.langgraph_api/
 !external/
 external/**
 !external/toolathlon/
