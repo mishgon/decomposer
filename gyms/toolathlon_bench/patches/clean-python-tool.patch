@@ -1,16 +1,38 @@
 --- python_interpretor.py
 +++ python_interpretor.py
-@@ -15,5 +15,9 @@ async def on_python_execute_tool_invoke(context: RunContextWrapper, params_str:
+@@ -1,6 +1,8 @@
+ import json
+ import os
++import shutil
+ import subprocess
++import tempfile
+ import uuid
+ import sys
+ from typing import Any
+@@ -14,6 +16,9 @@
+         code = params.get("code", "")
          filename = params.get("filename", f"{uuid.uuid4()}.py")
          timeout = params.get("timeout", 30)  # Default 30 seconds
 +
-+        # Tool implementation details must not become benchmark artifacts, and
-+        # a caller-supplied filename must never escape the private temp folder.
++        # A caller-supplied filename must never escape the private temp folder.
 +        filename = os.path.basename(filename) or f"{uuid.uuid4()}.py"
          
          # Ensure timeout is not greater than 120 seconds
          if timeout > 120:
-@@ -42,18 +46,27 @@ async def on_python_execute_tool_invoke(context: RunContextWrapper, params_str:
+@@ -27,9 +32,9 @@
+         agent_workspace = context.context.get('_agent_workspace', '.')
+         agent_workspace = os.path.abspath(agent_workspace)
+         
+-        # Create .python_tmp directory
+-        tmp_dir = os.path.join(agent_workspace, '.python_tmp')
+-        os.makedirs(tmp_dir, exist_ok=True)
++        # Each call gets a private directory outside the graded workspace, so
++        # concurrent calls that reuse a filename cannot clobber each other.
++        tmp_dir = tempfile.mkdtemp(prefix="python_execute-")
+         
+         
+         # Create Python file
+@@ -42,11 +47,11 @@
          start_time = time.time()
          
          # Execute Python file
@@ -24,19 +46,12 @@
                  capture_output=True,
                  text=True,
                  encoding='utf-8',
-                 timeout=timeout
-             )
+@@ -55,6 +60,8 @@
          except subprocess.TimeoutExpired:
              execution_time = time.time() - start_time
              return f"=== EXECUTION TIMEOUT ===\nExecution timed out after {timeout} seconds\nExecution time: {execution_time:.3f} seconds"
 +        finally:
-+            try:
-+                os.remove(file_path)
-+            except FileNotFoundError:
-+                pass
-+            try:
-+                os.rmdir(tmp_dir)
-+            except OSError:
-+                pass
++            shutil.rmtree(tmp_dir, ignore_errors=True)
          
          # Calculate execution time
+         execution_time = time.time() - start_time

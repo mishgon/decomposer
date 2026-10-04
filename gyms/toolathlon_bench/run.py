@@ -239,7 +239,7 @@ def trajectory(state, *, bundle, episode_id, started_at, error):
     }
 
 
-def _cleanup_episode(*, episode_dir: Path, task_container: str, task: str) -> None:
+def _cleanup_episode(*, episode_dir: Path, task_container: str, task: str, dumps_owner: str | None) -> None:
     """Capture raw container state and remove all per-episode resources."""
     cleanup: dict[str, object] = {
         "started_at": datetime.now(timezone.utc).isoformat(),
@@ -256,13 +256,13 @@ def _cleanup_episode(*, episode_dir: Path, task_container: str, task: str) -> No
             }
         except BaseException as error:
             cleanup["task_cleanup"] = {"command": task_cleanup, "error": repr(error)}
-    # The container runs as root; hand the episode directory back to the host user.
-    owner = f"{os.getuid()}:{os.getgid()}"
-    try:
-        completed = _exec(task_container, "chown", "-R", owner, "/workspace/dumps", check=False)
-        cleanup["ownership"] = {"owner": owner, "returncode": completed.returncode}
-    except BaseException as error:
-        cleanup["ownership"] = {"owner": owner, "error": repr(error)}
+    # Container root writes the episode directory; give it back to its owner.
+    if dumps_owner is not None:
+        try:
+            completed = _exec(task_container, "chown", "-R", dumps_owner, "/workspace/dumps", check=False)
+            cleanup["ownership"] = {"owner": dumps_owner, "returncode": completed.returncode}
+        except BaseException as error:
+            cleanup["ownership"] = {"owner": dumps_owner, "error": repr(error)}
     for kind, command in (
         ("log", ("logs", task_container)),
         ("inspect.json", ("inspect", task_container)),
@@ -381,6 +381,7 @@ def run_episode(args) -> None:
     agent_server: subprocess.Popen | None = None
     agent_server_log = None
     port_reservations = []
+    dumps_owner = None
     container_lock = _open_container_lock(args.container_lock_file)
     container_lock_held = False
     try:
@@ -408,6 +409,9 @@ def run_episode(args) -> None:
             *mounts, "--env", "LLM_PROXY_MASTER_KEY", *proxy_mount,
             "--env", f"DOCKER_API_VERSION={DOCKER_API_VERSION}", args.image,
         )
+        # Read the owner inside the container, where cleanup runs chown: under
+        # rootless Podman the host user is container root.
+        dumps_owner = _exec(task_container, "stat", "-c", "%u:%g", "/workspace/dumps").stdout.strip()
         for relative in USER_CONFIG_FILES:
             if (TOOLATHLON_ROOT / relative).is_file():
                 _docker("cp", str(TOOLATHLON_ROOT / relative), f"{task_container}:/workspace/{relative}")
@@ -586,7 +590,7 @@ def run_episode(args) -> None:
             )
             _docker("cp", str(trusted_bundle), f"{task_container}:{CONTAINER_BUNDLE}")
             # Agents could write this file; only the evaluator may create it.
-            (episode_dir / "eval_res.json").unlink(missing_ok=True)
+            _exec(task_container, "rm", "-rf", "--", "/workspace/dumps/eval_res.json")
             # Exit code 0 grades the artifacts even after an agent failure; that
             # failure still keeps the strict pass below false.
             completed = _exec(
@@ -643,6 +647,7 @@ def run_episode(args) -> None:
                 episode_dir=episode_dir,
                 task_container=task_container,
                 task=args.task,
+                dumps_owner=dumps_owner,
             )
         finally:
             _release_container_lock(container_lock)

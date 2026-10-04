@@ -26,19 +26,18 @@ def lanes(tasks, repetitions, conflict_groups):
     """Group episodes that share external state; each group runs sequentially.
 
     Repetitions of one task reuse its services, and tasks in a conflict group
-    reset the same services.
+    reset the same services. Overlapping groups merge into one lane.
     """
-    lane_of = {task: task for task in tasks}
-    for group in conflict_groups:
-        members = [task for task in tasks if task in group]
-        for task in members:
-            lane_of[task] = members[0]
-    grouped = {}
-    for task in tasks:
-        grouped.setdefault(lane_of[task], []).extend(
-            (task, repetition) for repetition in range(1, repetitions + 1)
-        )
-    return list(grouped.values())
+    merged = []
+    for group in [{task} for task in tasks] + [set(group) & set(tasks) for group in conflict_groups]:
+        for lane in [lane for lane in merged if lane & group]:
+            merged.remove(lane)
+            group |= lane
+        if group:
+            merged.append(group)
+    merged.sort(key=lambda lane: min(map(tasks.index, lane)))
+    return [[(task, repetition) for task in tasks if task in lane
+             for repetition in range(1, repetitions + 1)] for lane in merged]
 
 
 def execute(command, directory, timeout, stop_event):

@@ -3,7 +3,9 @@ import fcntl
 import importlib.util
 import json
 import os
+import shutil
 import signal
+import subprocess
 import sys
 import threading
 import types
@@ -125,6 +127,10 @@ def episode(tmp_path, monkeypatch):
         state.events.append(("docker", args[0]))
         if args[:2] == ("image", "inspect"):
             return CompletedProcess(args, 0, "[]", "")
+        if "stat" in args:
+            return CompletedProcess(args, 0, "1000:1000\n", "")
+        if args[-1] == "/workspace/dumps/eval_res.json":
+            (state.episode_dir / "eval_res.json").unlink(missing_ok=True)
         if args[0] == "cp" and args[1].endswith(bench.CONTAINER_BUNDLE):
             Path(args[2]).write_text(json.dumps(BUNDLE))
         if "scripts.decoupled.container_preprocess" in args:
@@ -247,6 +253,7 @@ def test_episode_runs_toolathlon_phases_in_trusted_order(episode):
     assert (episode.root / "configs/global_configs.py").read_text() == "example = True\n"
     episode.cleanup.assert_called_once_with(
         episode_dir=episode.episode_dir, task_container=run_args[run_args.index("--name") + 1], task="task",
+        dumps_owner="1000:1000",
     )
     assert not episode.private_dir.exists()
 
@@ -509,8 +516,8 @@ def test_cleanup_stops_kubernetes_task_and_redacts_inspection(tmp_path, monkeypa
         return CompletedProcess(args, 0, "log line\n", "")
 
     monkeypatch.setattr(bench, "_docker", docker)
-    bench._cleanup_episode(episode_dir=tmp_path, task_container="c", task="k8s-mysql")
-    owner = f"{os.getuid()}:{os.getgid()}"
+    owner = "0:0"
+    bench._cleanup_episode(episode_dir=tmp_path, task_container="c", task="k8s-mysql", dumps_owner=owner)
     assert calls[0] == ("exec", "--workdir", "/workspace", "c", *bench.K8S_TASK_CLEANUP_COMMANDS["k8s-mysql"])
     assert calls[1] == ("exec", "--workdir", "/workspace", "c", "chown", "-R", owner, "/workspace/dumps")
     assert calls[-1] == ("rm", "--force", "--volumes", "c")
@@ -521,8 +528,11 @@ def test_cleanup_stops_kubernetes_task_and_redacts_inspection(tmp_path, monkeypa
     assert cleanup["task_cleanup"]["returncode"] == 0
     assert cleanup["ownership"] == {"owner": owner, "returncode": 0}
     calls.clear()
-    bench._cleanup_episode(episode_dir=tmp_path, task_container="c", task="task")
+    bench._cleanup_episode(episode_dir=tmp_path, task_container="c", task="task", dumps_owner=owner)
     assert calls[0][-3:] == ("-R", owner, "/workspace/dumps") and calls[1][0] == "logs"
+    calls.clear()
+    bench._cleanup_episode(episode_dir=tmp_path, task_container="c", task="task", dumps_owner=None)
+    assert calls[0][0] == "logs"
 
 
 def test_stop_agent_server_signals_only_a_running_server(monkeypatch):
@@ -595,6 +605,13 @@ def test_lanes_group_repetitions_and_conflicting_tasks():
     assert parallel.lanes(["a", "b", "c"], 2, [["b", "a"], ["x", "c"]]) == [
         [("a", 1), ("a", 2), ("b", 1), ("b", 2)],
         [("c", 1), ("c", 2)],
+    ]
+
+
+def test_lanes_merge_overlapping_conflict_groups():
+    assert parallel.lanes(["x", "y", "z", "w"], 1, [["x", "y"], ["y", "z"]]) == [
+        [("x", 1), ("y", 1), ("z", 1)],
+        [("w", 1)],
     ]
 
 
@@ -1004,6 +1021,42 @@ def test_gateway_main_serves_on_loopback(gateway_module, monkeypatch):
     monkeypatch.setattr(sys, "argv", ["tool_gateway.py", "--bundle-file", "/run/b.json", "--port", "4001"])
     gateway_module.main()
     run_app.assert_called_once_with("app", host="127.0.0.1", port=4001)
+
+
+PYTHON_TOOL = BENCH_DIR.parents[1] / "external/toolathlon/utils/aux_tools/python_interpretor.py"
+
+
+@pytest.mark.skipif(not PYTHON_TOOL.is_file() or not shutil.which("patch") or not shutil.which("uv"),
+                    reason="needs the Toolathlon checkout, patch and uv")
+def test_patched_python_execute_isolates_concurrent_calls(tmp_path, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+
+    source = tmp_path / "python_interpretor.py"
+    shutil.copy(PYTHON_TOOL, source)
+    with (BENCH_DIR / "patches/clean-python-tool.patch").open() as patch:
+        subprocess.run(["patch", "--batch", str(source)], stdin=patch, check=True, capture_output=True)
+    agents_tool = types.ModuleType("agents.tool")
+    agents_tool.FunctionTool = lambda **kwargs: kwargs
+    agents_tool.RunContextWrapper = object
+    monkeypatch.setitem(sys.modules, "agents", types.ModuleType("agents"))
+    monkeypatch.setitem(sys.modules, "agents.tool", agents_tool)
+    spec = importlib.util.spec_from_file_location("python_interpretor", source)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    context = SimpleNamespace(context={"_agent_workspace": str(workspace)})
+
+    def call(n):
+        params = {"code": f"import os, time; time.sleep(0.5); print({n}, os.getcwd())",
+                  "filename": "../script.py"}
+        return asyncio.run(module.on_python_execute_tool_invoke(context, json.dumps(params)))
+
+    with ThreadPoolExecutor(2) as pool:
+        first, second = pool.map(call, [1, 2])
+    assert f"=== STDOUT ===\n1 {workspace}" in first
+    assert f"=== STDOUT ===\n2 {workspace}" in second
+    assert list(workspace.iterdir()) == []
 
 
 # --- usage.py and model_logging.py ---------------------------------------------
