@@ -105,7 +105,7 @@ def test_agent_block_follows_the_experiment_and_port_offset() -> None:
     assert agent["decomposer_system_prompt_profile"] == "teacher"
     assert agent["subagent_types"] == [
         {
-            "subagent_type_id": SUBAGENT_TYPE_ID,
+            "agent_type_id": SUBAGENT_TYPE_ID,
             "assistant_id": "qwen35_4b_non_thinking",
             "url": "http://127.0.0.1:2031",
             "description": SUBAGENT_DESCRIPTION,

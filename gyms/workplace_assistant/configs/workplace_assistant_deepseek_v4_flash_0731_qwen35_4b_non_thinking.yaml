@@ -36,7 +36,7 @@ decomposer:
       decomposer_system_prompt_profile: student
       response_for_verifier_factory: responses_api_agents.decomposer_agent.app:_subagent_tool_calls_and_final_message
       subagent_types:
-        - subagent_type_id: qwen35_4b_non_thinking
+        - agent_type_id: qwen35_4b_non_thinking
           assistant_id: qwen35_4b_non_thinking
           url: http://127.0.0.1:2024
           description: General-purpose tool-calling agent with access to the environment tools.

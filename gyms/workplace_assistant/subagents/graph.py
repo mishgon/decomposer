@@ -11,8 +11,8 @@ from responses_api_agents.decomposer_agent.subagents.graph import (
     NeMoGymSubagentMiddleware,
 )
 
-from decomposer.chat_vllm import ChatVLLM
-from decomposer.prompts import SUBAGENT_SYSTEM_PROMPT
+from decomposer.models import ChatVLLM
+from decomposer.prompts import AGENT_SYSTEM_PROMPT
 from gyms.qwen_sampling import non_thinking_subagent_sampling_kwargs
 
 REQUEST_TIMEOUT_SECONDS = 300.0
@@ -75,7 +75,7 @@ def _create_subagent(model: ChatVLLM) -> CompiledStateGraph:
                 exit_behavior="error",
             ),
         ],
-        system_prompt=SUBAGENT_SYSTEM_PROMPT,
+        system_prompt=AGENT_SYSTEM_PROMPT,
     )
 
 

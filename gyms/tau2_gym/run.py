@@ -278,7 +278,7 @@ def gym_config(experiment: Tau2Experiment, ports: PortLayout) -> dict[str, Any]:
                     "response_for_verifier_factory": VERIFIER_FACTORY,
                     "subagent_types": [
                         {
-                            "subagent_type_id": SUBAGENT_TYPE_ID,
+                            "agent_type_id": SUBAGENT_TYPE_ID,
                             "assistant_id": SUBAGENT_ASSISTANT_ID,
                             "url": f"http://127.0.0.1:{ports.langgraph}",
                             "description": SUBAGENT_DESCRIPTION,
