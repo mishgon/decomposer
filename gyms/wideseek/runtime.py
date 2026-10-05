@@ -13,9 +13,9 @@ from langchain_core.utils.function_calling import convert_to_openai_tool
 from decomposer.models import create_model as model
 
 
-DEFAULT_MODEL = "qwen_3_5_4b_unlooped_non_thinking"
-DEFAULT_SUBAGENT = "qwen_3_5_4b_unlooped_thinking"
-DEFAULT_TEACHER = "qwen_3_8_flash_next_non_thinking"
+DEFAULT_MODEL = "lmrouter/qwen_3_5_4b_unlooped_non_thinking"
+DEFAULT_SUBAGENT = "lmrouter/qwen_3_5_4b_unlooped_thinking"
+DEFAULT_TEACHER = "lmrouter/qwen_3_8_flash_next_non_thinking"
 MODEL_PROFILES = (DEFAULT_MODEL, DEFAULT_SUBAGENT, DEFAULT_TEACHER)
 
 

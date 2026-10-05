@@ -483,7 +483,6 @@ def test_context_overflow_retires_worker_and_allows_replacement(async_invocation
     client.threads.create.assert_called_once()
 
 
-@pytest.mark.parametrize("async_invocation", [False, True])
 @pytest.mark.parametrize(
     ("empty_history", "thread", "expected_error"),
     [

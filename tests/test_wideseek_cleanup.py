@@ -26,7 +26,7 @@ def client_with_runs(runs):
 
 
 def state_for(*threads):
-    return {'subagents': {t: {'thread_id': t} for t in threads}, 'subagent_runs': {}}
+    return {'agents': {t: {'thread_id': t} for t in threads}, 'agent_runs': {}}
 
 
 def test_archives_before_delete_and_releases_unused_threads(tmp_path):

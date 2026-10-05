@@ -7,8 +7,8 @@ scheduling; it does not train a model or start an indefinite queue.
 
 Defaults use main's named registry profiles:
 
-- Teacher and judge: `qwen_3_8_flash_next_non_thinking`.
-- Subagents: `qwen_3_5_4b_unlooped_thinking`, with reasoning preserved.
+- Teacher and judge: `lmrouter/qwen_3_8_flash_next_non_thinking`.
+- Subagents: `lmrouter/qwen_3_5_4b_unlooped_thinking`, with reasoning preserved.
 
 Sampling and provider settings come directly from `src/decomposer/models.py`.
 Model outputs, reasoning, tool calls, usage, subagent states and judge responses

@@ -10,6 +10,17 @@ from evals.wideseek.watch import display, subagent_counts
 
 
 class WatchTest(unittest.TestCase):
+    def test_current_harness_agent_run_ids(self):
+        messages = [
+            {'type': 'ai', 'tool_calls': [{'id': '1', 'name': 'run'}]},
+            {'type': 'tool', 'tool_call_id': '1', 'content': '{"agent_run_id": "a"}'},
+            {'type': 'ai', 'tool_calls': [{'id': '2', 'name': 'wait'}]},
+            {'type': 'tool', 'tool_call_id': '2', 'content': '[{"agent_run_id": "a"}]'},
+            {'type': 'ai', 'tool_calls': [{'id': '3', 'name': 'run'}]},
+            {'type': 'tool', 'tool_call_id': '3', 'content': '{"agent_run_id": "b"}'},
+        ]
+        self.assertEqual(subagent_counts(messages), (2, 1))
+
     def test_peak_counts_only_successful_spawns_and_collected_reports(self):
         messages = []
         def call(name, result):

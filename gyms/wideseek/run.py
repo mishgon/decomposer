@@ -57,7 +57,7 @@ async def cleanup_workers(client, state, path):
                 return runs
 
     errors = []
-    thread_ids = dict.fromkeys(s["thread_id"] for s in state.get("subagents", {}).values())
+    thread_ids = dict.fromkeys(s["thread_id"] for s in state.get("agents", {}).values())
     for thread_id in thread_ids:
         try:
             # A runs.create response can be lost before its ID reaches parent state.
@@ -90,11 +90,11 @@ async def episode(task, mode, attempt, root, args):
     subagent = getattr(args, "subagent_model", DEFAULT_MODEL)
     if mode == "decomposer":
         agent = create_decomposer_agent(decomposer_model=policy,
-            subagent_types=[{"subagent_type_id": subagent,
+            agent_types=[{"agent_type_id": subagent,
               "description": "Qwen3.5-4B unlooped researcher with offline Wiki-2018 search and access tools.",
-              "assistant_id": subagent, "url": args.worker_url}],
+              "assistant_id": subagent.removeprefix("lmrouter/"), "url": args.worker_url}],
             checkpointer=checkpoint, middleware=[ModelLog("decomposer")],
-            context_schema=Context, subagent_recursion_limit=410)
+            context_schema=Context, agent_recursion_limit=410)
     else:
         # Construct the same researcher graph with a checkpoint for interrupted traces.
         from langchain.agents import create_agent

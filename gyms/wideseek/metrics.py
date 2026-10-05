@@ -16,13 +16,13 @@ def subagent_counts(messages):
             result = json.loads(message.get('content', ''))
         except (ValueError, TypeError):
             continue
-        if name in {'run', 'spawn_subagent'} and isinstance(result, dict) and result.get('subagent_run_id'):
-            worker = result['subagent_run_id']
+        if name in {'run', 'spawn_subagent'} and isinstance(result, dict) and (result.get('agent_run_id') or result.get('subagent_run_id')):
+            worker = result.get('agent_run_id') or result['subagent_run_id']
             spawned.add(worker)
             active.add(worker)
             peak = max(peak, len(active))
         elif name == 'wait' and isinstance(result, list):
             for report in result:
                 if isinstance(report, dict):
-                    active.discard(report.get('subagent_run_id'))
+                    active.discard(report.get('agent_run_id') or report.get('subagent_run_id'))
     return len(spawned), peak

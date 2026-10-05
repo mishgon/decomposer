@@ -93,7 +93,7 @@ class ScoreTests(unittest.IsolatedAsyncioTestCase):
                 "data_sha256": hashlib.sha256(data.read_bytes()).hexdigest()}}))
             judge = AsyncMock(return_value={"score": .5, "status": "scored"})
             args = SimpleNamespace(data=data, run=run, output=root/"new-scores",
-                                   judge_model="qwen_3_8_flash_next_non_thinking", concurrency=2)
+                                   judge_model="lmrouter/qwen_3_8_flash_next_non_thinking", concurrency=2)
             with patch("evals.wideseek.rescore.evaluate", new=judge), \
                     patch("evals.wideseek.rescore.subprocess.check_output", return_value="test-revision"):
                 await main(args)
