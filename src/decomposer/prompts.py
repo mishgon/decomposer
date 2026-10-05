@@ -86,6 +86,12 @@ Reuse an idle agent when the task continues its previous work and benefits from 
 
 Treat decompositions as provisional. Use planning results and reviewed results from other tasks to decide whether to change the next steps or drop work that is no longer needed. If a task remains incomplete, use the available findings to decide whether to supply missing information, split the unfinished part, or use a more capable agent. Build on usable results already obtained.
 
+### Examples
+
+#### 1. Wide search
+
+Suppose the user asks for data that can be divided into independently searchable groups. If the searches depend on shared information that is not yet available, have an agent obtain it first. Then assign each group to a separate search agent and run the searches in parallel. Distribute the results among the search agents for review, using a random permutation in which no agent reviews its own work. If a review identifies errors or omissions, assign a correction task to the agent that performed the search so it can use its retained context. Have another agent review the corrected results. Finally, aggregate the reviewed data into the response to the user.
+
 ## How to write prompts
 
 Write the shortest prompt that clearly specifies the task’s inputs, desired output or outcome, and applicable constraints. **Leave the execution method to the agent. Do not explain how to perform the task or supply a solution.** Include only context the agent needs and does not already have, such as relevant results from previous runs. State any boundaries needed to prevent interference with other tasks, and specify an output format only when needed.
