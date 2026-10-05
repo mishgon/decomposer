@@ -74,7 +74,7 @@ svg text { font-family: system-ui, sans-serif; fill: #23343d; }
 .run-line { stroke: #338b79; stroke-width: 6; stroke-linecap: round; }
 .failed .run-line, .failed .event:hover circle, .failed .event:focus circle {
   stroke: #bc5252; }
-.uncollected .run-line { stroke: #a38145; stroke-dasharray: 5 6; }
+.uncollected .run-line { stroke: #a38145; }
 .event { cursor: pointer; outline: none; }
 .event circle { fill: white; stroke: #dce4e7; }
 .event:hover circle, .event:focus circle { stroke: #338b79; stroke-width: 2; }
@@ -221,9 +221,8 @@ def render_trace(trace: dict[str, Any]) -> str:
 
     def open_end(position: float, y: float) -> str:
         return (
-            f'<circle class="created" cx="{position:.2f}" cy="{y}" r="4">'
-            '<title>Ответ ещё не получен</title></circle>'
-            f'<text x="{position + 9:.2f}" y="{y + 5}">…</text>'
+            f'<text x="{position + 9:.2f}" y="{y + 5}">'
+            '…<title>Ответ ещё не получен</title></text>'
         )
 
     def run_bar(run: dict[str, Any], *, is_decomposer: bool) -> str:
