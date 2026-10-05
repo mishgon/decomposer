@@ -11,7 +11,7 @@ may set their sampling (``subagent_sampling``), otherwise they use Qwen3.5's gen
 non-thinking preset.
 
 Newer experiments name presets from ``src/decomposer/models.py`` instead
-(``manager_preset``, ``subagent_preset``; bridged by ``gyms/model_presets.py``): the
+(``manager_preset``, ``subagent_preset``; bridged by ``gyms/tau2_gym/model_presets.py``): the
 preset is then the only source of that role's sampling.
 """
 
@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from decomposer.prompt_profiles import DECOMPOSER_PROMPT_PROFILES, DecomposerPromptProfile
-from gyms.model_presets import (
+from gyms.tau2_gym.model_presets import (
     QWEN35_UNLOOPED_THINKING_PRESET,
     QWEN38_FLASH_NON_THINKING_PRESET,
     SUBAGENT_PRESET_GRAPHS,

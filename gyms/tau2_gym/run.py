@@ -60,8 +60,9 @@ from gyms.qwen_sampling import (  # noqa: E402
     non_thinking_subagent_sampling_kwargs,
     subagent_sampling_environment,
 )
-from gyms.model_presets import preset_record, upstream_model_id  # noqa: E402
+from gyms.tau2_gym.model_presets import preset_record, upstream_model_id  # noqa: E402
 from gyms.remote_model_proxy import require_upstream_models  # noqa: E402
+from gyms.tau2_gym.langgraph_server import write_runtime_config  # noqa: E402
 from gyms.tau2_gym.task_pools import load_pool  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -630,20 +631,25 @@ def remote_proxy_command(
     return command
 
 
-def langgraph_command(ports: PortLayout, jobs: int) -> list[str]:
+def langgraph_runtime_dir(output_dir: Path) -> Path:
+    """The run's own LangGraph working directory (gyms/tau2_gym/langgraph_server.py)."""
+    return output_dir / "langgraph"
+
+
+def langgraph_command(ports: PortLayout, jobs: int, runtime_dir: Path) -> list[str]:
+    """The subagent server, without file persistence, run from `runtime_dir`."""
     return [
-        str(PROJECT_VENV / "bin" / "langgraph"),
-        "dev",
+        str(PROJECT_VENV / "bin" / "python"),
+        "-m",
+        "gyms.tau2_gym.langgraph_server",
         "--config",
-        str(SUBAGENT_DIR / "langgraph.json"),
+        str(runtime_dir / "langgraph.json"),
         "--host",
         "127.0.0.1",
         "--port",
         str(ports.langgraph),
         "--n-jobs-per-worker",
         str(jobs),
-        "--no-browser",
-        "--no-reload",
     ]
 
 
@@ -833,7 +839,7 @@ def execute(args: argparse.Namespace) -> int:
             "subagent_sampling": subagent_sampling_record(env, experiment.subagent_preset),
             "subagent": subagent_command,
             "subagent_gpu": args.subagent_gpu,
-            "langgraph": langgraph_command(ports, args.langgraph_jobs),
+            "langgraph": langgraph_command(ports, args.langgraph_jobs, langgraph_runtime_dir(output_dir)),
             "gym_start": gym_start_command(ports, config=config_path, logs=logs),
             "gym_eval": gym_eval_command(ports, dataset=dataset, output=rollouts,
                                          num_repeats=args.num_repeats, concurrency=concurrency,
@@ -950,8 +956,10 @@ def execute(args: argparse.Namespace) -> int:
                 wait_http(f"{loopback_url(ports.qwen35_4b)}/models", model_processes, 1800)
 
         with phase("langgraph_startup", timings):
+            runtime_dir = langgraph_runtime_dir(output_dir)
+            write_runtime_config(runtime_dir)
             langgraph = supervisor.start(
-                "langgraph", langgraph_command(ports, args.langgraph_jobs), cwd=SUBAGENT_DIR
+                "langgraph", langgraph_command(ports, args.langgraph_jobs, runtime_dir), cwd=runtime_dir
             )
             wait_http(f"http://127.0.0.1:{ports.langgraph}/docs", [*model_processes, langgraph], 300)
 

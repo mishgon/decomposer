@@ -62,7 +62,7 @@ The matched text-default profiles are:
   OpenRouter DeepSeek.
 - `qwen38-flash-non-thinking-teacher-qwen35-4b-unlooped-thinking` needs no GPU and
   takes both roles from the `src/decomposer/models.py` presets
-  (`gyms/model_presets.py`). The manager is `lmrouter/qwen_3_8_flash_next_non_thinking`
+  (`gyms/workplace_assistant/model_presets.py`). The manager is `lmrouter/qwen_3_8_flash_next_non_thinking`
   behind the loopback manager proxy, whose extra body is that preset with
   `reasoning.effort: "none"` (the proxy ignores `chat_template_kwargs` on the
   Responses API). The subagents are `lmrouter/qwen_3_5_4b_unlooped_thinking`
@@ -234,6 +234,14 @@ Call budgets are part of the artifact identity: simple runs use `calls100` and
 Decomposer runs use `managercalls100-subagentcalls100`. The stored runtime
 configuration provides the remaining identity checks, including context,
 sampling, thinking mode, and output-length policy.
+
+## Subagent server state
+
+The runner serves the subagent graphs in `subagents/langgraph.json` through
+`langgraph_server.py`, which calls `run_server(disable_persistence=True)` from
+`<run>/langgraph/`. Under `langgraph dev` the store in `subagents/.langgraph_api` grew
+by 0.5-2.3 GB per run and, reloaded by the next run, slowed `threads.get_history` until
+runs timed out; the CLI offers no way to disable that persistence.
 
 ## Submit MLSpace jobs
 

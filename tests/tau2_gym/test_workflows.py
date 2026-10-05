@@ -280,7 +280,7 @@ PRESET_TEACHER = "qwen38_flash_non_thinking_teacher_qwen35_4b_unlooped_thinking"
 def test_preset_teacher_takes_both_roles_from_models_py(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    from gyms.model_presets import manager_responses_body
+    from gyms.tau2_gym.model_presets import manager_responses_body
 
     experiment = get_experiment(PRESET_TEACHER)
     assert experiment.pool == "decomposer_broad_v1"
@@ -314,11 +314,14 @@ def test_preset_teacher_takes_both_roles_from_models_py(
     plan = json.loads(capsys.readouterr().out)
     assert plan["subagent_backend"] == "preset" and plan["subagent"] is None
     assert plan["subagent_sampling"]["preset"] == "lmrouter/qwen_3_5_4b_unlooped_thinking"
+    langgraph = plan["langgraph"]
+    assert langgraph[langgraph.index("-m") + 1] == "gyms.tau2_gym.langgraph_server"
+    assert langgraph[langgraph.index("--config") + 1] == f"{plan['output_dir']}/langgraph/langgraph.json"
     assert "secret-value" not in json.dumps(plan)
 
 
 def test_presets_replace_sampling_and_must_match_their_graph() -> None:
-    from gyms.model_presets import QWEN35_UNLOOPED_THINKING_PRESET, QWEN38_FLASH_NON_THINKING_PRESET
+    from gyms.tau2_gym.model_presets import QWEN35_UNLOOPED_THINKING_PRESET, QWEN38_FLASH_NON_THINKING_PRESET
 
     experiment = get_experiment(PRESET_TEACHER)
     with pytest.raises(ValueError, match="replaces manager_sampling"):

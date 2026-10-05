@@ -1,7 +1,7 @@
 """Sampling presets for Qwen model families, for the older experiments.
 
 New experiments take their sampling from the model presets in
-``src/decomposer/models.py`` through ``gyms/model_presets.py``; this module stays
+``src/decomposer/models.py`` through each gym's ``model_presets.py``; this module stays
 until the older experiments are migrated.
 """
 

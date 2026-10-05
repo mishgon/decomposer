@@ -9,7 +9,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Literal, cast
 
-from gyms.model_presets import (
+from gyms.workplace_assistant.model_presets import (
     QWEN35_UNLOOPED_THINKING_PRESET,
     QWEN38_FLASH_NON_THINKING_PRESET,
     SUBAGENT_PRESET_GRAPHS,
@@ -153,7 +153,7 @@ class DecomposerExperiment:
     subagent_verify_tls: bool = True
     # None keeps the subagent graph's built-in preset.
     subagent_sampling: SubagentSampling | None = None
-    # models.py presets (gyms/model_presets.py). A manager preset replaces
+    # models.py presets (gyms/workplace_assistant/model_presets.py). A manager preset replaces
     # manager_sampling and the reasoning effort; a subagent preset needs
     # subagent_backend="preset" and the config's assistant_id set to its graph.
     manager_preset: str | None = None

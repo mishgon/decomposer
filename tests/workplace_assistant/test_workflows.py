@@ -172,8 +172,11 @@ def test_nonzero_offset_uses_repository_graph_and_model_url_mapping() -> None:
     experiment = get_experiment("deepseek-v4-flash-0731-gemma4-all")
     assert isinstance(experiment, DecomposerExperiment)
     ports = run_module.WorkplacePortLayout(12000)
-    command, directory = run_module.langgraph_command(repo_root, experiment, ports)
-    assert directory == repo_root / "gyms" / "workplace_assistant" / "subagents"
+    command, directory = run_module.langgraph_command(
+        repo_root, experiment, ports, repo_root / "unused" / "langgraph"
+    )
+    assert directory == repo_root / "unused" / "langgraph"
+    assert command[command.index("-m") + 1] == "gyms.workplace_assistant.langgraph_server"
     assert command[command.index("--port") + 1] == "14024"
     environment = run_module._base_environment(
         repo_root, experiment, "offset-test", ports
@@ -441,15 +444,13 @@ def test_gemma_text_defaults_use_pinned_thinking_manager_and_worker(tmp_path) ->
     assert policy["chat_template_kwargs"]["enable_thinking"] is True
     assert policy["extra_body"]["top_k"] == 64
     command, directory = run_module.langgraph_command(
-        Path(__file__).resolve().parents[2], experiment
+        Path(__file__).resolve().parents[2],
+        experiment,
+        run_module.DEFAULT_PORT_LAYOUT,
+        Path("/run") / "langgraph",
     )
-    assert directory == (
-        Path(__file__).resolve().parents[2]
-        / "gyms"
-        / "workplace_assistant"
-        / "subagents"
-    )
-    assert "langgraph.json" in " ".join(command)
+    assert directory == Path("/run") / "langgraph"
+    assert command[command.index("--config") + 1] == "/run/langgraph/langgraph.json"
 
 
 def test_requested_gemma_simple_profiles_use_matched_128k_defaults() -> None:
@@ -1836,11 +1837,13 @@ def test_decomposer_service_topology_has_subagent_vllm_and_langgraph() -> None:
     model_command = run_module.decomposer_vllm_command(
         models_for_experiment(experiment)[0], experiment
     )
-    langgraph, cwd = run_module.langgraph_command(repo_root, experiment)
+    langgraph, cwd = run_module.langgraph_command(
+        repo_root, experiment, run_module.DEFAULT_PORT_LAYOUT, repo_root / "run" / "langgraph"
+    )
     assert "--served-model-name" in model_command
-    assert "langgraph" in Path(langgraph[0]).name
+    assert langgraph[langgraph.index("-m") + 1] == "gyms.workplace_assistant.langgraph_server"
     assert langgraph[langgraph.index("--port") + 1] == "2024"
-    assert cwd.name == "subagents"
+    assert cwd == repo_root / "run" / "langgraph"
 
 
 def test_local_cuda_devices_remap_decomposer_logical_slots() -> None:
@@ -2498,7 +2501,7 @@ QWEN38_PRESETS = "qwen38-flash-non-thinking-teacher-qwen35-4b-unlooped-thinking"
 
 
 def test_preset_teacher_takes_both_roles_from_models_py() -> None:
-    from gyms.model_presets import SUBAGENT_PRESET_GRAPHS, manager_responses_body
+    from gyms.workplace_assistant.model_presets import SUBAGENT_PRESET_GRAPHS, manager_responses_body
 
     repo_root = Path(__file__).resolve().parents[2]
     experiment = get_experiment(QWEN38_PRESETS)

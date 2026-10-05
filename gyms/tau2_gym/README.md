@@ -13,7 +13,8 @@ gyms/tau2_gym/
 ├── run.py                    # local runner: manager + subagents -> langgraph -> gym env -> gym eval -> validate
 ├── tau2_export.py            # builds the Gym dataset from a task pool (runs inside the tau2 venv)
 ├── task_pools/               # versioned task pools and the recipe-driven builder
-├── subagents/                # LangGraph subagent server (Qwen3.5-4B, non-thinking)
+├── subagents/                # LangGraph subagent graphs (Qwen3.5-4B) and their langgraph.json
+├── langgraph_server.py       # serves them per run, without LangGraph file persistence
 └── gym_components/           # <- NEMO_GYM_EXTRA_ROOTS
     ├── pyproject.toml        # marker; see "Why the marker file" below
     └── resources_servers/tau2_gym/
@@ -163,7 +164,7 @@ config sha and, for local managers, a fingerprint of the served checkpoint.
 ## Subagent backends
 
 An experiment with a `models.py` preset (`manager_preset`, `subagent_preset`; see
-`gyms/model_presets.py`) takes that role's sampling from the preset alone. The manager
+`gyms/tau2_gym/model_presets.py`) takes that role's sampling from the preset alone. The manager
 preset becomes the manager proxy's extra body (non-thinking becomes `reasoning.effort:
 "none"`, since the proxy ignores `chat_template_kwargs` on the Responses API). A
 subagent preset runs as the `preset` backend: its graph is `create_model(preset)` itself,
@@ -195,6 +196,17 @@ within noise:
 | pass rate | 0.756 | 0.800 |
 | spawns/rollout | 1.58 | 1.64 |
 | max fan-out (mean / max) | 1.33 / 4 | 1.20 / 4 |
+
+## The subagent server keeps no state on disk
+
+`langgraph dev` saves its in-memory store to `.langgraph_api/` in its working directory,
+reloads it at startup and rewrites all of it every 10 s. Left in `subagents/` across
+runs, that store reached 3.8 GB, and `threads.get_history` (which `wait` calls for every
+finished run) took 7-35 s: subagents finished in ~15 s but reached the manager after
+145-215 s. `langgraph dev` cannot turn this off (the CLI drops `disable_persistence`
+from `langgraph.json`), so `run.py` starts `langgraph_server.py`, which calls
+`run_server(disable_persistence=True)` from `<run>/langgraph/`, as the GAIA2 gym does.
+The graphs still come from `subagents/langgraph.json`.
 
 ## How scoring works
 

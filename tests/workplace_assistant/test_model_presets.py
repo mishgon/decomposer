@@ -6,9 +6,9 @@ from pathlib import Path
 import pytest
 
 from decomposer.models import create_model
-from gyms import model_presets
+from gyms.workplace_assistant import model_presets
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_non_thinking_manager_body_is_the_preset_with_thinking_switched_off() -> None:
@@ -61,8 +61,7 @@ def test_only_lmrouter_presets_are_bridged() -> None:
         model_presets.manager_responses_body("openrouter/qwen_3_8_flash_next_low_thinking")
 
 
-@pytest.mark.parametrize("gym", ["tau2_gym", "workplace_assistant"])
-def test_every_subagent_preset_graph_is_registered(gym: str) -> None:
-    graphs = json.loads((REPO_ROOT / "gyms" / gym / "subagents" / "langgraph.json").read_text())["graphs"]
+def test_every_subagent_preset_graph_is_registered() -> None:
+    graphs = json.loads((REPO_ROOT / "gyms" / "workplace_assistant" / "subagents" / "langgraph.json").read_text())["graphs"]
     for graph in model_presets.SUBAGENT_PRESET_GRAPHS.values():
         assert graphs[graph] == f"./graph.py:{graph}"

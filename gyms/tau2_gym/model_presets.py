@@ -1,4 +1,4 @@
-"""The gyms' bridge to the model presets in ``src/decomposer/models.py``.
+"""This gym's bridge to the model presets in ``src/decomposer/models.py``.
 
 ``create_model(preset_id)`` is the single source of a model's sampling. Subagents use
 it as is: their LangGraph graphs call ``create_model`` and reach the shared proxy on
@@ -8,7 +8,8 @@ the preset's own endpoint. The Decomposer manager cannot: it runs inside NeMo Gy
 every request. On the Responses API the shared proxy ignores ``chat_template_kwargs``,
 so thinking is switched by ``reasoning.effort`` there: "none" for a non-thinking preset.
 
-Older experiments keep their values in ``gyms/qwen_sampling.py``.
+Older experiments keep their values in ``gyms/qwen_sampling.py``. Each gym keeps
+its own copy of this module until shared gym code is agreed on.
 """
 
 from __future__ import annotations
@@ -21,7 +22,8 @@ from decomposer.models import ChatVLLM, create_model
 QWEN38_FLASH_NON_THINKING_PRESET = "lmrouter/qwen_3_8_flash_next_non_thinking"
 QWEN35_UNLOOPED_THINKING_PRESET = "lmrouter/qwen_3_5_4b_unlooped_thinking"
 
-# Subagent presets and the LangGraph graph serving each, in both gyms' langgraph.json.
+# Subagent presets and the LangGraph graph serving each, in this gym's
+# subagents/langgraph.json.
 SUBAGENT_PRESET_GRAPHS = {QWEN35_UNLOOPED_THINKING_PRESET: "qwen35_4b_unlooped_thinking"}
 
 # Chat Completions extra_body keys a preset may carry, and what the manager body keeps.

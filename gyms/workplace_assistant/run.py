@@ -41,8 +41,9 @@ from gyms.qwen_sampling import (  # noqa: E402
     non_thinking_subagent_sampling_kwargs,
     subagent_sampling_environment,
 )
-from gyms.model_presets import preset_record, upstream_model_id  # noqa: E402
+from gyms.workplace_assistant.model_presets import preset_record, upstream_model_id  # noqa: E402
 from gyms.remote_model_proxy import require_upstream_models  # noqa: E402
+from gyms.workplace_assistant.langgraph_server import write_runtime_config  # noqa: E402
 from gyms.workplace_assistant.experiments import (  # noqa: E402
     ARTIFACTS_ROOT,
     HF_HOME,
@@ -679,28 +680,32 @@ def remote_subagent_proxy_command(
 def langgraph_command(
     local_repo: Path,
     experiment: DecomposerExperiment,
-    ports: WorkplacePortLayout = DEFAULT_PORT_LAYOUT,
+    ports: WorkplacePortLayout,
+    runtime_directory: Path,
 ) -> tuple[list[str], Path]:
-    # Every subagent graph comes from this repository: since main's persistent-
-    # subagent integration, Gym's own subagent server registers only a Qwen3.5-4B
-    # graph, so "gym_gemma4" experiments get the equivalent Gemma graphs from here.
-    directory = local_repo / "gyms" / "workplace_assistant" / "subagents"
+    """The subagent server and its working directory, which holds its config.
+
+    Every subagent graph comes from this repository (subagents/langgraph.json): since
+    main's persistent-subagent integration, Gym's own subagent server registers only a
+    Qwen3.5-4B graph, so "gym_gemma4" experiments get the equivalent Gemma graphs from
+    here. gyms/workplace_assistant/langgraph_server.py serves them without file
+    persistence from `runtime_directory`, the run's own "langgraph" directory.
+    """
     return (
         [
-            str(PROJECT_VENV / "bin" / "langgraph"),
-            "dev",
+            str(PROJECT_VENV / "bin" / "python"),
+            "-m",
+            "gyms.workplace_assistant.langgraph_server",
             "--config",
-            str(directory / "langgraph.json"),
+            str(runtime_directory / "langgraph.json"),
             "--host",
             "127.0.0.1",
             "--port",
             str(ports.langgraph),
             "--n-jobs-per-worker",
             str(experiment.langgraph_jobs),
-            "--no-browser",
-            "--no-reload",
         ],
-        directory,
+        runtime_directory,
     )
 
 
@@ -1430,7 +1435,9 @@ def _dry_plan(
         services.extend(
             decomposer_vllm_command(model, experiment, ports) for model in models
         )
-        services.append(langgraph_command(local_repo, experiment, ports)[0])
+        services.append(
+            langgraph_command(local_repo, experiment, ports, directory / "langgraph")[0]
+        )
         gpu_assignments = {
             f"subagent_vllm_{ports.model_port(model)}": visible_devices[model.gpu]
             for model in models
@@ -1880,7 +1887,11 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
                             1800,
                         )
                 langgraph_argv, langgraph_cwd = langgraph_command(
-                    local_repo, experiment, ports
+                    local_repo, experiment, ports, directory / "langgraph"
+                )
+                write_runtime_config(
+                    langgraph_cwd,
+                    local_repo / "gyms" / "workplace_assistant" / "subagents" / "langgraph.json",
                 )
                 langgraph = supervisor.start(
                     "langgraph", langgraph_argv, cwd=langgraph_cwd
