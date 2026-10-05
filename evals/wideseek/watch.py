@@ -33,7 +33,7 @@ def display(root, run=None):
         print(f"No run manifest under {root}")
         return
     manifest = json.loads(path.read_text())
-    directory = path.parent
+    directory = path.parent.resolve()
     settings = manifest["settings"]
     scheduler_path = directory / 'scheduler.json'
     scheduler = json.loads(scheduler_path.read_text()) if scheduler_path.exists() else None

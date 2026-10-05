@@ -1,4 +1,5 @@
 import contextlib
+import fcntl
 import io
 import json
 from pathlib import Path
@@ -10,6 +11,25 @@ from evals.wideseek.watch import display, subagent_counts
 
 
 class WatchTest(unittest.TestCase):
+    def test_symlinked_run_uses_real_collector_lock(self):
+        with tempfile.TemporaryDirectory() as folder:
+            base = Path(folder)
+            run = base / 'storage' / 'run'
+            run.mkdir(parents=True)
+            root = base / 'visible'
+            root.mkdir()
+            (root / 'alias').symlink_to(run, target_is_directory=True)
+            (run / 'manifest.json').write_text(json.dumps({
+                'started_at': time.time(), 'settings': {'tasks': ['task'],
+                'repetitions': 1, 'modes': ['simple'], 'concurrency': 2,
+                'model': 'agent', 'judge': {'model': 'judge'}}}))
+            with (run.parent / 'run.lock').open('w') as lock:
+                fcntl.flock(lock, fcntl.LOCK_EX)
+                output = io.StringIO()
+                with contextlib.redirect_stdout(output):
+                    display(root)
+                self.assertIn('Status: running', output.getvalue())
+
     def test_current_harness_agent_run_ids(self):
         messages = [
             {'type': 'ai', 'tool_calls': [{'id': '1', 'name': 'run'}]},
