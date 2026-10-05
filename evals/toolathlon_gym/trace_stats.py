@@ -17,8 +17,8 @@ def summarize_traces(root):
             trace = json.loads(path.read_text())
             totals["traces"] += 1
             totals["agent_errors"] += bool(trace.get("agent_error"))
-            totals["subagent_runs"] += len(trace.get("subagent_runs", {}))
-            models[str(trace.get("decomposer_model") or trace.get("subagent_api_model"))] += 1
+            totals["agent_runs"] += len(trace.get("agent_runs", {}))
+            models[str(trace.get("decomposer_model") or trace.get("agent_api_model"))] += 1
             if trace.get("started_at") and trace.get("finished_at"):
                 durations.append((datetime.fromisoformat(trace["finished_at"]) -
                                   datetime.fromisoformat(trace["started_at"])).total_seconds())
