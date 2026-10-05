@@ -181,14 +181,18 @@ def mock_vllm(monkeypatch):
     return SimpleNamespace(process=process, launch=launch, kill=kill, client=client)
 
 
+@pytest.mark.parametrize("host", [None, "0.0.0.0"])
 @pytest.mark.parametrize("body_fails", [False, True])
-def test_vllm_server_lifecycle(mock_vllm, body_fails):
+def test_vllm_server_lifecycle(mock_vllm, body_fails, host):
     import asyncio
     import signal
     from decomposer.models import vllm_server
 
     async def run():
-        async with vllm_server("vllm/qwen_3_5_4b_thinking", gpu="2"):
+        kwargs = {} if host is None else {"host": host}
+        async with vllm_server("vllm/qwen_3_5_4b_thinking", gpu="2", **kwargs):
+            command = mock_vllm.launch.call_args.args
+            assert command[command.index("--host") + 1] == (host or "127.0.0.1")
             mock_vllm.client.get.assert_awaited_once_with(
                 "http://127.0.0.1:8024/health", timeout=2,
             )

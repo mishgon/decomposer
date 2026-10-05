@@ -22,9 +22,10 @@ The fixed executor has no coverage policy, culling, adaptive retries or resume.
 
 Both roles use `create_model(model_id)` from [models.py](../../src/decomposer/models.py).
 Each entry declares its provider, URL, sampling parameters and reasoning behavior
-directly. Set `LLM_PROXY_MASTER_KEY` before creating models; the runner passes the
-key into the task container by its environment variable name, without storing it
-in artifacts. Sampling does not depend on environment variables.
+directly. Set `LLM_PROXY_MASTER_KEY` for lmrouter or `OPENROUTER_API_KEY` for
+OpenRouter. The runner passes keys into the task container by environment variable
+name, without storing them in artifacts. Local vLLM requires neither key.
+Sampling does not depend on environment variables.
 
 Choose models in [agents.py](agents.py); their sampling settings are defined in
 [models.py](../../src/decomposer/models.py). The container records its model IDs
@@ -90,7 +91,8 @@ Change its constants to select models, then rebuild the adapter image.
 The tool-equipped agent is used for standalone runs and by Decomposer.
 
 When selecting a `vllm/` model, start its server on the host before running tasks.
-It must listen on a container-accessible interface at port 8024.
+It must listen on a container-accessible interface at port 8024. With
+`vllm_server`, pass `host="0.0.0.0"`; the default binds only to loopback.
 The runner sets `VLLM_HOST=host.docker.internal` inside the task container;
 it does not start or stop vLLM.
 

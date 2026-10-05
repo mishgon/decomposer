@@ -176,11 +176,6 @@ def openrouter_transient_failure(result: dict[str, Any]) -> str | None:
     return None
 
 
-def validate_teacher_credentials() -> None:
-    if not os.environ.get("LLM_PROXY_MASTER_KEY"):
-        raise RuntimeError("Set LLM_PROXY_MASTER_KEY for the registered lmrouter models")
-
-
 def parse_args(argv: Sequence[str], defaults: dict[str, Any]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Run a resumable Decomposer batch on Toolathlon Gym."
@@ -687,7 +682,6 @@ def _run_collection(args, run_dir, *, repo_root, toolathlon_root, docker):
             target_successes=state["target_successes"],
         )
 
-    validate_teacher_credentials()
     docker("image", "inspect", args.image)
     manifest.update(status="running", finished_at=None)
     manifest.setdefault("invocations", []).append(

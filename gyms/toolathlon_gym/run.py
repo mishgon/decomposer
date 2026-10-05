@@ -199,8 +199,6 @@ def run_episode(args) -> None:
     task_dir = (tasks_dir / args.task).resolve()
     if task_dir.parent != tasks_dir or not task_dir.is_dir():
         raise ValueError(f"Unknown Toolathlon task: {args.task!r}")
-    if not os.environ.get("LLM_PROXY_MASTER_KEY"):
-        raise RuntimeError("Set LLM_PROXY_MASTER_KEY for the registered lmrouter models")
     proxy_mount = []
     proxy_socket = os.environ.get("LLM_PROXY_UNIX_SOCKET")
     if proxy_socket:
@@ -352,6 +350,8 @@ def run_episode(args) -> None:
             "TOOLATHLON_AGENT_CALL_LOG=/artifacts/data/agent_model_calls.jsonl",
             "--env",
             "LLM_PROXY_MASTER_KEY",
+            "--env",
+            "OPENROUTER_API_KEY",
             *proxy_mount,
             *postgres_env,
             "--volume",

@@ -14,7 +14,8 @@ from gyms.toolathlon_gym.task import model_metadata
 
 @pytest.mark.parametrize("agent_failed", [False, True])
 def test_render_failure_preserves_evaluation_and_container_metadata(tmp_path, monkeypatch, caplog, agent_failed):
-    monkeypatch.setenv("LLM_PROXY_MASTER_KEY", "test-key")
+    monkeypatch.delenv("LLM_PROXY_MASTER_KEY", raising=False)
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-openrouter-secret")
     monkeypatch.delenv("LLM_PROXY_UNIX_SOCKET", raising=False)
     monkeypatch.setattr(gym, "TOOLATHLON_ROOT", tmp_path / "toolathlon")
     (gym.TOOLATHLON_ROOT / "tasks/finalpool/task").mkdir(parents=True)
@@ -43,6 +44,8 @@ def test_render_failure_preserves_evaluation_and_container_metadata(tmp_path, mo
         elif args[0] == "port":
             output = "127.0.0.1:2024"
         elif args[0] == "run" and args[-1] == gym.DEFAULT_IMAGE:
+            assert ("--env", "OPENROUTER_API_KEY") in list(zip(args, args[1:]))
+            assert "test-openrouter-secret" not in " ".join(args)
             (episode / "runtime.json").write_text(json.dumps(runtime))
         elif args[0] == "exec" and "cat" in args:
             output = '{"pass": true}'
@@ -145,3 +148,22 @@ def test_minimal_saves_failed_trace_and_preserves_error(tmp_path, monkeypatch, c
     assert json.loads((tmp_path / "trace.json").read_text()) == state
     assert "broken renderer" in caplog.text
     assert not active
+
+
+@pytest.mark.parametrize("openrouter_key", [None, "test-openrouter-key"])
+def test_sft_collection_does_not_require_router_credentials(tmp_path, monkeypatch, openrouter_key):
+    from sft.toolathlon_gym import collection
+
+    monkeypatch.delenv("LLM_PROXY_MASTER_KEY", raising=False)
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    if openrouter_key:
+        monkeypatch.setenv("OPENROUTER_API_KEY", openrouter_key)
+    (tmp_path / "tasks/finalpool/task").mkdir(parents=True)
+    docker = MagicMock(side_effect=RuntimeError("image unavailable"))
+    with pytest.raises(RuntimeError, match="image unavailable"):
+        collection.main(
+            ["--tasks", "task"], repo_root=tmp_path, toolathlon_root=tmp_path,
+            default_artifacts_dir=tmp_path / "artifacts", default_image="test-image",
+            docker=docker,
+        )
+    docker.assert_called_once_with("image", "inspect", "test-image")

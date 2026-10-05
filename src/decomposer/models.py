@@ -255,12 +255,14 @@ def create_model(
 
 
 @asynccontextmanager
-async def vllm_server(model_id: str, *, gpu: str) -> AsyncIterator[None]:
+async def vllm_server(
+    model_id: str, *, gpu: str, host: str = "127.0.0.1",
+) -> AsyncIterator[None]:
     """Run a supported local model on one GPU and stop it on context exit."""
     match model_id:
         case "vllm/qwen_3_5_4b_thinking" | "vllm/qwen_3_5_4b_non_thinking":
             model = "Qwen/Qwen3.5-4B"
-            host, port = "127.0.0.1", _QWEN_3_5_4B_PORT
+            port = _QWEN_3_5_4B_PORT
             command = [
                 sys.executable, "-m", "vllm.entrypoints.cli.main", "serve", model,
                 "--host", host, "--port", str(port),
@@ -274,6 +276,7 @@ async def vllm_server(model_id: str, *, gpu: str) -> AsyncIterator[None]:
         case _:
             raise ValueError(f"Unsupported local vLLM model: {model_id}")
 
+    client_host = "127.0.0.1" if host == "0.0.0.0" else host
     with socket.socket() as listener:
         listener.bind((host, port))
     process = await asyncio.create_subprocess_exec(
@@ -286,7 +289,7 @@ async def vllm_server(model_id: str, *, gpu: str) -> AsyncIterator[None]:
                     if process.returncode is not None:
                         raise RuntimeError(f"Server exited during startup: {process.returncode}")
                     try:
-                        response = await client.get(f"http://{host}:{port}/health", timeout=2)
+                        response = await client.get(f"http://{client_host}:{port}/health", timeout=2)
                         if response.status_code == 200:
                             break
                     except httpx.TransportError:

@@ -14,14 +14,16 @@ PYTHONPATH=src:. python -m sft.toolathlon_gym.run \
   --all --adaptive -n 1 --concurrency 8
 ```
 
-Teacher and workers: `LLM_PROXY_MASTER_KEY`, using the explicit entries in
-[models.py](../../src/decomposer/models.py).
+Set credentials for the models configured in the Gym image: `LLM_PROXY_MASTER_KEY`
+for lmrouter or `OPENROUTER_API_KEY` for OpenRouter. Local vLLM requires neither key.
+The available models are defined in [models.py](../../src/decomposer/models.py).
 Models use their registered endpoints; collection does not start a local GPU server.
 The Gym image refresh remains under `inference/`.
 
 Models are configured in [Gym agents.py](../../gyms/toolathlon_gym/agents.py).
 Rebuild the Gym image after changing them. For `vllm/` models, start the local
-server before collection. `collect_hosted.sh` loads credentials from
+server with a container-accessible bind address before collection
+(`host="0.0.0.0"` when using `vllm_server`). `collect_hosted.sh` loads credentials from
 `LMROUTER_ENV` (default: `~/.local/share/environment/lmrouter.env`) and requires
 a validated `COLLECTION_IMAGE`. Example:
 
