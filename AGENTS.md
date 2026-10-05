@@ -1,32 +1,5 @@
 # AGENTS.md
 
-## Goal
-
-Build Decomposer, an agent that orchestrates other agents to solve tasks faster, at lower cost, and with higher quality by:
-
-- Parallelizing work across multiple agents.
-- Routing tasks to cheaper models according to task difficulty.
-- Reducing each agent's context.
-- Handling subagent errors.
-
-We aim to demonstrate improvements in speed, cost, and task-solving quality over standalone agents on Gaia2, Toolathlon, BrowseComp, and WideSearch.
-
-## Methodology
-
-Decomposer uses a minimal harness: a standard tool-calling loop with four tools for orchestrating subagents:
-
-- `new(subagent_type_id) -> subagent_id`: creates a subagent of the specified type with an empty conversation history.
-- `fork(subagent_id) -> subagent_id`: creates a subagent of the same type with a copy of its conversation history and state. The external environment remains shared.
-- `run(subagent_id, prompt) -> subagent_run_id`: starts a run of an existing subagent and immediately returns its run ID. The same subagent can run multiple times, retaining its conversation history across runs.
-- `wait() -> [...]`: waits for at least one new run to finish and returns all newly available subagent responses since the previous `wait` call. Each result includes the run status and any error. Waiting is bounded by a timeout.
-
-This loop enables fully asynchronous orchestration and execution: Decomposer can launch newly unblocked subtasks without waiting for unrelated subagent runs to finish. It can also adapt its decomposition as subagent results arrive. See `src/decomposer/core.py` for the implementation.
-
-We plan to train the orchestration model in two stages:
-
-1. Off-policy distillation of a carefully prompted LLM into a smaller model.
-2. Reinforcement learning that optimizes final task-solving quality, speed, and cost.
-
 ## Repo structure
 
 - `src/decomposer/`: core Decomposer package. This should stay benchmark- and training-agnostic.
@@ -44,6 +17,23 @@ We plan to train the orchestration model in two stages:
 - `docs/`: design notes, experiment notes, and persistent documentation.
 
 Evaluation and training workflows reuse `gyms/<gym_name>/`.
+
+## Coding
+
+### Default workflow
+
+Use this workflow by default:
+
+- Start from the user's request. Ask questions to clarify missing requirements if needed.
+- Propose one small changelist (CL) at a time, following [Google's Small CLs guidance](https://google.github.io/eng-practices/review/developer/small-cls.html). Revise the proposal based on the user's feedback.
+- Wait for the user to approve the proposal before implementing it. Present the implementation for review. Address feedback and present the revised implementation for review again.
+- Proceed to the next CL only after the user approves the implementation. Repeat until all the user's requirements have been fulfilled.
+
+### Code style
+
+Simplicity first. Always write the minimum code that meets current needs. No speculative features, configuration, or abstractions. No unrequested "flexibility" or "configurability". No error handling for cases the surrounding code already rules out. Extract helpers only when multiple places need the same logic and extraction improves clarity.
+
+Make surgical changes. Don't "improve" adjacent code, comments, or formatting. Don't perform unrequested refactoring. Match existing style, even if you'd do it differently. Remove imports, variables, and functions that *your* changes made unused. Mention pre-existing dead code; don't delete it unless asked.
 
 <!-- BEGIN agent-style v0.4.2 -->
 <!-- SPDX-License-Identifier: CC-BY-4.0 -->

@@ -1,186 +1,102 @@
-# Toolathlon-Gym
+# Toolathlon Gym
 
-This gym integration keeps Decomposer and its model credentials on the host while a
-task container owns the Toolathlon workspace, MCP servers, and evaluator.
-The host runner owns one supervised vLLM process for a batch. Task containers
-reuse it and do not pay a per-example model cold start.
-The configured Gemma-4-26B-A4B subagent runs in non-thinking mode.
+Reusable environment execution only: task setup, container lifecycle, model/tool
+loops, native result checking, cleanup, and raw artifacts.
 
-## Image layout
+## Run
 
-The adapter image extends `toolathlon-pack:latest`, preserving Toolathlon's
-existing `/opt/venv` and prebuilt MCP servers. It adds a separate Python 3.12
-environment at `/opt/subagents` for the LangGraph subagent server.
-The two environments are intentionally isolated. It also patches the bundled
-Canvas MCP client to use its existing PostgreSQL router when `PG_HOST` is set,
-while preserving its normal HTTP client outside Toolathlon.
+From the repository root:
 
-Build both images from the repository root:
+Ensure `docker` resolves to your configured runtime. On Hertz with the user-local
+Podman wrapper, first run `export PATH="$HOME/.local/bin:$PATH"`.
 
 ```bash
-gyms/toolathlon_gym/build.sh
+PYTHONPATH=src:. python -m gyms.toolathlon_gym.run \
+  --tasks task-a task-b --agent decomposer --concurrency 8 -n 1
 ```
 
-Override either image name with `TOOLATHLON_BASE_IMAGE` or
-`TOOLATHLON_DECOMPOSER_IMAGE`.
+Use `--agent qwen_3_5_4b_thinking` for the same tool-equipped worker acting directly on the
+task, without a Decomposer. Its model is configured in `agents.py`.
+Use a positional task for one task, `--tasks` for a subset, or `--all`.
+The fixed executor has no coverage policy, culling, adaptive retries or resume.
 
-## Episode lifecycle
+Both roles use `create_model(model_id)` from [models.py](../../src/decomposer/models.py).
+Each entry declares its provider, URL, sampling parameters and reasoning behavior
+directly. Set `LLM_PROXY_MASTER_KEY` for lmrouter or `OPENROUTER_API_KEY` for
+OpenRouter. The runner passes keys into the task container by environment variable
+name, without storing them in artifacts. Local vLLM requires neither key.
+Sampling does not depend on environment variables.
 
-The adapter image requires `TOOLATHLON_TASK` and an empty `/artifacts/data`
-mount. Its `task.py serve` command prepares the task with Toolathlon's native
-Python environment, writes `/artifacts/data/runtime.json`, and then starts the
-LangGraph server on port 2024. The server uses the separate `/opt/subagents`
-environment.
+Choose models in [agents.py](agents.py); their sampling settings are defined in
+[models.py](../../src/decomposer/models.py). The container records its model IDs
+and settings in `runtime.json`, which the runner copies into `trace.json`.
 
-The container resolves the host vLLM server through one variable per subagent
-model:
+Defaults: 45-minute agent timeout, 55-minute total episode timeout, recursion
+limit 410. Decomposer uses upstream's `new / fork / run / wait` interface.
 
-- `GEMMA_4_26B_A4B_BASE_URL` (the runner's default subagent), port 8023
-- `QWEN_3_5_4B_BASE_URL` (main's Qwen3.5-4B subagent, served by
-  `scripts/vllm/serve_qwen_3_5_4b.sh`), port 8024
+## Raw Outputs
 
-Both default to `host.docker.internal`.
+`--output-dir` defaults to `artifacts/gyms/toolathlon_gym/raw`. Each execution
+gets a new run ID with:
 
-Set the Decomposer credential and model path once:
+- `manifest.json`: selected tasks, repetitions, completion and process outcomes.
+- `traces/<task>/<episode>/`: raw messages, agent histories, usage, answer,
+  task workspace and cleanup records.
+- `evals/<task>/<episode>/result.json`: native evaluator output.
+- `logs/<task>/<repetition>/`: process stdout and stderr.
 
-```bash
-export OPENROUTER_API_KEY=...
-GEMMA=/home/matrosov/.cache/huggingface/hub/models--google--gemma-4-26B-A4B-it/snapshots/4d7ae4984b7db7de8f8457170b3f1a419ee76d52
-```
+After saving the native evaluation, Decomposer episodes generate `trace.html`
+next to `trace.json` using `decomposer.visualization.write_trace_html`.
+A visualization error produces a warning and preserves the episode's result.
 
-Run the full dataset once (an omitted `-n` means one repetition):
+An agent timeout/model failure retains partial messages, cancels active remote
+runs and waits for them to stop before native evaluation. This also covers ReAct
+runs and runs launched just before a checkpoint was interrupted. If shutdown
+cannot be confirmed within 60 seconds, the evaluator is skipped and the attempt
+fails with a saved shutdown error. Its diagnostic score does not turn the attempt into a success.
+A hard process kill or infrastructure failure can still prevent evaluation.
+Missing native scores remain missing; the Gym does not invent an aggregate score.
+Container inspection artifacts contain only allowlisted lifecycle fields, never
+the environment or command arguments. Older artifacts may contain credentials;
+sanitize them before sharing.
 
-```bash
-uv run python gyms/toolathlon_gym/run.py --all \
-  --purpose trace-generation \
-  --subagent-model "$GEMMA" \
-  --subagent-gpu 1 \
-  --concurrency 4 \
-  --n-jobs-per-worker 1000
-```
+## Build
 
-Run a subset, with every selected task repeated three times:
+`gyms/toolathlon_gym/build.sh` builds the task adapter on top of
+`toolathlon-pack:latest`. Native tools run in `/opt/venv`; LangGraph workers
+use `/opt/agents`. Rebuild the adapter after changing packaged code.
 
-```bash
-uv run python gyms/toolathlon_gym/run.py \
-  --tasks howtocook-event-menu-ppt canvas-announcement-summary \
-  -n 3 \
-  --purpose trace-generation \
-  --subagent-model "$GEMMA" \
-  --subagent-gpu 1
-```
+## Workflows
 
-The command prints a run ID and manifest path. Resume an interrupted run with
-that ID; completed episodes are skipped, while failed or interrupted episodes
-get a new attempt directory:
+- [SFT collection](../../sft/toolathlon_gym/README.md): resumable coverage-first scheduling.
+- [Evaluation](../../evals/toolathlon_gym/README.md): fixed-sample runs and metrics.
 
-```bash
-uv run python gyms/toolathlon_gym/run.py \
-  --resume 20260821T180000Z-0123abcd \
-  --purpose trace-generation
-```
+Workflows depend on this Gym, never the reverse.
 
-Resume loads the model, image, GPU, port, timeout, and vLLM settings from the
-manifest. Benchmark score `false` still counts as a completed harness episode
-and is skipped. It is an agent-quality result, not a reason to repeat the run.
+Python MCP servers launch directly from their preinstalled per-project virtual
+environments. Task startup never resolves or rebuilds those dependencies. A missing
+executable is an image-build problem and fails explicitly. Numerical thread pools
+are capped to one thread in the runtime image.
 
-The original one-task smoke interface remains available:
+## Agent Server
 
-```bash
-uv run python gyms/toolathlon_gym/run.py howtocook-event-menu-ppt \
-  --purpose trace-generation \
-  --subagent-model "$GEMMA" \
-  --subagent-gpu 1
-```
+This container-local LangGraph server exposes two assistants:
 
-Use `--reuse-vllm` only when the configured port already serves the expected
-model and the runner must not own that external process.
+- `qwen_3_5_4b_thinking`: a tool-equipped agent.
+- `decomposer`: orchestrates agents on the same server.
 
-For several externally managed replicas, pass their host-local ports as a pool.
-The batch verifies every endpoint and assigns episodes round-robin:
+Model IDs and agent factories are defined in [agents.py](agents.py).
+Change its constants to select models, then rebuild the adapter image.
+`--agent` selects an assistant ID from `langgraph.json`.
+The tool-equipped agent is used for standalone runs and by Decomposer.
 
-```bash
-uv run python gyms/toolathlon_gym/run.py --all \
-  --purpose trace-generation \
-  --subagent-ports 18100 18101 18102 18103 \
-  --concurrency 16 \
-  --n-jobs-per-worker 1000
-```
+When selecting a `vllm/` model, start its server on the host before running tasks.
+It must listen on a container-accessible interface at port 8024. With
+`vllm_server`, pass `host="0.0.0.0"`; the default binds only to loopback.
+The runner sets `VLLM_HOST=host.docker.internal` inside the task container;
+it does not start or stop vLLM.
 
-## MLSpace inference pool
-
-Toolathlon's Docker containers remain on Hertz-2. MLSpace jobs only run Gemma
-vLLM replicas and expose them through dedicated SSH reverse tunnels bound to
-Hertz-2 loopback. This avoids requiring Docker inside MLSpace.
-
-The reproducible service definitions are in `mlspace_experiments.py`. The live
-SR008 mapping uses one H100 for the connectivity pilot and sixteen high-priority
-single-H100 jobs for the full pool. Independent jobs avoid waiting for scarce
-eight-GPU shapes and keep one eviction from taking out half the pool. Artifacts,
-staged code, service logs, and dedicated tunnel
-credentials live outside the checkout at:
-
-```text
-/home/matrosov/decomposer-toolathlon-artifacts/
-  code/<git-commit>/
-  inference/<experiment>/
-  secrets/
-```
-
-Run the zero-GPU payload validation from the configured OCC environment:
-
-```bash
-conda run -n decomposer_jobs python \
-  gyms/toolathlon_gym/run_mlspace_inference_jobs.py \
-  --full --author-name matrosov --telegram-nick js0n_statham --dry
-```
-
-Submit `--pilot` first and verify port 18099 from Hertz-2. Submit `--full` only
-after that succeeds; the sixteen full jobs forward ports 18100 through 18115.
-
-## Artifacts and resume behavior
-
-All new output is under `artifacts/gyms/toolathlon_gym/`:
-
-```text
-runs/<run-id>/
-  manifest.json                 # task/repetition status, score, paths, timings, errors
-  events.jsonl                  # append-only raw lifecycle events
-  vllm.log                      # shared server log, appended on resume
-  attempts/<task>/rep-NNN/attempt-NNN/
-    attempt.json
-    runner.stdout.log
-    runner.stderr.log
-traces/<task>/<episode-id>/
-  runtime.json
-  trace.json
-  answer.txt
-  task.log
-  task.inspect.json
-  postgres.log
-  postgres.inspect.json
-  cleanup.json
-  workspace/...
-evals/<task>/<episode-id>/result.json
-```
-
-The manifest is atomically replaced after every state transition. Each
-task/repetition has its own entry and each retry has a distinct attempt log
-directory. Existing trace/evaluation directories are never overwritten. A
-batch runs up to `--concurrency` episodes at once, creates a fresh Docker
-network, PostgreSQL container, and task container for each one, and removes all
-three in the worker's `finally` block. Container startup and cleanup are briefly
-serialized, and each task receives its PostgreSQL container's network address
-directly to avoid rootless Podman DNS races; Decomposer execution remains
-concurrent. Each task container starts LangGraph with `--n-jobs-per-worker`
-slots (default 1000). The supervised vLLM is started once before the worker pool
-and stopped once after it.
-
-## Runtime boundary
-
-- Host: Decomposer, OpenRouter credentials, and vLLM servers.
-- Task container: task preprocessing, LangGraph subagent server, MCP server
-  processes, workspace, and native evaluation.
-- Episode network: an isolated Toolathlon PostgreSQL container.
-
-Evaluation records use the same episode identifier as their traces.
+The server reads the prepared task configuration from
+`$TOOLATHLON_DATA_DIR/runtime.json`. When it starts, it opens one persistent
+stdio session for each required MCP server and shares the loaded tools between
+the graphs. It closes every session when it stops.

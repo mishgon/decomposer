@@ -1,0 +1,35 @@
+diff --git a/local_servers/emails-mcp/src/emails_mcp/config/settings.py b/local_servers/emails-mcp/src/emails_mcp/config/settings.py
+index 7a1834e..61af1ea 100644
+--- a/local_servers/emails-mcp/src/emails_mcp/config/settings.py
++++ b/local_servers/emails-mcp/src/emails_mcp/config/settings.py
+@@ -53,7 +53,11 @@ class ConfigManager:
+             
+             email_config = EmailConfig(
+                 email=account_data.get('email', ''),
+-                password=account_data.get('password', ''),
++                # Toolathlon Gym replaces IMAP/SMTP with PostgreSQL-backed
++                # adapters, so task fixtures only need an email identity.
++                # Keep the model field populated without requiring a real
++                # credential in those fixtures.
++                password=account_data.get('password') or 'unused',
+                 name=account_data.get('name', ''),
+                 imap_server=account_data.get('imap_server', 'localhost'),
+                 imap_port=account_data.get('imap_port', 993),
+@@ -64,8 +68,8 @@ class ConfigManager:
+             )
+             
+             # Validate required fields
+-            if not email_config.email or not email_config.password:
+-                raise ValueError("Email and password are required")
++            if not email_config.email:
++                raise ValueError("Email is required")
+             
+             self.email_config = email_config
+             return email_config
+@@ -152,4 +156,4 @@ class ConfigManager:
+ 
+ 
+ # Global config manager instance
+-config_manager = ConfigManager()
+\ No newline at end of file
++config_manager = ConfigManager()

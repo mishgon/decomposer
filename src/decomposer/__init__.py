@@ -13,10 +13,10 @@ __all__ = [
 def __getattr__(name: str) -> Any:
     if name not in __all__:
         raise AttributeError(name)
-    from .chat_tools import build_decomposer_chat_tools
+    if name == "build_decomposer_chat_tools":
+        from .chat_tools import build_decomposer_chat_tools
+
+        return build_decomposer_chat_tools
     from .core import create_decomposer_agent
 
-    return {
-        "build_decomposer_chat_tools": build_decomposer_chat_tools,
-        "create_decomposer_agent": create_decomposer_agent,
-    }[name]
+    return create_decomposer_agent

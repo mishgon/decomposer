@@ -1,28 +1,22 @@
 # Minimal example
 
-This example runs Decomposer directly and exposes one general-purpose subagent
-through a local LangGraph server. Decomposer uses DeepSeek V4 Flash 0731 through OpenRouter;
-the subagent uses Qwen3.5-4B with thinking disabled through a local vLLM server.
+This example hosts Decomposer and a general-purpose agent on one local LangGraph
+server. Both use hosted models through `decomposer.models.create_model`.
+`agents.py` defines the factories; `langgraph.json` registers them.
 
-Set `OPENROUTER_API_KEY` in the environment before running the example.
-
-From the repository root, start vLLM for the subagent:
-
-```bash
-scripts/vllm/serve_qwen_3_5_4b.sh
-```
-
-In another terminal, start the subagent server from the repository root:
-
-```bash
-scripts/subagents/serve.sh
-```
-
-Then run Decomposer from the repository root:
+From the repository root, with `LLM_PROXY_MASTER_KEY` configured:
 
 ```bash
 uv run python examples/minimal/run.py
 ```
 
-The run prints the final answer and saves the Decomposer message history as
-human-readable Markdown at `examples/minimal/messages.md`.
+`run.py` uses `decomposer.agent_server` to start the server on port 2024 and wait
+for readiness. It runs Decomposer through the SDK; the context manager stops
+the server on exit, including errors. Port 2024 must be free.
+The development environment includes `langgraph-cli[inmem]`.
+
+The final answer is printed. `invoke_and_capture` captures the latest state and
+confirmed run statuses before the server stops, including on failure.
+The state is written to `trace.json`; `decomposer.visualization.write_trace_html`
+generates `trace.html`. An HTML error produces a warning; an agent error is
+re-raised after saving its trace.

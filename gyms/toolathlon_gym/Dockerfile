@@ -2,8 +2,9 @@ ARG TOOLATHLON_BASE_IMAGE=toolathlon-pack:latest
 FROM ${TOOLATHLON_BASE_IMAGE}
 
 ARG PYTHON_VERSION=3.12
-ENV SUBAGENT_VENV=/opt/subagents
+ENV AGENT_VENV=/opt/agents
 ENV LOCAL_SERVERS_PATH=/opt/local_servers
+ENV RAYON_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 POLARS_MAX_THREADS=1
 
 RUN apt-get update \
     && apt-get install --yes --no-install-recommends \
@@ -25,6 +26,12 @@ RUN set -e; for server in mcp-canvas-lms notion-mcp-server woocommerce-mcp; do \
 COPY gyms/toolathlon_gym/patches/mcp-canvas-lms-postgres.patch /tmp/
 RUN cd /opt/local_servers/mcp-canvas-lms \
     && git apply --no-index /tmp/mcp-canvas-lms-postgres.patch
+
+COPY gyms/toolathlon_gym/patches/emails-mcp-fixtures.patch /tmp/
+RUN cd /opt \
+    && git apply --no-index --check /tmp/emails-mcp-fixtures.patch \
+    && git apply --no-index /tmp/emails-mcp-fixtures.patch \
+    && uv sync --directory /opt/local_servers/emails-mcp --frozen
 
 RUN set -e; for server in \
         12306-mcp \
@@ -58,15 +65,15 @@ RUN uv pip install \
     "PyPDF2==3.0.1" \
     "reportlab>=4.4.3"
 
-COPY gyms/toolathlon_gym/subagents/requirements.txt /tmp/subagent-requirements.txt
+COPY gyms/toolathlon_gym/requirements.txt /tmp/agent-requirements.txt
 COPY pyproject.toml README.md /tmp/decomposer/
 COPY src/decomposer /tmp/decomposer/src/decomposer
 
 RUN uv python install "${PYTHON_VERSION}" \
-    && uv venv --python "${PYTHON_VERSION}" "${SUBAGENT_VENV}" \
+    && uv venv --python "${PYTHON_VERSION}" "${AGENT_VENV}" \
     && uv pip install \
-        --python "${SUBAGENT_VENV}/bin/python" \
-        --requirements /tmp/subagent-requirements.txt \
+        --python "${AGENT_VENV}/bin/python" \
+        --requirements /tmp/agent-requirements.txt \
         /tmp/decomposer
 
 COPY gyms/toolathlon_gym /opt/decomposer/gyms/toolathlon_gym

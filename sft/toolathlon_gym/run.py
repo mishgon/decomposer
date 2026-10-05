@@ -1,0 +1,23 @@
+"""Resumable, coverage-first off-policy trace collection."""
+
+import signal
+import sys
+
+from gyms.toolathlon_gym import run as gym
+from . import collection
+
+
+def main(argv=None):
+    return collection.main(
+        sys.argv[1:] if argv is None else argv,
+        repo_root=gym.REPO_ROOT,
+        toolathlon_root=gym.TOOLATHLON_ROOT,
+        default_artifacts_dir=gym.REPO_ROOT / "artifacts/sft/toolathlon_gym",
+        default_image=gym.DEFAULT_IMAGE,
+        docker=gym._docker,
+    )
+
+
+if __name__ == "__main__":
+    signal.signal(signal.SIGTERM, gym._handle_termination)
+    main()
