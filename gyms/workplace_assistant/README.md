@@ -60,6 +60,16 @@ The matched text-default profiles are:
   deployment discards reasoning items replayed by the harness. This profile is
   capture-only and is not a clean comparison with full-replay local Gemma or
   OpenRouter DeepSeek.
+- `qwen38-flash-non-thinking-teacher-qwen35-4b-unlooped-thinking` needs no GPU and
+  takes both roles from the `src/decomposer/models.py` presets
+  (`gyms/model_presets.py`). The manager is `lmrouter/qwen_3_8_flash_next_non_thinking`
+  behind the loopback manager proxy, whose extra body is that preset with
+  `reasoning.effort: "none"` (the proxy ignores `chat_template_kwargs` on the
+  Responses API). The subagents are `lmrouter/qwen_3_5_4b_unlooped_thinking`
+  (`subagent_backend="preset"`): the `qwen35_4b_unlooped_thinking` graph is the
+  preset's own `create_model()` client, thinking, with reasoning kept across turns and
+  no output cap, reaching the proxy on its own endpoint with `LLM_PROXY_MASTER_KEY`.
+  No subagent proxy starts.
 - `qwen38-flash-thinking-low-teacher-qwen35-4b-unlooped-non-thinking` needs no
   GPU. The manager is Qwen3.8-Flash-Next through the LLM proxy, thinking at
   `reasoning.effort` low, with the teacher prompt and no presence penalty. The

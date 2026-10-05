@@ -62,6 +62,7 @@ to pools by name, and `load_pool` rejects a pool edited after it was built.
 | `decomposer_pool_v1` | train | 333 / 17 | canon ∪ dead − held-out, ScriptedUser domains only |
 | `decomposer_train_v2` | train | 752 / 40 | canon ∪ dead − held-out, every canon domain |
 | `decomposer_eval_v1` | eval | 455 / 16 | HELDOUT_v2 − QUARANTINE: domains reserved from all tau2 training |
+| `decomposer_broad_v1` | train | 4,843 / 209 | every `tasks_hard.json` task − held-out (with reserved domains' `_dsh` copies) − follow-up tasks (101) − ask tasks (638) − order gate (213) |
 
 "canon" is `canon_full_{sft,grpo,dpo}.json`; "dead" are tasks with zero passes in
 tau2's solo-4B calibration (`progress/gaia2/unified/full/full_report_*.json`); "held-out"
@@ -69,6 +70,13 @@ is `HELDOUT_v2`, `heldout_exec_v5`, `cycle_heldout` and `QUARANTINE`, plus every
 HELDOUT_v2 reserves. v1 kept only `_user_type_for_domain(d) == "scripted"` domains; v2
 drops that filter because the Decomposer only ever sends the task's `first_message`
 and tau2's own training forces ScriptedUser on every domain.
+
+The broad pool's order gate replays the gold of every filter/superlative task with a
+DB check and two or more writes, in listed and in reversed order. It drops the 204
+whose final DB differs (IDs are minted from row counts, and tau2's DB term replays the
+gold in listed order, so a correct parallel run would fail) and the 9 whose gold does
+not replay. It needs the tau2 venv:
+`LOGURU_LEVEL=CRITICAL ~/decomposer_artifacts_new/venvs/tau2/bin/python gyms/tau2_gym/task_pools/build_pool.py decomposer_broad_v1`.
 
 To grow the pool, add a recipe to `build_pool.py` under a new name (never edit a built
 pool) and build it; the builder refuses any train/eval task overlap:
@@ -88,6 +96,7 @@ config from it and writes it to `<run>/configuration/tau2_gym.yaml`.
 | `qwen38_flash_teacher_{non_thinking,thinking}` | Qwen3.8-Flash-Next via the LLM proxy | teacher | train_v2 |
 | `qwen38_flash_teacher_thinking_low` | the same, thinking with `reasoning.effort` low | teacher | train_v2 |
 | `qwen38_flash_thinking_low_teacher_qwen35_4b_unlooped` | the same at effort low without the presence penalty; subagents on the unlooped model's own non-thinking sampling, 8192-token cap | teacher | train_v2 |
+| `qwen38_flash_non_thinking_teacher_qwen35_4b_unlooped_thinking` | `models.py` presets: `lmrouter/qwen_3_8_flash_next_non_thinking` manager; `lmrouter/qwen_3_5_4b_unlooped_thinking` subagents (type `subagent_thinking`, no output cap) | teacher | broad_v1 |
 | `deepseek_v4_flash_teacher` | DeepSeek-v4-flash via OpenRouter (effort max) | teacher | train_v2 |
 | `qwen35_4b_base_student` | untuned Qwen3.5-4B, local vLLM | student | eval_v1 |
 | `qwen35_4b_sft_mixed_v3_student` | Qwen3.5-4B SFT (v5 student release), local vLLM | student | eval_v1 |
@@ -153,7 +162,15 @@ config sha and, for local managers, a fingerprint of the served checkpoint.
 
 ## Subagent backends
 
-`--subagent-backend` picks where subagent traffic goes. The subagent graph is identical
+An experiment with a `models.py` preset (`manager_preset`, `subagent_preset`; see
+`gyms/model_presets.py`) takes that role's sampling from the preset alone. The manager
+preset becomes the manager proxy's extra body (non-thinking becomes `reasoning.effort:
+"none"`, since the proxy ignores `chat_template_kwargs` on the Responses API). A
+subagent preset runs as the `preset` backend: its graph is `create_model(preset)` itself,
+which reaches the shared proxy on the preset's endpoint with `LLM_PROXY_MASTER_KEY`, so
+no local subagent proxy starts.
+
+Otherwise `--subagent-backend` picks where subagent traffic goes. The subagent graph is identical
 either way: it always talks plaintext HTTP to loopback with `api_key="EMPTY"`, resolving
 its endpoint from `TAU2_GYM_MODEL_BASE_URLS_JSON`.
 

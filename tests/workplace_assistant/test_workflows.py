@@ -49,9 +49,9 @@ from gyms.qwen_sampling import qwen35_general_sampling
 
 
 def test_registry_is_global_and_unique() -> None:
-    assert len(DECOMPOSER_EXPERIMENTS) == 39
+    assert len(DECOMPOSER_EXPERIMENTS) == 40
     assert len(SIMPLE_EXPERIMENTS) == 32
-    assert len(experiments.EXPERIMENTS) == 71
+    assert len(experiments.EXPERIMENTS) == 72
     assert experiments.BASE_IMAGE.endswith("py3.12-torch2.7.0:0.0.42")
     assert {experiment.kind for experiment in experiments.ALL_EXPERIMENTS} == {
         "decomposer",
@@ -2492,3 +2492,87 @@ def test_invalid_proxy_subagent_experiments_are_rejected(
 ) -> None:
     with pytest.raises(ValueError, match=message):
         replace(get_experiment(QWEN38_UNLOOPED), **overrides)
+
+
+QWEN38_PRESETS = "qwen38-flash-non-thinking-teacher-qwen35-4b-unlooped-thinking"
+
+
+def test_preset_teacher_takes_both_roles_from_models_py() -> None:
+    from gyms.model_presets import SUBAGENT_PRESET_GRAPHS, manager_responses_body
+
+    repo_root = Path(__file__).resolve().parents[2]
+    experiment = get_experiment(QWEN38_PRESETS)
+    assert isinstance(experiment, DecomposerExperiment)
+    assert experiment.num_gpus == 0
+    assert models_for_experiment(experiment) == ()
+    assert not experiment.requires_subagent_proxy
+    assert experiment.upstream_model_ids == (
+        "Qwen/Qwen3.8-Flash-Next-NVFP4",
+        "Qwen/Qwen3.5-4B-unlooped",
+    )
+    body = experiment.remote_manager_extra_body
+    assert body == manager_responses_body("lmrouter/qwen_3_8_flash_next_non_thinking")
+    assert body["reasoning"] == {"effort": "none"} and body["include_reasoning"] is False
+
+    config = yaml.safe_load(
+        (
+            repo_root / "gyms/workplace_assistant/configs" / experiment.gym_config_filename
+        ).read_text()
+    )
+    assert config["responses_create_params"] == {
+        "temperature": body["temperature"],
+        "top_p": body["top_p"],
+    }
+    policy = config["policy_model"]["responses_api_models"]["openai_model"]
+    assert policy["extra_body"] == {
+        key: body[key]
+        for key in (
+            "top_k",
+            "min_p",
+            "presence_penalty",
+            "repetition_penalty",
+            "include_reasoning",
+            "chat_template_kwargs",
+        )
+    }
+    (entry,) = config["decomposer"]["responses_api_agents"]["decomposer_agent"][
+        "subagent_types"
+    ]
+    assert entry["assistant_id"] == SUBAGENT_PRESET_GRAPHS[experiment.subagent_preset]
+
+    ports = run_module.WorkplacePortLayout(1000)
+    assert "subagent_proxy" not in ports.as_dict(experiment)
+    configuration = run_module.runtime_configuration(experiment)
+    assert configuration["manager"]["preset"] == "lmrouter/qwen_3_8_flash_next_non_thinking"
+    assert configuration["manager"]["sampling"] == body
+    assert configuration["subagent"]["preset"] == "lmrouter/qwen_3_5_4b_unlooped_thinking"
+    assert configuration["subagent"]["sampling"]["max_completion_tokens"] is None
+    assert experiments.remote_subagent_record(experiment) == {
+        "backend": "preset",
+        "preset": "lmrouter/qwen_3_5_4b_unlooped_thinking",
+        "model_id": "Qwen/Qwen3.5-4B-unlooped",
+    }
+    plan = run_module._dry_plan(
+        repo_root,
+        experiment,
+        "trace-generation",
+        "train",
+        1,
+        None,
+        repo_root / "unused",
+        (),
+        None,
+        None,
+        ports,
+    )
+    assert plan["gpu_assignments"] == {}
+    proxies = [service for service in plan["services"] if "gyms.remote_model_proxy" in service]
+    assert len(proxies) == 1 and "--port 9142" in proxies[0]
+
+
+def test_preset_subagents_need_the_preset_backend() -> None:
+    experiment = get_experiment(QWEN38_PRESETS)
+    with pytest.raises(ValueError, match="go together"):
+        replace(experiment, subagent_backend="local_vllm")
+    with pytest.raises(ValueError, match="replaces manager_sampling"):
+        replace(experiment, manager_sampling=qwen35_general_sampling(thinking=False))

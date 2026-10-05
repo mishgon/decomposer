@@ -4,6 +4,7 @@
   ],
   "graphs": {
     "qwen35_4b_non_thinking": "./graph.py:qwen35_4b_non_thinking",
+    "qwen35_4b_unlooped_thinking": "./graph.py:qwen35_4b_unlooped_thinking",
     "gemma_4_2b_thinking": "./graph.py:gemma_4_2b_thinking",
     "gemma_4_2b_non_thinking": "./graph.py:gemma_4_2b_non_thinking",
     "gemma_4_4b_thinking": "./graph.py:gemma_4_4b_thinking",

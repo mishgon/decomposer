@@ -6,13 +6,15 @@ from typing import Any
 
 from langchain.agents import create_agent
 from langchain.agents.middleware import ModelCallLimitMiddleware
+from langchain_core.language_models.chat_models import BaseChatModel
 from langgraph.graph.state import CompiledStateGraph
 from responses_api_agents.decomposer_agent.subagents.graph import (
     NeMoGymSubagentMiddleware,
 )
 
-from decomposer.models import ChatVLLM
+from decomposer.models import ChatVLLM, create_model
 from decomposer.prompts import AGENT_SYSTEM_PROMPT
+from gyms.model_presets import QWEN35_UNLOOPED_THINKING_PRESET
 from gyms.qwen_sampling import non_thinking_subagent_sampling_kwargs
 
 REQUEST_TIMEOUT_SECONDS = 300.0
@@ -64,7 +66,7 @@ def _model_base_url(model_id: str, default_port: int) -> str:
     return value
 
 
-def _create_subagent(model: ChatVLLM) -> CompiledStateGraph:
+def _create_subagent(model: BaseChatModel) -> CompiledStateGraph:
     return create_agent(
         model=model,
         tools=[],
@@ -95,6 +97,12 @@ def qwen35_4b_non_thinking() -> CompiledStateGraph:
         **non_thinking_subagent_sampling_kwargs(),
     )
     return _create_subagent(model)
+
+
+def qwen35_4b_unlooped_thinking() -> CompiledStateGraph:
+    # The models.py preset as is: its sampling, thinking with reasoning kept across
+    # turns, no output cap, and its own proxy endpoint (LLM_PROXY_MASTER_KEY).
+    return _create_subagent(create_model(QWEN35_UNLOOPED_THINKING_PRESET))
 
 
 def _gemma_subagent(

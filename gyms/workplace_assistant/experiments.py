@@ -9,6 +9,14 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Literal, cast
 
+from gyms.model_presets import (
+    QWEN35_UNLOOPED_THINKING_PRESET,
+    QWEN38_FLASH_NON_THINKING_PRESET,
+    SUBAGENT_PRESET_GRAPHS,
+    is_thinking,
+    manager_responses_body,
+    upstream_model_id,
+)
 from gyms.qwen_sampling import (
     QWEN35_UNLOOPED_NON_THINKING,
     QWEN38_TEACHER_THINKING,
@@ -47,7 +55,9 @@ WORKPLACE_SUBAGENT_RECURSION_LIMIT = 1000
 RunPurpose = Literal["trace-generation", "evaluation"]
 DecomposerPromptProfile = Literal["teacher", "student"]
 DecomposerManagerBackend = Literal["openrouter", "llm_proxy", "local_vllm"]
-DecomposerSubagentBackend = Literal["local_vllm", "llm_proxy"]
+# preset: the models.py subagent preset, a create_model() graph that reaches the
+# shared proxy itself; no local subagent process.
+DecomposerSubagentBackend = Literal["local_vllm", "llm_proxy", "preset"]
 # Qwen3.8-Flash-Next on the proxy accepts none/low/medium/xhigh and defaults to xhigh.
 ManagerReasoningEffort = Literal["none", "low", "medium", "high", "xhigh"]
 SimpleAgentBackend = Literal["openrouter", "local_vllm"]
@@ -143,6 +153,11 @@ class DecomposerExperiment:
     subagent_verify_tls: bool = True
     # None keeps the subagent graph's built-in preset.
     subagent_sampling: SubagentSampling | None = None
+    # models.py presets (gyms/model_presets.py). A manager preset replaces
+    # manager_sampling and the reasoning effort; a subagent preset needs
+    # subagent_backend="preset" and the config's assistant_id set to its graph.
+    manager_preset: str | None = None
+    subagent_preset: str | None = None
     evaluation_prompt_profile: DecomposerPromptProfile = "student"
     concurrency: int = 8
     max_model_len: int = 32768
@@ -189,6 +204,38 @@ class DecomposerExperiment:
             raise ValueError(
                 f"{self.name}: manager_sampling requires manager_backend=llm_proxy"
             )
+        if self.manager_preset is not None:
+            if not self.requires_llm_proxy:
+                raise ValueError(
+                    f"{self.name}: manager_preset requires manager_backend=llm_proxy"
+                )
+            if (
+                self.manager_sampling is not None
+                or self.manager_reasoning_effort is not None
+            ):
+                raise ValueError(
+                    f"{self.name}: manager_preset replaces manager_sampling and the effort"
+                )
+            if self.manager_model_id != upstream_model_id(self.manager_preset):
+                raise ValueError(
+                    f"{self.name}: manager_model_id differs from {self.manager_preset}"
+                )
+            mode = "thinking" if is_thinking(self.manager_preset) else "non_thinking"
+            if self.manager_reasoning_mode != mode:
+                raise ValueError(f"{self.name}: {self.manager_preset} is a {mode} preset")
+        if (self.subagent_backend == "preset") != (self.subagent_preset is not None):
+            raise ValueError(
+                f"{self.name}: subagent_preset and subagent_backend=preset go together"
+            )
+        if self.subagent_preset is not None:
+            if self.subagent_preset not in SUBAGENT_PRESET_GRAPHS:
+                raise ValueError(f"{self.name}: no subagent graph for {self.subagent_preset}")
+            if self.subagent_sampling is not None:
+                raise ValueError(f"{self.name}: subagent_preset replaces subagent_sampling")
+            if self.subagent_graph != "repository":
+                raise ValueError(
+                    f"{self.name}: preset subagents need subagent_graph=repository"
+                )
         thinking_proxy_manager = (
             self.requires_llm_proxy and self.manager_reasoning_mode == "thinking"
         )
@@ -270,10 +317,17 @@ class DecomposerExperiment:
             models.append(self.manager_model_id)
         if self.requires_subagent_proxy and self.subagent_model_id is not None:
             models.append(self.subagent_model_id)
+        if self.subagent_preset is not None:
+            models.append(upstream_model_id(self.subagent_preset))
         return tuple(models)
 
     @property
     def remote_manager_extra_body(self) -> dict[str, object]:
+        if self.manager_preset is not None:
+            value: dict[str, object] = dict(manager_responses_body(self.manager_preset))
+            if self.max_output_tokens is not None:
+                value["max_output_tokens"] = self.max_output_tokens
+            return value
         if self.manager_sampling is None:
             return {}
         sampling = self.manager_sampling
@@ -823,6 +877,33 @@ DECOMPOSER_EXPERIMENTS = (
         subagent_api_key_env="LLM_PROXY_MASTER_KEY",
         subagent_verify_tls=False,
         subagent_sampling=QWEN35_UNLOOPED_NON_THINKING,
+        evaluation_prompt_profile="teacher",
+        concurrency=16,
+        num_gpus=0,
+        max_model_len=131072,
+        subagent_graph="repository",
+        model_servers=(),
+    ),
+    # Teacher traces with the models.py presets: Qwen3.8 Flash Next non-thinking as the
+    # manager (behind the local manager proxy, effort "none") and Qwen3.5-4B-unlooped
+    # thinking subagents as the preset's own create_model() graph (no output cap).
+    DecomposerExperiment(
+        name="qwen38-flash-non-thinking-teacher-qwen35-4b-unlooped-thinking",
+        gym_config_filename=(
+            "workplace_assistant_qwen38_flash_non_thinking_teacher_"
+            "qwen35_4b_unlooped_thinking.yaml"
+        ),
+        manager_backend="llm_proxy",
+        manager_model_id="Qwen/Qwen3.8-Flash-Next-NVFP4",
+        manager_proxy_port=8142,
+        manager_upstream_url_env="LLM_PROXY_URL",
+        manager_api_key_env="LLM_PROXY_MASTER_KEY",
+        manager_response_tool_parser="qwen3_xml",
+        manager_reasoning_mode="non_thinking",
+        manager_verify_tls=False,
+        manager_preset=QWEN38_FLASH_NON_THINKING_PRESET,
+        subagent_backend="preset",
+        subagent_preset=QWEN35_UNLOOPED_THINKING_PRESET,
         evaluation_prompt_profile="teacher",
         concurrency=16,
         num_gpus=0,
@@ -1986,6 +2067,12 @@ def collect_experiments(
 
 def remote_subagent_record(experiment: DecomposerExperiment) -> dict[str, object] | None:
     """How preparation manifests record proxy-served subagents; None when local."""
+    if experiment.subagent_preset is not None:
+        return {
+            "backend": experiment.subagent_backend,
+            "preset": experiment.subagent_preset,
+            "model_id": upstream_model_id(experiment.subagent_preset),
+        }
     if not experiment.requires_subagent_proxy:
         return None
     return {

@@ -1,0 +1,53 @@
+{
+ "name": "decomposer_broad_v1",
+ "role": "train",
+ "purpose": "Every runnable tasks_hard.json task outside the held-out sets, without ask tasks or DB-order-sensitive ones: broad teacher traces.",
+ "built": "2026-10-05",
+ "built_by": "gyms/tau2_gym/task_pools/build_pool.py",
+ "recipe": {
+  "name": "decomposer_broad_v1",
+  "role": "train",
+  "purpose": "Every runnable tasks_hard.json task outside the held-out sets, without ask tasks or DB-order-sensitive ones: broad teacher traces.",
+  "sources": [],
+  "exclude": [
+   "HELDOUT_v2.json",
+   "heldout_exec_v5.json",
+   "cycle_heldout.json",
+   "QUARANTINE.json"
+  ],
+  "exclude_reserved_domains": [
+   "HELDOUT_v2.json"
+  ],
+  "dead_reports": null,
+  "domain_filter": "all",
+  "all_tasks_hard": true,
+  "exclude_reserved_variants": [
+   "_dsh"
+  ],
+  "drop_followup": true,
+  "drop_ask": true,
+  "order_gate": true
+ },
+ "tau2_commit": "946eba8ee7d57ef54cca4085dfd5be8585a8f795",
+ "counts": {
+  "sources_union": 6653,
+  "dead_from_calibration": 0,
+  "dead_outside_sources": 0,
+  "dropped": {
+   "ask_task": 638,
+   "db_order_sensitive": 204,
+   "excluded_split": 677,
+   "gold_replay_error": 9,
+   "needs_followup": 101,
+   "reserved_domain": 181
+  },
+  "pool_tasks": 4843,
+  "pool_domains": 209,
+  "of_which_dead": 0,
+  "order_gate_checked": 1273
+ },
+ "shared_domains_with": {
+  "decomposer_eval_v1": 0
+ },
+ "sha256": "bd704d0c1621897f"
+}

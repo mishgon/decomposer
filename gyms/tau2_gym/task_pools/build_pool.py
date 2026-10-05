@@ -6,9 +6,9 @@ the pool, add a recipe under a new name and never edit a built one: experiments 
 SFT sources refer to pools by name and sha256.
 
 Tasks are validated against ``data/tau2/domains/<domain>/tasks_hard.json`` as raw
-JSON, so building a pool does not need the tau2 venv. The one exception is
+JSON, so building a pool does not need the tau2 venv. Two recipe options need it:
 ``domain_filter="scripted"`` (pool v1), which asks tau2's env manager how each domain
-is simulated.
+is simulated, and ``order_gate`` (broad pool v1), which replays gold actions.
 
 Bucket assignments from tau2's calibration are deliberately not inherited: they were
 cut on a solo Qwen3.5-4B, and the Decomposer is a different system. What a pool
@@ -27,7 +27,8 @@ import glob
 import json
 import subprocess
 import sys
-from collections.abc import Iterable, Sequence
+import os
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Literal
@@ -62,11 +63,27 @@ class PoolRecipe:
     # The Decomposer only ever sends the task's first_message, and tau2's own training
     # forces ScriptedUser on every domain, so v2 and later use "all".
     domain_filter: Literal["all", "scripted"] = "all"
+    # Every task in every domain's tasks_hard.json is a source too.
+    all_tasks_hard: bool = False
+    # Name suffixes of rebuilt copies of a domain (e.g. "_dsh") that share its
+    # reservation: a reserved domain's copies are removed whole as well.
+    exclude_reserved_variants: tuple[str, ...] = ()
+    # The Decomposer sends one user turn, so a scripted follow-up never arrives.
+    drop_followup: bool = False
+    # Tasks whose answer is a clarifying question (the SFT selection drops them).
+    drop_ask: bool = False
+    # Drop filter/superlative tasks whose DB check depends on the order of their
+    # independent writes (IDs minted from row counts): tau2's DB term replays the
+    # gold in listed order, so a correct parallel run would fail it.
+    order_gate: bool = False
 
 
 _CANON = ("canon_full_sft.json", "canon_full_grpo.json", "canon_full_dpo.json")
 _HELD_OUT = ("HELDOUT_v2.json", "heldout_exec_v5.json", "cycle_heldout.json", "QUARANTINE.json")
 _DEAD_REPORTS = "progress/gaia2/unified/full/full_report_*.json"
+_ASK_TEMPLATES = ("ambiguity", "pure_ambiguity")
+# Templates whose gold writes are independent of each other (one write per row).
+_INDEPENDENT_WRITE_TEMPLATES = ("filter_cardinality", "superlative_chain")
 
 RECIPES: dict[str, PoolRecipe] = {
     recipe.name: recipe
@@ -88,6 +105,22 @@ RECIPES: dict[str, PoolRecipe] = {
             exclude=_HELD_OUT,
             exclude_reserved_domains=("HELDOUT_v2.json",),
             dead_reports=_DEAD_REPORTS,
+        ),
+        PoolRecipe(
+            name="decomposer_broad_v1",
+            role="train",
+            purpose=(
+                "Every runnable tasks_hard.json task outside the held-out sets, without "
+                "ask tasks or DB-order-sensitive ones: broad teacher traces."
+            ),
+            sources=(),
+            all_tasks_hard=True,
+            exclude=_HELD_OUT,
+            exclude_reserved_domains=("HELDOUT_v2.json",),
+            exclude_reserved_variants=("_dsh",),
+            drop_followup=True,
+            drop_ask=True,
+            order_gate=True,
         ),
         PoolRecipe(
             name="decomposer_eval_v1",
@@ -155,11 +188,91 @@ def scripted_domains(tau2_root: Path) -> set[str]:
     }
 
 
-def build_pool(recipe: PoolRecipe, tau2_root: Path) -> tuple[dict[str, list[str]], dict[str, Any]]:
-    """The pool and the counts that explain it. Pure apart from reading ``tau2_root``."""
+def template_of(task: dict[str, Any]) -> str | None:
+    purpose = str((task.get("description") or {}).get("purpose") or "")
+    return purpose[1:].split("]", 1)[0] if purpose.startswith("[") else None
+
+
+def is_ask_task(task: dict[str, Any]) -> bool:
+    return template_of(task) in _ASK_TEMPLATES or (task.get("answer_spec") or {}).get("type") == "ask"
+
+
+def needs_order_gate(task: dict[str, Any]) -> bool:
+    criteria = task.get("evaluation_criteria") or {}
+    return (
+        template_of(task) in _INDEPENDENT_WRITE_TEMPLATES
+        and "DB" in (criteria.get("reward_basis") or [])
+        and len(criteria.get("actions") or []) >= 2
+    )
+
+
+# (domain, raw task) -> "ok" | "db_order_sensitive" | "gold_replay_error"
+OrderCheck = Callable[[str, dict[str, Any]], str]
+
+
+def tau2_order_check(tau2_root: Path) -> OrderCheck:
+    """Replays a task's gold in listed and reversed order on fresh worlds (tau2 venv).
+
+    Failing calls are skipped, as tau2's own gold replay for the DB term does; a task
+    whose world or gold cannot be set up at all is a replay error.
+    """
+    if str(tau2_root / "src") not in sys.path:
+        sys.path.insert(0, str(tau2_root / "src"))
+    os.environ.setdefault("TAU2_DATA_DIR", str(tau2_root / "data"))
+    from tau2.data_model.tasks import Task
+    from tau2.registry import registry
+
+    def final_hash(domain: str, task: dict[str, Any], actions: list[dict[str, Any]]) -> str:
+        if task.get("world") is None:
+            os.environ.pop("TAU2_WORLD", None)
+        else:
+            os.environ["TAU2_WORLD"] = str(task["world"])
+        environment = registry.get_env_constructor(domain)(language="en")
+        initial = Task.model_validate(task).initial_state
+        environment.set_state(
+            initial.initialization_data if initial else None,
+            initial.initialization_actions if initial else None,
+            [],
+        )
+        for action in actions:
+            try:
+                environment.make_tool_call(
+                    tool_name=action["name"], requestor=action.get("requestor", "assistant"), **action["arguments"]
+                )
+            except Exception:  # noqa: BLE001 - matches tau2's gold replay
+                continue
+        return environment.get_db_hash()
+
+    def check(domain: str, task: dict[str, Any]) -> str:
+        actions = list((task.get("evaluation_criteria") or {}).get("actions") or [])
+        try:
+            same = final_hash(domain, task, actions) == final_hash(domain, task, actions[::-1])
+        except Exception:  # noqa: BLE001
+            return "gold_replay_error"
+        return "ok" if same else "db_order_sensitive"
+
+    return check
+
+
+def _all_tasks_hard(tau2_root: Path) -> set[TaskKey]:
+    keys: set[TaskKey] = set()
+    for path in sorted((tau2_root / DOMAINS_DIR).glob("*/tasks_hard.json")):
+        for task in json.loads(path.read_text(encoding="utf-8")):
+            if isinstance(task, dict) and "id" in task:
+                keys.add((path.parent.name, str(task["id"])))
+    return keys
+
+
+def build_pool(
+    recipe: PoolRecipe, tau2_root: Path, *, order_check: OrderCheck | None = None
+) -> tuple[dict[str, list[str]], dict[str, Any]]:
+    """The pool and the counts that explain it. Pure apart from reading ``tau2_root``
+    (and replaying gold actions through tau2 when the recipe has an order gate)."""
     union: set[TaskKey] = set()
     for name in recipe.sources:
         union |= read_split(tau2_root, name)[0]
+    if recipe.all_tasks_hard:
+        union |= _all_tasks_hard(tau2_root)
     dead = dead_tasks(tau2_root, recipe.dead_reports) if recipe.dead_reports else set()
 
     excluded: set[TaskKey] = set()
@@ -168,7 +281,11 @@ def build_pool(recipe: PoolRecipe, tau2_root: Path) -> tuple[dict[str, list[str]
     reserved: set[str] = set()
     for name in recipe.exclude_reserved_domains:
         reserved |= set(read_split(tau2_root, name)[1].get("reserved_domains_never_train", []))
+    reserved |= {domain + suffix for domain in reserved for suffix in recipe.exclude_reserved_variants}
     allowed = scripted_domains(tau2_root) if recipe.domain_filter == "scripted" else None
+    if recipe.order_gate and order_check is None:
+        order_check = tau2_order_check(tau2_root)
+    gated = 0
 
     dropped: collections.Counter[str] = collections.Counter()
     domain_tasks: dict[str, dict[str, dict[str, Any]] | None] = {}
@@ -202,6 +319,19 @@ def build_pool(recipe: PoolRecipe, tau2_root: Path) -> tuple[dict[str, list[str]
         if first_message(task) is None:
             dropped["no_first_message"] += 1
             continue
+        if recipe.drop_followup and (task.get("evaluation_criteria") or {}).get("followup_triggers"):
+            dropped["needs_followup"] += 1
+            continue
+        if recipe.drop_ask and is_ask_task(task):
+            dropped["ask_task"] += 1
+            continue
+        if recipe.order_gate and needs_order_gate(task):
+            assert order_check is not None
+            gated += 1
+            verdict = order_check(domain, task)
+            if verdict != "ok":
+                dropped[verdict] += 1
+                continue
         pool.add(key)
 
     by_domain: dict[str, list[str]] = collections.defaultdict(list)
@@ -216,6 +346,8 @@ def build_pool(recipe: PoolRecipe, tau2_root: Path) -> tuple[dict[str, list[str]
         "pool_domains": len(by_domain),
         "of_which_dead": len(pool & dead),
     }
+    if recipe.order_gate:
+        counts["order_gate_checked"] = gated
     return dict(by_domain), counts
 
 

@@ -5,10 +5,14 @@ default task pool. ``run.py`` builds the Gym config from it at run time and writ
 the materialized config into the run directory, so this registry is the only place
 an experiment is described.
 
-Subagents are always Qwen3.5-4B non-thinking, served by a local vLLM or reached
-through the shared LLM proxy (``run.py --subagent-backend``). An experiment may set
-their sampling (``subagent_sampling``); otherwise they use Qwen3.5's general
+Subagents are Qwen3.5-4B, served by a local vLLM or reached through the shared LLM
+proxy (``run.py --subagent-backend``). By default they are non-thinking; an experiment
+may set their sampling (``subagent_sampling``), otherwise they use Qwen3.5's general
 non-thinking preset.
+
+Newer experiments name presets from ``src/decomposer/models.py`` instead
+(``manager_preset``, ``subagent_preset``; bridged by ``gyms/model_presets.py``): the
+preset is then the only source of that role's sampling.
 """
 
 from __future__ import annotations
@@ -19,6 +23,14 @@ from pathlib import Path
 from typing import Any, Literal
 
 from decomposer.prompt_profiles import DECOMPOSER_PROMPT_PROFILES, DecomposerPromptProfile
+from gyms.model_presets import (
+    QWEN35_UNLOOPED_THINKING_PRESET,
+    QWEN38_FLASH_NON_THINKING_PRESET,
+    SUBAGENT_PRESET_GRAPHS,
+    is_thinking,
+    manager_responses_body,
+    upstream_model_id,
+)
 from gyms.qwen_sampling import (
     QWEN35_GENERAL_NON_THINKING,
     QWEN35_UNLOOPED_NON_THINKING,
@@ -69,6 +81,8 @@ SFT_CHECKPOINTS_ROOT = Path("/mnt/share14T-2/sukhorukov/decomposer_artifacts/tra
 
 TRAIN_POOL = "decomposer_train_v2"
 EVAL_POOL = "decomposer_eval_v1"
+# Every runnable tasks_hard.json task outside the held-out sets (task_pools/build_pool.py).
+BROAD_POOL = "decomposer_broad_v1"
 
 
 @dataclass(frozen=True)
@@ -104,6 +118,15 @@ class Tau2Experiment:
     manager_max_model_calls: int = 100
     subagent_recursion_limit: int = 1000
     manager_max_model_len: int = 131072
+    # models.py presets. A manager preset replaces manager_sampling and the reasoning
+    # effort. A subagent preset makes the subagents the preset's own create_model()
+    # graph, which reaches the proxy itself (no local subagent proxy).
+    manager_preset: str | None = None
+    subagent_preset: str | None = None
+    # The entry the manager's `new` tool lists.
+    subagent_type_id: str = SUBAGENT_TYPE_ID
+    subagent_assistant_id: str = SUBAGENT_ASSISTANT_ID
+    subagent_description: str = SUBAGENT_DESCRIPTION
 
     def __post_init__(self) -> None:
         if self.prompt_profile not in DECOMPOSER_PROMPT_PROFILES:
@@ -114,7 +137,7 @@ class Tau2Experiment:
         if self.manager_extra_body and self.manager_backend != "openrouter":
             raise ValueError(f"{self.name}: manager_extra_body is for openrouter only")
         if self.manager_backend in ("llm_proxy", "local_vllm"):
-            if self.manager_sampling is None:
+            if self.manager_sampling is None and self.manager_preset is None:
                 raise ValueError(f"{self.name}: {self.manager_backend} needs manager_sampling")
             if self.manager_reasoning_mode == "service_default":
                 raise ValueError(f"{self.name}: {self.manager_backend} needs an explicit reasoning mode")
@@ -132,6 +155,21 @@ class Tau2Experiment:
         for name in ("concurrency", "manager_max_model_calls", "subagent_recursion_limit"):
             if getattr(self, name) < 1:
                 raise ValueError(f"{self.name}: {name} must be at least 1")
+        if self.manager_preset is not None:
+            if self.manager_backend != "llm_proxy":
+                raise ValueError(f"{self.name}: manager_preset needs manager_backend=llm_proxy")
+            if self.manager_sampling is not None or self.manager_reasoning_effort is not None:
+                raise ValueError(f"{self.name}: manager_preset replaces manager_sampling and the effort")
+            if self.manager_model_id != upstream_model_id(self.manager_preset):
+                raise ValueError(f"{self.name}: manager_model_id differs from {self.manager_preset}")
+            mode = "thinking" if is_thinking(self.manager_preset) else "non_thinking"
+            if self.manager_reasoning_mode != mode:
+                raise ValueError(f"{self.name}: {self.manager_preset} is a {mode} preset")
+        if self.subagent_preset is not None:
+            if self.subagent_sampling is not None:
+                raise ValueError(f"{self.name}: subagent_preset replaces subagent_sampling")
+            if SUBAGENT_PRESET_GRAPHS.get(self.subagent_preset) != self.subagent_assistant_id:
+                raise ValueError(f"{self.name}: no subagent graph {self.subagent_assistant_id!r} for {self.subagent_preset}")
 
     @property
     def chat_template_kwargs(self) -> dict[str, bool]:
@@ -156,7 +194,11 @@ class Tau2Experiment:
         reasoning items, the default is "xhigh"). ``chat_template_kwargs`` is kept for
         Chat Completions callers.
         """
-        if self.manager_backend != "llm_proxy" or self.manager_sampling is None:
+        if self.manager_backend != "llm_proxy":
+            return {}
+        if self.manager_preset is not None:
+            return manager_responses_body(self.manager_preset)
+        if self.manager_sampling is None:
             return {}
         sampling = self.manager_sampling
         return {
@@ -225,6 +267,26 @@ EXPERIMENTS: tuple[Tau2Experiment, ...] = (
         manager_sampling=QWEN38_TEACHER_THINKING,
         subagent_sampling=QWEN35_UNLOOPED_NON_THINKING,
         upstream_replays_reasoning=True,
+    ),
+    # Teacher traces with the models.py presets: Qwen3.8 Flash Next non-thinking as
+    # the manager and Qwen3.5-4B-unlooped thinking subagents (no output cap), over the
+    # broad pool.
+    Tau2Experiment(
+        name="qwen38_flash_non_thinking_teacher_qwen35_4b_unlooped_thinking",
+        description=(
+            "Qwen3.8 Flash Next non-thinking manager (models.py preset) with the teacher "
+            "prompt; Qwen3.5-4B-unlooped thinking subagents (models.py preset). Teacher "
+            "traces over the broad pool."
+        ),
+        manager_backend="llm_proxy",
+        manager_model_id=QWEN38_FLASH_MODEL_ID,
+        prompt_profile="teacher",
+        pool=BROAD_POOL,
+        manager_reasoning_mode="non_thinking",
+        manager_preset=QWEN38_FLASH_NON_THINKING_PRESET,
+        subagent_preset=QWEN35_UNLOOPED_THINKING_PRESET,
+        subagent_type_id="subagent_thinking",
+        subagent_assistant_id=SUBAGENT_PRESET_GRAPHS[QWEN35_UNLOOPED_THINKING_PRESET],
     ),
     Tau2Experiment(
         name="qwen35_4b_base_student",

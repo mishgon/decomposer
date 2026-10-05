@@ -1,4 +1,9 @@
-"""Recommended sampling presets for Qwen model families."""
+"""Sampling presets for Qwen model families, for the older experiments.
+
+New experiments take their sampling from the model presets in
+``src/decomposer/models.py`` through ``gyms/model_presets.py``; this module stays
+until the older experiments are migrated.
+"""
 
 from __future__ import annotations
 

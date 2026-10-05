@@ -41,6 +41,7 @@ from gyms.qwen_sampling import (  # noqa: E402
     non_thinking_subagent_sampling_kwargs,
     subagent_sampling_environment,
 )
+from gyms.model_presets import preset_record, upstream_model_id  # noqa: E402
 from gyms.remote_model_proxy import require_upstream_models  # noqa: E402
 from gyms.workplace_assistant.experiments import (  # noqa: E402
     ARTIFACTS_ROOT,
@@ -233,6 +234,8 @@ def hydra_flow_mapping(values: Mapping[str, Any]) -> str:
 
 def subagent_sampling_record(experiment: DecomposerExperiment) -> dict[str, Any]:
     """The sampling the Qwen3.5 subagent graph sends for this experiment."""
+    if experiment.subagent_preset is not None:
+        return preset_record(experiment.subagent_preset)
     environment = subagent_sampling_environment(experiment.subagent_sampling)
     record = non_thinking_subagent_sampling_kwargs(environment)
     cap = environment.get(SUBAGENT_MAX_COMPLETION_TOKENS_ENV)
@@ -279,6 +282,7 @@ def runtime_configuration(experiment: Experiment) -> dict[str, Any]:
             "sampling": (
                 experiment.remote_manager_extra_body
                 if experiment.manager_sampling is not None
+                or experiment.manager_preset is not None
                 else None
             ),
         },
@@ -290,6 +294,16 @@ def runtime_configuration(experiment: Experiment) -> dict[str, Any]:
     # Keys are added only when set, so identities of earlier runs still match.
     if experiment.manager_reasoning_effort is not None:
         configuration["manager"]["reasoning_effort"] = experiment.manager_reasoning_effort
+    if experiment.manager_preset is not None:
+        configuration["manager"]["preset"] = experiment.manager_preset
+    if experiment.subagent_preset is not None:
+        configuration["subagent"].update(
+            {
+                "backend": experiment.subagent_backend,
+                "preset": experiment.subagent_preset,
+                "model": upstream_model_id(experiment.subagent_preset),
+            }
+        )
     if experiment.requires_subagent_proxy:
         configuration["subagent"].update(
             {
@@ -297,7 +311,10 @@ def runtime_configuration(experiment: Experiment) -> dict[str, Any]:
                 "model": experiment.subagent_model_id,
             }
         )
-    if experiment.subagent_sampling is not None:
+    if (
+        experiment.subagent_sampling is not None
+        or experiment.subagent_preset is not None
+    ):
         configuration["subagent"]["sampling"] = subagent_sampling_record(experiment)
     return configuration
 
@@ -1658,6 +1675,14 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
                 ),
                 [],
             ).append(str(experiment.subagent_model_id))
+        if experiment.subagent_preset is not None:
+            # The preset graph reads LLM_PROXY_MASTER_KEY itself (from this
+            # environment) and reaches the same shared proxy on its own endpoint.
+            if not os.environ.get("LLM_PROXY_MASTER_KEY"):
+                raise RuntimeError("LLM_PROXY_MASTER_KEY is not set")
+            upstreams.setdefault(("LLM_PROXY_URL", "LLM_PROXY_MASTER_KEY", False), []).append(
+                upstream_model_id(experiment.subagent_preset)
+            )
         # The local proxies retry upstream failures, so a model the upstream does
         # not serve would stall the run instead of failing it.
         for (url_env, key_env, verify_tls), model_ids in upstreams.items():
@@ -1755,6 +1780,12 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
             status["manager"]["reasoning_effort"] = experiment.manager_reasoning_effort
     if isinstance(experiment, DecomposerExperiment):
         status["subagent_sampling"] = subagent_sampling_record(experiment)
+        if experiment.subagent_preset is not None:
+            status["subagent"] = {
+                "backend": experiment.subagent_backend,
+                "preset": experiment.subagent_preset,
+                "model": upstream_model_id(experiment.subagent_preset),
+            }
         if experiment.requires_subagent_proxy:
             status["subagent"] = {
                 "backend": experiment.subagent_backend,

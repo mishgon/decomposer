@@ -50,10 +50,7 @@ from gyms.tau2_gym.experiments import (  # noqa: E402
     LOCAL_SUBAGENT_MODEL_ID,
     OPENROUTER_API_KEY_ENV,
     OPENROUTER_BASE_URL,
-    SUBAGENT_ASSISTANT_ID,
-    SUBAGENT_DESCRIPTION,
     SUBAGENT_MODEL_ENV,
-    SUBAGENT_TYPE_ID,
     Tau2Experiment,
     get_experiment,
 )
@@ -63,6 +60,7 @@ from gyms.qwen_sampling import (  # noqa: E402
     non_thinking_subagent_sampling_kwargs,
     subagent_sampling_environment,
 )
+from gyms.model_presets import preset_record, upstream_model_id  # noqa: E402
 from gyms.remote_model_proxy import require_upstream_models  # noqa: E402
 from gyms.tau2_gym.task_pools import load_pool  # noqa: E402
 
@@ -89,7 +87,9 @@ SUBAGENT_DIR = REPO_ROOT / "gyms" / "tau2_gym" / "subagents"
 
 ROLLOUT_FAILURE_POLICY = "score_zero"
 VERIFIER_FACTORY = "responses_api_agents.decomposer_agent.app:_subagent_tool_calls_and_final_message"
-SUBAGENT_BACKENDS = ("local_vllm", "llm_proxy")
+# "preset": the experiment's models.py subagent preset, a create_model() graph that
+# reaches the shared proxy itself; no local subagent process.
+SUBAGENT_BACKENDS = ("local_vllm", "llm_proxy", "preset")
 STATUS_SCHEMA_VERSION = 2
 
 
@@ -217,10 +217,10 @@ def gym_config(experiment: Tau2Experiment, ports: PortLayout) -> dict[str, Any]:
             }
         }
     elif experiment.manager_backend == "llm_proxy":
-        assert sampling is not None
+        body = experiment.manager_proxy_extra_body
         # The manager proxy's --extra-body-json overrides these server-side; they are
         # set to the same values so the request is honest on its own.
-        create_params = {"temperature": sampling.temperature, "top_p": sampling.top_p}
+        create_params = {"temperature": body["temperature"], "top_p": body["top_p"]}
         policy = {
             "openai_model": {
                 "entrypoint": "app.py",
@@ -278,10 +278,10 @@ def gym_config(experiment: Tau2Experiment, ports: PortLayout) -> dict[str, Any]:
                     "response_for_verifier_factory": VERIFIER_FACTORY,
                     "subagent_types": [
                         {
-                            "agent_type_id": SUBAGENT_TYPE_ID,
-                            "assistant_id": SUBAGENT_ASSISTANT_ID,
+                            "agent_type_id": experiment.subagent_type_id,
+                            "assistant_id": experiment.subagent_assistant_id,
                             "url": f"http://127.0.0.1:{ports.langgraph}",
-                            "description": SUBAGENT_DESCRIPTION,
+                            "description": experiment.subagent_description,
                         }
                     ],
                 }
@@ -382,19 +382,39 @@ def require_free_port(port: int, name: str) -> None:
             )
 
 
-def subagent_base_url(ports: PortLayout, backend: str) -> str:
-    """Where subagents send their model traffic.
+def subagent_base_url(ports: PortLayout, backend: str) -> str | None:
+    """Where subagents send their model traffic; None for a preset, which has its own.
 
-    Both backends look identical to the subagent graph: loopback, `api_key="EMPTY"`.
-    For llm_proxy the loopback endpoint is gyms.remote_model_proxy, which injects the
-    real credentials and terminates the proxy's self-signed TLS.
+    local_vllm and llm_proxy look identical to the subagent graph: loopback,
+    `api_key="EMPTY"`. For llm_proxy the loopback endpoint is gyms.remote_model_proxy,
+    which injects the real credentials and terminates the proxy's self-signed TLS.
     """
+    if backend == "preset":
+        return None
     port = ports.subagent_proxy if backend == "llm_proxy" else ports.qwen35_4b
     return loopback_url(port)
 
 
-def resolve_subagent_model_id(subagent_backend: str, override: str | None) -> str:
-    """The model id the subagents request: explicit, else the one the backend serves."""
+def resolve_subagent_backend(experiment: Tau2Experiment, requested: str | None) -> str:
+    """An experiment with a subagent preset always runs it; others default to llm_proxy."""
+    if experiment.subagent_preset is not None:
+        if requested not in (None, "preset"):
+            raise SystemExit(f"{experiment.name} runs preset subagents; --subagent-backend {requested} does not apply")
+        return "preset"
+    if requested == "preset":
+        raise SystemExit(f"{experiment.name} has no subagent preset")
+    return requested or "llm_proxy"
+
+
+def resolve_subagent_model_id(
+    subagent_backend: str, override: str | None, experiment: Tau2Experiment | None = None
+) -> str:
+    """The model id the subagents request: the preset's, else explicit, else the backend's."""
+    if subagent_backend == "preset":
+        assert experiment is not None and experiment.subagent_preset is not None
+        if override:
+            raise SystemExit("--subagent-model-id does not apply to preset subagents")
+        return upstream_model_id(experiment.subagent_preset)
     if override:
         return override
     return LOCAL_SUBAGENT_MODEL_ID if subagent_backend == "local_vllm" else DEFAULT_SUBAGENT_MODEL_ID
@@ -424,7 +444,9 @@ def base_environment(ports: PortLayout, *, subagent_backend: str, subagent_model
             # tau2 logs every tool response at DEBUG through loguru.
             "LOGURU_LEVEL": env.get("LOGURU_LEVEL", "WARNING"),
             "TAU2_GYM_MODEL_BASE_URLS_JSON": json.dumps(
-                {subagent_model_id: subagent_base_url(ports, subagent_backend)}
+                {}
+                if subagent_backend == "preset"
+                else {subagent_model_id: subagent_base_url(ports, subagent_backend)}
             ),
             SUBAGENT_MODEL_ENV: subagent_model_id,
             "UV_CACHE_DIR": str(UV_CACHE),
@@ -444,8 +466,10 @@ def subagent_environment(experiment: Tau2Experiment) -> dict[str, str]:
     return subagent_sampling_environment(experiment.subagent_sampling)
 
 
-def subagent_sampling_record(env: Mapping[str, str]) -> dict[str, Any]:
+def subagent_sampling_record(env: Mapping[str, str], preset: str | None = None) -> dict[str, Any]:
     """The sampling the subagent graph will send, as run_status records it."""
+    if preset is not None:
+        return preset_record(preset)
     record = non_thinking_subagent_sampling_kwargs(env)
     record["max_completion_tokens"] = (
         int(env[SUBAGENT_MAX_COMPLETION_TOKENS_ENV]) if SUBAGENT_MAX_COMPLETION_TOKENS_ENV in env else None
@@ -456,7 +480,7 @@ def subagent_sampling_record(env: Mapping[str, str]) -> dict[str, Any]:
 def upstream_model_ids(experiment: Tau2Experiment, *, subagent_backend: str, subagent_model_id: str) -> list[str]:
     """Every model this run requests from the shared LLM proxy."""
     models = [experiment.manager_model_id] if experiment.manager_backend == "llm_proxy" else []
-    if subagent_backend == "llm_proxy":
+    if subagent_backend in ("llm_proxy", "preset"):
         models.append(subagent_model_id)
     return models
 
@@ -769,10 +793,12 @@ def execute(args: argparse.Namespace) -> int:
     dataset = dataset_path(pool, pool_meta["sha256"], args.tasks_per_domain, tasks_file)
     config = gym_config(experiment, ports)
 
-    subagent_model_id = resolve_subagent_model_id(args.subagent_backend, args.subagent_model_id)
-    env = base_environment(ports, subagent_backend=args.subagent_backend, subagent_model_id=subagent_model_id)
+    subagent_backend = resolve_subagent_backend(experiment, args.subagent_backend)
+    subagent_model_id = resolve_subagent_model_id(subagent_backend, args.subagent_model_id, experiment)
+    env = base_environment(ports, subagent_backend=subagent_backend, subagent_model_id=subagent_model_id)
     env.update(subagent_environment(experiment))
-    use_subagent_proxy = args.subagent_backend == "llm_proxy"
+    use_subagent_proxy = subagent_backend == "llm_proxy"
+    local_subagent = subagent_backend == "local_vllm"
     manager_command: list[str] | None = None
     if experiment.manager_backend == "local_vllm":
         assert checkpoint is not None
@@ -785,16 +811,16 @@ def execute(args: argparse.Namespace) -> int:
             response_tool_parser="qwen3_xml",
             extra_body=experiment.manager_proxy_extra_body,
         )
-    subagent_command = (
-        remote_proxy_command(ports.subagent_proxy)
-        if use_subagent_proxy
-        else subagent_vllm_command(
+    subagent_command: list[str] | None = None
+    if use_subagent_proxy:
+        subagent_command = remote_proxy_command(ports.subagent_proxy)
+    elif local_subagent:
+        subagent_command = subagent_vllm_command(
             ports,
             model_id=subagent_model_id,
             max_model_len=args.max_model_len,
             gpu_memory_utilization=args.gpu_memory_utilization,
         )
-    )
     timings: dict[str, float] = {}
 
     if args.dry:
@@ -803,8 +829,8 @@ def execute(args: argparse.Namespace) -> int:
             "pool": pool, "pool_sha256": pool_meta["sha256"], "ports": ports.as_dict(),
             "manager_checkpoint": str(checkpoint) if checkpoint else None,
             "manager": manager_command, "manager_gpu": args.manager_gpu,
-            "subagent_backend": args.subagent_backend, "subagent_model_id": subagent_model_id,
-            "subagent_sampling": subagent_sampling_record(env),
+            "subagent_backend": subagent_backend, "subagent_model_id": subagent_model_id,
+            "subagent_sampling": subagent_sampling_record(env, experiment.subagent_preset),
             "subagent": subagent_command,
             "subagent_gpu": args.subagent_gpu,
             "langgraph": langgraph_command(ports, args.langgraph_jobs),
@@ -818,7 +844,8 @@ def execute(args: argparse.Namespace) -> int:
 
     if experiment.manager_backend == "openrouter":
         require_env([OPENROUTER_API_KEY_ENV], "Source ~/.secrets/decomposer.env first.")
-    if experiment.manager_backend == "llm_proxy" or use_subagent_proxy:
+    if experiment.manager_backend == "llm_proxy" or not local_subagent:
+        # A preset subagent graph reads LLM_PROXY_MASTER_KEY itself, from this environment.
         require_env([LLM_PROXY_URL_ENV, LLM_PROXY_API_KEY_ENV], "Source ~/.secrets/decomposer.env first.")
         # The local proxies retry upstream failures, so a model the shared proxy does
         # not serve would stall the run instead of failing it: check before starting.
@@ -827,7 +854,7 @@ def execute(args: argparse.Namespace) -> int:
                 LLM_PROXY_URL_ENV,
                 LLM_PROXY_API_KEY_ENV,
                 upstream_model_ids(
-                    experiment, subagent_backend=args.subagent_backend, subagent_model_id=subagent_model_id
+                    experiment, subagent_backend=subagent_backend, subagent_model_id=subagent_model_id
                 ),
                 verify_tls=False,
             )
@@ -835,7 +862,7 @@ def execute(args: argparse.Namespace) -> int:
             raise SystemExit(f"LLM proxy pre-flight failed: {error}") from None
     if experiment.manager_backend == "local_vllm" and args.manager_gpu is None:
         raise SystemExit("A local manager needs --manager-gpu")
-    if not use_subagent_proxy and args.subagent_gpu is None:
+    if local_subagent and args.subagent_gpu is None:
         raise SystemExit("--subagent-backend local_vllm needs --subagent-gpu")
     if checkpoint is not None and not checkpoint.is_dir():
         raise SystemExit(f"Manager checkpoint not found: {checkpoint}")
@@ -871,10 +898,10 @@ def execute(args: argparse.Namespace) -> int:
         "limit": args.limit,
         "manager_checkpoint": str(checkpoint) if checkpoint else None,
         "manager_checkpoint_fingerprint": checkpoint_fingerprint(checkpoint) if checkpoint else None,
-        "subagent_backend": args.subagent_backend,
+        "subagent_backend": subagent_backend,
         "subagent_model_id": subagent_model_id,
-        "subagent_sampling": subagent_sampling_record(env),
-        "subagent_endpoint": subagent_base_url(ports, args.subagent_backend),
+        "subagent_sampling": subagent_sampling_record(env, experiment.subagent_preset),
+        "subagent_endpoint": subagent_base_url(ports, subagent_backend),
         "ports": ports.as_dict(),
         "gyms_config_sha256": hashlib.sha256(config_path.read_bytes()).hexdigest()[:16],
         "dataset": str(dataset),
@@ -903,9 +930,11 @@ def execute(args: argparse.Namespace) -> int:
             if use_subagent_proxy:
                 # No GPU and no model load: subagents reach the shared replicas
                 # through a local credential-isolating proxy.
+                assert subagent_command is not None
                 require_free_port(ports.subagent_proxy, "subagent LLM proxy")
                 model_processes.append(supervisor.start("subagent_llm_proxy", subagent_command, cwd=REPO_ROOT))
-            else:
+            elif local_subagent:
+                assert subagent_command is not None
                 require_free_port(ports.qwen35_4b, "Qwen3.5-4B subagent vLLM")
                 model_processes.append(supervisor.start(
                     "vllm_qwen35_4b", subagent_command, cwd=REPO_ROOT,
@@ -917,7 +946,7 @@ def execute(args: argparse.Namespace) -> int:
                 wait_http(f"http://127.0.0.1:{ports.manager_proxy}/health", model_processes, 300)
             if use_subagent_proxy:
                 wait_http(f"http://127.0.0.1:{ports.subagent_proxy}/health", model_processes, 300)
-            else:
+            elif local_subagent:
                 wait_http(f"{loopback_url(ports.qwen35_4b)}/models", model_processes, 1800)
 
         with phase("langgraph_startup", timings):
@@ -979,9 +1008,12 @@ def build_parser() -> argparse.ArgumentParser:
                         help="local manager weights; overrides the experiment's checkpoint")
     parser.add_argument("--manager-gpu", default=None, help="CUDA device(s) for a local manager vLLM")
     parser.add_argument("--manager-gpu-memory-utilization", type=float, default=0.9)
-    parser.add_argument("--subagent-backend", choices=SUBAGENT_BACKENDS, default="llm_proxy",
+    parser.add_argument("--subagent-backend", choices=SUBAGENT_BACKENDS, default=None,
                         help="local_vllm starts a dedicated Qwen3.5-4B on --subagent-gpu; "
-                             "llm_proxy reaches the shared replicas and needs no GPU.")
+                             "llm_proxy reaches the shared replicas and needs no GPU; "
+                             "preset (implied by an experiment's subagent preset) runs the "
+                             "models.py preset graph. Default: preset if the experiment has one, "
+                             "else llm_proxy.")
     parser.add_argument("--subagent-model-id", default=None,
                         help=f"model the subagents request; default {DEFAULT_SUBAGENT_MODEL_ID} on the proxy, "
                              f"{LOCAL_SUBAGENT_MODEL_ID} on a local vLLM")

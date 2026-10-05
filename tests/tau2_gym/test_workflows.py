@@ -272,3 +272,78 @@ def test_subagent_graph_sends_the_experiment_sampling(monkeypatch: pytest.Monkey
 def test_invalid_replay_flag_is_rejected() -> None:
     with pytest.raises(ValueError, match="upstream_replays_reasoning"):
         replace(get_experiment("qwen38_flash_teacher_non_thinking"), upstream_replays_reasoning=True)
+
+
+PRESET_TEACHER = "qwen38_flash_non_thinking_teacher_qwen35_4b_unlooped_thinking"
+
+
+def test_preset_teacher_takes_both_roles_from_models_py(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from gyms.model_presets import manager_responses_body
+
+    experiment = get_experiment(PRESET_TEACHER)
+    assert experiment.pool == "decomposer_broad_v1"
+    body = experiment.manager_proxy_extra_body
+    assert body == manager_responses_body("lmrouter/qwen_3_8_flash_next_non_thinking")
+    assert body["reasoning"] == {"effort": "none"} and body["include_reasoning"] is False
+    config = run_module.gym_config(experiment, run_module.PortLayout())
+    assert config["responses_create_params"] == {"temperature": 0.7, "top_p": 0.8}
+    (entry,) = config["decomposer"]["responses_api_agents"]["decomposer_agent"]["subagent_types"]
+    assert (entry["agent_type_id"], entry["assistant_id"]) == ("subagent_thinking", "qwen35_4b_unlooped_thinking")
+
+    assert run_module.resolve_subagent_backend(experiment, None) == "preset"
+    with pytest.raises(SystemExit, match="preset subagents"):
+        run_module.resolve_subagent_backend(experiment, "llm_proxy")
+    with pytest.raises(SystemExit, match="no subagent preset"):
+        run_module.resolve_subagent_backend(get_experiment("qwen38_flash_teacher_non_thinking"), "preset")
+    model = run_module.resolve_subagent_model_id("preset", None, experiment)
+    assert model == "Qwen/Qwen3.5-4B-unlooped"
+    assert run_module.upstream_model_ids(experiment, subagent_backend="preset", subagent_model_id=model) == [
+        "Qwen/Qwen3.8-Flash-Next-NVFP4",
+        "Qwen/Qwen3.5-4B-unlooped",
+    ]
+    env = run_module.base_environment(run_module.PortLayout(), subagent_backend="preset", subagent_model_id=model)
+    assert json.loads(env["TAU2_GYM_MODEL_BASE_URLS_JSON"]) == {}
+    record = run_module.subagent_sampling_record(env, experiment.subagent_preset)
+    assert record["preset"] == "lmrouter/qwen_3_5_4b_unlooped_thinking"
+    assert (record["temperature"], record["top_p"], record["max_completion_tokens"]) == (0.6, 0.95, None)
+
+    monkeypatch.setenv("LLM_PROXY_MASTER_KEY", "secret-value")
+    run_module.main(["--experiment", PRESET_TEACHER, "--limit", "10", "--dry"])
+    plan = json.loads(capsys.readouterr().out)
+    assert plan["subagent_backend"] == "preset" and plan["subagent"] is None
+    assert plan["subagent_sampling"]["preset"] == "lmrouter/qwen_3_5_4b_unlooped_thinking"
+    assert "secret-value" not in json.dumps(plan)
+
+
+def test_presets_replace_sampling_and_must_match_their_graph() -> None:
+    from gyms.model_presets import QWEN35_UNLOOPED_THINKING_PRESET, QWEN38_FLASH_NON_THINKING_PRESET
+
+    experiment = get_experiment(PRESET_TEACHER)
+    with pytest.raises(ValueError, match="replaces manager_sampling"):
+        replace(experiment, manager_sampling=QWEN35_GENERAL_NON_THINKING)
+    with pytest.raises(ValueError, match="non_thinking preset"):
+        replace(experiment, manager_reasoning_mode="thinking")
+    with pytest.raises(ValueError, match="manager_model_id differs"):
+        replace(experiment, manager_model_id="Qwen/Other")
+    with pytest.raises(ValueError, match="no subagent graph"):
+        replace(experiment, subagent_assistant_id="qwen35_4b_non_thinking")
+    assert experiment.manager_preset == QWEN38_FLASH_NON_THINKING_PRESET
+    assert experiment.subagent_preset == QWEN35_UNLOOPED_THINKING_PRESET
+
+
+def test_preset_subagent_graph_is_the_models_py_client(monkeypatch: pytest.MonkeyPatch) -> None:
+    import sys
+
+    sys.path.insert(0, str(REPO_ROOT / "external" / "Gym"))
+    from decomposer.prompts import AGENT_SYSTEM_PROMPT
+    from gyms.tau2_gym.subagents import graph
+
+    seen: dict = {}
+    monkeypatch.setattr(graph, "create_model", lambda preset: seen.setdefault("preset", preset))
+    monkeypatch.setattr(graph, "create_agent", lambda **kwargs: seen.update(kwargs) or object())
+    graph.qwen35_4b_unlooped_thinking()
+    assert seen["preset"] == "lmrouter/qwen_3_5_4b_unlooped_thinking"
+    assert seen["model"] == "lmrouter/qwen_3_5_4b_unlooped_thinking"
+    assert seen["system_prompt"] == AGENT_SYSTEM_PROMPT

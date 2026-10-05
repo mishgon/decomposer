@@ -125,7 +125,61 @@ def test_train_and_eval_pools_may_not_share_tasks(tau2_root: Path, tmp_path: Pat
     assert check_disjoint(clean, clean_pool, pools_dir) == {"pool_t": 1}
 
 
-@pytest.mark.parametrize("name", ["decomposer_pool_v1", "decomposer_train_v2", "decomposer_eval_v1"])
+def _hard(task_id: str, template: str, *, db: bool = False, writes: int = 2, **extra) -> dict:
+    task = _task(task_id)
+    task["description"] = {"purpose": f"[{template}] auto-sampled"}
+    task["evaluation_criteria"] = {
+        "reward_basis": ["DB", "ACTION"] if db else ["ACTION"],
+        "actions": [{"name": "w", "arguments": {"i": i}} for i in range(writes)],
+        **extra,
+    }
+    return task
+
+
+def test_broad_recipe_takes_every_runnable_task_and_gates_write_order(tau2_root: Path) -> None:
+    domains = tau2_root / "data" / "tau2" / "domains"
+    _write(domains / "vault_dsh" / "tasks_hard.json", [_task("vd1")])
+    _write(domains / "mall" / "tasks_hard.json", [
+        _hard("f_free", "filter_cardinality", db=True),
+        _hard("f_sensitive", "filter_cardinality", db=True),
+        _hard("f_broken", "superlative_chain", db=True),
+        _hard("f_nodb", "filter_cardinality"),
+        _hard("chain", "id_thread_chain", db=True),
+        _hard("one_write", "filter_cardinality", db=True, writes=1),
+        _hard("shift", "adaptivity_shift", followup_triggers=[{"tool_name": "*"}]),
+        _hard("amb", "ambiguity"),
+        _hard("asks", "conditional_branch") | {"answer_spec": {"type": "ask"}},
+        _hard("false_amb", "false_ambiguity"),
+    ])
+    checked: list[str] = []
+
+    def order_check(domain: str, task: dict) -> str:
+        checked.append(task["id"])
+        return {"f_sensitive": "db_order_sensitive", "f_broken": "gold_replay_error"}.get(task["id"], "ok")
+
+    recipe = _recipe(
+        sources=(), all_tasks_hard=True, dead_reports=None, exclude_reserved_variants=("_dsh",),
+        drop_followup=True, drop_ask=True, order_gate=True,
+    )
+    pool, counts = build_pool(recipe, tau2_root, order_check=order_check)
+
+    assert pool["mall"] == ["chain", "f_free", "f_nodb", "false_amb", "one_write"]
+    assert "vault" not in pool and "vault_dsh" not in pool
+    # Only independent-write templates with a DB check and two or more writes are replayed.
+    assert sorted(checked) == ["f_broken", "f_free", "f_sensitive"]
+    assert counts["order_gate_checked"] == 3
+    assert counts["dropped"] | {} == {
+        "ask_task": 2,
+        "db_order_sensitive": 1,
+        "excluded_split": 1,
+        "gold_replay_error": 1,
+        "needs_followup": 1,
+        "no_first_message": 1,
+        "reserved_domain": 2,
+    }
+
+
+@pytest.mark.parametrize("name", ["decomposer_pool_v1", "decomposer_train_v2", "decomposer_eval_v1", "decomposer_broad_v1"])
 def test_committed_pools_match_their_meta(name: str) -> None:
     tasks, meta = load_pool(name)
     assert meta["name"] == name
