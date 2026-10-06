@@ -36,10 +36,7 @@ from .schema import (
     MANIFEST_FORMAT_VERSION,
     sha256_text,
 )
-from decomposer.prompt_profiles import (
-    DECOMPOSER_PROMPT_PROFILES,
-    resolve_decomposer_system_prompt,
-)
+from decomposer.prompts import DECOMPOSER_SYSTEM_PROMPT
 
 from .clearml_logging import (
     SeparatePlotsClearMLCallback,
@@ -678,37 +675,22 @@ def _validate_manifest(
     return manifest
 
 
-def _validate_dataset_system_prompt_profile(
+def _validate_dataset_system_prompt(
     manifest: Mapping[str, Any],
     *,
     train_dataset: Dataset,
     validation_dataset: Dataset,
-    expected_profile: Any,
-) -> JsonObject | None:
-    """Fail closed when a training config expects a particular prompt profile."""
+) -> JsonObject:
+    """Verify that prepared records use the shared Decomposer prompt."""
 
-    if expected_profile is None:
-        return None
-    if expected_profile not in DECOMPOSER_PROMPT_PROFILES:
-        expected = ", ".join(DECOMPOSER_PROMPT_PROFILES)
-        raise ValueError(
-            "data.expected_system_prompt_profile must be one of: " + expected
-        )
     policy = manifest.get("policy")
     if not isinstance(policy, Mapping):
         raise ValueError("Prepared-data manifest has no policy object.")
-    actual_profile = policy.get("system_prompt_profile")
-    if actual_profile != expected_profile:
-        raise ValueError(
-            "Prepared-data prompt profile does not match "
-            "data.expected_system_prompt_profile: "
-            f"{actual_profile!r} != {expected_profile!r}."
-        )
-    expected_prompt = resolve_decomposer_system_prompt(expected_profile)
+    expected_prompt = DECOMPOSER_SYSTEM_PROMPT
     expected_sha256 = sha256_text(expected_prompt)
     if policy.get("system_prompt_sha256") != expected_sha256:
         raise ValueError(
-            "Prepared-data system prompt hash does not match the selected profile."
+            "Prepared-data system prompt hash does not match the Decomposer prompt."
         )
     for split, dataset in (
         ("train", train_dataset),
@@ -722,10 +704,9 @@ def _validate_dataset_system_prompt_profile(
             ):
                 raise ValueError(
                     f"Prepared {split} record {index} does not start with the "
-                    f"{expected_profile!r} Decomposer system prompt."
+                    "Decomposer system prompt."
                 )
     return {
-        "profile": expected_profile,
         "sha256": expected_sha256,
     }
 
@@ -1508,11 +1489,10 @@ def main(argv: Sequence[str] | None = None) -> None:
         validation_dataset,
         limited=limited,
     )
-    system_prompt_runtime = _validate_dataset_system_prompt_profile(
+    system_prompt_runtime = _validate_dataset_system_prompt(
         manifest,
         train_dataset=train_dataset,
         validation_dataset=validation_dataset,
-        expected_profile=data_config.get("expected_system_prompt_profile"),
     )
 
     tokenizer = AutoTokenizer.from_pretrained(

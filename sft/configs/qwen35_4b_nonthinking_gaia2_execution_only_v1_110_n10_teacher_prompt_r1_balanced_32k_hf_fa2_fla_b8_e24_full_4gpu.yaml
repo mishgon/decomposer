@@ -9,7 +9,6 @@ data:
   train_file: /home/sukhorukov/decomposer_artifacts/datasets/sft/decomposer-gaia2-execution-deepseek-qwen35-4b-nonthinking/v1-execution-110-n10-teacher-prompt-r1-balanced-32k/train.jsonl
   validation_file: /home/sukhorukov/decomposer_artifacts/datasets/sft/decomposer-gaia2-execution-deepseek-qwen35-4b-nonthinking/v1-execution-110-n10-teacher-prompt-r1-balanced-32k/validation.jsonl
   manifest_file: /home/sukhorukov/decomposer_artifacts/datasets/sft/decomposer-gaia2-execution-deepseek-qwen35-4b-nonthinking/v1-execution-110-n10-teacher-prompt-r1-balanced-32k/manifest.json
-  expected_system_prompt_profile: teacher
   include_reasoning: false
   require_prepared_tokenization: true
   error_on_truncation: true

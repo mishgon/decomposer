@@ -10,7 +10,6 @@ from copy import deepcopy
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from decomposer.prompt_profiles import DECOMPOSER_PROMPT_PROFILES
 
 from ..adapters.base import AdapterReadResult
 from ..schema import (
@@ -33,8 +32,6 @@ from ..schema import (
 )
 
 ADAPTER_VERSION = 3
-# Sources recorded before prompt profiles existed carry no profile.
-_ACCEPTED_PROMPT_PROFILES = frozenset({None, *DECOMPOSER_PROMPT_PROFILES})
 
 
 def _load_json(path: Path) -> JsonObject:
@@ -211,10 +208,6 @@ def _completed_marker(source_dir: Path, name: str) -> tuple[Path, JsonObject]:
         raise ValueError(f"GAIA2 source is not complete according to {path}")
     if marker.get("kind") not in {None, "decomposer"}:
         raise ValueError("GAIA2 completion marker is not a Decomposer run")
-    if marker.get("decomposer_system_prompt_profile") not in _ACCEPTED_PROMPT_PROFILES:
-        raise ValueError(
-            "GAIA2 completion marker names an unknown Decomposer prompt profile"
-        )
     return path, marker
 
 
@@ -592,14 +585,6 @@ def _validate_sidecar_identity(
     configuration = require_mapping(
         sidecar.get("configuration"), "GAIA2 configuration", "excluded_invalid_metadata"
     )
-    if (
-        configuration.get("decomposer_system_prompt_profile")
-        not in _ACCEPTED_PROMPT_PROFILES
-    ):
-        raise TraceValidationError(
-            "excluded_invalid_metadata",
-            "GAIA2 source names an unknown Decomposer prompt profile",
-        )
     models = require_mapping(
         configuration.get("model_configuration"),
         "GAIA2 model configuration",

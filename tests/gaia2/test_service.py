@@ -241,7 +241,6 @@ def test_openrouter_content_blocks_return_only_visible_text(monkeypatch):
     app = service.create_app(
         {
             "manager": {"model": "fake"},
-            "decomposer_system_prompt_profile": "teacher",
             "subagent_types": [{"subagent_type_id": "worker"}],
         }
     )
@@ -281,33 +280,10 @@ def test_reasoning_only_response_is_not_a_final_answer(monkeypatch):
     assert response.json()["detail"] == "Decomposer produced no visible final text"
 
 
-def test_prompt_profile_is_forwarded_to_decomposer(monkeypatch):
-    captured = {}
-    monkeypatch.setattr(service, "_model_from_config", lambda value: object())
-    monkeypatch.setattr(service, "system_prompt_middleware", lambda prompt: ("prompt", prompt))
-
-    def fake_create_decomposer_agent(**kwargs):
-        captured.update(kwargs)
-        return FakeGraph()
-
-    monkeypatch.setattr(service, "create_decomposer_agent", fake_create_decomposer_agent)
-    service.create_app(
-        {
-            "manager": {"model": "fake"},
-            "decomposer_system_prompt_profile": "teacher",
-            "subagent_types": [{"subagent_type_id": "worker"}],
-        }
-    )
-
-    # The core takes no prompt argument; the profile reaches it as the first middleware.
-    assert "decomposer_system_prompt" not in captured
-    assert captured["middleware"][0] == ("prompt", DECOMPOSER_SYSTEM_PROMPT)
-
-
 def test_prompt_addendum_is_appended_only_when_configured(monkeypatch):
     captured = {}
     monkeypatch.setattr(service, "_model_from_config", lambda value: object())
-    monkeypatch.setattr(service, "system_prompt_middleware", lambda prompt: ("prompt", prompt))
+    monkeypatch.setattr(service, "dynamic_prompt", lambda factory: ("prompt", factory(None)))
 
     def fake_create_decomposer_agent(**kwargs):
         captured.update(kwargs)
@@ -317,7 +293,6 @@ def test_prompt_addendum_is_appended_only_when_configured(monkeypatch):
     service.create_app(
         {
             "manager": {"model": "fake"},
-            "decomposer_system_prompt_profile": "teacher",
             "decomposer_system_prompt_addendum_profile": "gaia2-ambiguity",
             "subagent_types": [{"subagent_type_id": "worker"}],
         }
@@ -543,7 +518,6 @@ def test_environment_only_turn_keeps_ares_empty_task():
 
     assert messages[0] == {"role": "user", "content": "[TASK]: \n\n"}
     assert messages[1]["content"].startswith("Environment notifications updates:\n***\n[2026-01-01 09:00:00]")
-
 
 
 def test_public_context_records_only_a_hash_of_the_worker_prompt():

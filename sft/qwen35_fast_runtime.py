@@ -64,7 +64,6 @@ def _require_relative_file(root: Path, value: object) -> Path:
 def validate_runtime_bundle(
     bundle_dir: str | Path = DEFAULT_BUNDLE_DIR,
     *,
-    expected_profile: str = PROFILE_NAME,
     verify_checksums: bool = True,
 ) -> JsonObject:
     """Validate the immutable bundle metadata and critical file checksums."""
@@ -80,11 +79,6 @@ def validate_runtime_bundle(
         raise ValueError("Runtime bundle manifest must be a JSON object.")
     if manifest.get("format_version") != BUNDLE_FORMAT_VERSION:
         raise ValueError("Runtime bundle manifest format version does not match.")
-    if manifest.get("profile") != expected_profile:
-        raise ValueError(
-            f"Runtime bundle profile is {manifest.get('profile')!r}, "
-            f"expected {expected_profile!r}."
-        )
     identity = manifest.get("runtime")
     if identity != EXPECTED_RUNTIME:
         raise ValueError(

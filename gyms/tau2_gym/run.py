@@ -272,7 +272,6 @@ def gym_config(experiment: Tau2Experiment, ports: PortLayout) -> dict[str, Any]:
                     "resources_server": {"type": "resources_servers", "name": "tau2_gym"},
                     "model_server": {"type": "responses_api_models", "name": "policy_model"},
                     "join_gym_system_and_user_prompts": True,
-                    "decomposer_system_prompt_profile": experiment.prompt_profile,
                     "manager_max_model_calls": experiment.manager_max_model_calls,
                     "subagent_recursion_limit": experiment.subagent_recursion_limit,
                     "response_for_verifier_factory": VERIFIER_FACTORY,

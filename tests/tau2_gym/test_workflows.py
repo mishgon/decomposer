@@ -45,7 +45,6 @@ def test_subagent_schema_matches_the_sft_releases() -> None:
         ({"manager_backend": "llm_proxy", "manager_extra_body": {"a": 1}}, "openrouter only"),
         ({"manager_backend": "llm_proxy", "manager_sampling": None}, "needs manager_sampling"),
         ({"manager_reasoning_mode": "thinking"}, "non_thinking"),
-        ({"prompt_profile": "expert"}, "unknown prompt profile"),
         ({"concurrency": 0}, "at least 1"),
         # effort only means something to a thinking manager behind the proxy
         ({"manager_reasoning_effort": "low"}, "llm_proxy thinking manager"),
@@ -58,7 +57,6 @@ def test_invalid_experiments_are_rejected(overrides: dict, message: str) -> None
         description="x",
         manager_backend="local_vllm",
         manager_model_id="decomposer/x",
-        prompt_profile="student",
         pool="decomposer_eval_v1",
         manager_reasoning_mode="non_thinking",
         manager_sampling=QWEN35_GENERAL_NON_THINKING,
@@ -87,7 +85,6 @@ def test_agent_block_follows_the_experiment_and_port_offset() -> None:
     ports = run_module.PortLayout(offset=7).shifted()
     config = run_module.gym_config(get_experiment("qwen38_flash_teacher_non_thinking"), ports)
     agent = config["decomposer"]["responses_api_agents"]["decomposer_agent"]
-    assert agent["decomposer_system_prompt_profile"] == "teacher"
     assert agent["subagent_types"] == [
         {
             "agent_type_id": SUBAGENT_TYPE_ID,
@@ -169,7 +166,6 @@ def test_run_name_records_pool_and_subsample() -> None:
 def test_unlooped_teacher_sampling_for_manager_and_subagents() -> None:
     experiment = get_experiment("qwen38_flash_thinking_low_teacher_qwen35_4b_unlooped")
     assert experiment.pool == "decomposer_train_v2"
-    assert experiment.prompt_profile == "teacher"
     assert experiment.upstream_replays_reasoning
     assert experiment.manager_proxy_extra_body == {
         "temperature": 1.0,

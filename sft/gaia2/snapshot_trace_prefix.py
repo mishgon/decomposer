@@ -140,7 +140,6 @@ def create_trace_prefix_snapshot(
             "state": "complete",
             "kind": "decomposer",
             "purpose": "sft-trace-prefix-snapshot",
-            "decomposer_system_prompt_profile": "teacher",
             "scenario_count": len(scenario_ids),
             "num_repeats": len(logical_rollout_numbers),
             "logical_rollout_numbers": list(logical_rollout_numbers),

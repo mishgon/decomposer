@@ -30,20 +30,16 @@ from sft.schema import (
     validate_chat_tools,
     validate_decomposer_messages,
 )
-from decomposer.chat_tools import build_decomposer_chat_tools
-from decomposer.prompt_profiles import (
-    DECOMPOSER_STUDENT_SYSTEM_PROMPT,
-    resolve_decomposer_system_prompt,
-)
+from sft.chat_tools import build_decomposer_chat_tools
 from decomposer.prompts import (
     DECOMPOSER_SYSTEM_PROMPT,
     PARALLEL_FORK_RUN_CALL_ERROR,
     PARALLEL_RUN_CALL_ERROR,
     PARALLEL_WAIT_CALL_ERROR,
-    UNKNOWN_SUBAGENT_ERROR,
+    UNKNOWN_AGENT_ERROR,
 )
 from sft.train import (
-    _validate_dataset_system_prompt_profile,
+    _validate_dataset_system_prompt,
     _validate_manifest,
 )
 
@@ -63,9 +59,9 @@ def _response_tool(name: str, *parameters: str) -> dict:
 
 
 TOOLS = [
-    _response_tool("new", "subagent_type_id"),
-    _response_tool("fork", "subagent_id"),
-    _response_tool("run", "subagent_id", "prompt"),
+    _response_tool("new", "agent_type_id"),
+    _response_tool("fork", "agent_id"),
+    _response_tool("run", "agent_id", "prompt"),
     _response_tool("wait"),
 ]
 LEGACY_TOOLS = [
@@ -153,9 +149,9 @@ def _rollout(
                 _ai(
                     "",
                     reasoning=f"Delegate task {task_index}.",
-                    tool_calls=[_call("new", new_id, subagent_type_id="small")],
+                    tool_calls=[_call("new", new_id, agent_type_id="small")],
                 ),
-                _result("new", new_id, {"subagent_id": subagent_id}),
+                _result("new", new_id, {"agent_id": subagent_id}),
                 _ai(
                     "",
                     reasoning="Run it.",
@@ -163,7 +159,7 @@ def _rollout(
                         _call(
                             "run",
                             run_id,
-                            subagent_id=subagent_id,
+                            agent_id=subagent_id,
                             prompt=f"Do task {task_index}.",
                         )
                     ],
@@ -179,7 +175,7 @@ def _rollout(
                     wait_id,
                     [
                         {
-                            "subagent_id": subagent_id,
+                            "agent_id": subagent_id,
                             "subagent_run_id": subagent_run_id,
                             "status": "responded",
                             "response": "Done.",
@@ -209,7 +205,7 @@ def _legacy_rollout(task_index: int) -> dict:
                 _call(
                     "spawn_subagent",
                     spawn_id,
-                    subagent_type_id="small",
+                    agent_type_id="small",
                     prompt=f"Do task {task_index}.",
                 )
             ],
@@ -272,7 +268,6 @@ def _prepare_fixture_dataset(
     max_traces_per_prompt_per_teacher: int | None = None,
     version: str = "v3",
     tokenization: TokenizationSpec | None = None,
-    system_prompt_profile: str | None = None,
 ):
     """Test helper that exercises the new canonical builder without Git state."""
     spec = BuildSpec(
@@ -280,7 +275,6 @@ def _prepare_fixture_dataset(
         dataset=DatasetIdentity(id=output_dir.name, version=version),
         policy=PolicySpec(
             id="decomposer-default",
-            system_prompt_profile=system_prompt_profile,
         ),
         sources=tuple(
             SourceSpec(
@@ -405,8 +399,7 @@ def test_prepare_groups_teacher_variants_and_writes_manifest_v3(tmp_path: Path) 
 
     example = train[0]
     assert example["messages"][0]["role"] == "system"
-    assert example["messages"][0]["content"] == DECOMPOSER_STUDENT_SYSTEM_PROMPT
-    assert example["messages"][0]["content"] != DECOMPOSER_SYSTEM_PROMPT
+    assert example["messages"][0]["content"] == DECOMPOSER_SYSTEM_PROMPT
     assert example["messages"][1]["role"] == "user"
     assert example["messages"][-1]["teacher_reasoning"] == "Report success."
     assert [
@@ -485,61 +478,32 @@ def test_derive_source_view_preserves_exact_records_and_split(tmp_path: Path) ->
         )
 
 
-def test_teacher_prompt_profile_is_materialized_and_training_validated(
-    tmp_path: Path,
-) -> None:
+def test_shared_prompt_is_materialized_and_training_validated(tmp_path: Path) -> None:
     prepared = _prepare_fixture_dataset(
-        [_source(tmp_path, "teacher")],
-        tmp_path / "prepared-teacher-prompt",
-        system_prompt_profile="teacher",
+        [_source(tmp_path, "teacher")], tmp_path / "prepared-shared-prompt"
     )
-    train = _read_jsonl(prepared.train_path)
-    validation = _read_jsonl(prepared.validation_path)
-    assert prepared.manifest["policy"]["system_prompt_profile"] == "teacher"
-    assert prepared.manifest["policy"]["system_prompt_sha256"] == sha256_text(
-        DECOMPOSER_SYSTEM_PROMPT
+    train = Dataset.from_list(_read_jsonl(prepared.train_path))
+    validation = Dataset.from_list(_read_jsonl(prepared.validation_path))
+    runtime = _validate_dataset_system_prompt(
+        prepared.manifest, train_dataset=train, validation_dataset=validation
     )
+    assert runtime == {"sha256": sha256_text(DECOMPOSER_SYSTEM_PROMPT)}
     assert all(
-        record["messages"][0]["content"] == DECOMPOSER_SYSTEM_PROMPT
-        for record in [*train, *validation]
+        messages[0]["content"] == DECOMPOSER_SYSTEM_PROMPT
+        for dataset in (train, validation) for messages in dataset["messages"]
     )
-    runtime = _validate_dataset_system_prompt_profile(
-        prepared.manifest,
-        train_dataset=Dataset.from_list(train),
-        validation_dataset=Dataset.from_list(validation),
-        expected_profile="teacher",
-    )
-    assert runtime == {
-        "profile": "teacher",
-        "sha256": sha256_text(DECOMPOSER_SYSTEM_PROMPT),
-    }
-    with pytest.raises(ValueError, match="does not match"):
-        _validate_dataset_system_prompt_profile(
-            prepared.manifest,
-            train_dataset=Dataset.from_list(train),
-            validation_dataset=Dataset.from_list(validation),
-            expected_profile="student",
+    manifest = {**prepared.manifest, "policy": {"system_prompt_sha256": "stale"}}
+    with pytest.raises(ValueError, match="system prompt hash"):
+        _validate_dataset_system_prompt(
+            manifest, train_dataset=train, validation_dataset=validation
         )
-
-
-def test_prompt_profile_resolver_and_legacy_policy_are_strict() -> None:
-    assert (
-        resolve_decomposer_system_prompt("student") == DECOMPOSER_STUDENT_SYSTEM_PROMPT
-    )
-    assert resolve_decomposer_system_prompt("teacher") == DECOMPOSER_SYSTEM_PROMPT
-    assert (
-        PolicySpec(
-            id="legacy", system_prompt="decomposer_default"
-        ).resolved_system_prompt_profile
-        == "student"
-    )
-    with pytest.raises(ValueError, match="Unknown Decomposer prompt profile"):
-        resolve_decomposer_system_prompt("unknown")
-    with pytest.raises(ValidationError, match="mutually exclusive"):
-        PolicySpec(
-            id="invalid",
-            system_prompt="decomposer_default",
-            system_prompt_profile="teacher",
+    records = train.to_list()
+    records[0]["messages"][0]["content"] = "stale prompt"
+    with pytest.raises(ValueError, match="does not start"):
+        _validate_dataset_system_prompt(
+            prepared.manifest,
+            train_dataset=Dataset.from_list(records),
+            validation_dataset=validation,
         )
 
 
@@ -638,14 +602,14 @@ def test_prepare_sequentializes_parallel_calls(
     rollout = _rollout(0)
     messages = rollout["final_state"]["messages"]
     new_calls = [
-        _call("new", f"new-{index}", subagent_type_id="small")
+        _call("new", f"new-{index}", agent_type_id="small")
         for index in range(1, call_count + 1)
     ]
     run_calls = [
         _call(
             "run",
             f"run-{index}",
-            subagent_id=f"subagent-{index}",
+            agent_id=f"subagent-{index}",
             prompt=f"Do independent subtask {index}.",
         )
         for index in range(1, call_count + 1)
@@ -659,7 +623,7 @@ def test_prepare_sequentializes_parallel_calls(
         ),
         *reversed(
             [
-                _result("new", call["id"], {"subagent_id": f"subagent-{index}"})
+                _result("new", call["id"], {"agent_id": f"subagent-{index}"})
                 for index, call in enumerate(new_calls, start=1)
             ]
         ),
@@ -749,28 +713,28 @@ def _chat_turn(content: str, *calls: dict, reasoning: str | None = None) -> dict
 
 def test_sequentializer_drops_refused_calls_and_splits_legal_batches() -> None:
     legal = [
-        _chat_call("new", "new-a", subagent_type_id="small"),
-        _chat_call("fork", "fork-b", subagent_id="b"),
-        _chat_call("run", "run-c", subagent_id="c", prompt="Do C."),
+        _chat_call("new", "new-a", agent_type_id="small"),
+        _chat_call("fork", "fork-b", agent_id="b"),
+        _chat_call("run", "run-c", agent_id="c", prompt="Do C."),
     ]
     mixed = [
-        _chat_call("run", "run-a1", subagent_id="a", prompt="First."),
-        _chat_call("run", "run-d", subagent_id="d", prompt="Do D."),
-        _chat_call("fork", "fork-e", subagent_id="e"),
-        _chat_call("run", "run-a2", subagent_id="a", prompt="Second."),
-        _chat_call("run", "run-e", subagent_id="e", prompt="Do E."),
-        _chat_call("run", "run-x", subagent_id="x", prompt="Do X."),
+        _chat_call("run", "run-a1", agent_id="a", prompt="First."),
+        _chat_call("run", "run-d", agent_id="d", prompt="Do D."),
+        _chat_call("fork", "fork-e", agent_id="e"),
+        _chat_call("run", "run-a2", agent_id="a", prompt="Second."),
+        _chat_call("run", "run-e", agent_id="e", prompt="Do E."),
+        _chat_call("run", "run-x", agent_id="x", prompt="Do X."),
         _chat_call("wait", "wait-mixed"),
     ]
-    unknown_x = UNKNOWN_SUBAGENT_ERROR.format(subagent_id="x")
+    unknown_x = UNKNOWN_AGENT_ERROR.format(agent_id="x")
     messages = [
         {"role": "system", "content": "System."},
         {"role": "user", "content": "Task."},
         _chat_turn("Plan.", *legal, reasoning="Independent."),
         # Results arrive in any order and are paired by call ID.
         _chat_result("run", "run-c", '{"subagent_run_id": "sr-c"}'),
-        _chat_result("new", "new-a", '{"subagent_id": "a"}'),
-        _chat_result("fork", "fork-b", '{"subagent_id": "b2"}'),
+        _chat_result("new", "new-a", '{"agent_id": "a"}'),
+        _chat_result("fork", "fork-b", '{"agent_id": "b2"}'),
         _chat_turn("Go.", *mixed, reasoning="Start."),
         # The harness answers refused calls first, then executes the rest.
         _chat_result("run", "run-a1", PARALLEL_RUN_CALL_ERROR),
@@ -782,8 +746,8 @@ def test_sequentializer_drops_refused_calls_and_splits_legal_batches() -> None:
         _chat_result("run", "run-d", '{"subagent_run_id": "sr-d"}'),
         _chat_turn(
             "Retry A twice.",
-            _chat_call("run", "retry-1", subagent_id="a", prompt="First."),
-            _chat_call("run", "retry-2", subagent_id="a", prompt="Second."),
+            _chat_call("run", "retry-1", agent_id="a", prompt="First."),
+            _chat_call("run", "retry-2", agent_id="a", prompt="Second."),
         ),
         _chat_result("run", "retry-1", PARALLEL_RUN_CALL_ERROR),
         _chat_result("run", "retry-2", PARALLEL_RUN_CALL_ERROR),
@@ -858,10 +822,10 @@ def test_sequentializer_keeps_single_calls_and_requires_every_result() -> None:
         *single[:2],
         _chat_turn(
             "",
-            _chat_call("new", "new-a", subagent_type_id="small"),
+            _chat_call("new", "new-a", agent_type_id="small"),
             _chat_call("wait", "wait-1"),
         ),
-        _chat_result("new", "new-a", '{"subagent_id": "a"}'),
+        _chat_result("new", "new-a", '{"agent_id": "a"}'),
         _chat_turn("Done."),
     ]
     with pytest.raises(TraceValidationError, match="exactly one matching tool result"):
@@ -874,10 +838,10 @@ def test_prepare_drops_refused_calls_with_their_results(tmp_path: Path) -> None:
     run_call = messages[3]["tool_calls"][0]
     first_run = {**run_call, "id": "refused-run"}
     second_run = _call(
-        "run", "refused-again", subagent_id="subagent-0", prompt="Do it again."
+        "run", "refused-again", agent_id="subagent-0", prompt="Do it again."
     )
     stray_wait = _call("wait", "stray-wait")
-    extra_new = _call("new", "new-extra", subagent_type_id="small")
+    extra_new = _call("new", "new-extra", agent_type_id="small")
     # Insert two refused batches before the executed run turn: one keeps an
     # executed `new`, the other holds nothing but refused waits.
     messages[3:3] = [
@@ -889,7 +853,7 @@ def test_prepare_drops_refused_calls_with_their_results(tmp_path: Path) -> None:
         _result("run", first_run["id"], PARALLEL_RUN_CALL_ERROR),
         _result("run", second_run["id"], PARALLEL_RUN_CALL_ERROR),
         _result("wait", stray_wait["id"], PARALLEL_WAIT_CALL_ERROR),
-        _result("new", extra_new["id"], {"subagent_id": "subagent-extra"}),
+        _result("new", extra_new["id"], {"agent_id": "subagent-extra"}),
         _ai(
             "Summary truncated",
             tool_calls=[_call("wait", "stray-1"), _call("wait", "stray-2")],
@@ -1192,7 +1156,7 @@ def test_schema_rejects_legacy_spawn_subagent_traces() -> None:
         "id": "spawn-1",
         "function": {
             "name": "spawn_subagent",
-            "arguments": {"subagent_type_id": "small", "prompt": "Do it."},
+            "arguments": {"agent_type_id": "small", "prompt": "Do it."},
         },
     }
     legacy_messages = [
@@ -1241,7 +1205,6 @@ def test_builder_canonical_tools_are_exactly_new_fork_run_wait(
         dataset=DatasetIdentity(id="canonical-tools", version="v1"),
         policy=PolicySpec(
             id="decomposer-default",
-            system_prompt_profile="teacher",
             subagent_types=(subagent_type,),
         ),
         sources=(
@@ -1269,7 +1232,7 @@ def test_builder_canonical_tools_are_exactly_new_fork_run_wait(
     expected = build_decomposer_chat_tools(
         [
             {
-                "subagent_type_id": "small",
+                "agent_type_id": "small",
                 "description": "Fixture subagent.",
                 "assistant_id": "small",
             }
@@ -1441,7 +1404,7 @@ def test_v2_samples_before_validation_and_keeps_all_rewards(tmp_path: Path) -> N
         and rollout["_ng_rollout_index"] == selected_rollout(1)
     )
     selected_invalid["final_state"]["messages"][1]["tool_calls"][0]["args"][
-        "subagent_type_id"
+        "agent_type_id"
     ] = "unknown"
     unselected_invalid = next(
         rollout
@@ -1554,7 +1517,7 @@ def test_prepare_refuses_overwrite_and_bad_materialized_source(tmp_path: Path) -
                 _call(
                     "run",
                     "missing-result",
-                    subagent_id="subagent-0",
+                    agent_id="subagent-0",
                     prompt="Missing result.",
                 )
             ),
@@ -1708,7 +1671,6 @@ def test_qwen35_n7_mixed_spec_pins_teacher_prompt_and_exact_gaia_grid() -> None:
             "gaia2_execution_110_n7_teacher_prompt_filtered_32k.yaml"
         )
     ).spec
-    assert spec.policy.resolved_system_prompt_profile == "teacher"
     assert spec.split.strategy == "pinned"
     assert len(spec.sources) == 4
     old_gaia, prefix_gaia = spec.sources[-2:]
@@ -1736,7 +1698,6 @@ def test_qwen35_gaia2_execution_n10_spec_pins_balanced_task_split() -> None:
     assert spec.dataset.version == (
         "v1-execution-110-n10-teacher-prompt-r1-balanced-32k"
     )
-    assert spec.policy.resolved_system_prompt_profile == "teacher"
     assert spec.selection.policy == "exact_reward"
     assert spec.selection.success_reward == 1.0
     assert spec.selection.invalid_policy == "exclude"

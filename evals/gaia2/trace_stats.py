@@ -1076,7 +1076,6 @@ def _summarise(
         "kind": kind,
         "experiment": status.get("experiment"),
         "domain": status.get("domain"),
-        "prompt_profile": status.get("decomposer_system_prompt_profile"),
         "rollouts": len(rollouts),
         "population_rollouts": population,
         "empty_rollouts": sum(1 for r in rollouts if not r.get("turns", 1)),

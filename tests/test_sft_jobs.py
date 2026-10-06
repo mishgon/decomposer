@@ -1443,7 +1443,6 @@ def test_qwen35_gaia2_n7_teacher_prompt_config_is_isolated_and_stable() -> None:
     )
     assert config["model"]["name_or_path"] == "Qwen/Qwen3.5-4B"
     assert config["model"]["attn_implementation"] == "sdpa"
-    assert config["data"]["expected_system_prompt_profile"] == "teacher"
     assert "gaia2-execution-110-n7-teacher-prompt" in config["data"]["train_file"]
     assert config["data"]["include_reasoning"] is False
     assert config["training"]["per_device_train_batch_size"] == 1
@@ -1470,7 +1469,6 @@ def test_qwen35_gaia2_n7_fast_configs_are_distinct_and_pinned() -> None:
     full = yaml.safe_load((config_dir / f"{prefix}full_4gpu.yaml").read_text())
     for config in (smoke, full):
         assert config["model"]["attn_implementation"] == HF_FA2_IMPLEMENTATION
-        assert config["data"]["expected_system_prompt_profile"] == "teacher"
         assert "gaia2-execution-110-n7-teacher-prompt" in config["data"]["train_file"]
         training = config["training"]
         assert training["per_device_train_batch_size"] == 2
@@ -1518,7 +1516,6 @@ def test_qwen35_toolathlon_only_fast_config_is_isolated_and_pinned() -> None:
     assert config["model"]["attn_implementation"] == HF_FA2_IMPLEMENTATION
     for key in ("train_file", "validation_file", "manifest_file"):
         assert release in config["data"][key]
-    assert config["data"]["expected_system_prompt_profile"] == "teacher"
     assert config["data"]["include_reasoning"] is False
     training = config["training"]
     assert training["per_device_train_batch_size"] == 2
@@ -1564,7 +1561,6 @@ def test_qwen35_gaia2_execution_only_fast_config_is_isolated_and_pinned() -> Non
     assert config["model"]["attn_implementation"] == HF_FA2_IMPLEMENTATION
     for key in ("train_file", "validation_file", "manifest_file"):
         assert release in config["data"][key]
-    assert config["data"]["expected_system_prompt_profile"] == "teacher"
     assert config["data"]["include_reasoning"] is False
     training = config["training"]
     assert training["per_device_train_batch_size"] == 2

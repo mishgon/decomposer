@@ -17,7 +17,6 @@ for _import_root in (_REPO_ROOT, _REPO_ROOT / "src"):
     if str(_import_root) not in sys.path:
         sys.path.insert(0, str(_import_root))
 
-from decomposer.prompt_profiles import DECOMPOSER_PROMPT_PROFILES  # noqa: E402
 
 from gyms.gaia2.experiments import (  # noqa: E402
     BASE_IMAGE,
@@ -43,7 +42,6 @@ from gyms.gaia2.run import (  # noqa: E402
     nonnegative_int,
     positive_int,
     run_identity,
-    select_prompt_profile,
     validate_run_identity,
     validate_preparation,
 )
@@ -121,7 +119,6 @@ def build_job_desc(
     purpose: str = "evaluation",
     partition: str = "full",
     rollout_offset: int = 0,
-    prompt_profile: str | None = None,
     domain: Gaia2Domain = DOMAIN,
 ) -> str:
     spec = get_domain_spec(domain)
@@ -130,7 +127,6 @@ def build_job_desc(
             experiment,
             num_repeats,
             rollout_offset,
-            prompt_profile=prompt_profile,
         )
         if limit is not None:
             identity += f"-smoke-{limit}"
@@ -145,8 +141,6 @@ def build_job_desc(
         partition=partition,
         domain=spec.name,
     )
-    if prompt_profile is not None:
-        description += f" prompt-{prompt_profile}"
     return f"{description} #{author}"
 
 
@@ -161,7 +155,6 @@ def build_job_script(
     partition: str = "full",
     concurrency: int | None = None,
     rollout_offset: int = 0,
-    prompt_profile: str | None = None,
     domain: Gaia2Domain = DOMAIN,
     entrypoint: Sequence[str] = RUNNER_ENTRYPOINT,
 ) -> str:
@@ -185,8 +178,6 @@ def build_job_script(
     ]
     if concurrency is not None:
         command.extend(["--concurrency", str(concurrency)])
-    if prompt_profile is not None:
-        command.extend(["--prompt-profile", prompt_profile])
     if purpose == "trace-generation" or rollout_offset:
         command.extend(["--rollout-offset", str(rollout_offset)])
     if experiment.num_gpus:
@@ -220,7 +211,6 @@ def build_payload(
     partition: str = "full",
     concurrency: int | None = None,
     rollout_offset: int = 0,
-    prompt_profile: str | None = None,
     domain: Gaia2Domain = DOMAIN,
     entrypoint: Sequence[str] = RUNNER_ENTRYPOINT,
 ) -> dict[str, Any]:
@@ -253,7 +243,6 @@ def build_payload(
             partition=partition,
             concurrency=concurrency,
             rollout_offset=rollout_offset,
-            prompt_profile=prompt_profile,
             domain=domain,
             entrypoint=entrypoint,
         ),
@@ -265,7 +254,6 @@ def build_payload(
             purpose=purpose,
             partition=partition,
             rollout_offset=rollout_offset,
-            prompt_profile=prompt_profile,
             domain=domain,
         ),
         "env_variables": env_variables,
@@ -289,7 +277,6 @@ def print_parameter_table(
     purpose: str = "evaluation",
     partition: str = "full",
     rollout_offset: int = 0,
-    prompt_profile: str | None = None,
     domain: Gaia2Domain = DOMAIN,
 ) -> None:
     spec = get_domain_spec(domain)
@@ -302,10 +289,9 @@ def print_parameter_table(
                 experiment,
                 num_repeats,
                 rollout_offset,
-                prompt_profile=prompt_profile,
             )
             if purpose == "trace-generation"
-            else run_name(experiment, num_repeats, prompt_profile=prompt_profile)
+            else run_name(experiment, num_repeats)
         )
         if limit is not None:
             identity += f"/smoke_{limit}"
@@ -329,7 +315,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--partition", choices=PARTITIONS, default="full")
     parser.add_argument("--num-repeats", type=positive_int, default=3)
     parser.add_argument("--concurrency", type=positive_int)
-    parser.add_argument("--prompt-profile", choices=DECOMPOSER_PROMPT_PROFILES)
     parser.add_argument("--rollout-offset", type=nonnegative_int, default=0)
     parser.add_argument("--limit", type=positive_int)
     parser.add_argument("--dry", "--dry-run", action="store_true")
@@ -373,10 +358,6 @@ def main(
         parser.error(str(error))
     if not experiments:
         parser.error("experiment selectors matched no registered experiments")
-    if args.prompt_profile is not None and any(
-        experiment.kind != "decomposer" for experiment in experiments
-    ):
-        parser.error("--prompt-profile is only valid for Decomposer experiments")
 
     selected_count = len(experiments)
     candidates: list[Experiment] = []
@@ -389,7 +370,6 @@ def main(
                 args.rollout_offset,
                 args.partition,
                 args.limit,
-                prompt_profile=args.prompt_profile,
                 domain=spec.name,
             )
             if args.purpose == "trace-generation"
@@ -398,14 +378,11 @@ def main(
                 args.num_repeats,
                 args.limit,
                 partition=args.partition,
-                prompt_profile=args.prompt_profile,
                 domain=spec.name,
             )
         )
         if marker.is_file() and not args.force:
-            selected_experiment = select_prompt_profile(
-                experiment, args.prompt_profile
-            )
+            selected_experiment = experiment
             validate_run_identity(
                 marker,
                 run_identity(
@@ -514,7 +491,6 @@ def main(
             partition=args.partition,
             concurrency=args.concurrency,
             rollout_offset=args.rollout_offset,
-            prompt_profile=args.prompt_profile,
             domain=spec.name,
             entrypoint=entrypoint,
         )
@@ -533,7 +509,6 @@ def main(
             purpose=args.purpose,
             partition=args.partition,
             rollout_offset=args.rollout_offset,
-            prompt_profile=args.prompt_profile,
             domain=spec.name,
         )
 
@@ -552,7 +527,6 @@ def main(
                     "job_name": job_name,
                     "experiment": experiment.name,
                     "num_gpus": experiment.num_gpus,
-                    "prompt_profile": args.prompt_profile,
                     "manager_prompt_addendum_profile": getattr(
                         experiment, "manager_prompt_addendum_profile", None
                     ),
@@ -568,7 +542,6 @@ def main(
         "partition": args.partition,
         "num_repeats": args.num_repeats,
         "concurrency": args.concurrency,
-        "prompt_profile": args.prompt_profile,
         "rollout_offset": args.rollout_offset,
         "limit": args.limit,
         "skipped_completed": skipped_completed,

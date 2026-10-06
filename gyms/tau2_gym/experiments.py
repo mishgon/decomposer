@@ -1,6 +1,6 @@
 """Experiment registry for the tau2 gym.
 
-An experiment fixes the manager (backend, model, prompt profile, sampling) and its
+An experiment fixes the manager (backend, model, sampling) and its
 default task pool. ``run.py`` builds the Gym config from it at run time and writes
 the materialized config into the run directory, so this registry is the only place
 an experiment is described.
@@ -22,7 +22,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
-from decomposer.prompt_profiles import DECOMPOSER_PROMPT_PROFILES, DecomposerPromptProfile
 from gyms.tau2_gym.model_presets import (
     QWEN35_UNLOOPED_THINKING_PRESET,
     QWEN38_FLASH_NON_THINKING_PRESET,
@@ -91,7 +90,6 @@ class Tau2Experiment:
     manager_backend: ManagerBackend
     # openrouter/llm_proxy: the upstream model id. local_vllm: the served model name.
     manager_model_id: str
-    prompt_profile: DecomposerPromptProfile
     # Default pool; `run.py --pool` overrides it, and the run name records the pool.
     pool: str
     manager_reasoning_mode: ReasoningMode = "service_default"
@@ -128,8 +126,6 @@ class Tau2Experiment:
     subagent_description: str = SUBAGENT_DESCRIPTION
 
     def __post_init__(self) -> None:
-        if self.prompt_profile not in DECOMPOSER_PROMPT_PROFILES:
-            raise ValueError(f"{self.name}: unknown prompt profile {self.prompt_profile!r}")
         local = self.manager_backend == "local_vllm"
         if not local and (self.manager_checkpoint is not None or self.return_token_ids):
             raise ValueError(f"{self.name}: checkpoints and token ids need manager_backend=local_vllm")
@@ -221,11 +217,10 @@ def _qwen38_flash_teacher(
         description=(
             f"Qwen3.8 Flash Next ({reasoning.replace('_', '-')}"
             + (f", effort {effort}" if effort else "")
-            + ") manager with the teacher prompt: SFT traces."
+            + ") manager with the shared Decomposer prompt: SFT traces."
         ),
         manager_backend="llm_proxy",
         manager_model_id=QWEN38_FLASH_MODEL_ID,
-        prompt_profile="teacher",
         pool=TRAIN_POOL,
         manager_reasoning_mode=reasoning,
         manager_sampling=QWEN38_THINKING if reasoning == "thinking" else QWEN38_NON_THINKING,
@@ -236,10 +231,9 @@ def _qwen38_flash_teacher(
 EXPERIMENTS: tuple[Tau2Experiment, ...] = (
     Tau2Experiment(
         name="deepseek_v4_flash_teacher",
-        description="DeepSeek-v4-flash (reasoning effort max) manager with the teacher prompt.",
+        description="DeepSeek-v4-flash (reasoning effort max) manager with the shared Decomposer prompt.",
         manager_backend="openrouter",
         manager_model_id=DEEPSEEK_V4_FLASH_MODEL_ID,
-        prompt_profile="teacher",
         pool=TRAIN_POOL,
         manager_extra_body={"reasoning": {"effort": "max"}},
         concurrency=4,
@@ -254,12 +248,11 @@ EXPERIMENTS: tuple[Tau2Experiment, ...] = (
         name="qwen38_flash_thinking_low_teacher_qwen35_4b_unlooped",
         description=(
             "Qwen3.8 Flash Next (thinking, effort low, no presence penalty) manager with the "
-            "teacher prompt; Qwen3.5-4B-unlooped non-thinking subagents on their recommended "
+            "shared Decomposer prompt; Qwen3.5-4B-unlooped non-thinking subagents on their recommended "
             "sampling. SFT teacher traces."
         ),
         manager_backend="llm_proxy",
         manager_model_id=QWEN38_FLASH_MODEL_ID,
-        prompt_profile="teacher",
         pool=TRAIN_POOL,
         manager_reasoning_mode="thinking",
         manager_reasoning_effort="low",
@@ -279,7 +272,6 @@ EXPERIMENTS: tuple[Tau2Experiment, ...] = (
         ),
         manager_backend="llm_proxy",
         manager_model_id=QWEN38_FLASH_MODEL_ID,
-        prompt_profile="teacher",
         pool=BROAD_POOL,
         manager_reasoning_mode="non_thinking",
         manager_preset=QWEN38_FLASH_NON_THINKING_PRESET,
@@ -289,10 +281,9 @@ EXPERIMENTS: tuple[Tau2Experiment, ...] = (
     ),
     Tau2Experiment(
         name="qwen35_4b_base_student",
-        description="Untuned Qwen3.5-4B manager with the student prompt.",
+        description="Untuned Qwen3.5-4B manager with the shared Decomposer prompt.",
         manager_backend="local_vllm",
         manager_model_id="decomposer/qwen35-4b-base-manager",
-        prompt_profile="student",
         pool=EVAL_POOL,
         manager_reasoning_mode="non_thinking",
         manager_sampling=QWEN35_GENERAL_NON_THINKING,
@@ -303,7 +294,6 @@ EXPERIMENTS: tuple[Tau2Experiment, ...] = (
         description="Qwen3.5-4B manager SFT'd on the v5 student-prompt release (no tau2 data).",
         manager_backend="local_vllm",
         manager_model_id="decomposer/qwen35-4b-sft-student",
-        prompt_profile="student",
         pool=EVAL_POOL,
         manager_reasoning_mode="non_thinking",
         manager_sampling=QWEN35_GENERAL_NON_THINKING,
@@ -312,12 +302,11 @@ EXPERIMENTS: tuple[Tau2Experiment, ...] = (
     Tau2Experiment(
         name="qwen35_4b_student_checkpoint",
         description=(
-            "Any Qwen3.5-4B student-prompt manager checkpoint (`run.py --manager-checkpoint`), "
+            "Any Qwen3.5-4B manager checkpoint (`run.py --manager-checkpoint`), "
             "with evaluation sampling: SFT checkpoint evaluations."
         ),
         manager_backend="local_vllm",
         manager_model_id="decomposer/qwen35-4b-student",
-        prompt_profile="student",
         pool=EVAL_POOL,
         manager_reasoning_mode="non_thinking",
         manager_sampling=QWEN35_GENERAL_NON_THINKING,

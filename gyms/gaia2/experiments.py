@@ -285,7 +285,6 @@ DecomposerWorkerBackend = Literal["local_vllm", "llm_proxy"]
 # `reasoning.effort` for an llm_proxy manager on the Responses API, where the proxy
 # ignores chat_template_kwargs (see gyms/tau2_gym/experiments.py).
 ReasoningEffort = Literal["none", "low", "medium", "high", "xhigh"]
-DecomposerPromptProfile = Literal["student", "teacher"]
 # "are_native": workers get ARE's native agent system prompt for the scenario
 # (gyms/gaia2/worker_prompt.py); "legacy": the worker text used before it.
 WorkerSystemPrompt = Literal["are_native", "legacy"]
@@ -400,7 +399,6 @@ class DecomposerExperiment:
     worker_upstream_url_env: str | None = None
     worker_api_key_env: str | None = None
     worker_verify_tls: bool = True
-    prompt_profile: DecomposerPromptProfile = "student"
     manager_prompt_addendum_profile: Gaia2ManagerPromptAddendumProfile | None = None
     worker_system_prompt: WorkerSystemPrompt = "are_native"
     simulated_time: SimulatedTime = "frozen_turn"
@@ -802,7 +800,6 @@ DEEPSEEK_GEMMA_EXPERIMENT = DecomposerExperiment(
     name="deepseek-v4-flash-0731-teacher-gemma4-e4b-thinking",
     worker_checkpoint=GEMMA4_E4B_BASE,
     manager_backend="openrouter",
-    prompt_profile="teacher",
     num_gpus=1,
     manager_served_name="deepseek/deepseek-v4-flash-0731",
     manager_thinking=True,
@@ -989,13 +986,11 @@ QWEN35_BASE_DECOMPOSER_EXPERIMENT = DecomposerExperiment(
 QWEN35_BASE_TEACHER_DECOMPOSER_EXPERIMENT = replace(
     QWEN35_BASE_DECOMPOSER_EXPERIMENT,
     name="qwen35-4b-base-non-thinking-teacher-qwen35-4b-non-thinking",
-    prompt_profile="teacher",
 )
 DEEPSEEK_QWEN_EXPERIMENT = DecomposerExperiment(
     name="deepseek-v4-flash-0731-teacher-qwen35-4b-non-thinking",
     worker_checkpoint=QWEN35_4B_BASE,
     manager_backend="openrouter",
-    prompt_profile="teacher",
     num_gpus=1,
     manager_served_name="deepseek/deepseek-v4-flash-0731",
     manager_thinking=True,
@@ -1079,7 +1074,6 @@ QWEN36_TEXT_DEFAULTS_DECOMPOSER_EXPERIMENT = replace(
     manager_response_tool_parser="qwen3_xml",
     manager_reasoning_mode="non_thinking",
     manager_verify_tls=False,
-    prompt_profile="teacher",
     concurrency=16,
     max_model_len=131072,
     temperature=_QWEN36_NON_THINKING_SAMPLING.temperature,
@@ -1112,7 +1106,6 @@ QWEN36_THINKING_TEXT_DEFAULTS_DECOMPOSER_EXPERIMENT = replace(
     manager_response_tool_parser="qwen3_xml",
     manager_reasoning_mode="thinking",
     manager_verify_tls=False,
-    prompt_profile="teacher",
     concurrency=16,
     max_model_len=131072,
     temperature=_QWEN36_THINKING_SAMPLING.temperature,
@@ -1152,7 +1145,6 @@ QWEN38_LOW_QWEN35_UNLOOPED_EXPERIMENT = DecomposerExperiment(
     worker_upstream_url_env="LLM_PROXY_URL",
     worker_api_key_env="LLM_PROXY_MASTER_KEY",
     worker_verify_tls=False,
-    prompt_profile="teacher",
     num_gpus=0,
     manager_served_name=QWEN38_FLASH_MODEL_ID,
     worker_served_name=QWEN35_4B_UNLOOPED_MODEL_ID,
@@ -1186,7 +1178,6 @@ DEEPSEEK_GEMMA4_26B_NON_THINKING_EXPERIMENT = DecomposerExperiment(
     name="deepseek-v4-flash-0731-teacher-gemma4-26b-a4b-non-thinking",
     worker_checkpoint=GEMMA4_26B_A4B_BASE,
     manager_backend="openrouter",
-    prompt_profile="teacher",
     num_gpus=1,
     manager_served_name="deepseek/deepseek-v4-flash-0731",
     manager_thinking=True,
@@ -1208,7 +1199,6 @@ GEMMA4_26B_SHARED_DECOMPOSER_EXPERIMENT = DecomposerExperiment(
     ),
     worker_checkpoint=GEMMA4_26B_A4B_BASE,
     manager_checkpoint=GEMMA4_26B_A4B_BASE,
-    prompt_profile="teacher",
     num_gpus=1,
     manager_served_name="google/gemma-4-26B-A4B-it",
     worker_served_name="google/gemma-4-26B-A4B-it",
@@ -1232,7 +1222,6 @@ GEMMA4_31B_SHARED_DECOMPOSER_EXPERIMENT = DecomposerExperiment(
     ),
     worker_checkpoint=GEMMA4_31B_BASE,
     manager_checkpoint=GEMMA4_31B_BASE,
-    prompt_profile="teacher",
     num_gpus=1,
     manager_served_name="google/gemma-4-31B-it",
     worker_served_name="google/gemma-4-31B-it",
@@ -1276,7 +1265,6 @@ GEMMA4_E4B_SFT_MIXED_V3_DECOMPOSER_EXPERIMENT = DecomposerExperiment(
     name=("gemma4-e4b-sft-mixed-v3-non-thinking-gemma4-26b-a4b-non-thinking"),
     worker_checkpoint=GEMMA4_26B_A4B_BASE,
     manager_checkpoint=GEMMA4_E4B_SFT_MIXED_V3_VLLM,
-    prompt_profile="teacher",
     num_gpus=2,
     manager_served_name="decomposer/gemma4-e4b-sft-mixed-v3",
     worker_served_name="google/gemma-4-26B-A4B-it",
@@ -1297,7 +1285,6 @@ GEMMA4_E2B_SFT_MIXED_V3_DECOMPOSER_EXPERIMENT = DecomposerExperiment(
     worker_checkpoint=GEMMA4_26B_A4B_BASE,
     manager_checkpoint=GEMMA4_E2B_SFT_MIXED_V3_VLLM,
     # The SFT release was built with the teacher prompt, so evaluate under it.
-    prompt_profile="teacher",
     num_gpus=2,
     manager_served_name="decomposer/gemma4-e2b-sft-mixed-v3",
     worker_served_name="google/gemma-4-26B-A4B-it",
@@ -1320,7 +1307,6 @@ QWEN35_SFT_MIXED_V3_DECOMPOSER_EXPERIMENT = DecomposerExperiment(
     worker_checkpoint=GEMMA4_26B_A4B_BASE,
     manager_checkpoint=QWEN35_4B_SFT_MIXED_V3,
     # The SFT release was built with the teacher prompt, so evaluate under it.
-    prompt_profile="teacher",
     num_gpus=2,
     manager_served_name="decomposer/qwen35-4b-sft-mixed-v3",
     worker_served_name="google/gemma-4-26B-A4B-it",
@@ -1371,14 +1357,13 @@ QWEN35_SFT_MIXED_V3_E2B_DECOMPOSER_EXPERIMENT = replace(
 )
 
 # The student-prompt release. Identical to the trio above except for the
-# checkpoint and prompt_profile: same worker sampling, same budgets, so a
+# checkpoint: same worker sampling, same budgets, so a
 # difference in results is attributable to what the manager was trained under.
 QWEN35_SFT_STUDENT_DECOMPOSER_EXPERIMENT = replace(
     QWEN35_SFT_MIXED_V3_DECOMPOSER_EXPERIMENT,
     name="qwen35-4b-sft-student-non-thinking-gemma4-26b-a4b-non-thinking",
     manager_checkpoint=QWEN35_4B_SFT_MIXED_V3_STUDENT,
     manager_served_name="decomposer/qwen35-4b-sft-student",
-    prompt_profile="student",
     manager_port=8070,
     worker_port=8071,
     service_port=8152,
@@ -1445,7 +1430,6 @@ QWEN35_BASE_E2B_DECOMPOSER_EXPERIMENT = DecomposerExperiment(
 QWEN35_BASE_TEACHER_E2B_DECOMPOSER_EXPERIMENT = replace(
     QWEN35_BASE_E2B_DECOMPOSER_EXPERIMENT,
     name="qwen35-4b-base-non-thinking-teacher-gemma4-e2b-non-thinking",
-    prompt_profile="teacher",
     manager_port=8048,
     worker_port=8049,
     service_port=8147,
@@ -1486,7 +1470,6 @@ QWEN35_BASE_E4B_DECOMPOSER_EXPERIMENT = DecomposerExperiment(
 QWEN35_BASE_TEACHER_E4B_DECOMPOSER_EXPERIMENT = replace(
     QWEN35_BASE_E4B_DECOMPOSER_EXPERIMENT,
     name="qwen35-4b-base-non-thinking-teacher-gemma4-e4b-non-thinking",
-    prompt_profile="teacher",
     manager_port=8052,
     worker_port=8053,
     service_port=8149,
@@ -1527,7 +1510,6 @@ QWEN35_BASE_26B_A4B_DECOMPOSER_EXPERIMENT = DecomposerExperiment(
 QWEN35_BASE_TEACHER_26B_A4B_DECOMPOSER_EXPERIMENT = replace(
     QWEN35_BASE_26B_A4B_DECOMPOSER_EXPERIMENT,
     name="qwen35-4b-base-non-thinking-teacher-gemma4-26b-a4b-non-thinking",
-    prompt_profile="teacher",
     manager_port=8056,
     worker_port=8057,
     service_port=8151,
@@ -1537,7 +1519,6 @@ DEEPSEEK_PRO_GEMMA4_26B_NON_THINKING_EXPERIMENT = DecomposerExperiment(
     name="deepseek-v4-pro-0813-teacher-gemma4-26b-a4b-non-thinking",
     worker_checkpoint=GEMMA4_26B_A4B_BASE,
     manager_backend="openrouter",
-    prompt_profile="teacher",
     num_gpus=1,
     manager_served_name="deepseek/deepseek-v4-pro-0813",
     manager_thinking=True,
@@ -1809,13 +1790,11 @@ def preparation_manifest(
 def run_name(
     experiment: Experiment,
     num_repeats: int,
-    *,
-    prompt_profile: DecomposerPromptProfile | None = None,
-) -> str:
+    ) -> str:
     if num_repeats < 1:
         raise ValueError("num_repeats must be at least 1")
     name = experiment.name if num_repeats == 1 else f"{experiment.name}-n{num_repeats}"
-    return name if prompt_profile is None else f"{name}-prompt-{prompt_profile}"
+    return name
 
 
 def output_dir(
@@ -1824,7 +1803,6 @@ def output_dir(
     limit: int | None = None,
     *,
     partition: Partition = "full",
-    prompt_profile: DecomposerPromptProfile | None = None,
     domain: Gaia2Domain = DOMAIN,
 ) -> Path:
     spec = get_domain_spec(domain)
@@ -1833,7 +1811,7 @@ def output_dir(
     root = RESULTS_ROOT / SPLIT / spec.name
     if partition != "full":
         root = root / "partitions" / spec.split_manifest_name / partition
-    base = root / run_name(experiment, num_repeats, prompt_profile=prompt_profile)
+    base = root / run_name(experiment, num_repeats)
     return base if limit is None else base / f"smoke_{limit}"
 
 
@@ -1843,7 +1821,6 @@ def completion_marker(
     limit: int | None = None,
     *,
     partition: Partition = "full",
-    prompt_profile: DecomposerPromptProfile | None = None,
     domain: Gaia2Domain = DOMAIN,
 ) -> Path:
     return (
@@ -1852,7 +1829,6 @@ def completion_marker(
             num_repeats,
             limit,
             partition=partition,
-            prompt_profile=prompt_profile,
             domain=domain,
         )
         / ".eval_done.json"
@@ -1863,9 +1839,7 @@ def trace_run_name(
     experiment: Experiment,
     num_repeats: int,
     rollout_offset: int,
-    *,
-    prompt_profile: DecomposerPromptProfile | None = None,
-) -> str:
+    ) -> str:
     if num_repeats < 1:
         raise ValueError("num_repeats must be at least 1")
     if rollout_offset < 0:
@@ -1873,7 +1847,7 @@ def trace_run_name(
     first = rollout_offset + 1
     last = rollout_offset + num_repeats
     name = f"{experiment.name}-r{first:02d}-r{last:02d}"
-    return name if prompt_profile is None else f"{name}-prompt-{prompt_profile}"
+    return name
 
 
 def trace_output_dir(
@@ -1883,7 +1857,6 @@ def trace_output_dir(
     partition: Partition,
     limit: int | None = None,
     *,
-    prompt_profile: DecomposerPromptProfile | None = None,
     domain: Gaia2Domain = DOMAIN,
 ) -> Path:
     spec = get_domain_spec(domain)
@@ -1897,7 +1870,6 @@ def trace_output_dir(
             experiment,
             num_repeats,
             rollout_offset,
-            prompt_profile=prompt_profile,
         )
     )
     return base if limit is None else base / f"smoke_{limit}"
@@ -1910,7 +1882,6 @@ def trace_completion_marker(
     partition: Partition,
     limit: int | None = None,
     *,
-    prompt_profile: DecomposerPromptProfile | None = None,
     domain: Gaia2Domain = DOMAIN,
 ) -> Path:
     return (
@@ -1920,7 +1891,6 @@ def trace_completion_marker(
             rollout_offset,
             partition,
             limit,
-            prompt_profile=prompt_profile,
             domain=domain,
         )
         / ".trace_done.json"

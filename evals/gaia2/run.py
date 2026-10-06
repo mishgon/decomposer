@@ -62,12 +62,11 @@ def report(
 def output_dir(args: argparse.Namespace) -> Path:
     """The directory `gyms/gaia2/run.py` writes for these evaluation arguments."""
     spec = get_domain_spec(args.domain)
-    experiment = runner.select_prompt_profile(get_experiment(args.experiment), args.prompt_profile)
+    experiment = get_experiment(args.experiment)
     return runner.selected_output_dir(
         experiment,
         args,
         domain=spec.name,
-        prompt_profile=args.prompt_profile,
         ports=runner.Gaia2PortLayout(args.port_offset),
     )
 

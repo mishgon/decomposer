@@ -6,7 +6,6 @@ dataset:
 
 policy:
   id: decomposer-teacher
-  system_prompt_profile: teacher
   subagent_types:
     - id: qwen35_4b_non_thinking
       description: General-purpose tool-calling agent with access to the environment tools.

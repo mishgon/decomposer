@@ -9,7 +9,7 @@ import pytest
 from sft.gaia2.adapter import read_gaia2_source
 from sft.builder import load_build_spec
 from sft.schema import SelectionSpec, SourceSpec
-from decomposer.chat_tools import build_decomposer_chat_tools
+from sft.chat_tools import build_decomposer_chat_tools
 from decomposer.prompts import DECOMPOSER_SYSTEM_PROMPT, PARALLEL_WAIT_CALL_ERROR
 
 
@@ -78,7 +78,7 @@ def _ai(content: list[dict], *calls: dict) -> dict:
 def _manager_messages() -> list[dict]:
     responses = [
         {
-            "subagent_id": subagent_id,
+            "agent_id": subagent_id,
             "subagent_run_id": f"run-{subagent_id}",
             "status": "responded",
             "response": f"Did {subagent_id}.",
@@ -96,15 +96,15 @@ def _manager_messages() -> list[dict]:
                 },
                 {"type": "text", "text": "I will delegate."},
             ],
-            _call("new-a", "new", subagent_type_id="gaia2_worker"),
-            _call("new-b", "new", subagent_type_id="gaia2_worker"),
+            _call("new-a", "new", agent_type_id="gaia2_worker"),
+            _call("new-b", "new", agent_type_id="gaia2_worker"),
         ),
-        _tool("new-b", "new", '{"subagent_id": "b"}'),
-        _tool("new-a", "new", '{"subagent_id": "a"}'),
+        _tool("new-b", "new", '{"agent_id": "b"}'),
+        _tool("new-a", "new", '{"agent_id": "a"}'),
         _ai(
             [],
-            _call("run-a", "run", subagent_id="a", prompt="Do A."),
-            _call("run-b", "run", subagent_id="b", prompt="Do B."),
+            _call("run-a", "run", agent_id="a", prompt="Do A."),
+            _call("run-b", "run", agent_id="b", prompt="Do B."),
             _call("early-wait", "wait"),
         ),
         _tool("early-wait", "wait", PARALLEL_WAIT_CALL_ERROR),
@@ -119,14 +119,11 @@ def _manager_messages() -> list[dict]:
 def _sidecar(
     scenario_id: str,
     native_run_number: int | None,
-    *,
-    prompt_profile: str | None = "teacher",
-) -> dict:
+    ) -> dict:
     return {
         "scenario_id": scenario_id,
         "run_number": native_run_number,
         "configuration": {
-            "decomposer_system_prompt_profile": prompt_profile,
             "model_configuration": {
                 "manager": {
                     "served_name": "deepseek/deepseek-v4-flash-0731",
@@ -187,7 +184,7 @@ def _read(source: SourceSpec):
     tools = build_decomposer_chat_tools(
         [
             {
-                "subagent_type_id": "qwen35_4b_non_thinking",
+                "agent_type_id": "qwen35_4b_non_thinking",
                 "assistant_id": "qwen35_4b_non_thinking",
                 "description": "Fixture worker.",
             }
@@ -203,7 +200,7 @@ def _read(source: SourceSpec):
 
 
 def _write_evaluation_source(
-    source_dir: Path, *, prompt_profile: str | None = "teacher"
+    source_dir: Path
 ) -> None:
     rows: list[dict] = []
     for universe in (21, 25):
@@ -229,7 +226,7 @@ def _write_evaluation_source(
                         / "decomposer_sidecars"
                         / f"{scenario_id}__run{run_number}.json",
                         _sidecar(
-                            scenario_id, run_number, prompt_profile=prompt_profile
+                            scenario_id, run_number
                         ),
                     )
     _write_jsonl(source_dir / "output.jsonl", rows)
@@ -238,7 +235,6 @@ def _write_evaluation_source(
         {
             "state": "complete",
             "kind": "decomposer",
-            "decomposer_system_prompt_profile": "teacher",
             "num_repeats": 2,
             "decomposer_commit": "decomposer-revision",
             "gaia2_commit": "gaia2-revision",
@@ -283,7 +279,7 @@ def test_gaia2_evaluation_filters_binary_reward_and_holdout(tmp_path: Path) -> N
     assert new_messages[0]["teacher_reasoning"] == "Delegate."
     assert new_messages[0]["content"] == "I will delegate."
     assert all(
-        message["tool_calls"][0]["function"]["arguments"]["subagent_type_id"]
+        message["tool_calls"][0]["function"]["arguments"]["agent_type_id"]
         == "qwen35_4b_non_thinking"
         for message in new_messages
     )
@@ -298,23 +294,6 @@ def test_gaia2_evaluation_filters_binary_reward_and_holdout(tmp_path: Path) -> N
         "tool_calls": 1,
         "assistant_turns": 0,
     }
-
-
-@pytest.mark.parametrize(
-    ("prompt_profile", "eligible"),
-    [("teacher", 1), ("student", 1), (None, 1), ("unknown", 0)],
-)
-def test_gaia2_accepts_known_prompt_profiles(
-    tmp_path: Path, prompt_profile: str | None, eligible: int
-) -> None:
-    split = _split_manifest(tmp_path / "split.json")
-    source_dir = tmp_path / "source"
-    _write_evaluation_source(source_dir, prompt_profile=prompt_profile)
-
-    result = _read(_source(source_dir, split))
-
-    assert result.counts["eligible"] == eligible
-    assert result.counts["excluded_invalid_metadata"] == 1 - eligible
 
 
 def test_gaia2_trace_manifest_requires_terminal_full_grid(tmp_path: Path) -> None:

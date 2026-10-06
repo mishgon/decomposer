@@ -18,7 +18,7 @@ import urllib.error
 import urllib.request
 from collections import Counter
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -62,9 +62,6 @@ from gyms.gaia2.partition import (  # noqa: E402
 )
 from gyms.gaia2.prompts import compose_decomposer_system_prompt  # noqa: E402
 from gyms.gaia2.staging import git  # noqa: E402
-from decomposer.prompt_profiles import (  # noqa: E402
-    DECOMPOSER_PROMPT_PROFILES,
-)
 
 
 MAX_TCP_PORT = 65535
@@ -133,21 +130,10 @@ class Gaia2PortLayout:
 DEFAULT_PORT_LAYOUT = Gaia2PortLayout()
 
 
-def select_prompt_profile(
-    experiment: Experiment, requested_profile: str | None
-) -> Experiment:
-    if requested_profile is None:
-        return experiment
-    if not isinstance(experiment, DecomposerExperiment):
-        raise ValueError("--prompt-profile is only valid for Decomposer experiments")
-    return replace(experiment, prompt_profile=requested_profile)
-
-
 def prompt_sha256(experiment: Experiment) -> str | None:
     if not isinstance(experiment, DecomposerExperiment):
         return None
     prompt = compose_decomposer_system_prompt(
-        experiment.prompt_profile,
         experiment.manager_prompt_addendum_profile,
     )
     return hashlib.sha256(prompt.encode("utf-8")).hexdigest()
@@ -268,11 +254,6 @@ def run_identity(
         "limit": limit,
         "port_offset": ports.offset,
         "port_layout": ports.as_dict(experiment),
-        "decomposer_system_prompt_profile": (
-            experiment.prompt_profile
-            if isinstance(experiment, DecomposerExperiment)
-            else None
-        ),
         "decomposer_system_prompt_addendum_profile": (
             experiment.manager_prompt_addendum_profile
             if isinstance(experiment, DecomposerExperiment)
@@ -362,7 +343,6 @@ def selected_output_dir(
     args: argparse.Namespace,
     *,
     domain: Gaia2Domain,
-    prompt_profile: str | None,
     ports: Gaia2PortLayout,
 ) -> Path:
     """Choose an isolated default artifact path without altering explicit paths."""
@@ -376,7 +356,6 @@ def selected_output_dir(
             args.rollout_offset,
             args.partition,
             None,
-            prompt_profile=prompt_profile,
             domain=domain,
         )
     else:
@@ -385,7 +364,6 @@ def selected_output_dir(
             args.num_repeats,
             None,
             partition=args.partition,
-            prompt_profile=prompt_profile,
             domain=domain,
         )
     if ports.offset:
@@ -1575,7 +1553,6 @@ def _runtime_configs(
     service = {
         "manager": manager,
         "max_model_len": experiment.max_model_len,
-        "decomposer_system_prompt_profile": experiment.prompt_profile,
         "decomposer_system_prompt_addendum_profile": (
             experiment.manager_prompt_addendum_profile
         ),
@@ -1865,11 +1842,6 @@ def _dry_plan(
         "limit": limit,
         "port_offset": ports.offset,
         "port_layout": ports.as_dict(experiment),
-        "decomposer_system_prompt_profile": (
-            experiment.prompt_profile
-            if isinstance(experiment, DecomposerExperiment)
-            else None
-        ),
         "decomposer_system_prompt_addendum_profile": (
             experiment.manager_prompt_addendum_profile
             if isinstance(experiment, DecomposerExperiment)
@@ -1962,10 +1934,7 @@ def execute_trace_generation(local_repo: Path, args: argparse.Namespace) -> int:
     spec = get_domain_spec(getattr(args, "domain", DOMAIN))
     if not spec.supports_trace_generation:
         raise ValueError(f"Gaia2 {spec.name} does not support trace generation")
-    requested_prompt_profile = getattr(args, "prompt_profile", None)
-    experiment = select_prompt_profile(
-        get_experiment(args.experiment), requested_prompt_profile
-    )
+    experiment = get_experiment(args.experiment)
     if not isinstance(experiment, DecomposerExperiment):
         raise ValueError("Gaia2 trace generation requires a Decomposer experiment")
     check_simulated_time(experiment, spec.name)
@@ -1980,7 +1949,6 @@ def execute_trace_generation(local_repo: Path, args: argparse.Namespace) -> int:
         experiment,
         args,
         domain=spec.name,
-        prompt_profile=requested_prompt_profile,
         ports=ports,
     )
     logical_rollout_numbers = tuple(
@@ -2325,10 +2293,7 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
         raise ValueError("Gaia2 evaluation supports only full or pinned test data")
     if args.rollout_offset:
         raise ValueError("--rollout-offset is only valid for trace generation")
-    requested_prompt_profile = getattr(args, "prompt_profile", None)
-    experiment = select_prompt_profile(
-        get_experiment(args.experiment), requested_prompt_profile
-    )
+    experiment = get_experiment(args.experiment)
     check_simulated_time(experiment, spec.name)
     ports = Gaia2PortLayout(getattr(args, "port_offset", 0))
     ports.as_dict(experiment)
@@ -2337,7 +2302,6 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
         experiment,
         args,
         domain=spec.name,
-        prompt_profile=requested_prompt_profile,
         ports=ports,
     )
     if args.dry:
@@ -2653,7 +2617,6 @@ def build_parser() -> argparse.ArgumentParser:
         default=0,
         help="add this value to every local GAIA2 service port",
     )
-    parser.add_argument("--prompt-profile", choices=DECOMPOSER_PROMPT_PROFILES)
     parser.add_argument("--rollout-offset", type=nonnegative_int, default=0)
     parser.add_argument("--limit", type=positive_int)
     parser.add_argument("--dry", "--dry-run", action="store_true")

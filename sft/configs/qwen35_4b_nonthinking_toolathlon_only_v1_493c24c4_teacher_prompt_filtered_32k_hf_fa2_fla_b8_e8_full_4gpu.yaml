@@ -9,7 +9,6 @@ data:
   train_file: /home/sukhorukov/decomposer_artifacts/datasets/sft/decomposer-toolathlon-gym-deepseek-qwen35-4b-nonthinking/candidate-v1-493c24c4-teacher-prompt-pass-or-qgt90-32k/train.jsonl
   validation_file: /home/sukhorukov/decomposer_artifacts/datasets/sft/decomposer-toolathlon-gym-deepseek-qwen35-4b-nonthinking/candidate-v1-493c24c4-teacher-prompt-pass-or-qgt90-32k/validation.jsonl
   manifest_file: /home/sukhorukov/decomposer_artifacts/datasets/sft/decomposer-toolathlon-gym-deepseek-qwen35-4b-nonthinking/candidate-v1-493c24c4-teacher-prompt-pass-or-qgt90-32k/manifest.json
-  expected_system_prompt_profile: teacher
   include_reasoning: false
   require_prepared_tokenization: true
   error_on_truncation: true

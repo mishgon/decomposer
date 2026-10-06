@@ -12,7 +12,6 @@ dataset:
 # before tokenization, so the two releases stay directly comparable.
 policy:
   id: decomposer-default
-  system_prompt_profile: student
   subagent_types:
     - id: subagent_non_thinking
       description: General-purpose tool-calling agent with access to the environment tools.

@@ -33,14 +33,9 @@ The local runner does not submit an MLSpace job. It starts the selected model
 services, agent service, and Gym servers on the current machine, performs one
 Gym evaluation, validates the output, and stops every child process.
 
-Every run declares its intent explicitly. `--purpose trace-generation` selects
-the long teacher prompt and is available only for Decomposer experiments;
-`--purpose evaluation` normally selects the short student prompt. The
-explicitly named Qwen3.6 text-default teacher profiles keep the teacher prompt
-for evaluation as part of their experiment identity. Pass
-`--prompt-profile teacher` or `--prompt-profile student` to override that
-default for a Decomposer run. Explicit overrides use a distinct output and job
-identity. Simple-agent evaluations are unaffected by prompt selection.
+Every run declares its intent explicitly with `--purpose trace-generation` or
+`--purpose evaluation`. Both use `decomposer.prompts.DECOMPOSER_SYSTEM_PROMPT`.
+Trace generation is available only for Decomposer experiments.
 
 The matched text-default profiles are:
 
