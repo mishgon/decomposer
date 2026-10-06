@@ -85,6 +85,29 @@ SHA-256 in the immutable manifest. Training configs may set
 different prompt. Hidden teacher reasoning remains controlled separately by
 `data.include_reasoning`.
 
+### Qwen3.8 tau2 + Workplace release for the unloop student (current core)
+
+The first release of the current core trains the non-thinking Qwen3.5-4B unloop
+checkpoint on the 2026-10-06 Qwen3.8-Flash non-thinking teacher traces: tau2
+`decomposer_broad_v1` and the Workplace train split, one rollout per task, with
+Qwen3.5-4B-unlooped thinking subagents. Build it on Hertz-2 from a clean checkout
+of the committed specification:
+
+```bash
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 .venv/bin/python -m sft.prepare \
+  --spec sft/specs/decomposer_mixed_qwen38_qwen35_4b_unloop_nonthinking_v1_32k.yaml \
+  --output-root /mnt/share14T-2/sukhorukov/decomposer_artifacts/datasets/sft
+```
+
+Of 6,098 rollouts, 3,976 have reward `1`. Each keeps its gym's own tool schema
+and the teacher prompt, together with the mistakes the core answered (for
+example, 36 calls of non-Decomposer tools and 7 early answers). The 32K token
+limit excludes 3 tau2 traces, producing 3,973 records (2,985 tau2, 988
+Workplace): 3,578 train and 395 validation. Of 3,834 prompt groups, 135 tau2
+prompts appear in both a domain and its `_dsh` implementation; each such pair
+stays on one side of the split. The median record has 7.3K tokens, and 20% of
+the tokens are supervised.
+
 ### Qwen Workplace + Toolathlon final all-reward release
 
 The final mixed Qwen release intentionally keeps both full- and non-full-reward
