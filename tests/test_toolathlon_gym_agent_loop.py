@@ -43,7 +43,7 @@ def test_constructor_failure_still_saves_trace_and_cleans_up(monkeypatch, episod
 
 
 def test_partial_timeout_is_scored_after_worker_shutdown(monkeypatch, episode):
-    capture = AsyncMock(return_value=({"subagent_shutdown": [{"status": "interrupted"}]}, TimeoutError()))
+    capture = AsyncMock(return_value=({"agent_shutdown": [{"status": "interrupted"}]}, TimeoutError()))
     monkeypatch.setattr(loop, "invoke_and_capture", capture)
     result = run()
     assert result.reward_score == .4
@@ -54,7 +54,7 @@ def test_partial_timeout_is_scored_after_worker_shutdown(monkeypatch, episode):
 
 def test_active_worker_prevents_scoring(monkeypatch, episode):
     monkeypatch.setattr(loop, "invoke_and_capture", AsyncMock(return_value=(
-        {"subagent_shutdown_error": "still running"}, RuntimeError("shutdown"))))
+        {"agent_shutdown_error": "still running"}, RuntimeError("shutdown"))))
     with pytest.raises(RuntimeError, match="still running"):
         run()
     episode.score.assert_not_called()

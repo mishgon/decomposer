@@ -168,7 +168,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         ):
             sys.path.insert(0, str(toolathlon_root))
             from utils.aux_tools.overlong_tool_manager import make_overlong_tools
-            from gyms.toolathlon_gym.subagents.python_execute import make_python_execute
+            from gyms.toolathlon_gym.python_execute import make_python_execute
 
         if "python_execute" in needed_local_tools:
             tools.append(tool(make_python_execute(task_config["agent_workspace"])))

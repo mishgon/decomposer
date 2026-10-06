@@ -1,7 +1,7 @@
 # Toolathlon Gym OPD
 
-The SFT decomposer executes Gym tasks with hosted Qwen3.5-4B-unlooped
-non-thinking subagents. Hosted Qwen3.8 Flash Next scores the exact student token
+The student executes Gym tasks with main's hosted Qwen3.5-4B-unlooped
+thinking agents and current Decomposer prompt. Hosted Qwen3.8 Flash Next scores the exact student token
 IDs. Only student-generated positions contribute to the distillation loss;
 tool observations and subagent reports are masked. Native reward measures
 quality but does not enter the OPD loss.
@@ -33,6 +33,8 @@ Configure the shared [lmrouter tunnel](../../README.md). Export the private
 ```bash
 bash opd/toolathlon_gym/setup.sh
 export POLICY_GPU=2 ROLLOUT_GPU=3  # choose two actually free GPUs
+export MODEL_PATH="$HOME/models/Qwen3.5-4B"  # or decomposer-4b-sft for the paired comparison
+export RAY_TMPDIR=/mnt/share14T-2/matrosov/ray  # short path: Ray uses Unix sockets
 export RL_GYM_IMAGE=your-tested-gym-image
 export RL_DATA="$PWD/artifacts/training/toolathlon_gym_opd/smoke-data"
 export RL_ARTIFACTS="$PWD/artifacts/training/toolathlon_gym_opd/smoke-01"

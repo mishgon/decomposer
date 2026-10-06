@@ -13,8 +13,9 @@ from langgraph.errors import GraphRecursionError
 from verl.experimental.agent_loop.agent_loop import AgentLoopBase, AgentLoopOutput, register
 
 from decomposer.core import create_decomposer_agent
+from decomposer.agent_server import _cancel_agent_runs
+from langgraph_sdk import get_client
 from gyms.toolathlon_gym.episode import Episode
-from gyms.toolathlon_gym.run import invoke_and_capture
 from rl.toolathlon_gym.policy import PolicyTokens, RolloutBudgetExceeded, VerlChatModel
 
 
@@ -26,6 +27,23 @@ async def run_blocking(function):
     except asyncio.CancelledError:
         await operation
         raise
+
+
+async def invoke_and_capture(agent, inputs, config, timeout, agent_url):
+    """Keep the trainable policy local; stop remote workers before evaluation."""
+    error = None
+    try:
+        state = await asyncio.wait_for(agent.ainvoke(inputs, config=config), timeout)
+    except BaseException as exc:
+        error = exc
+        state = dict((await agent.aget_state(config)).values)
+    try:
+        async with get_client(url=agent_url, timeout=60) as client:
+            state["agent_shutdown"] = await asyncio.wait_for(_cancel_agent_runs(client), 60)
+    except BaseException as exc:
+        state["agent_shutdown_error"] = repr(exc)
+        error = error or exc
+    return state, error
 
 
 @register("toolathlon_decomposer")
@@ -53,20 +71,20 @@ class ToolathlonAgentLoop(AgentLoopBase):
                                   log_path=directory / "policy_calls.jsonl")
             agent = create_decomposer_agent(
                 decomposer_model=VerlChatModel(tokens=tokens),
-                subagent_types=[{
-                    "subagent_type_id": "qwen_3_5_4b_unlooped_non_thinking",
-                    "description": "Qwen3.5-4B unlooped non-thinking agent with all task tools.",
-                    "assistant_id": "qwen_3_5_4b_unlooped_non_thinking", "url": episode.url,
+                agent_types=[{
+                    "agent_type_id": "qwen_3_5_4b_thinking",
+                    "description": "Qwen3.5-4B thinking agent equipped with all the available tools.",
+                    "assistant_id": "qwen_3_5_4b_thinking", "url": episode.url,
                 }],
-                subagent_recursion_limit=410, checkpointer=InMemorySaver())
+                agent_recursion_limit=410, checkpointer=InMemorySaver())
             config = {"recursion_limit": 410, "configurable": {"thread_id": episode_id}}
             state, error = await invoke_and_capture(
                 agent, {"messages": [{"role": "user", "content": episode.runtime["task_config"]["task_str"]}]},
                 config, float(os.environ.get("RL_EPISODE_TIMEOUT", "2700")), episode.url)
             stop_reason = type(error).__name__ if error else "finished"
             # Never score a workspace that remote workers could still be changing.
-            if "subagent_shutdown_error" in state:
-                raise RuntimeError(state["subagent_shutdown_error"]) from error
+            if "agent_shutdown_error" in state:
+                raise RuntimeError(state["agent_shutdown_error"]) from error
             if isinstance(error, (asyncio.CancelledError, KeyboardInterrupt, SystemExit)):
                 raise error
             evaluation = await run_blocking(episode.score)
@@ -91,10 +109,11 @@ class ToolathlonAgentLoop(AgentLoopBase):
                              "data_source": kwargs.get("data_source"),
                              "elapsed_seconds": time.time() - started, "stop_reason": stop_reason,
                              "messages": [message_to_dict(m) for m in state.get("messages", [])],
-                             "subagent_runs": state.get("subagent_runs", {}),
-                             "subagents": state.get("subagents", {}),
-                             "subagent_shutdown": state.get("subagent_shutdown", []),
-                             "subagent_shutdown_error": state.get("subagent_shutdown_error")}
+                             "agent_runs": state.get("agent_runs", {}),
+                             "agents": state.get("agents", {}),
+                             "decomposer_agent_runs": state.get("decomposer_agent_runs", []),
+                             "agent_shutdown": state.get("agent_shutdown", []),
+                             "agent_shutdown_error": state.get("agent_shutdown_error")}
                     if tokens is not None:
                         trace.update(policy_calls=tokens.calls, prompt_ids=tokens.prompt_ids,
                                      response_ids=tokens.response_ids, response_mask=tokens.mask,

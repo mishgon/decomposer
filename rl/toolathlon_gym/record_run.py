@@ -8,13 +8,14 @@ import time
 from pathlib import Path
 
 from decomposer.models import create_model
-from gyms.toolathlon_gym.run import model_metadata
 
 
 def profile_metadata(profile):
     model = create_model(profile)
     try:
-        return {"profile": profile, **model_metadata(model)}
+        return {"profile": profile, "preserve_reasoning": model.preserve_reasoning,
+                **model.model_dump(include={"model_name", "temperature", "top_p", "extra_body",
+                                           "max_tokens", "max_retries"}, exclude_none=True)}
     finally:
         model.http_client.close()
         import asyncio
@@ -32,7 +33,7 @@ def main():
     metadata = {"pid": args.pid, "started_at": time.time() - age,
                 "process_start_ticks": ticks,
                 "gym_image": os.environ.get("RL_GYM_IMAGE"),
-                "subagent": profile_metadata("qwen_3_5_4b_unlooped_non_thinking"),
+                "subagent": profile_metadata("lmrouter/qwen_3_5_4b_unlooped_thinking"),
                 "model_path": os.environ.get("MODEL_PATH"),
                 "model_requested_path": os.environ.get("MODEL_CHECKPOINT_LINK"),
                 "data_dir": os.environ.get("RL_DATA"),
@@ -46,7 +47,7 @@ def main():
                 "revision": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
                 "policy_gpu": os.environ.get("CUDA_VISIBLE_DEVICES"), "overrides": overrides}
     if os.environ.get("RL_CONFIG_DIR", "").endswith("/opd/toolathlon_gym"):
-        metadata["teacher"] = profile_metadata("qwen_3_8_flash_next_non_thinking")
+        metadata["teacher"] = profile_metadata("lmrouter/qwen_3_8_flash_next_non_thinking")
     (args.directory / "run.json").write_text(json.dumps(metadata, indent=2))
     diff = subprocess.check_output(["git", "diff", "HEAD", "--", "rl/toolathlon_gym", "opd/toolathlon_gym",
                                     "gyms/toolathlon_gym", "src/decomposer"], text=True)

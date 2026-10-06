@@ -146,7 +146,7 @@ class Episode:
             env = {"PGHOST": address, "PG_HOST": address, "PGPORT": "5432",
                    "PGUSER": "eigent", "PGPASSWORD": "camel", "PGDATABASE": "toolathlon_gym",
                    "TOOLATHLON_TASK": self.task, "N_JOBS_PER_WORKER": "1000",
-                   "TOOLATHLON_SUBAGENT_CALL_LOG": "/artifacts/data/subagent_model_calls.jsonl",
+                   "TOOLATHLON_AGENT_CALL_LOG": "/artifacts/data/agent_model_calls.jsonl",
                    "PYTHONPATH": "/decomposer-source/src:/opt/decomposer",
                    "RAYON_NUM_THREADS": "2", "UV_CONCURRENT_BUILDS": "2",
                    "UV_CONCURRENT_INSTALLS": "2", "OMP_NUM_THREADS": "1",
@@ -159,9 +159,7 @@ class Episode:
                          *[arg for key, value in env.items() for arg in ("-e", f"{key}={value}")],
                          "-v", f"{data}:/artifacts/data",
                          "-v", f"{self.root}/src:/decomposer-source/src:ro",
-                         *[arg for name in ("graph.py", "webapp.py", "python_execute.py", "model_logging.py", "langgraph.json")
-                           for arg in ("-v", f"{self.root}/gyms/toolathlon_gym/subagents/{name}:"
-                                             f"/opt/decomposer/gyms/toolathlon_gym/subagents/{name}:ro")],
+                         "-v", f"{self.root}/gyms/toolathlon_gym:/opt/decomposer/gyms/toolathlon_gym:ro",
                          self.image)
             port = self.command("port", self.container, "2024/tcp").stdout.strip().rsplit(":", 1)[1]
             self.url = f"http://127.0.0.1:{port}"

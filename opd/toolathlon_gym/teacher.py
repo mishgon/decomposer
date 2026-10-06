@@ -38,7 +38,7 @@ def aligned_logprobs(response, token_ids, tokenizer=None):
 
 async def score(token_ids, *, tokenizer, output):
     """Score exact generated IDs; decoding/re-encoding can change BPE boundaries."""
-    model = create_model('qwen_3_8_flash_next_non_thinking')
+    model = create_model('lmrouter/qwen_3_8_flash_next_non_thinking')
     payload = {'model': model.model_name, 'prompt': token_ids, 'prompt_logprobs': 0,
                'max_tokens': 1, 'temperature': 1.0}
     started = time.time()
