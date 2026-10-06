@@ -253,7 +253,7 @@ def render_trace(trace: dict[str, Any]) -> str:
             f'y1="{y}" y2="{y}"/>',
             marker(
                 start, y - 26, "🧑" if is_decomposer else "🐶",
-                "Запрос пользователя" if is_decomposer else "Сообщение Decomposer", run["prompt"],
+                "Запрос пользователя" if is_decomposer else "Сообщение Моськи", run["prompt"],
             ),
         ]
         if collected:
@@ -262,7 +262,7 @@ def render_trace(trace: dict[str, Any]) -> str:
                 response = run.get("error") or ""
             bar.append(marker(
                 end, y + 26, "🐶" if is_decomposer else icons[agent_id],
-                "Ответ Decomposer" if is_decomposer else f"Ответ агента «{names[agent_id]}»", response,
+                "Ответ Моськи" if is_decomposer else f"Ответ агента «{names[agent_id]}»", response,
             ))
         else:
             bar.append(open_end(end, y))
@@ -271,9 +271,9 @@ def render_trace(trace: dict[str, Any]) -> str:
 
     parts = [
         f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 {height}" '
-        'aria-label="Временная шкала агентов Decomposer">',
+        'aria-label="Временная шкала агентов Моськи">',
         '<g class="decomposer"><text class="animal" x="24" y="107">🐶</text>'
-        '<text class="agent-name" x="60" y="105">Decomposer</text></g>',
+        '<text class="agent-name" x="60" y="105">Моська</text></g>',
     ]
     for i, agent in enumerate(agents):
         agent_id = agent["agent_id"]
@@ -334,7 +334,7 @@ def render_trace(trace: dict[str, Any]) -> str:
     return f"""<!doctype html>
 <html lang="ru">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Decomposer: трейс</title><style>{_STYLE}</style></head>
+<title>Моська: трейс</title><style>{_STYLE}</style></head>
 <body>
 <div class="chart">{chart}</div>
 <div id="tooltip" role="tooltip" tabindex="0" hidden></div>
