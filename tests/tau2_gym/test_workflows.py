@@ -29,7 +29,7 @@ def test_experiment_names_are_unique_and_pools_exist() -> None:
 
 
 def test_subagent_schema_matches_the_sft_releases() -> None:
-    """Teacher traces, SFT data, evals and OPD must share one subagent type and tool schema."""
+    """Teacher traces, SFT data and evals must share one subagent type and tool schema."""
     spec = yaml.safe_load(
         (REPO_ROOT / "sft/specs/decomposer_mixed_deepseek_qwen35_4b_nonthinking_v5_32k_student.yaml").read_text()
     )
@@ -70,21 +70,6 @@ def test_invalid_experiments_are_rejected(overrides: dict, message: str) -> None
 def _policy(config: dict) -> tuple[str, dict]:
     ((name, value),) = config["policy_model"]["responses_api_models"].items()
     return name, value
-
-
-def test_local_manager_config_records_token_ids_only_for_opd() -> None:
-    ports = run_module.PortLayout(offset=100).shifted()
-    opd = run_module.gym_config(get_experiment("opd_rollout"), ports)
-    name, policy = _policy(opd)
-    assert name == "vllm_model"
-    assert policy["base_url"] == "http://127.0.0.1:8126/v1"
-    assert policy["return_token_id_information"] is True
-    # OPD samples the raw policy: untruncated, unpenalised.
-    assert opd["responses_create_params"] == {"temperature": 1.0, "top_p": 1.0, "presence_penalty": 0.0}
-    assert policy["extra_body"]["top_k"] == -1
-
-    _, evaluation = _policy(run_module.gym_config(get_experiment("qwen35_4b_sft_mixed_v3_student"), ports))
-    assert evaluation["return_token_id_information"] is False
 
 
 def test_remote_manager_configs() -> None:
@@ -134,20 +119,6 @@ def test_manager_proxy_carries_the_experiment_sampling() -> None:
     assert "--response-tool-parser" not in run_module.remote_proxy_command(8143)
 
 
-def test_dry_run_plans_an_opd_round(capsys: pytest.CaptureFixture[str], tmp_path: Path) -> None:
-    checkpoint = tmp_path / "round_001"
-    run_module.main(
-        ["--experiment", "opd_rollout", "--manager-checkpoint", str(checkpoint),
-         "--tasks-per-domain", "2", "--num-repeats", "4", "--dry"]
-    )
-    plan = json.loads(capsys.readouterr().out)
-    assert plan["run_name"] == "opd_rollout-decomposer_train_v2-k2-n4"
-    assert plan["manager"][plan["manager"].index("serve") + 1] == str(checkpoint)
-    assert plan["dataset"].endswith(f"decomposer_train_v2-{plan['pool_sha256']}-k2.decomposer.jsonl")
-    assert plan["subagent_backend"] == "llm_proxy"
-    assert plan["subagent_model_id"] == "Qwen/Qwen3.5-4B-unlooped"
-
-
 def test_subagent_model_follows_the_backend_unless_given() -> None:
     assert run_module.resolve_subagent_model_id("llm_proxy", None) == "Qwen/Qwen3.5-4B-unlooped"
     assert run_module.resolve_subagent_model_id("local_vllm", None) == "Qwen/Qwen3.5-4B"
@@ -166,7 +137,7 @@ def test_remote_experiments_refuse_a_checkpoint(tmp_path: Path) -> None:
     with pytest.raises(SystemExit, match="remote manager"):
         run_module.resolve_checkpoint(get_experiment("qwen38_flash_teacher_thinking"), str(tmp_path))
     with pytest.raises(SystemExit, match="needs --manager-checkpoint"):
-        run_module.resolve_checkpoint(get_experiment("opd_rollout"), None)
+        run_module.resolve_checkpoint(get_experiment("qwen35_4b_student_checkpoint"), None)
 
 
 def test_checkpoint_fingerprint_changes_when_weights_are_rewritten(tmp_path: Path) -> None:

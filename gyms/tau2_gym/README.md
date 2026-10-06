@@ -101,11 +101,9 @@ config from it and writes it to `<run>/configuration/tau2_gym.yaml`.
 | `deepseek_v4_flash_teacher` | DeepSeek-v4-flash via OpenRouter (effort max) | teacher | train_v2 |
 | `qwen35_4b_base_student` | untuned Qwen3.5-4B, local vLLM | student | eval_v1 |
 | `qwen35_4b_sft_mixed_v3_student` | Qwen3.5-4B SFT (v5 student release), local vLLM | student | eval_v1 |
-| `opd_rollout` | the OPD round's checkpoint, local vLLM, untruncated sampling, token ids + logprobs | student | train_v2 |
 
 Every experiment exposes one subagent type, `subagent_non_thinking`, with the SFT
-releases' canonical description, so teacher traces, SFT data, student evals and OPD
-rollouts all see the same `new`/`fork`/`run`/`wait` schema.
+releases' canonical description, so teacher traces, SFT data and student evals all see the same `new`/`fork`/`run`/`wait` schema.
 
 Subagent sampling is Qwen3.5's general non-thinking preset (0.7/0.8/20, presence 1.5,
 no length cap) unless the experiment sets `subagent_sampling`. `run.py` passes it to
@@ -150,10 +148,6 @@ source ~/.secrets/decomposer.env      # LLM_PROXY_* (and OPENROUTER_API_KEY_DECO
 # evaluated in one command: the run, then metrics into <run>/eval_metrics.json
 .venv/bin/python -m evals.tau2_gym.run --experiment qwen35_4b_sft_mixed_v3_student \
   --tasks-per-domain 5 --num-repeats 3 --manager-gpu 6
-
-# OPD rollouts from a round's checkpoint (what opd/ drives)
-.venv/bin/python gyms/tau2_gym/run.py --experiment opd_rollout --manager-checkpoint <dir> \
-  --manager-gpu 5 --output-dir <round>/rollouts
 ```
 
 `--pool` overrides the experiment's pool and `--tasks-per-domain k` takes a

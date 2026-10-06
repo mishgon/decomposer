@@ -192,8 +192,7 @@ def checkpoint_fingerprint(checkpoint: Path) -> str:
     """Cheap identity for a served checkpoint: file names, sizes and mtimes.
 
     Hashing multi-GB weights on every run is too slow; this still changes whenever a
-    checkpoint is rewritten, which is what lets an OPD round prove its rollouts came
-    from the weights it just exported.
+    checkpoint is rewritten.
     """
     digest = hashlib.sha256()
     for path in sorted(p for p in checkpoint.rglob("*") if p.is_file()):

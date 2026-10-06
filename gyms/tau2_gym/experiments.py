@@ -37,7 +37,6 @@ from gyms.qwen_sampling import (
     QWEN38_NON_THINKING,
     QWEN38_TEACHER_THINKING,
     QWEN38_THINKING,
-    UNTRUNCATED_SAMPLING,
     QwenSamplingParams,
     SubagentSampling,
 )
@@ -54,7 +53,7 @@ LLM_PROXY_API_KEY_ENV = "LLM_PROXY_MASTER_KEY"
 
 # The id and description the SFT releases stamp into the `new` tool's type table
 # (policy.subagent_types in sft/specs). Using them here too means the teacher,
-# the SFT data, student evaluation and OPD rollouts all see one tool schema.
+# the SFT data and student evaluation all see one tool schema.
 SUBAGENT_TYPE_ID = "subagent_non_thinking"
 SUBAGENT_DESCRIPTION = "General-purpose tool-calling agent with access to the environment tools."
 SUBAGENT_ASSISTANT_ID = "qwen35_4b_non_thinking"
@@ -102,10 +101,10 @@ class Tau2Experiment:
     # openrouter only: provider request fields, e.g. reasoning effort.
     manager_extra_body: Mapping[str, Any] = field(default_factory=dict)
     # local_vllm only. None means the checkpoint is supplied at run time
-    # (`run.py --manager-checkpoint`), which is how the OPD loop serves each round.
+    # (`run.py --manager-checkpoint`).
     manager_checkpoint: Path | None = None
     # local_vllm only: Gym records prompt/generation token ids and logprobs on every
-    # manager turn (vllm_model.return_token_id_information), which OPD consumes.
+    # manager turn (vllm_model.return_token_id_information).
     return_token_ids: bool = False
     # None keeps Qwen3.5's general non-thinking preset (presence penalty 1.5, no cap).
     subagent_sampling: SubagentSampling | None = None
@@ -150,7 +149,7 @@ class Tau2Experiment:
         ):
             raise ValueError(f"{self.name}: upstream_replays_reasoning needs an llm_proxy thinking manager")
         if local and self.manager_reasoning_mode != "non_thinking":
-            # The SFT/OPD student is trained non-thinking only (sft/model_support.py).
+            # The SFT student is trained non-thinking only (sft/model_support.py).
             raise ValueError(f"{self.name}: a local manager must be non_thinking")
         for name in ("concurrency", "manager_max_model_calls", "subagent_recursion_limit"):
             if getattr(self, name) < 1:
@@ -222,7 +221,7 @@ def _qwen38_flash_teacher(
         description=(
             f"Qwen3.8 Flash Next ({reasoning.replace('_', '-')}"
             + (f", effort {effort}" if effort else "")
-            + ") manager with the teacher prompt: SFT traces and the OPD teacher's own behaviour."
+            + ") manager with the teacher prompt: SFT traces."
         ),
         manager_backend="llm_proxy",
         manager_model_id=QWEN38_FLASH_MODEL_ID,
@@ -314,7 +313,7 @@ EXPERIMENTS: tuple[Tau2Experiment, ...] = (
         name="qwen35_4b_student_checkpoint",
         description=(
             "Any Qwen3.5-4B student-prompt manager checkpoint (`run.py --manager-checkpoint`), "
-            "with evaluation sampling: SFT and OPD round evaluations."
+            "with evaluation sampling: SFT checkpoint evaluations."
         ),
         manager_backend="local_vllm",
         manager_model_id="decomposer/qwen35-4b-student",
@@ -322,20 +321,6 @@ EXPERIMENTS: tuple[Tau2Experiment, ...] = (
         pool=EVAL_POOL,
         manager_reasoning_mode="non_thinking",
         manager_sampling=QWEN35_GENERAL_NON_THINKING,
-    ),
-    Tau2Experiment(
-        name="opd_rollout",
-        description=(
-            "On-policy rollouts for OPD: the round's student checkpoint, untruncated "
-            "sampling, token ids and logprobs recorded on every manager turn."
-        ),
-        manager_backend="local_vllm",
-        manager_model_id="decomposer/opd-student",
-        prompt_profile="student",
-        pool=TRAIN_POOL,
-        manager_reasoning_mode="non_thinking",
-        manager_sampling=UNTRUNCATED_SAMPLING,
-        return_token_ids=True,
     ),
 )
 
