@@ -11,4 +11,6 @@ a different prompt. The files stay here unchanged as experiment records.
 
 Specifications for the current core should be added as new files. The current
 core names the tool arguments `agent_type_id` and `agent_id`; see
-`sft/README.md` for the pipeline.
+`sft/README.md` for the pipeline. A specification that omits
+`policy.subagent_types` keeps each gym's native tool schemas, and one that
+names no prompt profile trains with the `teacher` prompt.

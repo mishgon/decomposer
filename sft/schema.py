@@ -13,6 +13,8 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from decomposer.prompts import (
+    EARLY_RESPONSE_ERROR,
+    EMPTY_RESPONSE_ERROR,
     PARALLEL_FORK_RUN_CALL_ERROR,
     PARALLEL_RUN_CALL_ERROR,
     PARALLEL_WAIT_CALL_ERROR,
@@ -74,6 +76,9 @@ REFUSED_PARALLEL_CALL_ERRORS = frozenset(
         PARALLEL_RUN_CALL_ERROR,
     }
 )
+# Exact user messages the core injects when the manager answers before collecting
+# every run, or answers with empty text; the manager then continues.
+CORE_USER_MESSAGES = frozenset({EARLY_RESPONSE_ERROR, EMPTY_RESPONSE_ERROR})
 # Record attribute and manifest strategy for sequentialized parallel calls.
 PARALLEL_CALL_NORMALIZATION_ATTRIBUTE = "parallel_call_normalization"
 PARALLEL_CALL_NORMALIZATION_STRATEGY = "parallel_calls_to_single_call_turns"
@@ -148,9 +153,13 @@ class PolicySpec(StrictModel):
 
     @property
     def resolved_system_prompt_profile(self) -> Literal["student", "teacher"]:
-        # Missing and legacy ``decomposer_default`` both preserve the historical
-        # student-prompt behavior.
-        return self.system_prompt_profile or "student"
+        # Legacy ``decomposer_default`` keeps its historical student prompt; a
+        # spec that names no prompt trains with the teacher's own prompt.
+        if self.system_prompt_profile is not None:
+            return self.system_prompt_profile
+        if self.system_prompt == "decomposer_default":
+            return "student"
+        return "teacher"
 
 
 class SourceSamplingSpec(StrictModel):
@@ -489,8 +498,7 @@ class BuildSpec(StrictModel):
             ):
                 raise ValueError("spec_version 1 does not support v2 source options")
         else:
-            if not self.policy.subagent_types:
-                raise ValueError("spec_version >=2 requires policy.subagent_types")
+            # Without policy.subagent_types, records keep their native tool schemas.
             allowed_ids = {subagent.id for subagent in self.policy.subagent_types}
             for source in self.sources:
                 unknown_targets = sorted(
@@ -799,6 +807,8 @@ def _is_refused_call_result(result: Mapping[str, Any]) -> bool:
 
 def sequentialize_parallel_calls(
     messages: list[JsonObject],
+    *,
+    allow_core_errors: bool = False,
 ) -> tuple[list[JsonObject], int, int, int, int]:
     """Convert multi-call assistant messages into single-call assistant/tool turns.
 
@@ -829,6 +839,9 @@ def sequentialize_parallel_calls(
 
     A single-call message is never refused and passes through untouched: only
     multi-call messages are rewritten, matching the harness's own rule.
+
+    With ``allow_core_errors`` a batch may also hold calls of tools other than
+    new/fork/run/wait; the core answers each with an error result.
 
     Returns the rewritten messages, the number of batches sequentialized (those
     still holding several executed calls), the number of calls they contained,
@@ -868,9 +881,14 @@ def sequentialize_parallel_calls(
             call_id = call.get("id")
             name = function.get("name")
             reject_legacy_tool_name(name, f"Assistant message {index}")
+            known_name = (
+                isinstance(name, str) and bool(name)
+                if allow_core_errors
+                else name in DECOMPOSER_TOOL_NAMES
+            )
             if (
                 call.get("type") != "function"
-                or name not in DECOMPOSER_TOOL_NAMES
+                or not known_name
                 or not isinstance(call_id, str)
                 or not call_id
             ):
@@ -992,11 +1010,19 @@ def validate_decomposer_messages(
     messages: list[JsonObject],
     *,
     subagent_type_ids: frozenset[str] = frozenset(),
+    allow_core_errors: bool = False,
 ) -> None:
     """Validate the benchmark-neutral Decomposer tool-calling trajectory.
 
     ``subagent_type_ids``, when non-empty, lists the subagent types ``new`` may
     create; otherwise any non-empty type ID is accepted.
+
+    ``allow_core_errors`` keeps the mistakes the core answered and the manager
+    recovered from: calls of any tool name with any arguments, which the core
+    rejects with an error result or runs ignoring extra arguments, and the user
+    messages the core injects (``CORE_USER_MESSAGES``), including the empty
+    answer that precedes ``EMPTY_RESPONSE_ERROR``. The structure is still
+    checked: one task, every call answered, and a final text answer.
     """
     if len(messages) < 3 or messages[0].get("role") != "system":
         raise TraceValidationError(
@@ -1031,7 +1057,8 @@ def validate_decomposer_messages(
                 f"Message {index} content must be a string.",
             )
         if role == "user":
-            if index != 1 or pending:
+            injected = allow_core_errors and content in CORE_USER_MESSAGES
+            if (index != 1 and not injected) or pending:
                 raise TraceValidationError(
                     "excluded_invalid_messages",
                     "User messages may only appear after system.",
@@ -1054,7 +1081,13 @@ def validate_decomposer_messages(
                     "excluded_multiple_tool_calls",
                     f"Assistant message {index} contains {len(raw_calls)} tool calls.",
                 )
-            if not content.strip() and not raw_calls:
+            answered_empty = (
+                allow_core_errors
+                and index + 1 < len(messages)
+                and messages[index + 1].get("role") == "user"
+                and messages[index + 1].get("content") == EMPTY_RESPONSE_ERROR
+            )
+            if not content.strip() and not raw_calls and not answered_empty:
                 raise TraceValidationError(
                     "excluded_empty_training_target",
                     f"Assistant message {index} has neither text nor a tool call.",
@@ -1074,18 +1107,24 @@ def validate_decomposer_messages(
                 name = function.get("name")
                 arguments = function.get("arguments")
                 reject_legacy_tool_name(name, f"Assistant message {index}")
+                known_name = (
+                    isinstance(name, str) and bool(name)
+                    if allow_core_errors
+                    else name in DECOMPOSER_TOOL_NAMES
+                )
                 if (
                     call.get("type") != "function"
                     or not isinstance(call_id, str)
                     or not call_id
-                    or name not in DECOMPOSER_TOOL_NAMES
+                    or not known_name
                     or not isinstance(arguments, Mapping)
                 ):
                     raise TraceValidationError(
                         "excluded_invalid_tool_calls",
                         f"Assistant message {index} has an invalid call.",
                     )
-                _validate_call_arguments(str(name), arguments, subagent_type_ids)
+                if not allow_core_errors:
+                    _validate_call_arguments(str(name), arguments, subagent_type_ids)
                 if call_id in seen_call_ids:
                     raise TraceValidationError(
                         "excluded_invalid_tool_calls",

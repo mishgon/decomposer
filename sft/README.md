@@ -14,6 +14,17 @@ Traces recorded before the rename (`subagent_type_id`, `subagent_id`) are
 rejected as invalid tool calls. The canonical tool schemas come from
 `sft/chat_tools.py`, which builds them from the live core.
 
+A specification without `policy.subagent_types` keeps each record's native tool
+schemas instead, so every gym keeps its own agent types. Each source must use
+one schema; the manifest records its hash per source (`tool_schema_sha256`) and
+lists the dataset's hashes (`content.tool_schema_sha256s`). The
+NeMo Gym adapter (tau2, Workplace) keeps successful rollouts in which the
+manager made a mistake the core answered: a call of an unknown tool, malformed
+arguments, or an answer before collecting every run, which the core follows with
+an injected user message (`EARLY_RESPONSE_ERROR`, `EMPTY_RESPONSE_ERROR`). The
+trace must still be well formed: one task, every call answered, and a final
+text answer. The Toolathlon and GAIA2 adapters keep the strict checks.
+
 ## Legacy specs and configs
 
 Every build specification in `sft/specs/`, `sft/gaia2/specs/` and
@@ -63,7 +74,8 @@ same split. The builder requires a clean Git worktree and refuses to replace an
 existing `<dataset-id>/<version>` directory.
 
 New build specifications choose `policy.system_prompt_profile: student` or
-`teacher`; a specification without a profile uses `student`. `teacher` is the
+`teacher`; a specification without a profile uses `teacher`, and the legacy
+`policy.system_prompt: decomposer_default` keeps `student`. `teacher` is the
 core's orchestration prompt (`decomposer.prompts.DECOMPOSER_SYSTEM_PROMPT`),
 and `student` is the legacy one-line manager prompt
 (`decomposer.prompt_profiles.DECOMPOSER_STUDENT_SYSTEM_PROMPT`). The builder

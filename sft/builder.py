@@ -791,11 +791,27 @@ def prepare_dataset(
     if not retained:
         raise ValueError("No usable rollout traces were found.")
 
-    tool_schemas = {canonical_json(record.tools) for record in retained}
-    if len(tool_schemas) != 1:
-        raise ValueError(
-            f"Expected one consistent tool schema, found {len(tool_schemas)}."
+    # Sources may expose different native tool schemas (for example, each gym's
+    # own agent types), but each source must use one.
+    tool_schemas_by_source: defaultdict[str, set[str]] = defaultdict(set)
+    for record in retained:
+        tool_schemas_by_source[record.source.source_id].add(
+            canonical_json(record.tools)
         )
+    for source_manifest in source_manifests:
+        source_id = str(source_manifest["id"])
+        schemas = tool_schemas_by_source[source_id]
+        if len(schemas) > 1:
+            raise ValueError(
+                f"Expected one consistent tool schema in source {source_id!r}, "
+                f"found {len(schemas)}."
+            )
+        source_manifest["tool_schema_sha256"] = next(
+            (sha256_text(schema) for schema in schemas), None
+        )
+    tool_schema_sha256s = sorted(
+        {sha256_text(canonical_json(record.tools)) for record in retained}
+    )
     if spec.split.strategy == "prompt_fixed":
         train_records, validation_records, split_manifest = (
             _allocate_prompt_fixed_split(
@@ -944,7 +960,7 @@ def prepare_dataset(
             "validation_by_category": _count_by(validation_records, "category"),
         },
         "content": {
-            "tool_schema_sha256": sha256_text(next(iter(tool_schemas))),
+            "tool_schema_sha256s": tool_schema_sha256s,
             "assistant_reasoning_preserved_as_metadata": True,
         },
     }

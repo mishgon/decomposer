@@ -1,4 +1,9 @@
-"""Adapter from NeMo Gym rollout sidecars to canonical Decomposer traces."""
+"""Adapter from NeMo Gym rollout sidecars to canonical Decomposer traces.
+
+A successful rollout is kept with the manager's mistakes that the core answered
+(unknown tools, malformed arguments, injected user messages), since the recovery
+that follows them is the core's own behavior.
+"""
 
 from __future__ import annotations
 
@@ -12,7 +17,6 @@ from typing import Any
 
 from .base import AdapterReadResult
 from ..schema import (
-    DECOMPOSER_TOOL_NAMES,
     EXCLUSION_REASONS,
     PARALLEL_CALL_NORMALIZATION_ATTRIBUTE,
     CanonicalOutcome,
@@ -33,7 +37,7 @@ from ..schema import (
     validate_decomposer_messages,
 )
 
-ADAPTER_VERSION = 6
+ADAPTER_VERSION = 7
 
 
 def _canonical_prompt_input(value: Any) -> str:
@@ -112,7 +116,8 @@ def _convert_tool_call(
     if (
         not isinstance(call_id, str)
         or not call_id
-        or name not in DECOMPOSER_TOOL_NAMES
+        or not isinstance(name, str)
+        or not name
         or not isinstance(arguments, Mapping)
     ):
         raise TraceValidationError(
@@ -143,7 +148,8 @@ def _convert_message(message: Mapping[str, Any], index: int) -> JsonObject:
         if (
             not isinstance(call_id, str)
             or not call_id
-            or name not in DECOMPOSER_TOOL_NAMES
+            or not isinstance(name, str)
+            or not name
         ):
             raise TraceValidationError(
                 "excluded_invalid_tool_calls",
@@ -221,8 +227,8 @@ def _convert_messages(
         normalized_calls,
         dropped_calls,
         dropped_turns,
-    ) = sequentialize_parallel_calls(converted)
-    validate_decomposer_messages(normalized)
+    ) = sequentialize_parallel_calls(converted, allow_core_errors=True)
+    validate_decomposer_messages(normalized, allow_core_errors=True)
     return (
         normalized,
         normalized_messages,
@@ -508,7 +514,9 @@ def read_nemo_gym_source(
                     aliases=source.subagent_type_aliases,
                 )
                 validate_decomposer_messages(
-                    messages, subagent_type_ids=canonical_subagent_type_ids
+                    messages,
+                    subagent_type_ids=canonical_subagent_type_ids,
+                    allow_core_errors=True,
                 )
                 tools = (
                     deepcopy(list(canonical_tools))

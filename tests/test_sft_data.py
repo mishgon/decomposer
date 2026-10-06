@@ -37,6 +37,7 @@ from decomposer.prompt_profiles import (
 )
 from decomposer.prompts import (
     DECOMPOSER_SYSTEM_PROMPT,
+    EARLY_RESPONSE_ERROR,
     PARALLEL_FORK_RUN_CALL_ERROR,
     PARALLEL_RUN_CALL_ERROR,
     PARALLEL_WAIT_CALL_ERROR,
@@ -405,8 +406,8 @@ def test_prepare_groups_teacher_variants_and_writes_manifest_v3(tmp_path: Path) 
 
     example = train[0]
     assert example["messages"][0]["role"] == "system"
-    assert example["messages"][0]["content"] == DECOMPOSER_STUDENT_SYSTEM_PROMPT
-    assert example["messages"][0]["content"] != DECOMPOSER_SYSTEM_PROMPT
+    assert example["messages"][0]["content"] == DECOMPOSER_SYSTEM_PROMPT
+    assert example["messages"][0]["content"] != DECOMPOSER_STUDENT_SYSTEM_PROMPT
     assert example["messages"][1]["role"] == "user"
     assert example["messages"][-1]["teacher_reasoning"] == "Report success."
     assert [
@@ -421,7 +422,7 @@ def test_prepare_groups_teacher_variants_and_writes_manifest_v3(tmp_path: Path) 
         "wait",
     ]
     assert example["source"]["adapter"] == "nemo_gym"
-    assert example["source"]["adapter_version"] == 6
+    assert example["source"]["adapter_version"] == 7
     assert example["source"]["benchmark"] == "workplace_assistant"
     assert example["outcome"]["success"] is True
     for filename in ("train.jsonl", "validation.jsonl"):
@@ -533,6 +534,7 @@ def test_prompt_profile_resolver_and_legacy_policy_are_strict() -> None:
         ).resolved_system_prompt_profile
         == "student"
     )
+    assert PolicySpec(id="default").resolved_system_prompt_profile == "teacher"
     with pytest.raises(ValueError, match="Unknown Decomposer prompt profile"):
         resolve_decomposer_system_prompt("unknown")
     with pytest.raises(ValidationError, match="mutually exclusive"):
@@ -706,7 +708,7 @@ def test_prepare_sequentializes_parallel_calls(
         "tool_calls": 2 * call_count,
     }
 
-    assert prepared.manifest["preparation"]["adapter_versions"]["nemo_gym"] == 6
+    assert prepared.manifest["preparation"]["adapter_versions"]["nemo_gym"] == 7
     assert prepared.manifest["normalization"] == {
         "strategy": "parallel_calls_to_single_call_turns",
         "traces": 1,
@@ -1159,11 +1161,12 @@ def test_prepare_excludes_malformed_successful_traces_by_reason(tmp_path: Path) 
 
     prepared = _prepare_fixture_dataset([source], tmp_path / "prepared")
     filtering = prepared.manifest["filtering"]
-    assert filtering["included"] == 1
+    # rollouts[4]'s argument-less `new` is a mistake the core answers, so it stays.
+    assert filtering["included"] == 2
     assert filtering["excluded_invalid_agent_ref"] == 1
     assert filtering["excluded_missing_final_state"] == 1
     assert filtering["excluded_empty_training_target"] == 1
-    assert filtering["excluded_invalid_tool_calls"] == 2
+    assert filtering["excluded_invalid_tool_calls"] == 1
     assert filtering["excluded_multiple_tool_calls"] == 0
     assert filtering["excluded_prompt_mismatch"] == 1
     assert filtering["excluded_invalid_tool_schema"] == 1
@@ -1291,9 +1294,9 @@ def test_builder_canonical_tools_are_exactly_new_fork_run_wait(
     assert prepared.manifest["sources"][0]["tool_schema_origin"] == (
         "canonical_policy_interface"
     )
-    assert prepared.manifest["content"]["tool_schema_sha256"] == sha256_text(
-        canonical_json(expected)
-    )
+    assert prepared.manifest["content"]["tool_schema_sha256s"] == [
+        sha256_text(canonical_json(expected))
+    ]
 
 
 def _renamed_core_rollout(task_index: int) -> dict:
@@ -1399,16 +1402,150 @@ def test_renamed_core_rollouts_load_with_canonical_tools(tmp_path: Path) -> None
         assert set(calls[4]["arguments"]) == {"agent_id", "prompt"}
 
 
+def _core_answered_mistakes_rollout(task_index: int) -> dict:
+    """Mistakes the core answers, each followed by the manager's recovery."""
+    rollout = _rollout(task_index)
+    agent_id, agent_run_id = f"subagent-{task_index}", f"subagent-run-{task_index}"
+    rollout["final_state"]["messages"] = [
+        rollout["final_state"]["messages"][0],
+        _ai(
+            "",
+            tool_calls=[
+                _call("list_claims", "lc"),
+                _call("new", "quoted", agent_type_id='"small"'),
+            ],
+        ),
+        _result(
+            "list_claims",
+            "lc",
+            "Error: list_claims is not a valid tool, try one of [new, fork, run, wait].",
+        ),
+        _result("new", "quoted", 'Unknown agent type ID `"small"`. Available IDs: `small`.'),
+        _ai("", tool_calls=[_call("new", "new", agent_type_id="small")]),
+        _result("new", "new", {"agent_id": agent_id}),
+        _ai(
+            "",
+            tool_calls=[
+                _call("run", "run", agent_id=agent_id, prompt="Do it.", agent_id_note="x")
+            ],
+        ),
+        _result("run", "run", {"agent_run_id": agent_run_id}),
+        _ai("4."),
+        {"type": "human", "content": EARLY_RESPONSE_ERROR},
+        _ai("", tool_calls=[_call("wait", "wait", agent_id=agent_id)]),
+        _result(
+            "wait",
+            "wait",
+            [{"agent_id": agent_id, "agent_run_id": agent_run_id, "status": "responded", "response": "4"}],
+        ),
+        _ai("The answer is 4."),
+    ]
+    return rollout
+
+
+def test_nemo_gym_keeps_mistakes_the_core_answered(tmp_path: Path) -> None:
+    other_user_message = _core_answered_mistakes_rollout(1)
+    other_user_message["final_state"]["messages"][9]["content"] = "Please hurry."
+    source = _source(
+        tmp_path,
+        "teacher",
+        [_core_answered_mistakes_rollout(0), other_user_message],
+        [_materialized(0), _materialized(1)],
+    )
+
+    prepared = _prepare_fixture_dataset([source], tmp_path / "prepared")
+
+    filtering = prepared.manifest["filtering"]
+    assert filtering["included"] == 1
+    assert filtering["excluded_invalid_messages"] == 1
+    [record] = _read_jsonl(prepared.train_path) + _read_jsonl(prepared.validation_path)
+    messages = record["messages"]
+    assert [message["role"] for message in messages] == [
+        "system", "user",
+        "assistant", "tool", "assistant", "tool",
+        "assistant", "tool",
+        "assistant", "tool",
+        "assistant", "user",
+        "assistant", "tool",
+        "assistant",
+    ]
+    calls = [
+        call["function"]
+        for message in messages
+        for call in message.get("tool_calls") or []
+    ]
+    assert [call["name"] for call in calls] == ["list_claims", "new", "new", "run", "wait"]
+    assert calls[1]["arguments"] == {"agent_type_id": '"small"'}
+    assert calls[3]["arguments"]["agent_id_note"] == "x"
+    assert calls[4]["arguments"] == {"agent_id": "subagent-0"}
+    assert messages[11]["content"] == EARLY_RESPONSE_ERROR
+
+
+def test_v2_without_subagent_types_keeps_each_source_native_schema(
+    tmp_path: Path,
+) -> None:
+    sources = []
+    for name, description in (("gym-a", "The new tool."), ("gym-b", "Other types.")):
+        rollouts = [_rollout(index) for index in range(4)]
+        for rollout in rollouts:
+            rollout["response"]["tools"][0]["description"] = description
+        sources.append(
+            SourceSpec(
+                id=name,
+                adapter="nemo_gym",
+                path=_source(
+                    tmp_path, name, rollouts, [_materialized(index) for index in range(4)]
+                ),
+                benchmark=name,
+                environment="workplace",
+                partition="train",
+                teacher="teacher",
+                expected_native_rollouts=4,
+                expected_candidates=4,
+            )
+        )
+    spec = BuildSpec(
+        spec_version=2,
+        dataset=DatasetIdentity(id="native-schemas", version="v1"),
+        policy=PolicySpec(id="decomposer-default"),
+        sources=tuple(sources),
+        selection=SelectionSpec(),
+        split=SplitSpec(strategy="prompt_fixed", validation_fraction=0.25, seed=42),
+    )
+
+    prepared = prepare_dataset(
+        LoadedBuildSpec(path=tmp_path / "spec.yaml", sha256="6" * 64, spec=spec),
+        tmp_path / "datasets",
+        git_revision="test-revision",
+        require_clean_git=False,
+    )
+
+    records = _read_jsonl(prepared.train_path) + _read_jsonl(prepared.validation_path)
+    assert len(records) == 8
+    hashes = {}
+    for source_manifest in prepared.manifest["sources"]:
+        assert source_manifest["tool_schema_origin"] == "response.tools"
+        hashes[source_manifest["id"]] = source_manifest["tool_schema_sha256"]
+    assert hashes["gym-a"] != hashes["gym-b"]
+    assert prepared.manifest["content"]["tool_schema_sha256s"] == sorted(hashes.values())
+    for record in records:
+        assert sha256_text(canonical_json(record["tools"])) == hashes[
+            record["source"]["source_id"]
+        ]
+        assert record["messages"][0]["content"] == DECOMPOSER_SYSTEM_PROMPT
+    assert prepared.manifest["policy"]["system_prompt_profile"] == "teacher"
+
+
 def test_invalid_policy_error_reports_source_line(tmp_path: Path) -> None:
     rollouts = [_rollout(0), _rollout(1)]
-    rollouts[1]["final_state"]["messages"][1]["tool_calls"][0]["args"] = {}
+    rollouts[1]["final_state"]["messages"][2]["tool_call_id"] = "unknown"
     source = _source(
         tmp_path,
         "teacher",
         rollouts,
         [_materialized(0), _materialized(1)],
     )
-    with pytest.raises(ValueError, match=r"rollouts\.jsonl:2:.*agent_type_id"):
+    with pytest.raises(ValueError, match=r"rollouts\.jsonl:2:.*unknown or mismatched"):
         _prepare_fixture_dataset(
             [source], tmp_path / "prepared", invalid_policy="error"
         )
@@ -1647,12 +1784,6 @@ def test_prepare_refuses_overwrite_and_bad_materialized_source(tmp_path: Path) -
             "Duplicate tool-call ID",
         ),
         (
-            lambda rollout: rollout["final_state"]["messages"][1]["tool_calls"][
-                0
-            ].update({"name": "spinvoke"}),
-            "invalid name or arguments",
-        ),
-        (
             lambda rollout: rollout["final_state"]["messages"][1]["tool_calls"].append(
                 _call(
                     "run",
@@ -1662,12 +1793,6 @@ def test_prepare_refuses_overwrite_and_bad_materialized_source(tmp_path: Path) -
                 )
             ),
             "exactly one matching tool result",
-        ),
-        (
-            lambda rollout: rollout["final_state"]["messages"][3]["tool_calls"][
-                0
-            ]["args"].update({"prompt": " "}),
-            "non-empty prompt",
         ),
         (
             lambda rollout: rollout.update(_legacy_rollout(0)),

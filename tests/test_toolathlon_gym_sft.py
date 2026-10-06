@@ -21,7 +21,6 @@ from sft.schema import (
     SplitSpec,
 )
 from sft.chat_tools import build_decomposer_chat_tools
-from decomposer.prompt_profiles import DECOMPOSER_STUDENT_SYSTEM_PROMPT
 from decomposer.prompts import DECOMPOSER_SYSTEM_PROMPT, PARALLEL_WAIT_CALL_ERROR
 
 RUN_ID = "20260824T101524Z-203eac76"
@@ -486,9 +485,9 @@ def test_canonical_builder_accepts_toolathlon_source(tmp_path: Path) -> None:
     assert {row["group_id"] for row in train}.isdisjoint(
         row["group_id"] for row in validation
     )
-    # Specs without a prompt profile default to the student prompt.
+    # Specs without a prompt profile default to the teacher prompt.
     assert all(
-        row["messages"][0]["content"] == DECOMPOSER_STUDENT_SYSTEM_PROMPT
+        row["messages"][0]["content"] == DECOMPOSER_SYSTEM_PROMPT
         for row in train
     )
     assert prepared.manifest["preparation"]["adapter_versions"] == {"toolathlon_gym": 8}
