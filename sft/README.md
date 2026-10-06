@@ -6,9 +6,13 @@ Decomposer outputs. Benchmark prompts, tool definitions, tool responses, and
 subagent responses remain visible as context but receive label `-100`.
 
 Preparation accepts only trajectories of the current Decomposer core, whose
-manager uses the `new`, `fork`, `run`, and `wait` tools. Traces of the retired
-`spawn_subagent`/`wait` core are excluded with reason
-`excluded_legacy_tool_interface`; they are never converted.
+manager uses the `new`, `fork`, `run`, and `wait` tools with the argument names
+of the renamed core (2026-10-05): `new(agent_type_id)`, `fork(agent_id)` and
+`run(agent_id, prompt)`. Traces of the retired `spawn_subagent`/`wait` core are
+excluded with reason `excluded_legacy_tool_interface`; they are never converted.
+Traces recorded before the rename (`subagent_type_id`, `subagent_id`) are
+rejected as invalid tool calls. The canonical tool schemas come from
+`sft/chat_tools.py`, which builds them from the live core.
 
 ## Legacy specs and configs
 

@@ -57,9 +57,9 @@ EXCLUSION_REASONS = (
 DECOMPOSER_TOOL_NAMES = frozenset({"new", "fork", "run", "wait"})
 # String parameters each tool requires; there are no optional parameters.
 DECOMPOSER_TOOL_PARAMETERS: dict[str, tuple[str, ...]] = {
-    "new": ("subagent_type_id",),
-    "fork": ("subagent_id",),
-    "run": ("subagent_id", "prompt"),
+    "new": ("agent_type_id",),
+    "fork": ("agent_id",),
+    "run": ("agent_id", "prompt"),
     "wait": (),
 }
 # Tools of the retired spawn_subagent/wait core. Preparation accepts only the
@@ -742,10 +742,10 @@ def normalize_subagent_type_ids(
     allowed_ids: frozenset[str],
     aliases: Mapping[str, str],
 ) -> int:
-    """Normalize ``new``-call subagent type IDs to one canonical policy interface.
+    """Normalize ``new``-call ``agent_type_id`` values to one canonical policy interface.
 
     Only ``new`` names a subagent type; ``fork`` and ``run`` address existing
-    subagents by ID and inherit their type.
+    subagents by ``agent_id`` and inherit their type.
     """
     if not allowed_ids:
         return 0
@@ -769,17 +769,17 @@ def normalize_subagent_type_ids(
                 "new arguments",
                 "excluded_invalid_tool_calls",
             )
-            raw_id = arguments.get("subagent_type_id")
+            raw_id = arguments.get("agent_type_id")
             if not isinstance(raw_id, str) or not raw_id.strip():
                 raise TraceValidationError(
                     "excluded_invalid_tool_calls",
-                    "new has no valid subagent_type_id.",
+                    "new has no valid agent_type_id.",
                 )
             canonical_id = aliases.get(raw_id, raw_id)
             if canonical_id not in allowed_ids:
                 raise TraceValidationError(
                     "excluded_invalid_tool_calls",
-                    f"Unknown subagent_type_id {raw_id!r}.",
+                    f"Unknown agent_type_id {raw_id!r}.",
                 )
             if canonical_id != raw_id:
                 if not isinstance(arguments, dict):
@@ -787,7 +787,7 @@ def normalize_subagent_type_ids(
                         "excluded_invalid_tool_calls",
                         "new arguments must be mutable JSON objects.",
                     )
-                arguments["subagent_type_id"] = canonical_id
+                arguments["agent_type_id"] = canonical_id
                 normalized += 1
     return normalized
 
@@ -947,40 +947,40 @@ def _validate_call_arguments(
     subagent_type_ids: frozenset[str],
 ) -> None:
     if name == "new":
-        type_id = arguments.get("subagent_type_id")
+        type_id = arguments.get("agent_type_id")
         if (
-            set(arguments) != {"subagent_type_id"}
+            set(arguments) != {"agent_type_id"}
             or not isinstance(type_id, str)
             or not type_id.strip()
         ):
             raise TraceValidationError(
                 "excluded_invalid_tool_calls",
-                "new requires exactly one non-empty subagent_type_id string.",
+                "new requires exactly one non-empty agent_type_id string.",
             )
         if subagent_type_ids and type_id not in subagent_type_ids:
             raise TraceValidationError(
                 "excluded_invalid_tool_calls",
-                f"Unknown subagent_type_id {type_id!r}.",
+                f"Unknown agent_type_id {type_id!r}.",
             )
     elif name == "fork":
-        if set(arguments) != {"subagent_id"} or not isinstance(
-            arguments["subagent_id"], str
+        if set(arguments) != {"agent_id"} or not isinstance(
+            arguments["agent_id"], str
         ):
             raise TraceValidationError(
                 "excluded_invalid_tool_calls",
-                "fork requires exactly one subagent_id string.",
+                "fork requires exactly one agent_id string.",
             )
     elif name == "run":
         prompt = arguments.get("prompt")
         if (
-            set(arguments) != {"subagent_id", "prompt"}
-            or not isinstance(arguments["subagent_id"], str)
+            set(arguments) != {"agent_id", "prompt"}
+            or not isinstance(arguments["agent_id"], str)
             or not isinstance(prompt, str)
             or not prompt.strip()
         ):
             raise TraceValidationError(
                 "excluded_invalid_tool_calls",
-                "run requires a subagent_id string and a non-empty prompt string.",
+                "run requires an agent_id string and a non-empty prompt string.",
             )
     elif arguments:
         raise TraceValidationError(

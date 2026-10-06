@@ -20,7 +20,7 @@ from sft.schema import (
     SourceSpec,
     SplitSpec,
 )
-from decomposer.chat_tools import build_decomposer_chat_tools
+from sft.chat_tools import build_decomposer_chat_tools
 from decomposer.prompt_profiles import DECOMPOSER_STUDENT_SYSTEM_PROMPT
 from decomposer.prompts import DECOMPOSER_SYSTEM_PROMPT, PARALLEL_WAIT_CALL_ERROR
 
@@ -45,9 +45,9 @@ def _chat_tool(name: str, *parameters: str) -> dict:
 
 
 TOOLS = [
-    _chat_tool("new", "subagent_type_id"),
-    _chat_tool("fork", "subagent_id"),
-    _chat_tool("run", "subagent_id", "prompt"),
+    _chat_tool("new", "agent_type_id"),
+    _chat_tool("fork", "agent_id"),
+    _chat_tool("run", "agent_id", "prompt"),
     _chat_tool("wait"),
 ]
 LEGACY_TOOLS = [
@@ -116,10 +116,10 @@ def _trace(
             "type": "tool_call",
         }
 
-    new = call("new", "new", subagent_type_id="worker")
-    fork = call("fork", "fork", subagent_id="a")
-    run_a = call("run", "run-a", subagent_id="a", prompt="Do part A.")
-    run_b = call("run", "run-b", subagent_id="b", prompt="Do part B.")
+    new = call("new", "new", agent_type_id="worker")
+    fork = call("fork", "fork", agent_id="a")
+    run_a = call("run", "run-a", agent_id="a", prompt="Do part A.")
+    run_b = call("run", "run-b", agent_id="b", prompt="Do part B.")
     early_wait = call("wait", "early-wait")
     wait = call("wait", "wait")
     subagents = {
@@ -145,24 +145,24 @@ def _trace(
         "messages": [
             _human(prompt),
             _ai("Create a worker.", calls=[new], reasoning="One worker first."),
-            _tool("new", new["id"], '{"subagent_id":"a"}'),
+            _tool("new", new["id"], '{"agent_id":"a"}'),
             _ai("Copy it.", calls=[fork]),
-            _tool("fork", fork["id"], '{"subagent_id":"b"}'),
+            _tool("fork", fork["id"], '{"agent_id":"b"}'),
             _ai(
                 "Delegate both parts.",
                 calls=[run_a, run_b, early_wait],
                 reasoning="The parts are independent.",
             ),
             _tool("wait", early_wait["id"], PARALLEL_WAIT_CALL_ERROR),
-            _tool("run", run_b["id"], '{"subagent_run_id":"run-b"}'),
-            _tool("run", run_a["id"], '{"subagent_run_id":"run-a"}'),
+            _tool("run", run_b["id"], '{"agent_run_id":"run-b"}'),
+            _tool("run", run_a["id"], '{"agent_run_id":"run-a"}'),
             _ai("Wait for both.", calls=[wait], reasoning="Collect the responses."),
             _tool(
                 "wait",
                 wait["id"],
-                '[{"subagent_id":"a","subagent_run_id":"run-a","status":"responded",'
+                '[{"agent_id":"a","agent_run_id":"run-a","status":"responded",'
                 '"response":"A","error":null},'
-                '{"subagent_id":"b","subagent_run_id":"run-b","status":"error",'
+                '{"agent_id":"b","agent_run_id":"run-b","status":"error",'
                 '"response":null,"error":"retryable"}]',
             ),
             _ai("The requested task is complete.", reasoning="Report the result."),
@@ -491,7 +491,7 @@ def test_canonical_builder_accepts_toolathlon_source(tmp_path: Path) -> None:
         row["messages"][0]["content"] == DECOMPOSER_STUDENT_SYSTEM_PROMPT
         for row in train
     )
-    assert prepared.manifest["preparation"]["adapter_versions"] == {"toolathlon_gym": 7}
+    assert prepared.manifest["preparation"]["adapter_versions"] == {"toolathlon_gym": 8}
     assert prepared.manifest["normalization"] == {
         "strategy": "parallel_calls_to_single_call_turns",
         "traces": 10,
@@ -539,10 +539,10 @@ def test_v2_legacy_toolathlon_keeps_all_rewards_and_normalizes_interface(
         for message in trace["messages"]:
             for call in message.get("data", {}).get("tool_calls", []):
                 if call.get("name") == "new":
-                    call["args"]["subagent_type_id"] = "external-worker"
+                    call["args"]["agent_type_id"] = "external-worker"
     malformed_trace = episodes[-1][0]
     malformed_trace["messages"][1]["data"]["tool_calls"][0]["args"][
-        "subagent_type_id"
+        "agent_type_id"
     ] = "undeclared-worker"
     source = _source(tmp_path / "source", episodes, run_status="completed")
     spec = BuildSpec(
@@ -595,7 +595,7 @@ def test_v2_legacy_toolathlon_keeps_all_rewards_and_normalizes_interface(
     assert len({json.dumps(record["tools"], sort_keys=True) for record in records}) == 1
     for record in records:
         type_ids = {
-            call["function"]["arguments"]["subagent_type_id"]
+            call["function"]["arguments"]["agent_type_id"]
             for message in record["messages"]
             for call in message.get("tool_calls", [])
             if call["function"]["name"] == "new"
@@ -722,7 +722,7 @@ def test_completed_toolathlon_run_ignores_stale_attempt_traces(tmp_path: Path) -
     canonical_tools = build_decomposer_chat_tools(
         [
             {
-                "subagent_type_id": "worker",
+                "agent_type_id": "worker",
                 "description": "Canonical worker agent.",
                 "assistant_id": "worker",
             }

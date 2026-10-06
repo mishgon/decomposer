@@ -17,10 +17,10 @@ from typing import Any
 
 import yaml
 
-from decomposer.chat_tools import build_decomposer_chat_tools
 from decomposer.prompt_profiles import resolve_decomposer_system_prompt
 
 from .adapters.registry import ADAPTER_VERSIONS, ADAPTERS
+from .chat_tools import build_decomposer_chat_tools
 from .schema import (
     CANONICAL_SCHEMA_VERSION,
     EXCLUSION_REASONS,
@@ -722,7 +722,7 @@ def prepare_dataset(
         canonical_tools = build_decomposer_chat_tools(
             [
                 {
-                    "subagent_type_id": subagent.id,
+                    "agent_type_id": subagent.id,
                     "description": subagent.description,
                     "assistant_id": subagent.id,
                 }

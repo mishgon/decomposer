@@ -9,7 +9,7 @@ import pytest
 from sft.gaia2.adapter import read_gaia2_source
 from sft.builder import load_build_spec
 from sft.schema import SelectionSpec, SourceSpec
-from decomposer.chat_tools import build_decomposer_chat_tools
+from sft.chat_tools import build_decomposer_chat_tools
 from decomposer.prompts import DECOMPOSER_SYSTEM_PROMPT, PARALLEL_WAIT_CALL_ERROR
 
 
@@ -78,13 +78,13 @@ def _ai(content: list[dict], *calls: dict) -> dict:
 def _manager_messages() -> list[dict]:
     responses = [
         {
-            "subagent_id": subagent_id,
-            "subagent_run_id": f"run-{subagent_id}",
+            "agent_id": agent_id,
+            "agent_run_id": f"run-{agent_id}",
             "status": "responded",
-            "response": f"Did {subagent_id}.",
+            "response": f"Did {agent_id}.",
             "error": None,
         }
-        for subagent_id in ("a", "b")
+        for agent_id in ("a", "b")
     ]
     return [
         {"type": "human", "data": {"content": "Complete the scenario."}},
@@ -96,20 +96,20 @@ def _manager_messages() -> list[dict]:
                 },
                 {"type": "text", "text": "I will delegate."},
             ],
-            _call("new-a", "new", subagent_type_id="gaia2_worker"),
-            _call("new-b", "new", subagent_type_id="gaia2_worker"),
+            _call("new-a", "new", agent_type_id="gaia2_worker"),
+            _call("new-b", "new", agent_type_id="gaia2_worker"),
         ),
-        _tool("new-b", "new", '{"subagent_id": "b"}'),
-        _tool("new-a", "new", '{"subagent_id": "a"}'),
+        _tool("new-b", "new", '{"agent_id": "b"}'),
+        _tool("new-a", "new", '{"agent_id": "a"}'),
         _ai(
             [],
-            _call("run-a", "run", subagent_id="a", prompt="Do A."),
-            _call("run-b", "run", subagent_id="b", prompt="Do B."),
+            _call("run-a", "run", agent_id="a", prompt="Do A."),
+            _call("run-b", "run", agent_id="b", prompt="Do B."),
             _call("early-wait", "wait"),
         ),
         _tool("early-wait", "wait", PARALLEL_WAIT_CALL_ERROR),
-        _tool("run-b", "run", '{"subagent_run_id": "run-b"}'),
-        _tool("run-a", "run", '{"subagent_run_id": "run-a"}'),
+        _tool("run-b", "run", '{"agent_run_id": "run-b"}'),
+        _tool("run-a", "run", '{"agent_run_id": "run-a"}'),
         _ai([], _call("wait", "wait")),
         _tool("wait", "wait", json.dumps(responses)),
         _ai([{"type": "text", "text": "Finished."}]),
@@ -187,7 +187,7 @@ def _read(source: SourceSpec):
     tools = build_decomposer_chat_tools(
         [
             {
-                "subagent_type_id": "qwen35_4b_non_thinking",
+                "agent_type_id": "qwen35_4b_non_thinking",
                 "assistant_id": "qwen35_4b_non_thinking",
                 "description": "Fixture worker.",
             }
@@ -283,7 +283,7 @@ def test_gaia2_evaluation_filters_binary_reward_and_holdout(tmp_path: Path) -> N
     assert new_messages[0]["teacher_reasoning"] == "Delegate."
     assert new_messages[0]["content"] == "I will delegate."
     assert all(
-        message["tool_calls"][0]["function"]["arguments"]["subagent_type_id"]
+        message["tool_calls"][0]["function"]["arguments"]["agent_type_id"]
         == "qwen35_4b_non_thinking"
         for message in new_messages
     )
@@ -293,7 +293,7 @@ def test_gaia2_evaluation_filters_binary_reward_and_holdout(tmp_path: Path) -> N
     }
     assert result.source_manifest["layout"]["holdout_rollouts"] == 4
     assert result.source_manifest["binary_reward_counts"] == {"0": 3, "1": 1}
-    assert result.source_manifest["adapter_version"] == 3
+    assert result.source_manifest["adapter_version"] == 4
     assert result.source_manifest["dropped_refused_calls"] == {
         "tool_calls": 1,
         "assistant_turns": 0,

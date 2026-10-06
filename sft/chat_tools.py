@@ -6,11 +6,11 @@ from typing import Any, Sequence
 
 from langchain_core.utils.function_calling import convert_to_openai_tool
 
-from .core import DecomposerAgentMiddleware, SubagentType
+from decomposer.core import AgentType, DecomposerAgentMiddleware
 
 
 def build_decomposer_chat_tools(
-    subagent_types: Sequence[SubagentType],
+    agent_types: Sequence[AgentType],
 ) -> list[dict[str, Any]]:
     """Return the OpenAI/Transformers schemas exposed by Decomposer.
 
@@ -20,7 +20,7 @@ def build_decomposer_chat_tools(
     are created lazily only when a tool is invoked.
     """
     middleware = DecomposerAgentMiddleware(
-        subagent_types,
-        subagent_recursion_limit=None,
+        agent_types,
+        agent_recursion_limit=None,
     )
     return [convert_to_openai_tool(tool) for tool in middleware.tools]

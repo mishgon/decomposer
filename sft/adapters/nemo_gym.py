@@ -33,7 +33,7 @@ from ..schema import (
     validate_decomposer_messages,
 )
 
-ADAPTER_VERSION = 5
+ADAPTER_VERSION = 6
 
 
 def _canonical_prompt_input(value: Any) -> str:

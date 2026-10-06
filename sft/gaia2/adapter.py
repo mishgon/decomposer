@@ -32,7 +32,7 @@ from ..schema import (
     validate_decomposer_messages,
 )
 
-ADAPTER_VERSION = 3
+ADAPTER_VERSION = 4
 # Sources recorded before prompt profiles existed carry no profile.
 _ACCEPTED_PROMPT_PROFILES = frozenset({None, *DECOMPOSER_PROMPT_PROFILES})
 

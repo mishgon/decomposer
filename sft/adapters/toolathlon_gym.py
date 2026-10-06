@@ -34,7 +34,7 @@ from ..schema import (
 )
 from .base import AdapterReadResult
 
-ADAPTER_VERSION = 7
+ADAPTER_VERSION = 8
 TRACE_SCHEMA_VERSION = 2
 IMPORT_SCHEMA_VERSION = 1
 TERMINAL_RUN_STATUSES = frozenset({"completed", "completed_with_errors"})
