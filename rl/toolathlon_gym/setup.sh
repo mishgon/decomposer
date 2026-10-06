@@ -13,6 +13,11 @@ if ! git -C external/verl apply --recount --reverse --check "$padding_patch" 2>/
     git -C external/verl apply --recount --check "$padding_patch"
     git -C external/verl apply --recount "$padding_patch"
 fi
+position_patch="$PWD/rl/toolathlon_gym/patches/verl-position-ids.patch"
+if ! git -C external/verl apply --recount --reverse --check "$position_patch" 2>/dev/null; then
+    git -C external/verl apply --recount --check "$position_patch"
+    git -C external/verl apply --recount "$position_patch"
+fi
 if [ ! -d .venv-rl ]; then
     "$uv_bin" venv --python 3.12 .venv-rl
 fi

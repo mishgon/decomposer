@@ -1,0 +1,17 @@
+diff --git a/verl/utils/tensordict_utils.py b/verl/utils/tensordict_utils.py
+--- a/verl/utils/tensordict_utils.py
++++ b/verl/utils/tensordict_utils.py
+@@ -180,3 +180,3 @@
+-    nested_tensor = torch.nested.nested_tensor_from_jagged(values=values, offsets=offsets)
+-    nested_tensor._ragged_idx = ragged_idx
++    nested_tensor = torch.nested.nested_tensor_from_jagged(
++        values=values, offsets=offsets, jagged_dim=ragged_idx)
+     return nested_tensor
+diff --git a/verl/workers/utils/padding.py b/verl/workers/utils/padding.py
+--- a/verl/workers/utils/padding.py
++++ b/verl/workers/utils/padding.py
+@@ -66,3 +66,3 @@
+         position_ids_list.append(valid_ids)
+-    position_ids_nested = torch.nested.as_nested_tensor(position_ids_list, layout=torch.jagged)
++    position_ids_nested = tu.nested_tensor_from_tensor_list(position_ids_list)
+ 
