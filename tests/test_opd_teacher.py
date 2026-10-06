@@ -47,7 +47,7 @@ class TeacherClientTests(unittest.IsolatedAsyncioTestCase):
                 'opd.toolathlon_gym.teacher.create_model', return_value=model) as registry:
             output = Path(directory) / 'score.json'
             self.assertEqual(await score([1, 2], tokenizer=None, output=output), [0., -.5])
-            registry.assert_called_once_with('qwen_3_8_flash_next_non_thinking')
+            registry.assert_called_once_with('lmrouter/qwen_3_8_flash_next_non_thinking')
             model.root_async_client.completions.create.assert_awaited_once_with(
                 model='teacher', prompt=[1, 2], max_tokens=1, temperature=1.0, extra_body={'prompt_logprobs': 0})
             self.assertEqual(json.loads(output.read_text())['status'], 'completed')

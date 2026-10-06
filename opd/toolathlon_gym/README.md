@@ -34,7 +34,7 @@ Configure the shared [lmrouter tunnel](../../README.md). Export the private
 bash opd/toolathlon_gym/setup.sh
 export POLICY_GPU=2 ROLLOUT_GPU=3  # choose two actually free GPUs
 export MODEL_PATH="$HOME/models/Qwen3.5-4B"  # or decomposer-4b-sft for the paired comparison
-export RAY_TMPDIR=/mnt/share14T-2/matrosov/ray  # short path: Ray uses Unix sockets
+export RAY_TMPDIR=/tmp/opd-ray  # short path: Ray uses Unix sockets
 export RL_GYM_IMAGE=your-tested-gym-image
 export RL_DATA="$PWD/artifacts/training/toolathlon_gym_opd/smoke-data"
 export RL_ARTIFACTS="$PWD/artifacts/training/toolathlon_gym_opd/smoke-01"
