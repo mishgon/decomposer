@@ -61,7 +61,7 @@ def join_env_calls(
     taken: set[int] = set()
     out: dict[str, list[dict[str, Any] | None]] = {}
     for state in subagents:
-        run_id = state["subagent_run_id"]
+        run_id = state["agent_run_id"]
         life = lifecycles.get(run_id)
         low = life.started if life and life.started else -math.inf
         high = life.ended if life and life.ended else math.inf
@@ -90,7 +90,7 @@ def _run_ids(content: str) -> list[str]:
         payload = [payload]
     if not isinstance(payload, list):
         return []
-    return [r["subagent_run_id"] for r in payload if isinstance(r, dict) and "subagent_run_id" in r]
+    return [r["agent_run_id"] for r in payload if isinstance(r, dict) and "agent_run_id" in r]
 
 
 def build(run_dir: Path, scenario: str, run: int) -> dict[str, Any]:
@@ -103,19 +103,19 @@ def build(run_dir: Path, scenario: str, run: int) -> dict[str, Any]:
     env_calls = raw.get("tool_calls") or []
 
     lifecycles = parse_langgraph_log(run_dir / "logs" / "langgraph_subagent.log")
-    known = [lifecycles[s["subagent_run_id"]] for s in states if s["subagent_run_id"] in lifecycles]
+    known = [lifecycles[s["agent_run_id"]] for s in states if s["agent_run_id"] in lifecycles]
     if len(known) != len(states):
         raise SystemExit(f"run {run}: only {len(known)}/{len(states)} run ids found in the log")
     t0 = min(life.created for life in known)
     elapsed = float(manager["timing"]["elapsed_seconds"])
 
-    order = sorted(states, key=lambda s: lifecycles[s["subagent_run_id"]].created)
-    number = {s["subagent_run_id"]: i + 1 for i, s in enumerate(order)}
+    order = sorted(states, key=lambda s: lifecycles[s["agent_run_id"]].created)
+    number = {s["agent_run_id"]: i + 1 for i, s in enumerate(order)}
     joined = join_env_calls(states, env_calls, lifecycles)
 
     subagents = []
     for state in order:
-        run_id = state["subagent_run_id"]
+        run_id = state["agent_run_id"]
         life = lifecycles[run_id]
         calls = []
         for call, record in zip(state.get("tool_calls") or [], joined[run_id]):
@@ -171,7 +171,7 @@ def build(run_dir: Path, scenario: str, run: int) -> dict[str, Any]:
         call = calls[0]
         result = messages[i + 1]["data"].get("content") if i + 1 < len(messages) else ""
         ids = _run_ids(str(result))
-        if call["name"] in ("run", "spawn_subagent") and ids:
+        if call["name"] == "run" and ids:
             run_id = ids[0]
             t = round(lifecycles[run_id].created - t0, 2)
             last_t = t

@@ -199,6 +199,7 @@ def test_port_offset_threads_through_commands_and_runtime_configs(tmp_path) -> N
     plugin = json.loads(plugin_path.read_text(encoding="utf-8"))
     assert service["manager"]["base_url"] == "http://127.0.0.1:20142/v1"
     assert service["subagent_types"][0]["url"] == "http://127.0.0.1:14034"
+    assert service["subagent_types"][0]["agent_type_id"] == "gaia2_worker"
     assert plugin["service_url"] == "http://127.0.0.1:20134"
 
     are = are_command(

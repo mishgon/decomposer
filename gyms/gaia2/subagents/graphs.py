@@ -16,7 +16,7 @@ from langgraph.runtime import Runtime
 
 from are.simulation.schema_reminders import render_openai_tool_retry_reminder
 
-from decomposer.chat_vllm import ChatVLLM
+from decomposer.models import ChatVLLM
 from gyms.gaia2.model_overflow import (
     ExactModelCallLimitMiddleware,
     Gaia2ModelOverflowMiddleware,

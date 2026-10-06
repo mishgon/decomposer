@@ -33,13 +33,13 @@ def _tool(payload) -> dict:
 
 
 def _spawn(run_id: str) -> list[dict]:
-    return [_ai("run"), _tool({"subagent_run_id": run_id})]
+    return [_ai("run"), _tool({"agent_run_id": run_id})]
 
 
 def _wait(*run_ids: str) -> list[dict]:
     return [
         _ai("wait"),
-        _tool([{"subagent_run_id": r, "status": "responded"} for r in run_ids]),
+        _tool([{"agent_run_id": r, "status": "responded"} for r in run_ids]),
     ]
 
 
@@ -54,12 +54,12 @@ def test_consecutive_spawns_are_the_only_source_of_parallelism():
     assert stats["unclosed_at_end"] == 0
 
 
-def test_new_and_fork_start_no_runs_and_legacy_spawns_still_count():
+def test_new_and_fork_start_no_runs():
     messages = [
-        _ai("new"), _tool({"subagent_id": "s1"}),
-        _ai("fork"), _tool({"subagent_id": "s2"}),
+        _ai("new"), _tool({"agent_id": "s1"}),
+        _ai("fork"), _tool({"agent_id": "s2"}),
         *_spawn("a"),
-        _ai("spawn_subagent"), _tool({"subagent_run_id": "b"}),
+        *_spawn("b"),
         *_wait("a", "b"),
     ]
 
@@ -120,8 +120,8 @@ def test_subagent_without_an_end_timestamp_is_excluded_not_extrapolated():
 def test_identical_tool_calls_are_disambiguated_by_the_langgraph_interval():
     call = {"id": "1", "name": "Files__open", "args": {"path": "/a"}}
     subagents = [
-        {"subagent_run_id": "early", "tool_calls": [dict(call)]},
-        {"subagent_run_id": "late", "tool_calls": [dict(call)]},
+        {"agent_run_id": "early", "tool_calls": [dict(call)]},
+        {"agent_run_id": "late", "tool_calls": [dict(call)]},
     ]
     env_calls = [
         {"tool": "Files__open", "arguments": {"path": "/a"}, "started_at": 5.0, "result": "first"},
@@ -140,7 +140,7 @@ def test_identical_tool_calls_are_disambiguated_by_the_langgraph_interval():
 
 
 def test_a_tool_call_with_no_env_record_is_reported_not_silently_dropped():
-    subagents = [{"subagent_run_id": "x", "tool_calls": [{"name": "Gone", "args": {}}]}]
+    subagents = [{"agent_run_id": "x", "tool_calls": [{"name": "Gone", "args": {}}]}]
 
     results, quality = join_tool_calls(subagents, [], {})
 

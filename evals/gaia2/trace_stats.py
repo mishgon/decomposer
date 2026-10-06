@@ -12,9 +12,8 @@ Three sources are joined per rollout:
   schemas, and every environment tool call with a wall-clock ``started_at``.
 * ``logs/langgraph_subagent.log`` — one line per subagent run carrying
   ``run_id``/``run_started_at``/``run_ended_at``/``run_wait_time_ms``.
-  ``run`` (``spawn_subagent`` in the earlier core) returns the LangGraph
-  ``run_id`` as ``subagent_run_id`` (``src/decomposer/core.py``), so the join is
-  exact.
+  ``run`` returns the LangGraph ``run_id`` as ``agent_run_id``
+  (``src/decomposer/core.py``), so the join is exact.
 * ``logs/{manager,worker,policy,manager_worker}_vllm.log`` — periodic throughput
   samples, integrated to recover token volumes the traces do not record.
 
@@ -211,11 +210,10 @@ def _tool_name(message: dict[str, Any]) -> str | None:
 def structural_parallelism(messages: Sequence[dict[str, Any]]) -> dict[str, Any]:
     """Replay the manager's run/wait sequence and track the outstanding set.
 
-    A "spawn" here is any call that starts a subagent run: ``run``, or
-    ``spawn_subagent`` in traces of the earlier core. Returns the depth reached
-    after each spawn (how many runs the manager deliberately had in flight), how
-    many responses each ``wait`` collected, and the length of each unbroken run
-    of spawns.
+    A "spawn" here is a ``run`` call, which starts a subagent run. Returns the
+    depth reached after each spawn (how many runs the manager deliberately had
+    in flight), how many responses each ``wait`` collected, and the length of
+    each unbroken run of spawns.
     """
     outstanding: set[str] = set()
     depths: list[int] = []
@@ -241,9 +239,9 @@ def structural_parallelism(messages: Sequence[dict[str, Any]]) -> dict[str, Any]
             except (ValueError, TypeError):
                 payload = None
 
-        if pending in ("run", "spawn_subagent"):
-            if isinstance(payload, dict) and "subagent_run_id" in payload:
-                outstanding.add(payload["subagent_run_id"])
+        if pending == "run":
+            if isinstance(payload, dict) and "agent_run_id" in payload:
+                outstanding.add(payload["agent_run_id"])
                 depths.append(len(outstanding))
                 burst += 1
             else:
@@ -256,7 +254,7 @@ def structural_parallelism(messages: Sequence[dict[str, Any]]) -> dict[str, Any]
                 per_wait.append(len(payload))
                 for report in payload:
                     if isinstance(report, dict):
-                        outstanding.discard(report.get("subagent_run_id"))
+                        outstanding.discard(report.get("agent_run_id"))
             else:
                 empty_waits += 1
         pending = None
@@ -445,7 +443,7 @@ def join_tool_calls(
     quality = {"unique": 0, "ambiguous": 0, "unmatched": 0}
 
     for state in subagents:
-        run_id = state["subagent_run_id"]
+        run_id = state["agent_run_id"]
         life = lifecycles.get(run_id)
         low = life.started if life and life.started else -math.inf
         high = life.ended if life and life.ended else math.inf
@@ -541,7 +539,7 @@ def rollout_stats(
     shared = system_prompt_tokens + schema_tokens
 
     for state in subagent_states:
-        run_id = state["subagent_run_id"]
+        run_id = state["agent_run_id"]
         statuses[state.get("status") or "unknown"] += 1
         life = lifecycles.get(run_id)
         if life:
@@ -865,9 +863,9 @@ def analyse_decomposer_run(
 
 
 def _subagent_system_prompt() -> str:
-    from decomposer.prompts import SUBAGENT_SYSTEM_PROMPT
+    from decomposer.prompts import AGENT_SYSTEM_PROMPT
 
-    return SUBAGENT_SYSTEM_PROMPT
+    return AGENT_SYSTEM_PROMPT
 
 
 def analyse_simple_run(

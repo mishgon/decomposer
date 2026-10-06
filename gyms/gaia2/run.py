@@ -1581,7 +1581,7 @@ def _runtime_configs(
         ),
         "subagent_types": [
             {
-                "subagent_type_id": "gaia2_worker",
+                "agent_type_id": "gaia2_worker",
                 "description": (
                     f"{experiment.worker_served_name} worker with authenticated access to "
                     "the current Gaia2 scenario tools."

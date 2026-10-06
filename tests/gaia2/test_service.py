@@ -49,7 +49,7 @@ def test_manager_model_call_limit_is_installed_independently(monkeypatch):
             "manager_max_model_calls": 200,
             "manager_recursion_limit": 1000,
             "subagent_recursion_limit": 1000,
-            "subagent_types": [{"subagent_type_id": "worker"}],
+            "subagent_types": [{"agent_type_id": "worker"}],
         }
     )
 
@@ -66,7 +66,7 @@ def test_manager_model_call_limit_is_installed_independently(monkeypatch):
         and item.actor == "manager"
         for item in captured["middleware"]
     )
-    assert captured["subagent_recursion_limit"] == 1000
+    assert captured["agent_recursion_limit"] == 1000
 
 
 def test_manager_overflow_is_returned_as_structured_terminal_failure(monkeypatch):
@@ -88,7 +88,7 @@ def test_manager_overflow_is_returned_as_structured_terminal_failure(monkeypatch
         {
             "manager": {"model": "fake"},
             "max_model_len": 131072,
-            "subagent_types": [{"subagent_type_id": "worker"}],
+            "subagent_types": [{"agent_type_id": "worker"}],
         }
     )
 
@@ -121,7 +121,7 @@ def test_episode_persists_thread_and_forwards_runtime_context(monkeypatch):
             "manager": {"model": "fake"},
             "subagent_types": [
                 {
-                    "subagent_type_id": "worker",
+                    "agent_type_id": "worker",
                     "description": "worker",
                     "assistant_id": "worker",
                     "url": "http://127.0.0.1:1",
@@ -180,18 +180,18 @@ def test_episode_persists_thread_and_forwards_runtime_context(monkeypatch):
 def test_uncollected_subagent_is_reported_as_outstanding():
     summaries, outstanding = service._subagent_summary(
         {
-            "subagents": {
-                "s1": {"subagent_id": "s1", "subagent_type_id": "worker"},
+            "agents": {
+                "s1": {"agent_id": "s1", "agent_type_id": "worker"},
             },
-            "subagent_runs": {
-                "running": {"subagent_id": "s1", "status": "running"},
+            "agent_runs": {
+                "running": {"agent_id": "s1", "status": "running"},
                 "uncollected": {
-                    "subagent_id": "s1",
+                    "agent_id": "s1",
                     "status": "responded",
                     "response": "ok",
                 },
                 "collected": {
-                    "subagent_id": "s1",
+                    "agent_id": "s1",
                     "status": "responded",
                     "response": "ok",
                     "response_sequence_number": 1,
@@ -208,7 +208,7 @@ def test_uncollected_subagent_is_reported_as_outstanding():
     assert outstanding == ["running", "uncollected"]
     assert all("messages" not in summary for summary in summaries)
     # The type lives on the persistent subagent, not on the run.
-    assert {summary["subagent_type_id"] for summary in summaries} == {"worker"}
+    assert {summary["agent_type_id"] for summary in summaries} == {"worker"}
     assert summaries[2]["response"] == "ok"
 
 
@@ -242,7 +242,7 @@ def test_openrouter_content_blocks_return_only_visible_text(monkeypatch):
         {
             "manager": {"model": "fake"},
             "decomposer_system_prompt_profile": "teacher",
-            "subagent_types": [{"subagent_type_id": "worker"}],
+            "subagent_types": [{"agent_type_id": "worker"}],
         }
     )
     with TestClient(app) as client:
@@ -266,7 +266,7 @@ def test_reasoning_only_response_is_not_a_final_answer(monkeypatch):
     app = service.create_app(
         {
             "manager": {"model": "fake"},
-            "subagent_types": [{"subagent_type_id": "worker"}],
+            "subagent_types": [{"agent_type_id": "worker"}],
         }
     )
     with TestClient(app) as client:
@@ -295,7 +295,7 @@ def test_prompt_profile_is_forwarded_to_decomposer(monkeypatch):
         {
             "manager": {"model": "fake"},
             "decomposer_system_prompt_profile": "teacher",
-            "subagent_types": [{"subagent_type_id": "worker"}],
+            "subagent_types": [{"agent_type_id": "worker"}],
         }
     )
 
@@ -319,7 +319,7 @@ def test_prompt_addendum_is_appended_only_when_configured(monkeypatch):
             "manager": {"model": "fake"},
             "decomposer_system_prompt_profile": "teacher",
             "decomposer_system_prompt_addendum_profile": "gaia2-ambiguity",
-            "subagent_types": [{"subagent_type_id": "worker"}],
+            "subagent_types": [{"agent_type_id": "worker"}],
         }
     )
 
