@@ -35,6 +35,9 @@ export RL_GYM_IMAGE
 export PYTHONPATH="$PWD:$PWD/src:$PWD/external/verl${PYTHONPATH:+:$PYTHONPATH}"
 .venv-rl/bin/python -c 'import torch; import verl.checkpoint_engine.nccl_checkpoint_engine; from verl.utils.attention_utils import unpad_input; unpad_input(torch.ones(1, 2, 1), torch.ones(1, 2, dtype=torch.long))'
 export TOKENIZERS_PARALLELISM=false
+# Avoid the uvloop actor path implicated in the rollout worker's native GC crash.
+export RAY_USE_UVLOOP=0
+export PYTHONFAULTHANDLER=1
 export PATH="$PWD/.venv-rl/bin:/usr/local/cuda/bin:$PATH"
 export TENSORBOARD_DIR="$RL_ARTIFACTS/tensorboard"
 mkdir -p "$RL_ARTIFACTS"
