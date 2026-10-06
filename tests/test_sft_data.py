@@ -924,6 +924,34 @@ def test_prepare_drops_refused_calls_with_their_results(tmp_path: Path) -> None:
     assert prepared.manifest["normalization"]["traces"] == 0
 
 
+def test_prompt_shared_by_two_categories_stays_on_one_side(tmp_path: Path) -> None:
+    # Tasks 0 and 1 carry the same prompt under different categories, like a tau2
+    # domain and its `_dsh` implementation.
+    rollouts = [_rollout(index, prompt_task_index=0 if index < 2 else None) for index in range(10)]
+    materialized = [
+        _materialized(index, prompt_task_index=0 if index < 2 else None) for index in range(10)
+    ]
+    source = _source(tmp_path, "teacher", rollouts, materialized)
+
+    prepared = _prepare_fixture_dataset(
+        [source], tmp_path / "prepared", validation_fraction=0.5
+    )
+
+    train = _read_jsonl(prepared.train_path)
+    validation = _read_jsonl(prepared.validation_path)
+    shared = {record["id"] for record in [*train, *validation]} & {
+        f"nemo_gym:workplace_assistant:teacher:{index}:0" for index in (0, 1)
+    }
+    assert len(shared) == 2
+    sides = [
+        {record["id"] for record in split} & shared for split in (train, validation)
+    ]
+    assert sorted(len(side) for side in sides) == [0, 2]
+    split = prepared.manifest["split"]
+    assert split["num_groups"] == 9
+    assert split["multi_category_groups"] == 1
+
+
 def test_prepare_is_reproducible(tmp_path: Path) -> None:
     sources = [_source(tmp_path, "teacher-a"), _source(tmp_path, "teacher-b")]
     first = _prepare_fixture_dataset(

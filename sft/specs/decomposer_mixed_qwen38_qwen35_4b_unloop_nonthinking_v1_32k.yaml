@@ -1,0 +1,53 @@
+spec_version: 2
+
+dataset:
+  id: decomposer-mixed-qwen38-qwen35-4b-unloop-nonthinking
+  version: v1-tau2-broad-workplace-train-n1-32k
+
+# No subagent_types: each record keeps its gym's own tool schemas and agent
+# types. No prompt profile: the student trains with the teacher prompt.
+policy:
+  id: decomposer-default
+
+sources:
+  # tau2 broad_v1 pool (2026-10-06): Qwen3.8-Flash non-thinking manager,
+  # Qwen3.5-4B-unlooped thinking subagents, one rollout per task.
+  - id: tau2-qwen38-flash-nonthinking-broad-v1-n1
+    adapter: nemo_gym
+    path: /mnt/share14T-2/sukhorukov/decomposer_artifacts/evaluation/results/tau2_gym/qwen38_flash_non_thinking_teacher_qwen35_4b_unlooped_thinking-decomposer_broad_v1-n1
+    benchmark: tau2_gym
+    environment: tau2_gym
+    partition: train
+    teacher: qwen38-flash-non-thinking
+    expected_native_rollouts: 4843
+    expected_candidates: 4843
+  # Workplace train split (2026-10-06), same teacher and subagents, one rollout
+  # per task.
+  - id: workplace-qwen38-flash-nonthinking-train-n1
+    adapter: nemo_gym
+    path: /mnt/share14T-2/sukhorukov/decomposer_artifacts/evaluation/results/workplace_assistant/train/qwen38-flash-non-thinking-teacher-qwen35-4b-unlooped-thinking-n1
+    benchmark: workplace_assistant
+    environment: workplace_assistant
+    partition: train
+    teacher: qwen38-flash-non-thinking
+    expected_native_rollouts: 1255
+    expected_candidates: 1255
+
+selection:
+  policy: exact_reward
+  success_reward: 1.0
+  invalid_policy: exclude
+  max_traces_per_prompt_per_teacher: null
+
+split:
+  strategy: prompt_fixed
+  validation_fraction: 0.1
+  seed: 42
+
+# The student is the unloop Qwen3.5-4B checkpoint, whose tokenizer files equal
+# Qwen/Qwen3.5-4B@851bf6e. Training requires the same path as the model.
+tokenization:
+  profile: qwen35_sft_non_thinking
+  tokenizer: /mnt/share14T-2/sukhorukov/decomposer_artifacts/models/qwen35_4b_original_unloop/checkpoint-0
+  max_tokens: 32768
+  trust_remote_code: false

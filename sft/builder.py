@@ -239,17 +239,16 @@ def _allocate_prompt_fixed_split(
     validation_fraction: float,
     seed: int,
 ) -> tuple[list[CanonicalRollout], list[CanonicalRollout], JsonObject]:
-    group_categories: dict[str, str] = {}
-    groups_by_category: dict[str, set[str]] = defaultdict(set)
+    categories_by_group: dict[str, set[str]] = defaultdict(set)
     for record in records:
-        category = _record_category(record)
-        existing = group_categories.setdefault(record.group_id, category)
-        if existing != category:
-            raise ValueError(
-                f"Task group {record.group_id} spans categories {existing!r} and {category!r}."
-            )
-        groups_by_category[category].add(record.group_id)
-    num_groups = len(group_categories)
+        categories_by_group[record.group_id].add(_record_category(record))
+    # A prompt can appear under several categories (for example, a tau2 domain and
+    # its independent `_dsh` implementation). Its group stays whole, so the prompt
+    # never lands on both sides, and counts toward its first category.
+    groups_by_category: dict[str, set[str]] = defaultdict(set)
+    for group_id, categories in categories_by_group.items():
+        groups_by_category[min(categories)].add(group_id)
+    num_groups = len(categories_by_group)
     target = round(num_groups * validation_fraction)
     raw = {
         category: len(groups) * target / num_groups
@@ -281,6 +280,9 @@ def _allocate_prompt_fixed_split(
             "seed": seed,
             "validation_fraction": validation_fraction,
             "num_groups": num_groups,
+            "multi_category_groups": sum(
+                len(categories) > 1 for categories in categories_by_group.values()
+            ),
             "train_groups": num_groups - len(validation_groups),
             "validation_groups": len(validation_groups),
             "validation_groups_by_category": dict(sorted(quotas.items())),
