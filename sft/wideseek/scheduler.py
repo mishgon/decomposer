@@ -1,14 +1,5 @@
 """Coverage first, then bounded water-filling, matching Toolathlon SFT policy."""
-import math
-
-
-def qualifies(result, threshold):
-    score = result["evaluation"].get("score")
-    return (result["status"] == "finished" and not result.get("cleanup_errors")
-            and result.get("trace_available", True)
-            and result["evaluation"].get("status") == "scored"
-            and type(score) in (int, float) and math.isfinite(score)
-            and 0 <= score <= 1 and (score == 1. or score > threshold))
+from gyms.wideseek.metrics import qualifies
 
 
 def new_state(task_ids, threshold=.9, target_successes=4):

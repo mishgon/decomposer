@@ -1,7 +1,6 @@
 """Shared episode budget and model/tool logs; no secrets in artifacts."""
 import asyncio
 import json
-import os
 from pathlib import Path
 import sqlite3
 import time
@@ -45,11 +44,8 @@ class BudgetExceeded(RuntimeError):
 
 
 def directory(context):
-    path = Path(context["directory"]).resolve()
-    root = Path(os.environ.get("WS_ARTIFACT_ROOT", "artifacts")).resolve()
-    if not path.is_relative_to(root) or path == root:
-        raise ValueError("Episode directory must be beneath WS_ARTIFACT_ROOT")
-    return path
+    # The runner supplies this path through trusted runtime context, not tool arguments.
+    return Path(context["directory"]).resolve()
 
 
 def save(path, value):

@@ -1,5 +1,16 @@
 """Small raw-trajectory statistics, shared by execution and monitoring."""
 import json
+import math
+
+
+def qualifies(result, threshold):
+    """Whether a finished, captured episode meets a native-score threshold."""
+    score = result["evaluation"].get("score")
+    return (result["status"] == "finished" and not result.get("cleanup_errors")
+            and result.get("trace_available", True)
+            and result["evaluation"].get("status") == "scored"
+            and type(score) in (int, float) and math.isfinite(score)
+            and 0 <= score <= 1 and (score == 1. or score > threshold))
 
 
 def subagent_counts(messages):

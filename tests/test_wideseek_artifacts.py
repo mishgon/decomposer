@@ -11,8 +11,7 @@ from gyms.wideseek.run import run_jobs, usage
 from gyms.wideseek.runtime import ModelLog, init_budget
 
 
-def test_incremental_calls_preserve_reasoning_and_count_once(tmp_path, monkeypatch):
-    monkeypatch.setenv("WS_ARTIFACT_ROOT", str(tmp_path))
+def test_incremental_calls_preserve_reasoning_and_count_once(tmp_path):
     path = tmp_path / "episode"
     init_budget(path)
     response = AIMessage(content="answer", additional_kwargs={"reasoning_content": "reasoning"},
@@ -82,13 +81,12 @@ def test_episode_manifest_and_html(tmp_path):
         assert (path.parent / "usage.json").exists()
 
 
-def test_logging_inside_agent_graph(tmp_path, monkeypatch):
+def test_logging_inside_agent_graph(tmp_path):
     from langchain.agents import create_agent
     from langchain_core.language_models.fake_chat_models import FakeListChatModel
     from langgraph.checkpoint.memory import InMemorySaver
     from gyms.wideseek.runtime import Context
 
-    monkeypatch.setenv("WS_ARTIFACT_ROOT", str(tmp_path))
     path = tmp_path / "episode"
     init_budget(path)
     graph = create_agent(FakeListChatModel(responses=["answer"]),

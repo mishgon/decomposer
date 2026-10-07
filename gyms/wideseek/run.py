@@ -20,7 +20,7 @@ from langchain_core.messages import message_to_dict
 from decomposer.visualization import write_trace_html
 from decomposer.usage import build_usage_summary
 
-from gyms.wideseek import agents
+from gyms.wideseek import REPO_ROOT, agents
 from gyms.wideseek.evaluate import evaluate
 from gyms.wideseek.metrics import subagent_counts
 from gyms.wideseek.prepare import agent_input
@@ -110,7 +110,7 @@ async def episode(task, mode, attempt, root, args):
               "episode_id": path.name, "run_id": root.name,
               "repetition": attempt, "mode": mode, "attempt": attempt,
               "execution_directory": path.name, "started_at": time.time(),
-              "revision": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()}
+              "revision": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=REPO_ROOT, text=True).strip()}
     state = {}
     try:
         state = await asyncio.wait_for(agent.ainvoke(agent_input(task), config=config,
@@ -166,7 +166,6 @@ async def prepare_run(args):
     """Validate services and create or resume a raw run, without scheduling tasks."""
     asyncio.get_running_loop().add_signal_handler(signal.SIGTERM, asyncio.current_task().cancel)
     root = args.output.resolve()
-    os.environ.setdefault("WS_ARTIFACT_ROOT", str(Path("artifacts").resolve()))
     raw = args.data.read_bytes()
     tasks = [json.loads(line) for line in raw.splitlines()][:args.limit]
     if not tasks:
@@ -198,9 +197,14 @@ async def prepare_run(args):
                 "timeout": args.timeout,
                 "judge": {"model": profiles["judge"]["model_name"], "profile": agents.JUDGE_MODEL,
                           "temperature": 0., "thinking": False, "paper_comparable": False}}
-    sources = {str(p): hashlib.sha256(p.read_bytes()).hexdigest()
-               for base in (Path("gyms/wideseek"), Path("src/decomposer"))
-               for p in base.rglob("*") if p.is_file() and p.suffix in {".py", ".sh", ".json", ".txt"}}
+    sources = {}
+    for base in (REPO_ROOT / "gyms/wideseek", REPO_ROOT / "src/decomposer"):
+        for folder, directories, files in os.walk(base):
+            directories[:] = [name for name in directories if name not in {".venv", "__pycache__"}]
+            for name in files:
+                path = Path(folder) / name
+                if path.suffix in {".py", ".sh", ".json", ".txt"}:
+                    sources[str(path.relative_to(REPO_ROOT))] = hashlib.sha256(path.read_bytes()).hexdigest()
     if args.resume:
         previous = json.loads((root / "manifest.json").read_text())
         if previous["settings"] != settings:
@@ -214,7 +218,7 @@ async def prepare_run(args):
                 raise ValueError("Cannot migrate a run between different Decomposer harness versions")
             previous.setdefault("source_history", []).append({
                 "previous_source_sha256": previous["source_sha256"], "changed_at": time.time(),
-                "revision": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()})
+                "revision": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=REPO_ROOT, text=True).strip()})
             previous["source_sha256"] = sources
             save(root / "manifest.json", previous)
     else:
@@ -223,11 +227,11 @@ async def prepare_run(args):
              "harness": args.agent, "assistant_id": args.agent,
              "tasks": settings["tasks"], "repetitions": args.n, "episodes": [],
              "settings": settings, "started_at": time.time(),
-             "revision": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
+             "revision": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=REPO_ROOT, text=True).strip(),
              "packages": {p: importlib.metadata.version(p) for p in
                  ("langchain", "langchain-openai", "langgraph", "langgraph-api", "httpx", "pandas")},
              "source_sha256": sources})
-        (root / "source.diff").write_bytes(subprocess.check_output(["git", "diff", "HEAD"]))
+        (root / "source.diff").write_bytes(subprocess.check_output(["git", "diff", "HEAD"], cwd=REPO_ROOT))
     return tasks, root
 
 
@@ -270,7 +274,7 @@ async def main(args):
 
 def create_parser():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--data", type=Path, default=Path("artifacts/gyms/wideseek/data/width/tasks.jsonl"))
+    parser.add_argument("--data", type=Path, default=REPO_ROOT / "artifacts/gyms/wideseek/data/width/tasks.jsonl")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--agent", choices=agents.AGENT_MODELS, required=True)
     parser.add_argument("--limit", type=int, default=2)

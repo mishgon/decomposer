@@ -1,4 +1,5 @@
 from pathlib import Path
+import ast
 import json
 import pytest
 
@@ -43,11 +44,18 @@ def test_summary_keeps_judge_errors_separate_and_excludes_judge_tokens():
     assert summarize([])["mean_native_score"] is None
 
 
-def test_gym_has_no_evaluation_workflow_dependency():
-    source = Path("gyms/wideseek/run.py").read_text()
-    assert "from evals" not in source
-    assert "import evals" not in source
-    assert "from sft" not in source
+def test_workflow_layers_do_not_import_each_other():
+    root = Path(__file__).resolve().parents[1]
+    for layer, forbidden in (("gyms", {"evals", "sft", "opd", "rl"}),
+                             ("evals", {"sft", "opd", "rl"}),
+                             ("sft", {"evals", "opd", "rl"})):
+        for path in (root / layer / "wideseek").rglob("*.py"):
+            if ".venv" in path.parts:
+                continue
+            for node in ast.walk(ast.parse(path.read_text())):
+                names = ([node.module or ""] if isinstance(node, ast.ImportFrom) else
+                         [alias.name for alias in node.names] if isinstance(node, ast.Import) else [])
+                assert not {name.split(".")[0] for name in names} & forbidden, path
 
 
 def test_collection_indexes_only_finished_scored_traces(tmp_path):

@@ -8,6 +8,7 @@ import subprocess
 import time
 
 from gyms.wideseek.evaluate import evaluate
+from gyms.wideseek import REPO_ROOT
 from gyms.wideseek.runtime import MODEL_PROFILES, close_model, model, model_metadata, save
 
 
@@ -29,7 +30,7 @@ async def main(args):
     save(args.output / "manifest.json", {"source_run": str(args.run.resolve()),
         "source_manifest": manifest, "judge_model": args.judge_model,
         "generation": generation,
-        "revision": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
+        "revision": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=REPO_ROOT, text=True).strip(),
         "started_at": time.time(), "attempts": len(paths)})
     semaphore = asyncio.Semaphore(args.concurrency)
 

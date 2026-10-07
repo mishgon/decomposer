@@ -9,8 +9,7 @@ from pathlib import Path
 import statistics
 import time
 
-from sft.wideseek.scheduler import qualifies
-from gyms.wideseek.metrics import subagent_counts
+from gyms.wideseek.metrics import qualifies, subagent_counts
 
 
 def duration(seconds):

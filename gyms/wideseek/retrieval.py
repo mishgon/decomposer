@@ -61,9 +61,10 @@ def serve(assets, upstream, port, qdrant_url):
 
 
 if __name__ == "__main__":
+    from gyms.wideseek import REPO_ROOT
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--assets", type=Path, required=True)
-    parser.add_argument("--upstream", type=Path, default=Path("external/RLinf"))
+    parser.add_argument("--upstream", type=Path, default=REPO_ROOT / "external/RLinf")
     parser.add_argument("--port", type=int, default=18080)
     parser.add_argument("--qdrant-url", default="http://127.0.0.1:16333")
     args = parser.parse_args()

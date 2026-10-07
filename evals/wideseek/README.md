@@ -7,7 +7,7 @@ The aggregate is saved to `summary.json` in the run directory.
 
 ```bash
 source gyms/wideseek/env.sh
-.venv/bin/python -m evals.wideseek.run --agent react \
+gyms/wideseek/.venv/bin/python -m evals.wideseek.run --agent react \
   --output artifacts/evals/wideseek/runs/qwen4b-simple \
   --limit 100 -n 3 --concurrency 2
 ```

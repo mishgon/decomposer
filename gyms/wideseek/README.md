@@ -18,8 +18,12 @@ bit-for-bit identical. Existing downloaded assets are reused.
 ```bash
 UV_BIN="$HOME/.local/bin/uv" bash gyms/wideseek/setup.sh
 export WS_ASSETS=/large/disk/wideseek/assets
-.venv/bin/python -m gyms.wideseek.assets --root "$WS_ASSETS"
+gyms/wideseek/.venv/bin/python -m gyms.wideseek.assets --root "$WS_ASSETS"
 ```
+
+Run these commands from the repository root. Setup creates an isolated
+`gyms/wideseek/.venv` for the Gym and CPU retrieval dependencies; it does not
+install into the root `.venv` used for training or other gyms.
 
 Start each service in its own terminal or tmux session, saving stdout/stderr under
 `artifacts/gyms/wideseek/setup/`:
@@ -31,17 +35,19 @@ bash gyms/wideseek/serve.sh workers
 ```
 
 Local ports are 16333/16334 (Qdrant), 18080 (retrieval) and 18081 (workers).
-`env.sh` loads credentials from `LMROUTER_ENV` or the home environment file.
+`env.sh` requires `LLM_PROXY_MASTER_KEY` in the calling shell's environment.
+Configure credentials using the shared lmrouter instructions before sourcing it;
+the Gym does not read a personal credential file.
 Export `LLM_PROXY_UNIX_SOCKET` when using the relay. Model parameters are not read
-from Gym environment variables. `WS_SEARCH_URL`, `WS_ASSETS` and
-`WS_ARTIFACT_ROOT` configure services/storage only.
+from Gym environment variables. `WS_SEARCH_URL` and `WS_ASSETS` configure
+services/storage only. `--output` selects the run directory on any writable disk.
 
 ## Tasks and Raw Execution
 
 ```bash
-.venv/bin/python -m gyms.wideseek.prepare --source width
+gyms/wideseek/.venv/bin/python -m gyms.wideseek.prepare --source width
 source gyms/wideseek/env.sh
-.venv/bin/python -m gyms.wideseek.run --agent react \
+gyms/wideseek/.venv/bin/python -m gyms.wideseek.run --agent react \
   --output artifacts/gyms/wideseek/runs/raw-smoke --limit 2 -n 1 --concurrency 2
 ```
 

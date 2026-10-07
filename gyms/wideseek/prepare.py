@@ -60,9 +60,10 @@ def prepare(source, output):
 
 
 if __name__ == "__main__":
+    from gyms.wideseek import REPO_ROOT
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", choices=SOURCES, default="width")
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
-    output = args.output or Path("artifacts/gyms/wideseek/data") / args.source
+    output = args.output or REPO_ROOT / "artifacts/gyms/wideseek/data" / args.source
     print(json.dumps(prepare(args.source, output), indent=2))

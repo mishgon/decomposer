@@ -15,11 +15,11 @@ case "${1:-}" in
   retrieval)
     : "${WS_ASSETS:?Set WS_ASSETS}"
     export CUDA_VISIBLE_DEVICES=""
-    exec .venv/bin/python -u -m gyms.wideseek.retrieval --assets "$WS_ASSETS"
+    exec gyms/wideseek/.venv/bin/python -u -m gyms.wideseek.retrieval --assets "$WS_ASSETS"
     ;;
   workers)
     source gyms/wideseek/env.sh
-    exec .venv/bin/langgraph dev --config gyms/wideseek/langgraph.json --host 127.0.0.1 \
+    exec gyms/wideseek/.venv/bin/langgraph dev --config gyms/wideseek/langgraph.json --host 127.0.0.1 \
       --port 18081 --no-browser --no-reload --n-jobs-per-worker 4
     ;;
   *) echo 'Usage: serve.sh {qdrant|retrieval|workers}' >&2; exit 2 ;;
