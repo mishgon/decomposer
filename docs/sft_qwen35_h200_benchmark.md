@@ -24,7 +24,7 @@ A one-step profile shows where the remaining time goes. At the median length, a 
 
 DDP itself costs about 4% when every rank gets the same lengths. **Opportunities** ranks what could still be gained.
 
-**Update, same day.** **Optimization Benchmark** applied five of those opportunities to full training and to LoRA. The steady-state rate (excluding each run's first step) of full training rose from 27,076 to 35,128 tokens/s (+30%). LoRA rose from 27,442 to 36,894 tokens/s (+34%), or to 39,475 with adapter dropout 0. Use its **Recommended Configurations**.
+**Update, same day.** **Optimization Benchmark** applied five of those opportunities to full training and to LoRA. The steady-state rate (excluding each run's first step) of full training rose from 27,076 to 35,128 tokens/s (+30%). LoRA rose from 27,442 to 36,894 tokens/s (+34%), or to 39,475 with adapter dropout 0. Skipping PEFT's fp32 input cast then took LoRA to 44,681 tokens/s with dropout 0 (+63% over its baseline). Use its **Recommended Configurations**.
 
 ## Setup
 
@@ -207,7 +207,7 @@ Later the same day, all six opportunities were measured in both training modes, 
 - **Full training:** the recommended DDP setup above (fp32 weights, bf16 autocast).
 - **LoRA:** a bf16 base with fp32 adapters (r 32, alpha 64, dropout 0.05) on the 200 linear projections of the language model, also on DDP (`sft/README.md`, **LoRA**).
 
-Together the changes speed up full training by 30% and LoRA by 34%; with LoRA adapter dropout set to 0, LoRA gains 44%. Every change keeps the loss trajectory. Of the sixth opportunity, the Trainer's logging settings made no difference. Balancing ranks needs variable-size batches, which this benchmark did not try.
+Together the changes speed up full training by 30% and LoRA by 34%; with LoRA adapter dropout set to 0, LoRA gains 44%. Skipping PEFT's input cast, measured afterwards (**PEFT Input Cast**), raises the LoRA gain to 63%. Every change keeps the loss trajectory. Of the sixth opportunity, the Trainer's logging settings made no difference. Balancing ranks needs variable-size batches, which this benchmark did not try.
 
 ### Method
 
@@ -319,6 +319,20 @@ GPU kernel time per step at 7.5K, in ms:
 
 **The multi-GPU gap** is smaller than it first looked. On the steady metric, the full baseline runs 6,769 tokens/s per GPU, 17% below the single-GPU 7.5K profile (8,145); the full stack runs 8,782, 19% below its profile (10,859). The 30% gap in **DDP Overhead** used end-to-end time, which includes the first step's start-up. The remaining gap comes from the length mix, rank imbalance and about 4% of DDP overhead.
 
+### PEFT Input Cast
+
+After the profile above, the trainer turns off PEFT's cast of each adapted layer's input to the fp32 adapter dtype whenever it trains under bf16 autocast (`8a45f3c`; `sft/README.md`, **LoRA**). The LoRA stack ran on the same sample against a control: the previous commit, run from a temporary worktree with the same venv in the same session.
+
+| LoRA stack | Steady tokens/s | Gain | Over the LoRA baseline | Peak allocated |
+| --- | ---: | ---: | ---: | ---: |
+| Control (previous commit), dropout 0 | 39,849 | | +45.2% | 28.6 GiB |
+| Input cast skipped, dropout 0, 2 runs | 45,032 and 44,329 | +12.1% over the control | +62.8% | 26.1 GiB |
+| Input cast skipped, dropout 0.05 | 43,096 | +16.8% over the earlier dropout-0.05 stack (36,894) | +57.0% | 28.1 GiB |
+
+The gain falls inside the profile's range (+13% at 28K, +18% at 7.5K). With dropout 0.05 it is larger, because PEFT used to apply dropout to the fp32 copy. Lowering dropout from 0.05 to 0 now gains 3.7% in the stack, down from 7.0%.
+
+Every new run logged `Skipped PEFT's fp32 input cast in 200 LoRA layers.`, and the control logged none. With dropout 0, the first step matches the control (loss 0.6491; gradient norm 1.98 against 2.00). The logged loss windows (steps 2-10, 11-20 and 21-30) differ from the control's by at most 0.0006.
+
 ### Recommended Configurations
 
 Both modes need the environment in **Environment**. That includes `causal-conv1d` on `PYTHONPATH`: without it, Transformers falls back to the PyTorch convolution and only logs a warning. Benchmark runs record the convolution actually used in `benchmark_summary.json` under `linear_attention_runtime.causal_conv1d`.
@@ -350,14 +364,14 @@ model:
 lora:
   r: 32
   alpha: 64
-  dropout: 0.0         # 7% faster than 0.05 in the stack; choose for regularisation, not speed
+  dropout: 0.0         # 3.7% faster than 0.05 in the stack; choose for regularisation, not speed
 ```
 
 Logging settings make no measurable difference; keep `logging_steps: 1` for per-step loss curves.
 
 ### Next Opportunities
 
-1. **Skip PEFT's input cast in LoRA under bf16 autocast** (+13% to +18% per step in the profile). It is a small trainer change, but it still needs a benchmark across all 4 GPUs.
+1. **Done: skip PEFT's input cast in LoRA under bf16 autocast.** The trainer now does it; see **PEFT Input Cast**.
 2. **Token-budget batches** to balance ranks (at most about 8% on this sample).
 3. **The remaining copies in full training** (242 ms at 7.5K, 17% of kernel time). As before, the profiler cannot attribute them to source lines.
 
@@ -416,7 +430,11 @@ training:
 
 - **Optimization benchmark:**
   - `gates.py` (SHA-256 `3728caf25a1d16121c86652321dd5090cb1b72a17efb464a8ca8d8e1d718fb3a`) runs the correctness gates on one GPU.
-  - `run_cases3.sh` (SHA-256 `93057ebedf7b94968efbf7adb214ac84242bd635638b4349315b13d965777ace`) runs the cases. Its case lines are `name config per_device_batch stratified|longest count plain|causal`, where `causal` adds the bundle's `causal-conv1d` to `PYTHONPATH`. It ran `round2_warm.txt`, `round2.txt` and `round3.txt`.
+  - `run_cases3.sh` (SHA-256 `95ff136323f4daac4f2958fb59809d051efb1b0482a9b84d9ae68e91e9cdacf9`) runs the cases.
+    - Its case lines are `name config per_device_batch stratified|longest count plain|causal`, where `causal` adds the bundle's `causal-conv1d` to `PYTHONPATH`.
+    - `REPO=<checkout>` runs another checkout with the shared venv; the input-cast control used that.
+    - It ran `round2_warm.txt`, `round2.txt`, `round3.txt` and the `round4_*.txt` input-cast cases.
+    - The earlier version without `REPO` (`93057ebe…`) ran rounds 2 and 3.
   - `summarize2.py <bench_dir> <case>...` prints steady throughput, step-time median, rank imbalance, peak memory, first-step loss and gradient norm, the convolution and attention actually used, GPU processes and autotuning events.
   - `run_profiles4.sh` and `run_profile_nocast.sh` ran the profiles, and `compare_profiles.py <profile_dir> <name>...` tabulates them.
   - Configs: `ddp_fp32.yaml` and `lora.yaml` (SHA-256 `f0079bd7c880aad057e12cb96b4a8ca05a92b9e89da9cc35889f7fe48af9c455`) are the baselines. `f_<change>.yaml` and `l_<change>.yaml` add one change each. The stacks are `f_all.yaml` (`113caa5827b0c1a495d510d88353bf6b35342ca36132aad7c9018f78f6ed5f4d`), `l_all.yaml` (`803ff5a39921aac8ad4bab107e8e3d95002ff52e051a298f09641508bb210ec1`) and `l_all_nodrop.yaml` (`2d9a5002742d70c5ed6f80411e5f21abbc1330c79aac135cecc37e9629cf2e78`).

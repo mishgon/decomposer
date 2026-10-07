@@ -629,8 +629,8 @@ lora:
 Dropout is 0 for single-epoch runs. The tau2 + Workplace release
 (`v1-tau2-broad-workplace-train-n1-32k`) has about 30M tokens, roughly 6M of them
 supervised. The LoRA config trains 1 epoch, so every record is seen once. In a
-single pass there is little to overfit, and dropout mostly adds noise and costs 7%
-of throughput (`docs/sft_qwen35_h200_benchmark.md`). For multi-epoch runs, raise it
+single pass there is little to overfit, and dropout mostly adds noise and costs about
+4% of throughput (`docs/sft_qwen35_h200_benchmark.md`). For multi-epoch runs, raise it
 (for example to 0.05) if validation loss starts rising.
 
 ## ClearML
