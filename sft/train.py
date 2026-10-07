@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import gc
 import hashlib
 import importlib.metadata
@@ -1172,6 +1173,51 @@ def _save_final_configuration(
     generation_config.save_pretrained(final_dir)
 
 
+def _bf16_config(config: Any) -> Any:
+    """A copy of the model config that records the bf16 export dtype, sub-configs included."""
+    config = copy.deepcopy(config)
+    config.dtype = torch.bfloat16
+    for key in config.sub_configs:
+        sub_config = getattr(config, key, None)
+        if sub_config is not None:
+            sub_config.dtype = torch.bfloat16
+    return config
+
+
+def _rewrite_weights_in_bf16(final_dir: Path) -> int:
+    """Rewrite the exported full-SFT weights in bf16, the dtype evaluation serves.
+
+    Full SFT keeps fp32 master weights (fp32 DDP weights, or FSDP's upcast), and both
+    export paths save them as they are. Returns the number of tensors cast.
+    """
+    from safetensors import safe_open
+    from safetensors.torch import save_file
+
+    cast = 0
+    total_size = 0
+    for path in sorted(final_dir.glob("*.safetensors")):
+        tensors = {}
+        with safe_open(path, framework="pt") as weights:
+            metadata = weights.metadata()
+            for name in weights.keys():
+                tensor = weights.get_tensor(name)
+                if tensor.is_floating_point() and tensor.dtype != torch.bfloat16:
+                    tensor = tensor.to(torch.bfloat16)
+                    cast += 1
+                tensors[name] = tensor
+                total_size += tensor.numel() * tensor.element_size()
+        # Write beside the original and swap, so no tensor is read from a file being overwritten.
+        temporary_path = path.with_name(f".{path.name}.tmp")
+        save_file(tensors, temporary_path, metadata=metadata)
+        os.replace(temporary_path, path)
+    index_path = final_dir / "model.safetensors.index.json"
+    if index_path.exists():
+        index = json.loads(index_path.read_text(encoding="utf-8"))
+        index["metadata"]["total_size"] = total_size
+        _write_json(index_path, index)
+    return cast
+
+
 def _export_lora(
     model: Any,
     output_dir: Path,
@@ -2025,7 +2071,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         if _is_rank_zero() and peft_config is None:
             _save_final_configuration(
                 final_dir,
-                model_config=trainer.model.config,
+                model_config=_bf16_config(trainer.model.config),
                 tokenizer=tokenizer,
                 generation_config=generation_config,
             )
@@ -2046,6 +2092,10 @@ def main(argv: Sequence[str] | None = None) -> None:
                 safe_serialization=True,
                 remove_checkpoint_dir=True,
             )
+
+        if _is_rank_zero() and peft_config is None:
+            cast = _rewrite_weights_in_bf16(final_dir)
+            print(f"Rewrote {cast} exported tensors in bf16.")
 
         if _is_rank_zero():
             summary = {

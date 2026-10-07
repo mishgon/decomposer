@@ -584,6 +584,11 @@ serving runtimes. `training_summary.json` records the completed epoch and step,
 best validation loss and checkpoint, resolved batch settings, exported stop
 IDs, and whether early stopping fired.
 
+Full SFT keeps fp32 master weights (fp32 DDP weights, or FSDP's upcast), so the
+export rewrites `final/` in bf16, with a bf16 `config.json`, on both paths.
+Evaluation serves bf16 anyway (`--dtype bfloat16`), and resuming uses the Trainer
+checkpoints, which are unchanged.
+
 Gemma-4 KV-shared layers intentionally omit unused `k_norm` weights after SFT,
 but vLLM 0.24 still requires those parameters during checkpoint validation.
 Create a zero-copy compatibility view for vLLM without changing `final/`:

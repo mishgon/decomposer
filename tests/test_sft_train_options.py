@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 
 import pytest
@@ -8,7 +9,13 @@ import torch
 # Training runs FLA on its Triton kernels; its TileLang backend is not the validated path.
 os.environ.setdefault("FLA_TILELANG", "0")
 
-from sft.train import _enable_qwen35_native_gva, _freeze_modules, _step_timing_summary
+from sft.train import (
+    _bf16_config,
+    _enable_qwen35_native_gva,
+    _freeze_modules,
+    _rewrite_weights_in_bf16,
+    _step_timing_summary,
+)
 
 
 def _tiny_text_config(**overrides):
@@ -31,6 +38,15 @@ def _tiny_text_config(**overrides):
     return Qwen3_5TextConfig(**{**values, **overrides})
 
 
+def _tiny_multimodal_config():
+    from transformers import Qwen3_5Config
+
+    return Qwen3_5Config(
+        text_config=_tiny_text_config().to_dict(),
+        vision_config={"depth": 1, "hidden_size": 16, "intermediate_size": 32, "num_heads": 2, "out_hidden_size": 128},
+    )
+
+
 def test_step_timing_summary_skips_warmup_and_measures_imbalance() -> None:
     summary = _step_timing_summary(
         [30.0, 5.0, 5.0, 2.0, 2.0],
@@ -45,14 +61,9 @@ def test_step_timing_summary_skips_warmup_and_measures_imbalance() -> None:
 
 
 def test_freeze_modules_freezes_only_the_named_subtree() -> None:
-    from transformers import Qwen3_5Config, Qwen3_5ForConditionalGeneration
+    from transformers import Qwen3_5ForConditionalGeneration
 
-    model = Qwen3_5ForConditionalGeneration(
-        Qwen3_5Config(
-            text_config=_tiny_text_config().to_dict(),
-            vision_config={"depth": 1, "hidden_size": 16, "intermediate_size": 32, "num_heads": 2, "out_hidden_size": 128},
-        )
-    )
+    model = Qwen3_5ForConditionalGeneration(_tiny_multimodal_config())
     visual = sum(p.numel() for n, p in model.named_parameters() if n.startswith("model.visual."))
 
     assert _freeze_modules(model, ["model.visual"]) == visual
@@ -60,6 +71,48 @@ def test_freeze_modules_freezes_only_the_named_subtree() -> None:
         assert parameter.requires_grad is not name.startswith("model.visual.")
     with pytest.raises(ValueError, match="matched no parameters"):
         _freeze_modules(model, ["model.vis"])
+
+
+def test_rewrite_weights_in_bf16_casts_every_shard(tmp_path) -> None:
+    from safetensors.torch import load_file
+    from transformers import Qwen3_5ForConditionalGeneration
+
+    torch.manual_seed(0)
+    Qwen3_5ForConditionalGeneration(_tiny_multimodal_config()).save_pretrained(
+        tmp_path, max_shard_size="200KB"
+    )
+    shards = sorted(tmp_path.glob("*.safetensors"))
+    assert len(shards) > 1
+
+    def load():
+        tensors = {}
+        for shard in shards:
+            tensors.update(load_file(shard))
+        return tensors
+
+    original = load()
+    assert {tensor.dtype for tensor in original.values()} == {torch.float32}
+    assert _rewrite_weights_in_bf16(tmp_path) == len(original)
+    rewritten = load()
+    assert rewritten.keys() == original.keys()
+    for name, tensor in original.items():
+        torch.testing.assert_close(rewritten[name], tensor.to(torch.bfloat16), rtol=0, atol=0)
+    index = json.loads((tmp_path / "model.safetensors.index.json").read_text())
+    assert index["metadata"]["total_size"] == sum(tensor.numel() * 2 for tensor in rewritten.values())
+
+
+def test_bf16_config_records_bf16_in_every_sub_config(tmp_path) -> None:
+    config = _tiny_multimodal_config()
+    config.dtype = torch.float32  # as an fp32-weight run loads it
+    for key in config.sub_configs:
+        getattr(config, key).dtype = torch.float32
+
+    _bf16_config(config).save_pretrained(tmp_path)
+
+    saved = json.loads((tmp_path / "config.json").read_text())
+    assert saved["dtype"] == "bfloat16"
+    assert saved["text_config"]["dtype"] == saved["vision_config"]["dtype"] == "bfloat16"
+    assert config.dtype == torch.float32  # the training model's config is left alone
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="FLA kernels need CUDA")
