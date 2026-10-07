@@ -598,6 +598,20 @@ The derived directory symlinks the original model tensor and adds identity
 `k_norm` tensors only for the KV-shared layers. Transformers consumers should
 continue to use `final/`; vLLM consumers should use `final-vllm/`.
 
+### LoRA
+
+A top-level `lora:` section (`r`, `alpha`, `dropout`) trains LoRA adapters
+instead of all weights; without it, training is full SFT. LoRA is defined for
+Qwen3.5 and runs on DDP (`training.fsdp: false`), with the base model in bf16
+(`model.dtype: bfloat16`): the base stays frozen, and PEFT keeps the adapters in
+fp32. Adapters go on the language model's linear projections
+(`self_attn.{q,k,v,o}_proj`, `linear_attn.{in_proj_qkv,in_proj_z,out_proj}`,
+`mlp.{gate,up,down}_proj`); the vision tower, `lm_head`, the short convolutions
+and the tiny `in_proj_a/b` gate projections get none. Because the whole base is
+frozen, `ddp_find_unused_parameters: false` works. The run saves the adapter to
+`final-adapter/` and the merged bf16 model to `final/`, so evaluation and serving
+use `final/` for both modes.
+
 ## ClearML
 
 ClearML is disabled by default. Configure the self-hosted server without adding

@@ -69,6 +69,7 @@ train = [
     "fla-core==0.5.2",
     "kernels==0.15.2",
     "liger-kernel==0.8.1",
+    "peft>=0.21,<0.22",
     "pyyaml>=6,<7",
     "trl>=1.9.2,<2",
 ]

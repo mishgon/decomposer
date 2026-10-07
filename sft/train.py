@@ -73,6 +73,15 @@ from .qwen35_fast_runtime import (
 
 JsonObject = dict[str, Any]
 _LAUNCHER_LOG_FILENAMES = frozenset({"console.log", "mlspace.log"})
+# Qwen3.5 language-model projections that receive LoRA adapters. The vision tower,
+# lm_head, the short convolutions and the tiny in_proj_a/b gate projections (32
+# outputs) get none.
+QWEN35_LORA_TARGET_MODULES = (
+    r"model\.language_model\.layers\.\d+\."
+    r"(self_attn\.(q_proj|k_proj|v_proj|o_proj)"
+    r"|linear_attn\.(in_proj_qkv|in_proj_z|out_proj)"
+    r"|mlp\.(gate_proj|up_proj|down_proj))"
+)
 _GEMMA4_REQUIRED_STOP_TOKENS = ("<turn|>", "<|tool_response>")
 _PREPARED_SPLIT_FEATURES = Features(
     {
@@ -935,6 +944,40 @@ def _positive_integer(value: Any, *, field: str) -> int:
     return value
 
 
+def _build_lora_config(
+    lora: Any,
+    *,
+    training_config: Mapping[str, Any],
+    model_type: str,
+) -> Any:
+    """PEFT LoRA config for the optional `lora:` section; None means full SFT."""
+    if lora is None:
+        return None
+    if not isinstance(lora, Mapping) or set(lora) != {"r", "alpha", "dropout"}:
+        raise ValueError("lora must set exactly r, alpha and dropout.")
+    if training_config.get("fsdp"):
+        raise ValueError("LoRA runs use DDP; set training.fsdp: false.")
+    if model_type != "qwen3_5":
+        raise ValueError(f"LoRA targets are defined for Qwen3.5 only, not {model_type!r}.")
+    dropout = lora["dropout"]
+    if (
+        isinstance(dropout, bool)
+        or not isinstance(dropout, (int, float))
+        or not 0 <= dropout < 1
+    ):
+        raise ValueError("lora.dropout must be at least 0 and below 1.")
+    from peft import LoraConfig
+
+    return LoraConfig(
+        r=_positive_integer(lora["r"], field="lora.r"),
+        lora_alpha=_positive_integer(lora["alpha"], field="lora.alpha"),
+        lora_dropout=float(dropout),
+        target_modules=QWEN35_LORA_TARGET_MODULES,
+        bias="none",
+        task_type="CAUSAL_LM",
+    )
+
+
 def _resolve_train_batch_config(
     training_config: Mapping[str, Any],
     *,
@@ -1126,6 +1169,27 @@ def _save_final_configuration(
     model_config.save_pretrained(final_dir)
     tokenizer.save_pretrained(final_dir)
     generation_config.save_pretrained(final_dir)
+
+
+def _export_lora(
+    model: Any,
+    output_dir: Path,
+    *,
+    tokenizer: Any,
+    generation_config: GenerationConfig,
+) -> Path:
+    """Save the trained adapter, then the merged model that evaluation serves."""
+    model.save_pretrained(output_dir / "final-adapter")
+    merged = model.merge_and_unload()
+    final_dir = output_dir / "final"
+    merged.save_pretrained(final_dir, safe_serialization=True)
+    _save_final_configuration(
+        final_dir,
+        model_config=merged.config,
+        tokenizer=tokenizer,
+        generation_config=generation_config,
+    )
+    return final_dir
 
 
 def _has_existing_run_output(output_dir: Path) -> bool:
@@ -1631,6 +1695,11 @@ def main(argv: Sequence[str] | None = None) -> None:
     if model_init_kwargs.get("attn_implementation") == GEMMA4_MIXED_ATTENTION:
         register_gemma4_mixed_attention()
     training_config["model_init_kwargs"] = model_init_kwargs
+    peft_config = _build_lora_config(
+        config.get("lora"),
+        training_config=training_config,
+        model_type=str(checkpoint_config.model_type),
+    )
 
     output_dir = Path(training_config["output_dir"]).resolve()
     resume_from_checkpoint = run_config.get("resume_from_checkpoint")
@@ -1714,6 +1783,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         train_dataset=train_dataset,
         eval_dataset=validation_dataset,
         callbacks=callbacks or None,
+        peft_config=peft_config,
     )
     trainer.model.generation_config = generation_config
 
@@ -1787,11 +1857,21 @@ def main(argv: Sequence[str] | None = None) -> None:
 
         tokenizer.chat_template = canonical_template
         final_dir = output_dir / "final"
-        fsdp_plugin = trainer.accelerator.state.fsdp_plugin
+        # AcceleratorState raises AttributeError for fsdp_plugin on non-FSDP (DDP) runs.
+        fsdp_plugin = getattr(trainer.accelerator.state, "fsdp_plugin", None)
         uses_sharded_state = fsdp_plugin is not None and "SHARDED_STATE_DICT" in str(
             fsdp_plugin.state_dict_type
         )
-        if uses_sharded_state:
+        if peft_config is not None:
+            # LoRA runs on DDP, so rank 0 holds the whole adapted model.
+            if _is_rank_zero():
+                _export_lora(
+                    trainer.model,
+                    output_dir,
+                    tokenizer=tokenizer,
+                    generation_config=generation_config,
+                )
+        elif uses_sharded_state:
             save_fsdp_model(
                 fsdp_plugin,
                 trainer.accelerator,
@@ -1801,7 +1881,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         else:
             trainer.save_model(str(final_dir))
 
-        if _is_rank_zero():
+        if _is_rank_zero() and peft_config is None:
             _save_final_configuration(
                 final_dir,
                 model_config=trainer.model.config,
