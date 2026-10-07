@@ -1410,6 +1410,26 @@ def _enable_qwen35_native_gva(model: torch.nn.Module) -> int:
     return layers
 
 
+def _skip_lora_input_cast(model: torch.nn.Module) -> int:
+    """Stop PEFT from copying each adapted layer's input to the fp32 adapter dtype.
+
+    Under bf16 autocast the adapter matmuls run in bf16 anyway, so the cast is a
+    bf16 -> fp32 -> bf16 round trip of every adapted activation, in the forward pass,
+    the checkpoint recompute and backward. This is the flag that
+    `peft.helpers.disable_input_dtype_casting` sets.
+    """
+    from peft.tuners.tuners_utils import BaseTunerLayer
+
+    layers = 0
+    for module in model.modules():
+        if isinstance(module, BaseTunerLayer):
+            module.cast_input_dtype_enabled = False
+            layers += 1
+    if not layers:
+        raise ValueError("Found no LoRA layers to skip the input cast in.")
+    return layers
+
+
 def _initialize_clearml(config: Mapping[str, Any], resolved_config: JsonObject):
     if not config.get("enabled", False):
         return None
@@ -1895,6 +1915,11 @@ def main(argv: Sequence[str] | None = None) -> None:
         layers = _enable_qwen35_native_gva(trainer.model)
         if _is_rank_zero():
             print(f"Native GVA enabled in {layers} gated-delta layers.")
+    # Without bf16 autocast, the cast is what keeps the adapter matmuls in fp32.
+    if peft_config is not None and trainer.args.bf16:
+        layers = _skip_lora_input_cast(trainer.model)
+        if _is_rank_zero():
+            print(f"Skipped PEFT's fp32 input cast in {layers} LoRA layers.")
     step_timing = None
     if run_config.get("benchmark", False):
         step_timing = _StepTiming(trainer.model)

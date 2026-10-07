@@ -6,7 +6,7 @@ import pytest
 import torch
 from transformers import GenerationConfig
 
-from sft.train import _build_lora_config, _export_lora
+from sft.train import _build_lora_config, _export_lora, _skip_lora_input_cast
 
 LORA = {"r": 4, "alpha": 8, "dropout": 0.0}
 
@@ -88,6 +88,31 @@ def test_lora_adapts_only_language_model_projections() -> None:
     assert adapted == expected
     trainable = {name for name, parameter in model.named_parameters() if parameter.requires_grad}
     assert trainable and all(".lora_" in name for name in trainable)
+
+
+def test_skipping_lora_input_cast_keeps_autocast_results() -> None:
+    peft = pytest.importorskip("peft")
+    config = _build_lora_config(LORA, training_config={}, model_type="qwen3_5")
+    config.init_lora_weights = False  # non-zero B, so the adapter path contributes
+    model = peft.get_peft_model(_tiny_qwen35().to(torch.bfloat16), config)
+    layer = model.base_model.model.model.language_model.layers[0].mlp.down_proj
+    lora_A, lora_B = layer.lora_A["default"], layer.lora_B["default"]
+    assert lora_A.weight.dtype == torch.float32  # PEFT keeps adapters in fp32 on a bf16 base
+    inputs = torch.randn(2, 5, 48, dtype=torch.bfloat16)
+
+    def run():
+        layer.zero_grad()
+        x = inputs.clone().requires_grad_(True)
+        with torch.autocast("cpu", dtype=torch.bfloat16):
+            output = layer(x)
+        output.float().square().sum().backward()
+        return output.detach(), x.grad, lora_A.weight.grad.clone(), lora_B.weight.grad.clone()
+
+    with_cast = run()
+    assert _skip_lora_input_cast(model) == 25
+    assert not layer.cast_input_dtype_enabled
+    for skipped, cast in zip(run(), with_cast, strict=True):
+        torch.testing.assert_close(skipped, cast, rtol=0, atol=0)
 
 
 class _Tokenizer:

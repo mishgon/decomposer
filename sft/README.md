@@ -612,6 +612,27 @@ frozen, `ddp_find_unused_parameters: false` works. The run saves the adapter to
 `final-adapter/` and the merged bf16 model to `final/`, so evaluation and serving
 use `final/` for both modes.
 
+Under bf16 autocast (`training.bf16: true`), the trainer turns off PEFT's cast of
+each adapted layer's input to the fp32 adapter dtype: autocast runs the adapter
+matmuls in bf16 anyway, so the cast only copied every adapted activation there and
+back. The adapters and their optimizer state stay fp32.
+
+The recommended settings:
+
+```yaml
+lora:
+  r: 32
+  alpha: 64
+  dropout: 0.0
+```
+
+Dropout is 0 for single-epoch runs. The tau2 + Workplace release
+(`v1-tau2-broad-workplace-train-n1-32k`) has about 30M tokens, roughly 6M of them
+supervised. The LoRA config trains 1 epoch, so every record is seen once. In a
+single pass there is little to overfit, and dropout mostly adds noise and costs 7%
+of throughput (`docs/sft_qwen35_h200_benchmark.md`). For multi-epoch runs, raise it
+(for example to 0.05) if validation loss starts rising.
+
 ## ClearML
 
 ClearML is disabled by default. Configure the self-hosted server without adding
