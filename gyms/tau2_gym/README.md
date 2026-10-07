@@ -115,6 +115,12 @@ tau2's own agent does: `<instructions>` with the Decomposer agent prompt, then
 `<policy>`. The subagent type's description tells the manager that subagents have
 the policy.
 
+tau2 is the only gym that sets `drop_gym_system_prompt`; Workplace keeps
+`join_gym_system_and_user_prompts`, so its manager still gets the date line. Traces
+from before 2026-10-07, such as
+`qwen38_flash_non_thinking_teacher_qwen35_4b_unlooped_thinking-decomposer_broad_v1-n1-manager-policy`,
+have the policy at the top of the manager's first message.
+
 Subagent sampling is Qwen3.5's general non-thinking preset (0.7/0.8/20, presence 1.5,
 no length cap) unless the experiment sets `subagent_sampling`. `run.py` passes it to
 the LangGraph server as `DECOMPOSER_SUBAGENT_SAMPLING_JSON` (plus
