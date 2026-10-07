@@ -23,8 +23,8 @@ from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.memory import InMemorySaver
 from pydantic import BaseModel, Field
 
-from decomposer.chat_vllm import ChatVLLM
 from decomposer.core import TERMINAL_STATUSES, create_decomposer_agent
+from decomposer.models import ChatVLLM
 from gyms.gaia2.model_overflow import (
     ExactModelCallLimitMiddleware,
     Gaia2ModelOverflowError,
@@ -175,15 +175,15 @@ def _subagent_summary(state: dict[str, Any]) -> tuple[list[dict[str, Any]], list
     Subagents persist across runs (and turns), so the type lives on the subagent,
     not on the run.
     """
-    subagents = state.get("subagents") or {}
+    subagents = state.get("agents") or {}
     summaries: list[dict[str, Any]] = []
     outstanding: list[str] = []
-    for run_id, run in (state.get("subagent_runs") or {}).items():
-        subagent = subagents.get(run.get("subagent_id")) or {}
+    for run_id, run in (state.get("agent_runs") or {}).items():
+        subagent = subagents.get(run.get("agent_id")) or {}
         item = {
-            "subagent_run_id": run_id,
-            "subagent_id": run.get("subagent_id"),
-            "subagent_type_id": subagent.get("subagent_type_id"),
+            "agent_run_id": run_id,
+            "agent_id": run.get("agent_id"),
+            "agent_type_id": subagent.get("agent_type_id"),
             "status": run.get("status"),
             "prompt": run.get("prompt"),
             "response": run.get("response"),
@@ -276,11 +276,11 @@ def create_app(config: dict[str, Any]) -> FastAPI:
     checkpointer = InMemorySaver()
     graph = create_decomposer_agent(
         decomposer_model=manager_model,
-        subagent_types=subagent_types,
+        agent_types=subagent_types,
         checkpointer=checkpointer,
         context_schema=EpisodeContext,
         middleware=middleware,
-        subagent_recursion_limit=int(config.get("subagent_recursion_limit", 200)),
+        agent_recursion_limit=int(config.get("subagent_recursion_limit", 200)),
     )
     recursion_limit = int(config.get("manager_recursion_limit", 200))
     episodes: dict[str, Episode] = {}
@@ -292,7 +292,7 @@ def create_app(config: dict[str, Any]) -> FastAPI:
             (
                 item
                 for item in subagent_types
-                if item["subagent_type_id"] == subagent.get("subagent_type_id")
+                if item["agent_type_id"] == subagent.get("agent_type_id")
             ),
             None,
         )
@@ -315,11 +315,11 @@ def create_app(config: dict[str, Any]) -> FastAPI:
             state = snapshot.values
         except Exception:
             return
-        subagents = state.get("subagents") or {}
-        for run in (state.get("subagent_runs") or {}).values():
+        subagents = state.get("agents") or {}
+        for run in (state.get("agent_runs") or {}).values():
             if run.get("status") in TERMINAL_STATUSES:
                 continue
-            subagent = subagents.get(run.get("subagent_id")) or {}
+            subagent = subagents.get(run.get("agent_id")) or {}
             client = _subagent_client(subagent)
             if client is None or not subagent.get("thread_id"):
                 continue

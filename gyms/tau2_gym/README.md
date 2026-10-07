@@ -105,6 +105,13 @@ config from it and writes it to `<run>/configuration/tau2_gym.yaml`.
 Every experiment exposes one subagent type, `subagent_non_thinking`, with the SFT
 releases' canonical description, so teacher traces, SFT data and student evals all see the same `new`/`fork`/`run`/`wait` schema.
 
+Subagents get the domain policy in their system prompt, because they hold the
+environment tools and the manager does not. `subagents/graph.py` takes it from the
+row's system message (`policy.md`, which the manager also receives at the top of its
+first message) and wraps it as tau2's own agent does: `<instructions>` with the
+Decomposer agent prompt, then `<policy>`. The subagent type's description says so,
+so the manager need not restate the rules in its prompts.
+
 Subagent sampling is Qwen3.5's general non-thinking preset (0.7/0.8/20, presence 1.5,
 no length cap) unless the experiment sets `subagent_sampling`. `run.py` passes it to
 the LangGraph server as `DECOMPOSER_SUBAGENT_SAMPLING_JSON` (plus

@@ -50,11 +50,10 @@ OPENROUTER_API_KEY_ENV = "OPENROUTER_API_KEY_DECOMPOSER"
 LLM_PROXY_URL_ENV = "LLM_PROXY_URL"
 LLM_PROXY_API_KEY_ENV = "LLM_PROXY_MASTER_KEY"
 
-# The id and description the SFT releases stamp into the `new` tool's type table
-# (policy.subagent_types in sft/specs). Using them here too means the teacher,
-# the SFT data and student evaluation all see one tool schema.
+# The `new` tool's type-table entry. Subagents have the domain policy;
+# legacy SFT specs override this description with their original text.
 SUBAGENT_TYPE_ID = "subagent_non_thinking"
-SUBAGENT_DESCRIPTION = "General-purpose tool-calling agent with access to the environment tools."
+SUBAGENT_DESCRIPTION = "General-purpose tool-calling agent with access to the environment tools and the domain policy."
 SUBAGENT_ASSISTANT_ID = "qwen35_4b_non_thinking"
 
 # The model the subagents request, passed from run.py to the LangGraph server through
