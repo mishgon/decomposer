@@ -27,6 +27,7 @@ from transformers import (
     AutoTokenizer,
     EarlyStoppingCallback,
     GenerationConfig,
+    TrainerCallback,
 )
 from trl import SFTConfig, SFTTrainer
 
@@ -1315,6 +1316,100 @@ def _build_trainer_callbacks(
     return callbacks
 
 
+class _StepTiming(TrainerCallback):
+    """Benchmark mode: wall time and each rank's real tokens for every optimizer step."""
+
+    def __init__(self, model: torch.nn.Module) -> None:
+        self.step_seconds: list[float] = []
+        self.rank_tokens: list[list[int]] = []
+        self._tokens: Any = 0
+        self._last: float | None = None
+        model.register_forward_pre_hook(self._count_tokens, with_kwargs=True)
+
+    def _count_tokens(self, _module: Any, _args: Any, kwargs: Mapping[str, Any]) -> None:
+        mask = kwargs.get("attention_mask")
+        if mask is not None:
+            # Stays on the device; the step-end gather is the only synchronisation.
+            self._tokens = self._tokens + mask.sum()
+
+    def on_train_begin(self, args: Any, state: Any, control: Any, **kwargs: Any) -> None:
+        self._last = time.perf_counter()
+
+    def on_step_end(self, args: Any, state: Any, control: Any, **kwargs: Any) -> None:
+        tokens = torch.as_tensor(self._tokens, device=torch.cuda.current_device()).reshape(1)
+        gathered = [tokens]
+        if torch.distributed.is_available() and torch.distributed.is_initialized():
+            gathered = [torch.zeros_like(tokens) for _ in range(_world_size())]
+            torch.distributed.all_gather(gathered, tokens)
+        counts = [int(value) for value in gathered]
+        now = time.perf_counter()
+        self.step_seconds.append(now - self._last)
+        self.rank_tokens.append(counts)
+        self._last = now
+        self._tokens = 0
+
+
+def _step_timing_summary(
+    step_seconds: Sequence[float],
+    rank_tokens: Sequence[Sequence[int]],
+    *,
+    skip: int = 3,
+) -> JsonObject:
+    """Steady-state throughput after `skip` warm-up steps, and how unevenly ranks were loaded."""
+    seconds = list(step_seconds[skip:])
+    tokens = [list(step) for step in rank_tokens[skip:]]
+    if not seconds:
+        return {"steps": len(step_seconds), "skipped": skip}
+    ordered = sorted(seconds)
+    return {
+        "steps": len(step_seconds),
+        "skipped": skip,
+        "steady_tokens_per_second": sum(map(sum, tokens)) / sum(seconds),
+        "step_seconds_p50": ordered[len(ordered) // 2],
+        "step_seconds_p90": ordered[min(len(ordered) - 1, int(0.9 * len(ordered)))],
+        # The slowest rank sets each step's pace: largest rank load over the mean rank load.
+        "rank_imbalance_ratio": sum(map(max, tokens))
+        / (sum(map(sum, tokens)) / len(tokens[0])),
+        "step_seconds": list(step_seconds),
+        "rank_tokens": [list(step) for step in rank_tokens],
+    }
+
+
+def _freeze_modules(model: torch.nn.Module, prefixes: Sequence[str]) -> int:
+    """Stop training the named submodules, such as Qwen3.5's unused vision tower."""
+    frozen = 0
+    for name, parameter in model.named_parameters():
+        if any(name == prefix or name.startswith(prefix + ".") for prefix in prefixes):
+            parameter.requires_grad_(False)
+            frozen += parameter.numel()
+    if not frozen:
+        raise ValueError(f"model.freeze_modules matched no parameters: {list(prefixes)}.")
+    return frozen
+
+
+def _enable_qwen35_native_gva(model: torch.nn.Module) -> int:
+    """Let FLA spread Qwen3.5's key heads over the value heads instead of copying them.
+
+    `Qwen3_5GatedDeltaNet.forward` repeats query and key from the key-head count to
+    the value-head count before the kernel; FLA's chunked delta rule accepts the
+    smaller key-head count directly. Equal head counts skip the repeat; the split
+    sizes come from `__init__` and the reshapes infer the head count.
+    """
+    from fla.ops.gated_delta_rule import chunk_gated_delta_rule
+    from transformers.models.qwen3_5.modeling_qwen3_5 import Qwen3_5GatedDeltaNet
+
+    layers = 0
+    for module in model.modules():
+        if isinstance(module, Qwen3_5GatedDeltaNet):
+            if module.chunk_gated_delta_rule is not chunk_gated_delta_rule:
+                raise RuntimeError("model.qwen35_native_gva needs FLA's chunk_gated_delta_rule.")
+            module.num_k_heads = module.num_v_heads
+            layers += 1
+    if not layers:
+        raise ValueError("model.qwen35_native_gva found no Qwen3.5 gated-delta layers.")
+    return layers
+
+
 def _initialize_clearml(config: Mapping[str, Any], resolved_config: JsonObject):
     if not config.get("enabled", False):
         return None
@@ -1786,6 +1881,24 @@ def main(argv: Sequence[str] | None = None) -> None:
         peft_config=peft_config,
     )
     trainer.model.generation_config = generation_config
+    # The optimizer and the DDP wrapper are built inside train(), after these changes.
+    freeze_modules = model_config.get("freeze_modules")
+    if freeze_modules is not None:
+        if not isinstance(freeze_modules, list) or not all(
+            isinstance(prefix, str) and prefix for prefix in freeze_modules
+        ):
+            raise ValueError("model.freeze_modules must be a list of module path prefixes.")
+        frozen = _freeze_modules(trainer.model, freeze_modules)
+        if _is_rank_zero():
+            print(f"Froze {frozen} parameters under {freeze_modules}.")
+    if model_config.get("qwen35_native_gva", False):
+        layers = _enable_qwen35_native_gva(trainer.model)
+        if _is_rank_zero():
+            print(f"Native GVA enabled in {layers} gated-delta layers.")
+    step_timing = None
+    if run_config.get("benchmark", False):
+        step_timing = _StepTiming(trainer.model)
+        trainer.add_callback(step_timing)
 
     try:
         if torch.cuda.is_available():
@@ -1835,6 +1948,9 @@ def main(argv: Sequence[str] | None = None) -> None:
                         "train_sampling_strategy", "random"
                     ),
                     "sample": _benchmark_sample_manifest(train_dataset),
+                    "step_timing": _step_timing_summary(
+                        step_timing.step_seconds, step_timing.rank_tokens
+                    ),
                     "attention_implementation": model_config.get(
                         "attn_implementation", "sdpa"
                     ),
