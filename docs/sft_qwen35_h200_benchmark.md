@@ -355,6 +355,8 @@ training:
   ddp_find_unused_parameters: false
 ```
 
+The fp32 weights do not reach `final/`: since `51c57ad`, the export rewrites it in bf16 with a bf16 config, on DDP and FSDP alike. Smoke runs of this recipe and of the FSDP recipe each exported 9 GB of bf16 weights that reloaded and generated.
+
 LoRA uses the same keys, except:
 
 ```yaml
