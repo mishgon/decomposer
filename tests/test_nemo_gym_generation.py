@@ -23,6 +23,8 @@ def test_worker_routes_native_tools_with_session(gym, monkeypatch):
     graph = importlib.import_module(f"gyms.{gym}.subagents.graph")
     context = {
         "body": {
+            # tau2 workers read the domain policy from the row's system message.
+            "input": [{"role": "system", "content": "Policy."}, {"role": "user", "content": "Request."}],
             "tools": [{
                 "type": "function",
                 "name": "lookup",

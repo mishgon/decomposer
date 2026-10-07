@@ -3,8 +3,13 @@
 Subagents are compiled with ``tools=[]``: the tau2 tool schemas ride in on the
 dataset row and are injected per run by ``NeMoGymSubagentMiddleware``, which also
 routes each call to ``POST {resource_server_url}/{tool_name}``
-(``decomposer_agent/subagents/graph.py:37-42,83-90``). So nothing tau2-specific
-belongs here -- this module only pins the model endpoints.
+(``decomposer_agent/subagents/graph.py:37-42,83-90``).
+
+The subagents also get the domain policy: they hold the environment tools, while
+the manager that receives the policy has none. It comes from the row's system
+message, the same text the manager gets, and the system prompt wraps it the way
+tau2's own agent does (``tau2/agent/llm_agent.py`` ``SYSTEM_PROMPT``), with the
+Decomposer's agent prompt as the instructions.
 
 Only Qwen3.5-4B is registered: manager and subagents share one architecture, but
 they must be served from *separate* vLLM instances, with the subagent pinned to a
@@ -18,7 +23,11 @@ import json
 import os
 
 from langchain.agents import create_agent
-from langchain.agents.middleware import ModelCallLimitMiddleware
+from langchain.agents.middleware import (
+    ModelCallLimitMiddleware,
+    ModelRequest,
+    dynamic_prompt,
+)
 from langchain_core.language_models.chat_models import BaseChatModel
 from langgraph.graph.state import CompiledStateGraph
 from responses_api_agents.decomposer_agent.subagents.graph import (
@@ -73,18 +82,31 @@ def _model_base_url(model_id: str, default_port: int) -> str:
     return value
 
 
+@dynamic_prompt
+def _system_prompt_with_policy(request: ModelRequest) -> str:
+    """The agent prompt plus the domain policy from the row's system message."""
+    policies = [
+        item["content"]
+        for item in request.runtime.context["body"]["input"]
+        if item.get("role") == "system"
+    ]
+    if len(policies) != 1:
+        raise ValueError(f"Expected one system message with the domain policy, got {len(policies)}")
+    return f"<instructions>\n{AGENT_SYSTEM_PROMPT}\n</instructions>\n<policy>\n{policies[0]}\n</policy>"
+
+
 def _create_subagent(model: BaseChatModel) -> CompiledStateGraph:
     return create_agent(
         model=model,
         tools=[],
         middleware=[
+            _system_prompt_with_policy,
             NeMoGymSubagentMiddleware(),
             ModelCallLimitMiddleware(
                 run_limit=SUBAGENT_MAX_MODEL_CALLS,
                 exit_behavior="error",
             ),
         ],
-        system_prompt=AGENT_SYSTEM_PROMPT,
     )
 
 

@@ -28,13 +28,14 @@ def test_experiment_names_are_unique_and_pools_exist() -> None:
         load_pool(experiment.pool)
 
 
-def test_subagent_schema_matches_the_sft_releases() -> None:
-    """Teacher traces, SFT data, evals and OPD must share one subagent type and tool schema."""
+def test_subagent_type_matches_the_legacy_sft_releases() -> None:
+    """Legacy releases stamp this type id; the description has since gained the domain policy."""
     spec = yaml.safe_load(
         (REPO_ROOT / "sft/specs/decomposer_mixed_deepseek_qwen35_4b_nonthinking_v5_32k_student.yaml").read_text()
     )
     (subagent,) = spec["policy"]["subagent_types"]
-    assert subagent == {"id": SUBAGENT_TYPE_ID, "description": SUBAGENT_DESCRIPTION}
+    assert subagent["id"] == SUBAGENT_TYPE_ID
+    assert SUBAGENT_DESCRIPTION.endswith("and the domain policy.")
 
 
 @pytest.mark.parametrize(
@@ -340,7 +341,6 @@ def test_preset_subagent_graph_is_the_models_py_client(monkeypatch: pytest.Monke
     import sys
 
     sys.path.insert(0, str(REPO_ROOT / "external" / "Gym"))
-    from decomposer.prompts import AGENT_SYSTEM_PROMPT
     from gyms.tau2_gym.subagents import graph
 
     seen: dict = {}
@@ -349,4 +349,45 @@ def test_preset_subagent_graph_is_the_models_py_client(monkeypatch: pytest.Monke
     graph.qwen35_4b_unlooped_thinking()
     assert seen["preset"] == "lmrouter/qwen_3_5_4b_unlooped_thinking"
     assert seen["model"] == "lmrouter/qwen_3_5_4b_unlooped_thinking"
-    assert seen["system_prompt"] == AGENT_SYSTEM_PROMPT
+    assert graph._system_prompt_with_policy in seen["middleware"]
+    assert "system_prompt" not in seen
+
+
+def test_subagent_system_prompt_carries_the_domain_policy() -> None:
+    import asyncio
+    import sys
+
+    sys.path.insert(0, str(REPO_ROOT / "external" / "Gym"))
+    from langchain_core.language_models.fake_chat_models import (
+        FakeMessagesListChatModel,
+    )
+    from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+
+    from decomposer.prompts import AGENT_SYSTEM_PROMPT
+    from gyms.tau2_gym.subagents import graph
+
+    seen: list = []
+
+    class RecordingModel(FakeMessagesListChatModel):
+        def bind_tools(self, tools, **kwargs):
+            return self
+
+        def _generate(self, messages, *args, **kwargs):
+            seen.append(messages)
+            return super()._generate(messages, *args, **kwargs)
+
+    def run(gym_input: list[dict]) -> None:
+        context = {"body": {"input": gym_input}, "resource_server_url": "http://resources", "resource_server_cookies": {}}
+        subagent = graph._create_subagent(RecordingModel(responses=[AIMessage(content="done")]))
+        asyncio.run(subagent.ainvoke({"messages": [HumanMessage(content="Cancel slot S-1.")]}, context=context))
+
+    run([{"role": "system", "content": "# Policy\nRefunds need approval."}, {"role": "user", "content": "User request."}])
+    system, prompt = seen[0]
+    assert isinstance(system, SystemMessage)
+    # tau2's template with the agent prompt as the instructions; the user's request stays with the manager.
+    assert system.content == (
+        f"<instructions>\n{AGENT_SYSTEM_PROMPT}\n</instructions>\n<policy>\n# Policy\nRefunds need approval.\n</policy>"
+    )
+    assert prompt.content == "Cancel slot S-1."
+    with pytest.raises(ValueError, match="one system message"):
+        run([{"role": "user", "content": "User request."}])
