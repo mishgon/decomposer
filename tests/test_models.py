@@ -69,8 +69,9 @@ def test_length_limit_is_an_error() -> None:
         model._create_chat_result(_response(finish_reason="length"))
 
 
-def test_flash_next_uses_nonthinking_sampling():
-    model = create_model("lmrouter/qwen_3_8_flash_next_non_thinking")
+@pytest.mark.parametrize("provider", ["lmrouter", "vllm"])
+def test_flash_next_uses_nonthinking_sampling(provider):
+    model = create_model(f"{provider}/qwen_3_8_flash_next_non_thinking")
     payload = model._get_request_payload("test")
     assert "reasoning_effort" not in payload
     assert payload["temperature"] == .7
@@ -83,6 +84,36 @@ def test_flash_next_uses_nonthinking_sampling():
     assert model.preserve_reasoning is False
     assert "max_tokens" not in payload
     assert "max_completion_tokens" not in payload
+
+
+@pytest.mark.parametrize("host", [None, "host.docker.internal"])
+def test_local_flash_next_transport(monkeypatch, host):
+    import httpx
+    import decomposer.models as models
+    from unittest.mock import MagicMock
+
+    monkeypatch.delenv("VLLM_HOST", raising=False)
+    if host:
+        monkeypatch.setenv("VLLM_HOST", host)
+    monkeypatch.setenv("LLM_PROXY_UNIX_SOCKET", "/unused/router.sock")
+    monkeypatch.delenv("LLM_PROXY_MASTER_KEY", raising=False)
+    transport = MagicMock(wraps=httpx.HTTPTransport)
+    async_transport = MagicMock(wraps=httpx.AsyncHTTPTransport)
+    monkeypatch.setattr(models.httpx, "HTTPTransport", transport)
+    monkeypatch.setattr(models.httpx, "AsyncHTTPTransport", async_transport)
+    launch = MagicMock()
+    monkeypatch.setattr(models.asyncio, "create_subprocess_exec", launch)
+    model = create_model("vllm/qwen_3_8_flash_next_non_thinking")
+    assert model.openai_api_base == f"http://{host or '127.0.0.1'}:8025/v1"
+    assert model.model_name == "Qwen/Qwen3.8-Flash-Next-NVFP4"
+    assert model.openai_api_key.get_secret_value() == "EMPTY"
+    assert model.request_timeout == 600
+    assert model.max_retries == 2
+    assert model.disable_streaming is True
+    assert model.use_responses_api is False
+    assert all(call.kwargs.get("uds") is None for call in transport.call_args_list)
+    assert all(call.kwargs.get("uds") is None for call in async_transport.call_args_list)
+    launch.assert_not_called()
 
 
 @pytest.mark.parametrize("effort", ["low", "medium"])
