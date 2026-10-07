@@ -104,6 +104,9 @@ def test_agent_block_follows_the_experiment_and_port_offset() -> None:
     config = run_module.gym_config(get_experiment("qwen38_flash_teacher_non_thinking"), ports)
     agent = config["decomposer"]["responses_api_agents"]["decomposer_agent"]
     assert agent["decomposer_system_prompt_profile"] == "teacher"
+    # The manager gets only the request; the policy goes to the subagents.
+    assert agent["drop_gym_system_prompt"] is True
+    assert "join_gym_system_and_user_prompts" not in agent
     assert agent["subagent_types"] == [
         {
             "agent_type_id": SUBAGENT_TYPE_ID,
