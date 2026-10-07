@@ -41,7 +41,7 @@ from Gym environment variables. `WS_SEARCH_URL`, `WS_ASSETS` and
 ```bash
 .venv/bin/python -m gyms.wideseek.prepare --source width
 source gyms/wideseek/env.sh
-.venv/bin/python -m gyms.wideseek.run --harness react \
+.venv/bin/python -m gyms.wideseek.run --agent react \
   --output artifacts/gyms/wideseek/runs/raw-smoke --limit 2 -n 1 --concurrency 2
 ```
 
@@ -51,10 +51,19 @@ the dataset revision, preserves reference answers for judging, records hashes
 and refuses to overwrite an existing directory. Agents receive only the question
 and output-format instructions. Split future held-out sets by question hash.
 
-`--harness react|decomposer` selects one setup per run. `--model`,
-`--subagent-model` and `--judge-model` accept named registry profiles. Raw execution
-defaults to non-thinking Qwen4B for agent/subagent and Flash Next for the judge.
-The SFT workflow selects its teacher and thinking subagent separately.
+`--agent react|decomposer` selects a named configuration from `agents.py`.
+ReAct uses non-thinking Qwen3.5-4B unlooped. Decomposer uses non-thinking
+Qwen3.8 Flash Next with thinking Qwen3.5-4B unlooped researchers. The judge is
+Flash Next. Model profiles are constants in `agents.py`; sampling settings come
+from the shared model registry. There are no model-override CLI flags.
+
+Controllers run in the runner process. Delegated researchers share one Agent
+Server, addressed by `--worker-url`. Its stable assistant ID is `researcher`,
+independent of model profile names. Each episode has a unique controller thread,
+checkpoint store and artifact directory. Cleanup only touches researchers
+recorded in that episode's state, never other episodes on the shared server.
+`serve.sh workers` provides four shared run slots, not four slots per episode;
+concurrent episodes can queue behind each other. Wikipedia retrieval stays shared.
 
 Each agent has recursion limit 410; task execution timeout is 45 minutes.
 Optional `--model-calls` and `--output-tokens` provide shared smoke budgets.

@@ -1,8 +1,7 @@
 {
   "dependencies": ["."],
   "graphs": {
-    "qwen_3_5_4b_unlooped_thinking": "gyms.wideseek.worker:thinking_graph",
-    "qwen_3_5_4b_unlooped_non_thinking": "gyms.wideseek.worker:non_thinking_graph"
+    "researcher": "gyms.wideseek.agents:researcher"
   },
   "python_version": "3.12"
 }

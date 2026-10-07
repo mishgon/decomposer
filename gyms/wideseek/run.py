@@ -16,12 +16,11 @@ import httpx
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph_sdk import get_client
 
-from decomposer.core import create_decomposer_agent
+from gyms.wideseek import agents
 from gyms.wideseek.evaluate import evaluate
 from gyms.wideseek.metrics import subagent_counts
 from gyms.wideseek.prepare import agent_input
-from gyms.wideseek.runtime import (BudgetExceeded, Context, DEFAULT_MODEL, DEFAULT_SUBAGENT,
-    DEFAULT_TEACHER, MODEL_PROFILES, ModelLog, close_model, init_budget, model, model_metadata, save)
+from gyms.wideseek.runtime import (BudgetExceeded, close_model, init_budget, model, model_metadata, save)
 
 
 def usage(path):
@@ -86,21 +85,11 @@ async def episode(task, mode, attempt, root, args):
     init_budget(path, args.model_calls, args.output_tokens)
     checkpoint = InMemorySaver()
     client = get_client(url=args.worker_url)
-    policy = model(getattr(args, "model", DEFAULT_MODEL))
-    subagent = getattr(args, "subagent_model", DEFAULT_MODEL)
-    if mode == "decomposer":
-        agent = create_decomposer_agent(decomposer_model=policy,
-            agent_types=[{"agent_type_id": subagent,
-              "description": "Qwen3.5-4B unlooped researcher with offline Wiki-2018 search and access tools.",
-              "assistant_id": subagent.removeprefix("lmrouter/"), "url": args.worker_url}],
-            checkpointer=checkpoint, middleware=[ModelLog("decomposer")],
-            context_schema=Context, agent_recursion_limit=410)
+    policy = model(agents.AGENT_MODELS[args.agent])
+    if args.agent == "decomposer":
+        agent = agents.decomposer(policy, checkpoint, args.worker_url)
     else:
-        # Construct the same researcher graph with a checkpoint for interrupted traces.
-        from langchain.agents import create_agent
-        from gyms.wideseek.worker import search, access, SYSTEM_PROMPT
-        agent = create_agent(policy, tools=[search, access], system_prompt=SYSTEM_PROMPT,
-            context_schema=Context, middleware=[ModelLog("researcher")], checkpointer=checkpoint)
+        agent = agents.react(policy, checkpoint)
     config = {"recursion_limit": 410, "configurable": {"thread_id": uuid4().hex}}
     result = {"task_id": task["task_id"], "mode": mode, "attempt": attempt,
               "execution_directory": path.name, "started_at": time.time(),
@@ -130,7 +119,7 @@ async def episode(task, mode, attempt, root, args):
     result["answer"] = answer
     try:
         result["evaluation"] = await asyncio.wait_for(evaluate(task, answer, path,
-            judge_model_id=getattr(args, "judge_model", DEFAULT_TEACHER)), timeout=600)
+            judge_model_id=agents.JUDGE_MODEL), timeout=600)
     except Exception as exc:
         result["evaluation"] = {"status": "evaluation_error", "score": None,
                                 "error": f"{type(exc).__name__}: {exc}"}
@@ -160,20 +149,21 @@ async def prepare_run(args):
             response = await http.get(args.worker_url + "/ok")
             response.raise_for_status()
     profiles = {}
-    for role, profile in (("agent", args.model), ("subagent", args.subagent_model), ("judge", args.judge_model)):
+    for role, profile in (("agent", agents.AGENT_MODELS[args.agent]),
+                          ("subagent", agents.RESEARCHER_MODEL), ("judge", agents.JUDGE_MODEL)):
         policy = model(profile)
         try:
             profiles[role] = {"profile": profile, **model_metadata(policy)}
         finally:
             await close_model(policy)
     settings = {"tasks": [t["task_id"] for t in tasks], "data_sha256": hashlib.sha256(raw).hexdigest(),
-                "modes": modes, "repetitions": args.n, "concurrency": args.concurrency,
+                "agent": args.agent, "modes": modes, "repetitions": args.n, "concurrency": args.concurrency,
                 "model": profiles["agent"]["model_name"], "model_profiles": profiles,
                 "generation": profiles["agent"], "recursion_limit": 410,
                 "retrieval": retrieval,
                 "model_calls": args.model_calls, "output_tokens": args.output_tokens,
                 "timeout": args.timeout,
-                "judge": {"model": profiles["judge"]["model_name"], "profile": args.judge_model,
+                "judge": {"model": profiles["judge"]["model_name"], "profile": agents.JUDGE_MODEL,
                           "temperature": 0., "thinking": False, "paper_comparable": False}}
     sources = {str(p): hashlib.sha256(p.read_bytes()).hexdigest()
                for base in (Path("gyms/wideseek"), Path("src/decomposer"))
@@ -226,9 +216,7 @@ def create_parser():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--data", type=Path, default=Path("artifacts/gyms/wideseek/data/width/tasks.jsonl"))
     parser.add_argument("--output", type=Path, required=True)
-    harness = parser.add_mutually_exclusive_group(required=True)
-    harness.add_argument("--harness", choices=["react", "decomposer"])
-    harness.add_argument("--mode", choices=["simple", "decomposer"], help=argparse.SUPPRESS)
+    parser.add_argument("--agent", choices=agents.AGENT_MODELS, required=True)
     parser.add_argument("--limit", type=int, default=2)
     parser.add_argument("-n", type=int, default=3)
     parser.add_argument("--concurrency", type=int, default=2)
@@ -236,9 +224,6 @@ def create_parser():
     parser.add_argument("--output-tokens", type=int, default=None, help="Optional shared token cap; default uncapped")
     parser.add_argument("--timeout", type=int, default=2700)
     parser.add_argument("--worker-url", default="http://127.0.0.1:18081")
-    parser.add_argument("--model", choices=MODEL_PROFILES, default=DEFAULT_MODEL)
-    parser.add_argument("--subagent-model", choices=(DEFAULT_MODEL, DEFAULT_SUBAGENT), default=DEFAULT_MODEL)
-    parser.add_argument("--judge-model", choices=MODEL_PROFILES, default=DEFAULT_TEACHER)
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--allow-source-change", action="store_true",
                         help="Record an explicit Gym-source migration on resume; core/model/data must match")
@@ -248,8 +233,7 @@ def create_parser():
 def cli(run=main, argv=None, *, parser=None):
     parser = parser or create_parser()
     args = parser.parse_args(argv)
-    if args.harness is not None:
-        args.mode = "simple" if args.harness == "react" else "decomposer"
+    args.mode = "simple" if args.agent == "react" else "decomposer"
     if args.allow_source_change and not args.resume:
         parser.error("--allow-source-change requires --resume")
     if min(v for v in (args.limit, args.n, args.concurrency, args.model_calls, args.output_tokens, args.timeout) if v is not None) < 1:

@@ -55,10 +55,10 @@ def test_lost_launch_response_is_cleaned_before_evaluation(tmp_path):
         client.threads.delete.assert_awaited_once_with('known-thread')
         return {'status': 'scored', 'score': 0.}
 
-    args = SimpleNamespace(model_calls=None, output_tokens=None, worker_url='http://unused', timeout=1)
+    args = SimpleNamespace(agent='decomposer', model_calls=None, output_tokens=None, worker_url='http://unused', timeout=1)
     task = {'task_id': 'task', 'question': 'Question', 'answer': 'Answer', 'unique_columns': []}
     with patch('gyms.wideseek.run.model', return_value=SimpleNamespace()), \
-            patch('gyms.wideseek.run.create_decomposer_agent', return_value=graph), \
+            patch('gyms.wideseek.run.agents.decomposer', return_value=graph), \
             patch('gyms.wideseek.run.get_client', return_value=client), \
             patch('gyms.wideseek.run.evaluate', new=evaluate):
         asyncio.run(episode(task, 'decomposer', 1, tmp_path, args))
@@ -107,3 +107,14 @@ def test_worker_still_running_after_cancel_is_not_deleted(tmp_path):
     errors = asyncio.run(cleanup_workers(client, state_for('thread'), tmp_path))
     assert errors == ['thread: RuntimeError: Worker still active after cancellation']
     client.threads.delete.assert_not_awaited()
+
+
+def test_shared_server_cleanup_does_not_touch_another_episode(tmp_path):
+    runs = {'episode-a': [{'run_id': 'a', 'status': 'running'}],
+            'episode-b': [{'run_id': 'b', 'status': 'running'}]}
+    client = client_with_runs(runs)
+    assert asyncio.run(cleanup_workers(client, state_for('episode-a'), tmp_path)) == []
+    assert runs['episode-b'][0]['status'] == 'running'
+    client.threads.get_state.assert_awaited_once_with('episode-a')
+    client.threads.delete.assert_awaited_once_with('episode-a')
+    assert not (tmp_path / 'subagents/episode-b.json').exists()

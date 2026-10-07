@@ -6,11 +6,10 @@ from typing import Annotated
 from uuid import uuid4
 
 import httpx
-from langchain.agents import create_agent
 from langchain.tools import tool, ToolRuntime
 from pydantic import Field
 
-from gyms.wideseek.runtime import Context, DEFAULT_MODEL, DEFAULT_SUBAGENT, ModelLog, directory, model, save
+from gyms.wideseek.runtime import Context, directory, save
 
 
 async def request_tool(endpoint, payload, runtime):
@@ -55,13 +54,3 @@ SYSTEM_PROMPT = (
     "Answer the user's research task using the provided offline search and access tools. "
     "The corpus is Wikipedia from 2018. Follow the requested output format. "
     "Do not invent facts or claim to have checked sources you did not read.")
-
-
-def thinking_graph():
-    return create_agent(model(DEFAULT_SUBAGENT), tools=[search, access], context_schema=Context,
-        middleware=[ModelLog("researcher")], system_prompt=SYSTEM_PROMPT)
-
-
-def non_thinking_graph():
-    return create_agent(model(DEFAULT_MODEL), tools=[search, access], context_schema=Context,
-        middleware=[ModelLog("researcher")], system_prompt=SYSTEM_PROMPT)

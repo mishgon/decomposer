@@ -19,7 +19,7 @@ then run a bounded smoke:
 
 ```bash
 source gyms/wideseek/env.sh
-.venv/bin/python -m sft.wideseek.run --harness decomposer \
+.venv/bin/python -m sft.wideseek.run --agent decomposer \
   --output artifacts/sft/wideseek/runs/smoke --limit 4 -n 1 --concurrency 2
 ```
 
@@ -46,7 +46,7 @@ For the full 20,000-task width split, the prepared command is:
 
 ```bash
 source gyms/wideseek/env.sh
-.venv/bin/python -m sft.wideseek.run --harness decomposer --adaptive \
+.venv/bin/python -m sft.wideseek.run --agent decomposer --adaptive \
   --output artifacts/sft/wideseek/runs/width-coverage \
   --limit 20000 -n 1 --concurrency 2
 ```

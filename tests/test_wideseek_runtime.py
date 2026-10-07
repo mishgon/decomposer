@@ -42,7 +42,7 @@ class ScoreTests(unittest.IsolatedAsyncioTestCase):
             root = Path(folder)
             data = root / "tasks.jsonl"
             data.write_text(json.dumps({"task_id": "test", "question": "Q"}) + "\n")
-            args = create_parser().parse_args(["--harness", "react", "--output", str(root / "run"),
+            args = create_parser().parse_args(["--agent", "react", "--output", str(root / "run"),
                                               "--data", str(data), "--limit", "1"])
             args.mode = "simple"
             policy = SimpleNamespace(model_name="qwen", temperature=.6, top_p=.95)
@@ -109,10 +109,10 @@ class ScoreTests(unittest.IsolatedAsyncioTestCase):
         graph.aget_state = AsyncMock(return_value=SimpleNamespace(values={}))
         policy = MagicMock()
         policy.http_async_client.aclose = AsyncMock()
-        args = SimpleNamespace(model_calls=2, output_tokens=100, worker_url="http://unused", timeout=1)
+        args = SimpleNamespace(agent="react", model_calls=2, output_tokens=100, worker_url="http://unused", timeout=1)
         task = {"task_id": "test", "question": "Question", "answer": "Answer", "unique_columns": []}
         with tempfile.TemporaryDirectory() as folder, patch("gyms.wideseek.run.model", return_value=policy), \
-                patch("langchain.agents.create_agent", return_value=graph), \
+                patch("gyms.wideseek.run.agents.react", return_value=graph), \
                 patch("gyms.wideseek.run.evaluate", new=AsyncMock(return_value={"score": 0.})):
             root = Path(folder)
             with self.assertRaises(asyncio.CancelledError):
@@ -140,15 +140,18 @@ class ScoreTests(unittest.IsolatedAsyncioTestCase):
             values={"messages": [HumanMessage(content="unfinished task")]}))
         policy = MagicMock()
         policy.http_async_client.aclose = AsyncMock()
-        args = SimpleNamespace(model_calls=None, output_tokens=None, worker_url="http://unused", timeout=1)
+        args = SimpleNamespace(agent="react", model_calls=None, output_tokens=None, worker_url="http://unused", timeout=1)
         tasks = [{"task_id": name, "question": "Question", "answer": "Answer", "unique_columns": []}
                  for name in ("limited", "healthy")]
         judge = AsyncMock(return_value={"score": 0.})
         with tempfile.TemporaryDirectory() as folder, patch("gyms.wideseek.run.model", return_value=policy), \
-                patch("langchain.agents.create_agent", return_value=graph), \
+                patch("gyms.wideseek.run.agents.react", return_value=graph), \
                 patch("gyms.wideseek.run.evaluate", new=judge):
             root = Path(folder)
             await asyncio.gather(*(episode(task, "simple", 1, root, args) for task in tasks))
+            calls = graph.ainvoke.await_args_list
+            self.assertEqual(len({c.kwargs["config"]["configurable"]["thread_id"] for c in calls}), 2)
+            self.assertEqual(len({c.kwargs["context"]["directory"] for c in calls}), 2)
             limited = root / "simple/limited/attempt-001"
             failed = json.loads((limited / "result.json").read_text())
             healthy = json.loads((root / "simple/healthy/attempt-001/result.json").read_text())

@@ -1,14 +1,31 @@
 from pathlib import Path
 import json
+import pytest
 
 from evals.wideseek.run import summarize
 from gyms.wideseek.run import create_parser
 
 
-def test_harness_cli_and_legacy_mode():
+def test_named_agent_cli_rejects_model_overrides_and_legacy_flags():
     parser = create_parser()
-    assert parser.parse_args(["--harness", "react", "--output", "/tmp/raw"]).harness == "react"
-    assert parser.parse_args(["--mode", "simple", "--output", "/tmp/raw"]).mode == "simple"
+    for name in ("react", "decomposer"):
+        assert parser.parse_args(["--agent", name, "--output", "/tmp/raw"]).agent == name
+    for flag in ("--mode", "--harness", "--model", "--subagent-model", "--judge-model"):
+        with pytest.raises(SystemExit):
+            parser.parse_args(["--agent", "react", "--output", "/tmp/raw", flag, "old"])
+
+
+def test_researcher_id_is_explicit_and_matches_server(monkeypatch):
+    from gyms.wideseek import agents
+    root = Path(__file__).resolve().parents[1]
+    graphs = json.loads((root / "gyms/wideseek/langgraph.json").read_text())["graphs"]
+    captured = {}
+    monkeypatch.setattr(agents, "create_decomposer_agent", lambda **kw: captured.update(kw))
+    agents.decomposer("policy", "checkpoint", "http://worker")
+    worker = captured["agent_types"][0]
+    assert worker["assistant_id"] == worker["agent_type_id"] == "researcher"
+    assert graphs[worker["assistant_id"]] == "gyms.wideseek.agents:researcher"
+    assert worker["url"] == "http://worker"
 
 
 def test_summary_keeps_judge_errors_separate_and_excludes_judge_tokens():

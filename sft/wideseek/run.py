@@ -5,7 +5,7 @@ from pathlib import Path
 import time
 
 from gyms.wideseek.run import cli, create_parser, prepare_run, run_jobs
-from gyms.wideseek.runtime import DEFAULT_SUBAGENT, DEFAULT_TEACHER, save
+from gyms.wideseek.runtime import save
 from sft.wideseek.scheduler import new_state, plan_next_wave, qualifies, statistics
 
 
@@ -94,7 +94,7 @@ async def main(args):
 def create_collection_parser():
     parser = create_parser()
     parser.description = __doc__
-    parser.set_defaults(model=DEFAULT_TEACHER, subagent_model=DEFAULT_SUBAGENT, n=1)
+    parser.set_defaults(n=1)
     parser.add_argument("--success-threshold", type=float, default=.9)
     parser.add_argument("--adaptive", action="store_true", help="Prioritize coverage, then balance successful traces")
     parser.add_argument("--target-successes", type=int, default=4, help="Use 1 for coverage only; default 4")

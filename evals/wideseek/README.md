@@ -6,15 +6,16 @@ the explicitly named `mean_native_score_infra_zero` also counts them as zero.
 
 ```bash
 source gyms/wideseek/env.sh
-.venv/bin/python -m evals.wideseek.run --harness react \
+.venv/bin/python -m evals.wideseek.run --agent react \
   --output artifacts/evals/wideseek/runs/qwen4b-simple \
   --limit 100 -n 3 --concurrency 2
 ```
 
-Repeat with `--harness decomposer` and a separate output directory for comparison.
-Both default to the same non-thinking Qwen4B policy and subagents. Registry profile
-overrides are explicit CLI arguments; provider and sampling settings stay in
-`src/decomposer/models.py`. Native per-episode judging belongs to the Gym.
+Use `--agent decomposer` with a separate output directory for Flash Next plus
+thinking Qwen4B researchers. This is a different-model comparison, not a
+same-model harness ablation. Configurations live in `gyms/wideseek/agents.py`;
+provider and sampling settings stay in `src/decomposer/models.py`.
+Native per-episode judging belongs to the Gym.
 
 `sequence.py` schedules the two setups sequentially and stops on process failure.
 `rescore.py` scores saved answers with a selected registry judge into a new output
