@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 
 
 _QWEN_3_5_4B_PORT = 8024
+_QWEN_3_8_FLASH_NEXT_PORT = 8025
 
 
 class ChatVLLM(ChatOpenAI):
@@ -104,6 +105,7 @@ def create_model(
     model_id: Literal[
         "vllm/qwen_3_5_4b_thinking",
         "vllm/qwen_3_5_4b_non_thinking",
+        "vllm/qwen_3_8_flash_next_non_thinking",
         "lmrouter/qwen_3_5_4b_unlooped_thinking",
         "lmrouter/qwen_3_5_4b_unlooped_non_thinking",
         "lmrouter/qwen_3_8_flash_next_non_thinking",
@@ -141,6 +143,28 @@ def create_model(
                     "chat_template_kwargs": {"enable_thinking": thinking},
                 },
                 preserve_reasoning=thinking,
+                timeout=600,
+                max_retries=2,
+                http_client=sync_client,
+                http_async_client=client,
+                disable_streaming=True,
+                use_responses_api=False,
+            )
+        case "vllm/qwen_3_8_flash_next_non_thinking":
+            return ChatVLLM(
+                model="Qwen/Qwen3.8-Flash-Next-NVFP4",
+                base_url=f"http://{os.environ.get('VLLM_HOST', '127.0.0.1')}:{_QWEN_3_8_FLASH_NEXT_PORT}/v1",
+                api_key="EMPTY",
+                temperature=0.7,
+                top_p=0.8,
+                presence_penalty=1.5,
+                extra_body={
+                    "top_k": 20,
+                    "min_p": 0.0,
+                    "repetition_penalty": 1.0,
+                    "chat_template_kwargs": {"enable_thinking": False},
+                },
+                preserve_reasoning=False,
                 timeout=600,
                 max_retries=2,
                 http_client=sync_client,
