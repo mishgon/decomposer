@@ -36,7 +36,7 @@ def display(root, run=None):
     settings = manifest["settings"]
     scheduler_path = directory / 'scheduler.json'
     scheduler = json.loads(scheduler_path.read_text()) if scheduler_path.exists() else None
-    total = len(settings["tasks"]) * settings["repetitions"] * len(settings["modes"])
+    total = len(settings["tasks"]) * settings["repetitions"]
     rows = []
     counts = {}
     for result in directory.glob("*/*/attempt-*/result.json"):
@@ -90,26 +90,23 @@ def display(root, run=None):
         profile = settings['model_profiles']['subagent']
         print(f"Subagents: {profile['model_name']} | preserve reasoning: {profile['preserve_reasoning']}")
     print()
-    legacy = len(settings['modes']) > 1
-    if legacy:
-        print("Legacy combined run (new runs use one setup each)")
-    for mode in settings['modes']:
-        selected = [r for r in rows if r['mode'] == mode]
-        scores = [r['evaluation'].get('score') for r in selected]
-        mean = f"{sum(s or 0 for s in scores)/len(scores):.3f}" if scores else '--'
-        returned = sum(r['status'] == 'finished' for r in selected)
-        print(f"Setup: {mode}")
-        print(f"Attempts ended: {len(selected)} = {returned} returned an answer + {len(selected)-returned} stopped early")
-        stops = Counter(r['status'] for r in selected if r['status'] != 'finished')
-        if stops:
-            print("Stop reasons: " + ', '.join(f"{name.replace('_', ' ')}: {count}" for name, count in sorted(stops.items())))
-        print(f"Mean native score: {mean} across all {len(selected)} ended attempts (not pass rate)")
-        print(f"Evaluation errors: {sum(s is None for s in scores)} | Missing answers and evaluation errors count as zero in mean")
-        samples = [counts[id(r)] for r in selected if id(r) in counts]
-        if samples:
-            print(f"Subagents/attempt: {sum(s[0] for s in samples)/len(samples):.2f} | Peak unawaited/attempt: {sum(s[1] for s in samples)/len(samples):.2f} (mean over {len(samples)} ended attempts)")
-        else:
-            print("Subagents/attempt: -- | Peak unawaited/attempt: --")
+    mode, = settings["modes"]
+    selected = [r for r in rows if r['mode'] == mode]
+    scores = [r['evaluation'].get('score') for r in selected]
+    mean = f"{sum(s or 0 for s in scores)/len(scores):.3f}" if scores else '--'
+    returned = sum(r['status'] == 'finished' for r in selected)
+    print(f"Setup: {mode}")
+    print(f"Attempts ended: {len(selected)} = {returned} returned an answer + {len(selected)-returned} stopped early")
+    stops = Counter(r['status'] for r in selected if r['status'] != 'finished')
+    if stops:
+        print("Stop reasons: " + ', '.join(f"{name.replace('_', ' ')}: {count}" for name, count in sorted(stops.items())))
+    print(f"Mean native score: {mean} across all {len(selected)} ended attempts (not pass rate)")
+    print(f"Evaluation errors: {sum(s is None for s in scores)} | Missing answers and evaluation errors count as zero in mean")
+    samples = [counts[id(r)] for r in selected if id(r) in counts]
+    if samples:
+        print(f"Subagents/attempt: {sum(s[0] for s in samples)/len(samples):.2f} | Peak unawaited/attempt: {sum(s[1] for s in samples)/len(samples):.2f} (mean over {len(samples)} ended attempts)")
+    else:
+        print("Subagents/attempt: -- | Peak unawaited/attempt: --")
     if scheduler:
         seconds = [r['finished_at']-r['started_at'] for r in rows]
         if finished:

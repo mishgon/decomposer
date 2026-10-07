@@ -24,8 +24,9 @@ gyms/wideseek/.venv/bin/python -m sft.wideseek.run --agent decomposer \
 ```
 
 Repeat the same command with `--resume` to skip saved results and retry interrupted
-executions in fresh directories. Completed results are never rerun. Source/data
-and model-setting changes require a new run directory.
+executions in fresh directories. Completed results are never rerun. Task data
+and model settings must match the saved manifest. Each attempt records its Git
+revision; use a new run directory when comparing harness versions.
 
 ## Coverage-First Collection
 
@@ -58,13 +59,6 @@ context limits are unchanged from the smoke. Choose concurrency before launch.
 Resume the same command with `--resume`: saved results count toward both budgets
 and coverage; only unfinished attempts in the saved wave launch again.
 `--max-waves 1` runs one bounded validation wave per invocation, then stops.
-
-For an explicit migration of an existing fixed-attempt run, add
-`--adaptive --resume --allow-source-change`, keeping its task set, models, data,
-limits and concurrency identical. Previous Gym/collector source hashes are
-recorded. Changing the core Decomposer harness is refused. Traces are re-indexed
-under the strict coverage rule; all failed raw attempts remain intact. A four-task
-smoke cannot be expanded to 20,000 tasks by resume; use a fresh collection identity.
 
 ## Fixed Attempts and Artifacts
 

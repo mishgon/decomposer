@@ -114,7 +114,7 @@ def test_collector_resume_counts_saved_traces_and_keeps_failures(tmp_path):
         for task, attempt in jobs:
             save_result(task, attempt, .3 if attempt == 2 else .99)
 
-    with patch("sft.wideseek.run.prepare_run", new=AsyncMock(return_value=(tasks, tmp_path))), \
+    with patch("sft.wideseek.run.prepare_collection", new=AsyncMock(return_value=(tasks, tmp_path))), \
             patch("sft.wideseek.run.run_jobs", new=run_jobs):
         asyncio.run(main(args))
         assert launches == [["b", 2]]
@@ -127,6 +127,6 @@ def test_collector_resume_counts_saved_traces_and_keeps_failures(tmp_path):
     assert len(completed_results(tmp_path, "decomposer")) == 4
     assert len((tmp_path / "successful-traces.jsonl").read_text().splitlines()) == 2
     args.target_successes = 4
-    with patch("sft.wideseek.run.prepare_run", new=AsyncMock(return_value=(tasks, tmp_path))):
+    with patch("sft.wideseek.run.prepare_collection", new=AsyncMock(return_value=(tasks, tmp_path))):
         with pytest.raises(ValueError, match="target_successes"):
             asyncio.run(main(args))

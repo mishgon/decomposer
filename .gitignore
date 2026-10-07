@@ -199,7 +199,6 @@ artifacts/
 /artifacts
 
 # Pinned WideSeek retrieval source downloaded by setup.sh
-/external/RLinf/
 
 # PyPI configuration file
 .pypirc

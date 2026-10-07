@@ -10,9 +10,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from gyms.wideseek import REPO_ROOT
 from gyms.wideseek.run import create_parser, prepare_run
 from gyms.wideseek.runtime import directory
+from sft.wideseek.run import prepare_collection
+import pytest
 
 
-def test_paths_and_source_hashes_outside_repository(tmp_path, monkeypatch):
+def test_collection_resume_and_paths_outside_repository(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     data = tmp_path / "tasks.jsonl"
     data.write_text(json.dumps({"task_id": "test", "question": "Q"}) + "\n")
@@ -21,22 +23,28 @@ def test_paths_and_source_hashes_outside_repository(tmp_path, monkeypatch):
         REPO_ROOT / "artifacts/gyms/wideseek/data/width/tasks.jsonl")
     args = parser.parse_args(["--agent", "react", "--output", "run", "--data", str(data)])
     args.mode = "simple"
+    args.resume = False
     http = MagicMock()
     response = MagicMock()
     response.json.return_value = {"status": "ready"}
     http.__aenter__ = AsyncMock(return_value=SimpleNamespace(get=AsyncMock(return_value=response)))
     http.__aexit__ = AsyncMock()
     with patch("gyms.wideseek.run.model", return_value=SimpleNamespace(model_name="test")), \
-            patch("gyms.wideseek.run.httpx.AsyncClient", return_value=http), \
-            patch("gyms.wideseek.run.importlib.metadata.version", return_value="test"):
-        asyncio.run(prepare_run(args))
+            patch("gyms.wideseek.run.httpx.AsyncClient", return_value=http):
+        asyncio.run(prepare_collection(args))
         before = json.loads((tmp_path / "run/manifest.json").read_text())
-        assert "src/decomposer/core.py" in before["source_sha256"]
-        assert "gyms/wideseek/run.py" in before["source_sha256"]
+        assert before["revision"]
+        assert before["settings"]["data_sha256"]
+        assert "source_sha256" not in before
+        with pytest.raises(FileExistsError):
+            asyncio.run(prepare_run(args))
         monkeypatch.chdir(REPO_ROOT)
         args.output = tmp_path / "run"
         args.resume = True
-        asyncio.run(prepare_run(args))
+        asyncio.run(prepare_collection(args))
+        args.timeout += 1
+        with pytest.raises(ValueError, match="settings or task data differ"):
+            asyncio.run(prepare_collection(args))
     assert before == json.loads((tmp_path / "run/manifest.json").read_text())
     assert directory({"directory": str(tmp_path / "other-disk/episode")}) == tmp_path / "other-disk/episode"
 

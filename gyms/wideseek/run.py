@@ -3,7 +3,6 @@ import argparse
 import asyncio
 import fcntl
 import hashlib
-import importlib.metadata
 import json
 import os
 from pathlib import Path
@@ -162,8 +161,8 @@ async def episode(task, mode, attempt, root, args):
     print(json.dumps({k: result[k] for k in ("mode", "task_id", "attempt", "status", "evaluation")}), flush=True)
 
 
-async def prepare_run(args):
-    """Validate services and create or resume a raw run, without scheduling tasks."""
+async def describe_run(args):
+    """Validate services and describe a run without writing its artifacts."""
     asyncio.get_running_loop().add_signal_handler(signal.SIGTERM, asyncio.current_task().cancel)
     root = args.output.resolve()
     raw = args.data.read_bytes()
@@ -197,41 +196,19 @@ async def prepare_run(args):
                 "timeout": args.timeout,
                 "judge": {"model": profiles["judge"]["model_name"], "profile": agents.JUDGE_MODEL,
                           "temperature": 0., "thinking": False, "paper_comparable": False}}
-    sources = {}
-    for base in (REPO_ROOT / "gyms/wideseek", REPO_ROOT / "src/decomposer"):
-        for folder, directories, files in os.walk(base):
-            directories[:] = [name for name in directories if name not in {".venv", "__pycache__"}]
-            for name in files:
-                path = Path(folder) / name
-                if path.suffix in {".py", ".sh", ".json", ".txt"}:
-                    sources[str(path.relative_to(REPO_ROOT))] = hashlib.sha256(path.read_bytes()).hexdigest()
-    if args.resume:
-        previous = json.loads((root / "manifest.json").read_text())
-        if previous["settings"] != settings:
-            raise ValueError("Resume settings differ from the saved run")
-        if previous["source_sha256"] != sources:
-            if not args.allow_source_change:
-                raise ValueError("Resume source code differs; use --allow-source-change for a Gym-only migration")
-            original_core = {p: h for p, h in previous["source_sha256"].items() if p.startswith("src/decomposer/")}
-            current_core = {p: h for p, h in sources.items() if p.startswith("src/decomposer/")}
-            if original_core != current_core:
-                raise ValueError("Cannot migrate a run between different Decomposer harness versions")
-            previous.setdefault("source_history", []).append({
-                "previous_source_sha256": previous["source_sha256"], "changed_at": time.time(),
-                "revision": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=REPO_ROOT, text=True).strip()})
-            previous["source_sha256"] = sources
-            save(root / "manifest.json", previous)
-    else:
-        root.mkdir(parents=True, exist_ok=False)
-        save(root / "manifest.json", {"run_id": root.name, "status": "running",
-             "harness": args.agent, "assistant_id": args.agent,
-             "tasks": settings["tasks"], "repetitions": args.n, "episodes": [],
-             "settings": settings, "started_at": time.time(),
-             "revision": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=REPO_ROOT, text=True).strip(),
-             "packages": {p: importlib.metadata.version(p) for p in
-                 ("langchain", "langchain-openai", "langgraph", "langgraph-api", "httpx", "pandas")},
-             "source_sha256": sources})
-        (root / "source.diff").write_bytes(subprocess.check_output(["git", "diff", "HEAD"], cwd=REPO_ROOT))
+    manifest = {"run_id": root.name, "status": "running",
+                "harness": args.agent, "assistant_id": args.agent,
+                "tasks": settings["tasks"], "repetitions": args.n, "episodes": [],
+                "settings": settings, "started_at": time.time(),
+                "revision": subprocess.check_output(
+                    ["git", "rev-parse", "HEAD"], cwd=REPO_ROOT, text=True).strip()}
+    return tasks, root, manifest
+
+
+async def prepare_run(args):
+    tasks, root, manifest = await describe_run(args)
+    root.mkdir(parents=True, exist_ok=False)
+    save(root / "manifest.json", manifest)
     return tasks, root
 
 
@@ -284,9 +261,6 @@ def create_parser():
     parser.add_argument("--output-tokens", type=int, default=None, help="Optional shared token cap; default uncapped")
     parser.add_argument("--timeout", type=int, default=2700)
     parser.add_argument("--worker-url", default="http://127.0.0.1:18081")
-    parser.add_argument("--resume", action="store_true")
-    parser.add_argument("--allow-source-change", action="store_true",
-                        help="Record an explicit Gym-source migration on resume; core/model/data must match")
     return parser
 
 
@@ -294,8 +268,6 @@ def cli(run=main, argv=None, *, parser=None):
     parser = parser or create_parser()
     args = parser.parse_args(argv)
     args.mode = "simple" if args.agent == "react" else "decomposer"
-    if args.allow_source_change and not args.resume:
-        parser.error("--allow-source-change requires --resume")
     if min(v for v in (args.limit, args.n, args.concurrency, args.model_calls, args.output_tokens, args.timeout) if v is not None) < 1:
         parser.error("Counts and budgets must be positive")
     # Lock outside the run directory so first-launch mkdir remains exclusive.

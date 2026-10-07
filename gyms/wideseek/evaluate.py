@@ -7,8 +7,8 @@ import time
 from uuid import uuid4
 
 from gyms.wideseek.runtime import DEFAULT_TEACHER, close_model, model, save
-from gyms.wideseek.vendor.table_reward import evaluate_markdown, extract_final_answer
-from gyms.wideseek.vendor.qa_prompt import LLM_JUDGE_PROMPT
+from external.wideseek_reward.table_reward import evaluate_markdown, extract_final_answer
+from external.wideseek_reward.qa_prompt import LLM_JUDGE_PROMPT
 
 
 def validate_judge(text, messages):

@@ -24,6 +24,8 @@ gyms/wideseek/.venv/bin/python -m gyms.wideseek.assets --root "$WS_ASSETS"
 Run these commands from the repository root. Setup creates an isolated
 `gyms/wideseek/.venv` for the Gym and CPU retrieval dependencies; it does not
 install into the root `.venv` used for training or other gyms.
+It also initializes `external/RLinf` at the commit pinned by Git. The extracted
+scorer and its Apache license live in `external/wideseek_reward/`.
 
 Start each service in its own terminal or tmux session, saving stdout/stderr under
 `artifacts/gyms/wideseek/setup/`:
@@ -74,17 +76,13 @@ concurrent episodes can queue behind each other. Wikipedia retrieval stays share
 Each agent has recursion limit 410; task execution timeout is 45 minutes.
 Optional `--model-calls` and `--output-tokens` provide shared smoke budgets.
 The Gym adds no default completion cap; hosted context/output limits still apply.
-Use `--resume` with identical settings/data/source to skip saved results. An
-interrupted attempt gets a fresh execution directory, preserving its old logs.
-A file lock prevents concurrent writers to one run.
+Raw and evaluation runs require a new output directory. Only the SFT collector
+supports `--resume`. A file lock prevents concurrent writers to one run.
+Workflows reuse `describe_run()` and `run_jobs()` without adding scheduling policy
+to the Gym.
 
-`--allow-source-change` explicitly records a Gym-code migration during resume.
-Data, models, limits and concurrency must still match. Different core Decomposer
-harness versions are rejected. Workflows can reuse `prepare_run()` and
-`run_jobs()` to schedule explicit task/attempt pairs without adding policy here.
-
-`manifest.json` records data/source hashes, registry settings, retrieval revisions
-and package versions. Each `simple|decomposer/<task>/attempt-NNN/result.json`
+`manifest.json` records the task-data hash, registry settings, retrieval revisions
+and Git revision. Each `simple|decomposer/<task>/attempt-NNN/result.json`
 references an execution directory with model/tool/judge logs, final graph state,
 worker states and provider usage. Failed attempts remain available for analysis.
 No aggregate evaluation or collection policy lives in this directory.

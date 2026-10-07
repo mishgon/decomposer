@@ -14,6 +14,12 @@ def test_named_agent_cli_rejects_model_overrides_and_legacy_flags():
     for flag in ("--mode", "--harness", "--model", "--subagent-model", "--judge-model"):
         with pytest.raises(SystemExit):
             parser.parse_args(["--agent", "react", "--output", "/tmp/raw", flag, "old"])
+    for flag in ("--resume", "--allow-source-change"):
+        with pytest.raises(SystemExit):
+            parser.parse_args(["--agent", "react", "--output", "/tmp/raw", flag])
+    from sft.wideseek.run import create_collection_parser
+    assert create_collection_parser().parse_args([
+        "--agent", "react", "--output", "/tmp/raw", "--resume"]).resume
 
 
 def test_researcher_id_is_explicit_and_matches_server(monkeypatch):

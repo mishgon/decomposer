@@ -47,18 +47,18 @@ class WatchTest(unittest.TestCase):
             cid = str(len(messages))
             messages.extend([{'type': 'ai', 'tool_calls': [{'id': cid, 'name': name}]},
                              {'type': 'tool', 'tool_call_id': cid, 'content': json.dumps(result)}])
-        call('new', {'subagent_id': 'worker'})
-        call('run', {'subagent_run_id': 'a'})
-        call('run', {'subagent_run_id': 'b'})
+        call('new', {'agent_id': 'worker'})
+        call('run', {'agent_run_id': 'a'})
+        call('run', {'agent_run_id': 'b'})
         call('wait', 'Timed out')  # No collected reports: neither worker is removed.
-        call('spawn_subagent', {'subagent_run_id': 'c'})
-        call('wait', [{'subagent_run_id': 'a'}, {'subagent_run_id': 'b'}])
-        call('spawn_subagent', {'subagent_run_id': 'd'})
-        call('spawn_subagent', {'error': 'failed'})
+        call('run', {'agent_run_id': 'c'})
+        call('wait', [{'agent_run_id': 'a'}, {'agent_run_id': 'b'}])
+        call('run', {'agent_run_id': 'd'})
+        call('run', {'error': 'failed'})
         self.assertEqual(subagent_counts(messages), (4, 3))
 
-    def test_single_and_legacy_runs(self):
-        for modes in (["simple"], ["simple", "decomposer"]):
+    def test_single_setup_runs(self):
+        for modes in (["simple"], ["decomposer"]):
             with self.subTest(modes=modes), tempfile.TemporaryDirectory() as folder:
                 root = Path(folder)
                 run = root / "test"
@@ -71,11 +71,10 @@ class WatchTest(unittest.TestCase):
                 with contextlib.redirect_stdout(output):
                     display(root)
                 text = output.getvalue()
-                self.assertIn("Setup: simple", text)
+                self.assertIn(f"Setup: {modes[0]}", text)
                 self.assertIn("Mean native score: --", text)
                 self.assertIn("0 = 0 returned an answer + 0 stopped early", text)
                 self.assertIn("STOPPED / interrupted", text)
-                self.assertEqual("Legacy combined run" in text, len(modes) > 1)
 
     def test_finds_collection_under_sft_artifacts(self):
         with tempfile.TemporaryDirectory() as folder:

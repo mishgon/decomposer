@@ -1,10 +1,8 @@
 """Collect off-policy WideSeek trajectories and index successful traces."""
-import hashlib
 import json
-from pathlib import Path
 import time
 
-from gyms.wideseek.run import cli, create_parser, prepare_run, run_jobs
+from gyms.wideseek.run import cli, create_parser, describe_run, run_jobs
 from gyms.wideseek.runtime import save
 from sft.wideseek.scheduler import new_state, plan_next_wave, qualifies, statistics
 
@@ -41,6 +39,19 @@ def update_index(root, mode, threshold, tasks, adaptive):
         "trace_index": index.name, "schedule": "coverage_first" if adaptive else "fixed attempts per task"})
 
 
+async def prepare_collection(args):
+    tasks, root, manifest = await describe_run(args)
+    path = root / "manifest.json"
+    if args.resume:
+        previous = json.loads(path.read_text())
+        if previous["settings"] != manifest["settings"]:
+            raise ValueError("Resume settings or task data differ; use a new run directory")
+    else:
+        root.mkdir(parents=True, exist_ok=False)
+        save(path, manifest)
+    return tasks, root
+
+
 async def main(args):
     if not 0 <= args.success_threshold <= 1 or args.target_successes < 1:
         raise ValueError("Threshold must be in [0, 1] and target successes positive")
@@ -48,7 +59,7 @@ async def main(args):
         raise ValueError("Adaptive collection launches one attempt per task per wave; use -n 1")
     if args.max_waves is not None and args.max_waves < 1:
         raise ValueError("Wave limit must be positive")
-    tasks, root = await prepare_run(args)
+    tasks, root = await prepare_collection(args)
     if not args.adaptive:
         await run_jobs(tasks, ((t["task_id"], n) for n in range(1, args.n + 1) for t in tasks), root, args)
         update_index(root, args.mode, args.success_threshold, tasks, False)
@@ -60,14 +71,6 @@ async def main(args):
                 "max_zero_success_launches", "max_balance_launches"):
         if state[key] != expected[key]:
             raise ValueError(f"Cannot change adaptive {key} on resume")
-    sources = {f"sft/wideseek/{p.name}": hashlib.sha256(p.read_bytes()).hexdigest()
-               for p in (Path(__file__), Path(__file__).with_name("scheduler.py"))}
-    previous = state.get("collector_sources", sources)
-    if previous != sources:
-        if not getattr(args, "allow_source_change", False):
-            raise ValueError("Collector source changed; use --allow-source-change for an audited migration")
-        state.setdefault("source_history", []).append({"previous_sources": previous, "changed_at": time.time()})
-    state["collector_sources"] = sources
     state["status"] = "running"
     waves = 0
     while True:
@@ -95,6 +98,7 @@ def create_collection_parser():
     parser = create_parser()
     parser.description = __doc__
     parser.set_defaults(n=1)
+    parser.add_argument("--resume", action="store_true")
     parser.add_argument("--success-threshold", type=float, default=.9)
     parser.add_argument("--adaptive", action="store_true", help="Prioritize coverage, then balance successful traces")
     parser.add_argument("--target-successes", type=int, default=4, help="Use 1 for coverage only; default 4")

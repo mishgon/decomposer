@@ -1,6 +1,6 @@
 # Copyright 2025 The RLinf Authors.
 # Licensed under the Apache License, Version 2.0 (see LICENSE in this directory).
-# Copied from utils/prompt.py at the RLinf revision pinned in assets.py.
+# Copied from utils/prompt.py at RLinf 64875d346d5cafb06c1112f563b20d2c6360bfae.
 
 BOXED_FORMAT_EN = "If you determine that no further external knowledge is required, you have to wrap your final answer in \\boxed{}."
 

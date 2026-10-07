@@ -18,7 +18,7 @@ same-model harness ablation. Configurations live in `gyms/wideseek/agents.py`;
 provider and sampling settings stay in `src/decomposer/models.py`.
 Native per-episode judging belongs to the Gym.
 
-`sequence.py` schedules the two setups sequentially and stops on process failure.
+Run the two configurations separately, using distinct output directories.
 `rescore.py` scores saved answers with a selected registry judge into a new output
 directory, preserving every original result. Use each module's `--help`.
 
@@ -29,7 +29,6 @@ bash evals/wideseek/watch-wideseek.sh
 The watcher selects the latest individual raw, evaluation or SFT run. Pass its
 run name to select one explicitly. It shows completed attempts, normal finishes,
 early stops, unscored results, mean native score, worker counts and whole-run ETA.
-Historical combined-run artifacts remain readable.
 
 For adaptive SFT collection, the watcher shows live task coverage, exhausted
 tasks, current phase and wave progress. ETA covers the current wave; it does not

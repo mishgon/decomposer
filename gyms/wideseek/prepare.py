@@ -31,7 +31,7 @@ def agent_input(task):
     """References and grading metadata must never enter an agent's input."""
     question = task["question"]
     if not task["unique_columns"]:
-        from gyms.wideseek.vendor.qa_prompt import BOXED_FORMAT_EN
+        from external.wideseek_reward.qa_prompt import BOXED_FORMAT_EN
         question += "\n\n" + BOXED_FORMAT_EN
     return {"messages": [{"role": "user", "content": question}]}
 
