@@ -83,6 +83,17 @@ references an execution directory with model/tool/judge logs, final graph state,
 worker states and provider usage. Failed attempts remain available for analysis.
 No aggregate evaluation or collection policy lives in this directory.
 
+The manifest also indexes completed episodes with their status, native evaluation
+and relative `trace_path`. Each execution saves `trace.json` with common episode,
+model, message and agent-run fields, plus `usage.json` using the shared trace-usage
+summary. `result.json` also counts provider calls from durable logs, including
+failed or unfinished calls that did not reach the final graph state.
+Decomposer traces include `trace.html` through the shared visualizer; ReAct has no
+orchestration timeline. `model_calls.jsonl` appends request deltas and responses,
+including reasoning. A call ID joins its start and outcome records; thread IDs
+separate concurrent conversations. Calls without an outcome count as unfinished.
+Judge calls remain separate so judge tokens do not inflate agent usage.
+
 At episode end, cleanup discovers runs on every known subagent thread, including
 runs whose launch response was lost. It cancels active runs and waits for them,
 then saves one `subagents/<thread_id>.json` archive containing final state and run

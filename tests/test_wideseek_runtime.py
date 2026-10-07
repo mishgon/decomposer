@@ -158,7 +158,7 @@ class ScoreTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(failed["status"], "context_exceeded")
             self.assertEqual(healthy["status"], "finished")
             trace = json.loads((limited / failed["execution_directory"] / "trace.json").read_text())
-            self.assertEqual(trace["messages"][0]["content"], "unfinished task")
+            self.assertEqual(trace["messages"][0]["data"]["content"], "unfinished task")
             self.assertEqual(judge.await_count, 2)
             self.assertCountEqual([c.args[1] for c in judge.await_args_list], ["", "done"])
 

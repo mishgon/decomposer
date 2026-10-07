@@ -25,7 +25,7 @@ async def main(args):
     await run_episodes(args)
     rows = [json.loads(path.read_text())
             for path in (args.output / args.mode).glob("*/attempt-???/result.json")]
-    save(args.output / f"{args.mode}-summary.json", summarize(rows))
+    save(args.output / "summary.json", summarize(rows))
 
 
 if __name__ == "__main__":

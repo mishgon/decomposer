@@ -3,6 +3,7 @@
 `run.py` reuses the raw Gym runner and adds aggregate native scores, episode
 timings, agent tokens and completion/error counts. Judge errors remain unscored;
 the explicitly named `mean_native_score_infra_zero` also counts them as zero.
+The aggregate is saved to `summary.json` in the run directory.
 
 ```bash
 source gyms/wideseek/env.sh

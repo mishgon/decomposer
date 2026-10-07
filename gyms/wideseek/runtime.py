@@ -7,9 +7,13 @@ import sqlite3
 import time
 from typing import TypedDict
 from uuid import uuid4
+from datetime import datetime, timezone
 
 from langchain.agents.middleware import AgentMiddleware
 from langchain_core.utils.function_calling import convert_to_openai_tool
+from langchain_core.messages import message_to_dict
+from langgraph.config import get_config
+from decomposer.model_logging import append_record, request_delta
 from decomposer.models import create_model as model
 
 
@@ -85,20 +89,24 @@ class ModelLog(AgentMiddleware):
     async def awrap_model_call(self, request, handler):
         path = await asyncio.to_thread(directory, request.runtime.context)
         limit = await asyncio.to_thread(reserve, path)
-        log = path / "model_calls" / f"{uuid4().hex}.json"
-        row = {"role": self.role, "started_at": time.time(), "max_tokens": limit,
+        log = path / "model_calls.jsonl"
+        started = time.monotonic()
+        row = {"call_id": uuid4().hex, "role": self.role,
+               "thread_id": get_config()["configurable"]["thread_id"],
+               "started_at": datetime.now(timezone.utc).isoformat(), "max_tokens": limit,
                "generation": {**model_metadata(request.model), **request.model_settings},
-               "tools": [convert_to_openai_tool(t) for t in request.tools],
-               "messages": [m.model_dump(mode="json") for m in request.messages]}
-        if request.system_message:
-            row["system_message"] = request.system_message.model_dump(mode="json")
-        await asyncio.to_thread(save, log, row)
+               "request_message_count": len(request.messages),
+               "request_delta": [message_to_dict(m) for m in request_delta(request.messages)]}
+        if not any(m.type == "ai" for m in request.messages):
+            row["tools"] = [convert_to_openai_tool(t) for t in request.tools]
+            row["system_message"] = message_to_dict(request.system_message) if request.system_message else None
+        await asyncio.to_thread(append_record, log, {**row, "status": "started"})
         try:
             settings = dict(request.model_settings)
             if limit is not None:
                 settings["max_tokens"] = limit
             response = await handler(request.override(model_settings=settings))
-            row["responses"] = [m.model_dump(mode="json") for m in response.result]
+            outcome = {"status": "success", "response": [message_to_dict(m) for m in response.result]}
             used = sum((getattr(m, "usage_metadata", None) or {}).get("output_tokens", 0)
                        for m in response.result)
             # If provider omits usage, conservatively keep the full reservation.
@@ -106,8 +114,10 @@ class ModelLog(AgentMiddleware):
                 await asyncio.to_thread(refund, path, max(0, limit - used))
             return response
         except BaseException as exc:
-            row["error"] = f"{type(exc).__name__}: {exc}"
+            outcome = {"status": "error", "error": f"{type(exc).__name__}: {exc}"}
             raise
         finally:
-            row["finished_at"] = time.time()
-            await asyncio.to_thread(save, log, row)
+            await asyncio.to_thread(append_record, log, {
+                "call_id": row["call_id"], "role": self.role, **outcome,
+                "finished_at": datetime.now(timezone.utc).isoformat(),
+                "duration_seconds": time.monotonic() - started})

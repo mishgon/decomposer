@@ -7,6 +7,7 @@ def subagent_counts(messages):
     calls, spawned, active = {}, set(), set()
     peak = 0
     for message in messages:
+        message = message.get('data', message)
         if message.get('type') == 'ai':
             calls.update({c['id']: c['name'] for c in message.get('tool_calls', [])})
         if message.get('type') != 'tool':
