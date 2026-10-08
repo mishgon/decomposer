@@ -1707,10 +1707,6 @@ def main(argv: Sequence[str] | None = None) -> None:
         *train_overlength_exclusions,
         *validation_overlength_exclusions,
     ]
-    overlength_truncations = [
-        *train_overlength_truncations,
-        *validation_overlength_truncations,
-    ]
     longest_train_samples = data_config.get("longest_train_samples")
     train_dataset = _select_longest_by_token_length(
         train_dataset,
@@ -1721,6 +1717,16 @@ def main(argv: Sequence[str] | None = None) -> None:
         train_dataset,
         stratified_train_samples,
     )
+    # Report only the cut records this run trains on, after any sample selection.
+    selected_train_ids = set(train_dataset["id"])
+    overlength_truncations = [
+        *(
+            item
+            for item in train_overlength_truncations
+            if item["id"] in selected_train_ids
+        ),
+        *validation_overlength_truncations,
+    ]
     train_token_stats = (
         _summarize_tokenization(train_dataset)
         if train_overlength_exclusions
