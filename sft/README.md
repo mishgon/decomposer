@@ -215,6 +215,47 @@ the rest of the call log, are left out.
   expected_candidates: <finished attempts>
 ```
 
+### Qwen3.8 four-gym release v3 for the unloop student
+
+The v3 release (`v3-tau2-workplace-toolathlon-wideseek-20261008`) has the same
+sources and rules as v2 below. Toolathlon and WideSeek were snapshotted again as
+byte-for-byte copies at 19:41 and 19:44 UTC, and the tau2 and Workplace
+snapshots are unchanged. Build it on Hertz-2 from a clean checkout:
+
+```bash
+.venv/bin/python -m sft.prepare \
+  --spec sft/specs/decomposer_mixed_qwen38_qwen35_4b_unloop_nonthinking_v3.yaml \
+  --output-root /mnt/share14T-2/sukhorukov/decomposer_artifacts/datasets/sft
+```
+
+| Source | Snapshot | Rollouts | Selected |
+|---|---|---:|---:|
+| tau2 | `170d2e3d…` | 4,843 | 2,948 |
+| Workplace | `c36c909e…` | 1,255 | 988 |
+| Toolathlon | `c9ea4cfe…` | 1,095 | 214 |
+| WideSeek | `c160625c…` | 253 | 70 |
+
+That gives 4,220 records (3,797 train, 423 validation) with fingerprint
+`50a73343…1fdb8df4`. Every v2 record is in v3 unchanged, plus 4 Toolathlon and 6
+WideSeek records. The added task groups shift the per-category validation
+quotas, so 15 records changed sides (13 of them tau2). With the Qwen3.5 template
+the release has 38.4M tokens, 8.86M of them supervised.
+
+| Gym | Median tokens | Max | Supervised share | Cut at 16K | Kept at 16K | Cut at 32K | Kept at 32K |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| tau2 | 6.8K | 65.5K | 54% | 93 | 97% | 4 | 99% |
+| Workplace | 6.0K | 30.7K | 13% | 6 | 99% | 0 | 100% |
+| Toolathlon | 29.3K | 64.3K | 27% | 191 | 44% | 84 | 80% |
+| WideSeek | 20.5K | 54.8K | 6% | 45 | 55% | 17 | 88% |
+| All | | | | 335 | 80% | 105 | 93% |
+
+"Kept" is the share of supervised tokens left after cutting from the end; no
+record is left without any. A two-step LoRA smoke on the 4 longest train records
+with the training defaults (16K) trained and exported
+(`/mnt/share14T-2/sukhorukov/decomposer_artifacts/training/sft/smokes/mixed-v3-20261008`).
+The Toolathlon snapshot holds the proxy key, like v2's, and must not be
+published.
+
 ### Qwen3.8 four-gym release v2 for the unloop student
 
 The v2 release (`v2-tau2-workplace-toolathlon-wideseek-20261008`) adds the
