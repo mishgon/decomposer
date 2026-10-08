@@ -34,7 +34,6 @@ from .schema import (
     BuildSpec,
     CanonicalRollout,
     JsonObject,
-    TokenizationSpec,
     TraceValidationError,
     canonical_json,
     sha256_file,
@@ -455,129 +454,6 @@ def _count_by(records: Sequence[CanonicalRollout], field: str) -> dict[str, int]
     return dict(sorted(Counter(values).items()))
 
 
-def _summarize_lengths(values: Sequence[int]) -> JsonObject:
-    if not values:
-        raise ValueError("Cannot summarize an empty token-length collection.")
-    ordered = sorted(values)
-
-    def percentile(fraction: float) -> int:
-        return ordered[max(0, math.ceil(fraction * len(ordered)) - 1)]
-
-    return {
-        "records": len(ordered),
-        "min": ordered[0],
-        "p50": percentile(0.50),
-        "p90": percentile(0.90),
-        "p95": percentile(0.95),
-        "p99": percentile(0.99),
-        "max": ordered[-1],
-        "total": sum(ordered),
-    }
-
-
-def _load_tokenization_runtime(
-    spec: TokenizationSpec,
-) -> tuple[Any, str, JsonObject]:
-    from transformers import AutoTokenizer
-
-    from .model_support import build_training_template
-
-    tokenizer = AutoTokenizer.from_pretrained(
-        spec.tokenizer,
-        revision=spec.revision,
-        trust_remote_code=spec.trust_remote_code,
-    )
-    canonical_template = tokenizer.chat_template
-    training_template = build_training_template(spec.profile, canonical_template)
-    init_kwargs = getattr(tokenizer, "init_kwargs", {})
-    resolved_revision = (
-        init_kwargs.get("_commit_hash") if isinstance(init_kwargs, Mapping) else None
-    )
-    return (
-        tokenizer,
-        training_template,
-        {
-            "profile": spec.profile,
-            "tokenizer": spec.tokenizer,
-            "requested_revision": spec.revision,
-            "resolved_revision": resolved_revision,
-            "tokenizer_class": type(tokenizer).__name__,
-            "canonical_template_sha256": sha256_text(canonical_template),
-            "training_template_sha256": sha256_text(training_template),
-            "include_reasoning": False,
-            "max_tokens": spec.max_tokens,
-        },
-    )
-
-
-def _tokenize_and_filter_split(
-    records: Sequence[CanonicalRollout],
-    *,
-    split: str,
-    spec: TokenizationSpec,
-    tokenizer: Any,
-    training_template: str,
-) -> tuple[list[CanonicalRollout], JsonObject]:
-    from .preprocessing import (
-        PREPARED_TOKENIZATION_ATTRIBUTE,
-        configure_example,
-        tokenization_stats,
-    )
-
-    retained: list[CanonicalRollout] = []
-    excluded: list[JsonObject] = []
-    raw_lengths: list[int] = []
-    retained_lengths: list[int] = []
-    for record in records:
-        serialized = record.model_dump(mode="json")
-        configured = configure_example(serialized, include_reasoning=False)
-        stats = tokenization_stats(
-            {**serialized, **configured},
-            tokenizer=tokenizer,
-            training_template=training_template,
-        )
-        token_length = int(stats["_token_length"])
-        supervised_tokens = int(stats["_supervised_tokens"])
-        raw_lengths.append(token_length)
-        prepared_metadata = {
-            "profile": spec.profile,
-            "tokens": token_length,
-            "supervised_tokens": supervised_tokens,
-        }
-        enriched = record.model_copy(
-            update={
-                "attributes": {
-                    **record.attributes,
-                    PREPARED_TOKENIZATION_ATTRIBUTE: prepared_metadata,
-                }
-            }
-        )
-        if token_length <= spec.max_tokens:
-            retained.append(enriched)
-            retained_lengths.append(token_length)
-        else:
-            excluded.append(
-                {
-                    "id": record.id,
-                    "split": split,
-                    "source_id": record.source.source_id,
-                    "environment": record.source.environment,
-                    "token_length": token_length,
-                    "max_tokens": spec.max_tokens,
-                }
-            )
-    if not retained:
-        raise ValueError(
-            f"The {spec.max_tokens}-token preparation limit emptied the {split} split."
-        )
-    return retained, {
-        "before_filter": _summarize_lengths(raw_lengths),
-        "after_filter": _summarize_lengths(retained_lengths),
-        "excluded": len(excluded),
-        "excluded_records": excluded,
-    }
-
-
 def _logical_spec(spec: BuildSpec) -> JsonObject:
     policy_exclude = {"subagent_types"} if spec.spec_version == 1 else set()
     source_exclude = {"path"}
@@ -616,8 +492,6 @@ def _logical_spec(spec: BuildSpec) -> JsonObject:
         "selection": spec.selection.model_dump(mode="json"),
         "split": logical_split,
     }
-    if spec.tokenization is not None:
-        logical["tokenization"] = spec.tokenization.model_dump(mode="json")
     return logical
 
 
@@ -842,30 +716,6 @@ def prepare_dataset(
     train_records = _sort_records(train_records)
     validation_records = _sort_records(validation_records)
 
-    tokenization_manifest: JsonObject | None = None
-    if spec.tokenization is not None:
-        tokenizer, training_template, tokenization_manifest = (
-            _load_tokenization_runtime(spec.tokenization)
-        )
-        train_records, train_tokenization = _tokenize_and_filter_split(
-            train_records,
-            split="train",
-            spec=spec.tokenization,
-            tokenizer=tokenizer,
-            training_template=training_template,
-        )
-        validation_records, validation_tokenization = _tokenize_and_filter_split(
-            validation_records,
-            split="validation",
-            spec=spec.tokenization,
-            tokenizer=tokenizer,
-            training_template=training_template,
-        )
-        tokenization_manifest["splits"] = {
-            "train": train_tokenization,
-            "validation": validation_tokenization,
-        }
-    retained = [*train_records, *validation_records]
     split_manifest["effective_train_groups"] = len(
         {record.group_id for record in train_records}
     )
@@ -877,18 +727,6 @@ def prepare_dataset(
     for counts in counts_by_source.values():
         total_counts.update(counts)
     _assert_filter_counts(total_counts, "all sources")
-    excluded_token_length = (
-        0
-        if tokenization_manifest is None
-        else sum(
-            int(split["excluded"]) for split in tokenization_manifest["splits"].values()
-        )
-    )
-    excluded_token_length_by_source: Counter[str] = Counter()
-    if tokenization_manifest is not None:
-        for split in tokenization_manifest["splits"].values():
-            for excluded in split["excluded_records"]:
-                excluded_token_length_by_source[str(excluded["source_id"])] += 1
     excluded_malformed_by_source = {
         source_id: sum(
             counts[reason]
@@ -897,16 +735,6 @@ def prepare_dataset(
         )
         for source_id, counts in sorted(counts_by_source.items())
     }
-    if tokenization_manifest is not None:
-        for source_manifest in source_manifests:
-            source_id = str(source_manifest["id"])
-            before_token_limit = int(source_manifest["counts"]["included"])
-            excluded = excluded_token_length_by_source[source_id]
-            source_manifest["tokenization"] = {
-                "eligible_before_token_limit": before_token_limit,
-                "excluded_token_length": excluded,
-                "included": before_token_limit - excluded,
-            }
 
     manifest: JsonObject = {
         "format_version": MANIFEST_FORMAT_VERSION,
@@ -940,11 +768,6 @@ def prepare_dataset(
         "filtering": {
             **_serialized_counts(total_counts),
             "excluded_malformed_by_source": excluded_malformed_by_source,
-            "eligible_before_token_limit": total_counts["included"],
-            "excluded_token_length": excluded_token_length,
-            "excluded_token_length_by_source": dict(
-                sorted(excluded_token_length_by_source.items())
-            ),
             "included": len(retained),
             "sidecar_failure_records": sum(
                 int(source["sidecar_failure_records"]) for source in source_manifests
@@ -967,8 +790,6 @@ def prepare_dataset(
             "assistant_reasoning_preserved_as_metadata": True,
         },
     }
-    if tokenization_manifest is not None:
-        manifest["tokenization"] = tokenization_manifest
 
     release_dir.parent.mkdir(parents=True, exist_ok=True)
     temporary_dir = Path(

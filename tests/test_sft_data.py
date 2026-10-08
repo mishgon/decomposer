@@ -23,7 +23,6 @@ from sft.schema import (
     SelectionSpec,
     SourceSpec,
     SplitSpec,
-    TokenizationSpec,
     TraceValidationError,
     canonical_json,
     normalize_response_tools,
@@ -270,7 +269,6 @@ def _prepare_fixture_dataset(
     invalid_policy: str = "exclude",
     max_traces_per_prompt_per_teacher: int | None = None,
     version: str = "v3",
-    tokenization: TokenizationSpec | None = None,
     system_prompt_profile: str | None = None,
 ):
     """Test helper that exercises the new canonical builder without Git state."""
@@ -303,7 +301,6 @@ def _prepare_fixture_dataset(
             validation_fraction=validation_fraction,
             seed=seed,
         ),
-        tokenization=tokenization,
     )
     return prepare_dataset(
         LoadedBuildSpec(
@@ -541,94 +538,6 @@ def test_prompt_profile_resolver_and_legacy_policy_are_strict() -> None:
             system_prompt="decomposer_default",
             system_prompt_profile="teacher",
         )
-
-
-class _LengthFixtureTokenizer:
-    init_kwargs = {"_commit_hash": "fixture-revision"}
-
-    def apply_chat_template(self, messages, **kwargs):
-        prompt = next(
-            message["content"] for message in messages if message["role"] == "user"
-        )
-        token_length = 12 if prompt.endswith("Task 0.") else 6
-        return {
-            "input_ids": list(range(token_length)),
-            "assistant_masks": [1] * token_length,
-        }
-
-
-def test_versioned_token_limits_produce_stable_strict_subset(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    def fake_runtime(spec: TokenizationSpec):
-        return (
-            _LengthFixtureTokenizer(),
-            "fixture-template",
-            {
-                "profile": spec.profile,
-                "tokenizer": spec.tokenizer,
-                "requested_revision": spec.revision,
-                "resolved_revision": "fixture-revision",
-                "tokenizer_class": "_LengthFixtureTokenizer",
-                "canonical_template_sha256": "1" * 64,
-                "training_template_sha256": "2" * 64,
-                "include_reasoning": False,
-                "max_tokens": spec.max_tokens,
-            },
-        )
-
-    monkeypatch.setattr(builder_module, "_load_tokenization_runtime", fake_runtime)
-    source = _source(tmp_path, "teacher")
-    common = {
-        "profile": "gemma4_sft_non_thinking",
-        "tokenizer": "google/gemma-4-E4B-it",
-        "revision": "main",
-    }
-    prepared_8k = _prepare_fixture_dataset(
-        [source],
-        tmp_path / "prepared-8k",
-        version="v2-8k",
-        tokenization=TokenizationSpec(**common, max_tokens=8),
-    )
-    prepared_32k = _prepare_fixture_dataset(
-        [source],
-        tmp_path / "prepared-32k",
-        version="v2-32k",
-        tokenization=TokenizationSpec(**common, max_tokens=32),
-    )
-
-    rows_8k = {
-        row["id"]: split
-        for split, path in (
-            ("train", prepared_8k.train_path),
-            ("validation", prepared_8k.validation_path),
-        )
-        for row in _read_jsonl(path)
-    }
-    rows_32k = {
-        row["id"]: (split, row)
-        for split, path in (
-            ("train", prepared_32k.train_path),
-            ("validation", prepared_32k.validation_path),
-        )
-        for row in _read_jsonl(path)
-    }
-    assert set(rows_8k) < set(rows_32k)
-    assert all(rows_32k[row_id][0] == split for row_id, split in rows_8k.items())
-    assert prepared_8k.manifest["filtering"]["excluded_token_length"] == 1
-    assert prepared_8k.manifest["filtering"]["excluded_token_length_by_source"] == {
-        "teacher": 1
-    }
-    assert prepared_8k.manifest["sources"][0]["tokenization"] == {
-        "eligible_before_token_limit": 10,
-        "excluded_token_length": 1,
-        "included": 9,
-    }
-    assert prepared_32k.manifest["filtering"]["excluded_token_length"] == 0
-    for _, row in rows_32k.values():
-        metadata = row["attributes"]["prepared_tokenization"]
-        assert metadata["profile"] == "gemma4_sft_non_thinking"
-        assert metadata["tokens"] in {6, 12}
 
 
 def test_prepare_keeps_parallel_calls_as_emitted(tmp_path: Path) -> None:
@@ -1733,224 +1642,13 @@ def test_strict_tool_call_validation_in_error_mode(
         )
 
 
-def test_qwen35_workplace_partial_spec_is_pinned_and_success_only() -> None:
-    loaded = load_build_spec(
-        Path(
-            "sft/workplace_assistant/specs/"
-            "decomposer_workplace_deepseek_qwen35_4b_nonthinking_"
-            "v1_1444_32k.yaml"
-        )
-    )
-    spec = loaded.spec
-    assert spec.dataset.id == ("decomposer-workplace-deepseek-qwen35-4b-nonthinking")
-    assert spec.dataset.version == "v1-1444-32k"
-    assert len(spec.sources) == 1
-    source = spec.sources[0]
-    assert source.adapter == "nemo_gym"
-    assert source.partition == "train"
-    assert source.path is not None
-    assert source.path.name.endswith("first-1444")
-    assert spec.selection.success_reward == 1.0
-    assert spec.selection.invalid_policy == "exclude"
-    assert spec.selection.max_traces_per_prompt_per_teacher is None
-    assert spec.split.strategy == "prompt_fixed"
-    assert spec.split.validation_fraction == 0.1
-    assert spec.split.seed == 42
-    assert spec.tokenization is not None
-    assert spec.tokenization.profile == "qwen35_sft_non_thinking"
-    assert spec.tokenization.revision == ("851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a")
-    assert spec.tokenization.max_tokens == 32768
-
-
-def test_qwen35_workplace_full_spec_is_pinned_and_success_only() -> None:
-    loaded = load_build_spec(
-        Path(
-            "sft/workplace_assistant/specs/"
-            "decomposer_workplace_deepseek_qwen35_4b_nonthinking_"
-            "v1_3765_32k.yaml"
-        )
-    )
-    spec = loaded.spec
-    assert spec.dataset.id == ("decomposer-workplace-deepseek-qwen35-4b-nonthinking")
-    assert spec.dataset.version == "v1-3765-32k"
-    assert len(spec.sources) == 1
-    source = spec.sources[0]
-    assert source.adapter == "nemo_gym"
-    assert source.partition == "train"
-    assert source.path is not None
-    assert source.path.name == ("deepseek-v4-flash-0731-qwen35-4b-non-thinking-n3")
-    assert spec.selection.success_reward == 1.0
-    assert spec.selection.invalid_policy == "exclude"
-    assert spec.selection.max_traces_per_prompt_per_teacher is None
-    assert spec.split.strategy == "prompt_fixed"
-    assert spec.split.validation_fraction == 0.1
-    assert spec.split.seed == 42
-    assert spec.tokenization is not None
-    assert spec.tokenization.profile == "qwen35_sft_non_thinking"
-    assert spec.tokenization.revision == ("851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a")
-    assert spec.tokenization.max_tokens == 32768
-
-
-def test_qwen35_mixed_spec_pins_all_reward_sources_and_sampling() -> None:
-    spec = load_build_spec(
-        Path(
-            "sft/specs/decomposer_mixed_deepseek_qwen35_4b_nonthinking_v1_32k.yaml"
-        )
-    ).spec
-    assert spec.spec_version == 2
-    assert spec.dataset.version == "v1-final-493c24c4-404-32k"
-    assert spec.selection.policy == "all_rewards"
-    assert spec.selection.invalid_policy == "exclude"
-    assert spec.policy.subagent_types[0].id == "qwen35_4b_non_thinking"
-    workplace, toolathlon = spec.sources
-    assert workplace.expected_native_rollouts == 3765
-    assert workplace.expected_candidates == 1255
-    assert workplace.sampling is not None
-    assert workplace.sampling.seed == 42
-    assert workplace.sampling.expected_tasks == 1255
-    assert workplace.sampling.expected_rollouts_per_task == 3
-    assert toolathlon.expected_native_rollouts == 404
-    assert toolathlon.expected_candidates == 404
-    assert toolathlon.require_completed_run is True
-    assert toolathlon.trace_format == "toolathlon_legacy_unversioned"
-    assert toolathlon.subagent_type_aliases == {
-        "qwen_3_5_4b_non_thinking": "qwen35_4b_non_thinking"
-    }
-    assert spec.tokenization is not None
-    assert spec.tokenization.revision == ("851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a")
-
-
-def test_qwen35_filtered_mixed_spec_uses_source_specific_selection() -> None:
-    spec = load_build_spec(
-        Path(
-            "sft/specs/"
-            "decomposer_mixed_deepseek_qwen35_4b_nonthinking_"
-            "v1_filtered_pass_quality_32k.yaml"
-        )
-    ).spec
-
-    assert spec.spec_version == 3
-    assert spec.dataset.version == (
-        "v1-final-493c24c4-404-wp-r1-tool-pass-or-qgt90-or-missing-32k"
-    )
-    assert spec.selection.policy == "all_rewards"
-    workplace, toolathlon = spec.sources
-    assert workplace.selection is not None
-    assert workplace.selection.policy == "exact_reward"
-    assert workplace.selection.success_reward == 1.0
-    assert workplace.sampling is not None
-    assert workplace.sampling.max_per_task == 1
-    assert workplace.sampling.seed == 42
-    assert toolathlon.selection is not None
-    assert toolathlon.selection.policy == "toolathlon_pass_or_quality"
-    assert toolathlon.selection.minimum_check_ratio_exclusive == 0.9
-    assert toolathlon.expected_native_rollouts == 404
-    assert toolathlon.expected_candidates == 404
-    assert toolathlon.require_completed_run is True
-
-
-def test_qwen35_n7_mixed_spec_pins_teacher_prompt_and_exact_gaia_grid() -> None:
-    spec = load_build_spec(
-        Path(
-            "sft/specs/"
-            "decomposer_mixed_deepseek_qwen35_4b_nonthinking_v3_"
-            "gaia2_execution_110_n7_teacher_prompt_filtered_32k.yaml"
-        )
-    ).spec
-    assert spec.policy.resolved_system_prompt_profile == "teacher"
-    assert spec.split.strategy == "pinned"
-    assert len(spec.sources) == 4
-    old_gaia, prefix_gaia = spec.sources[-2:]
-    assert old_gaia.gaia2 is not None
-    assert prefix_gaia.gaia2 is not None
-    assert old_gaia.gaia2.logical_rollout_numbers == (1, 2, 3)
-    assert prefix_gaia.gaia2.logical_rollout_numbers == (4, 5, 6, 7)
-    assert old_gaia.expected_candidates == 330
-    assert prefix_gaia.expected_candidates == 440
-
-
-def test_qwen35_gaia2_execution_n10_spec_pins_balanced_task_split() -> None:
-    spec = load_build_spec(
-        Path(
-            "sft/gaia2/specs/"
-            "decomposer_gaia2_execution_deepseek_qwen35_4b_nonthinking_"
-            "v1_110_n10_teacher_prompt_r1_balanced_32k.yaml"
-        )
-    ).spec
-
-    assert spec.spec_version == 3
-    assert spec.dataset.id == (
-        "decomposer-gaia2-execution-deepseek-qwen35-4b-nonthinking"
-    )
-    assert spec.dataset.version == (
-        "v1-execution-110-n10-teacher-prompt-r1-balanced-32k"
-    )
-    assert spec.policy.resolved_system_prompt_profile == "teacher"
-    assert spec.selection.policy == "exact_reward"
-    assert spec.selection.success_reward == 1.0
-    assert spec.selection.invalid_policy == "exclude"
-    assert spec.split.strategy == "pinned"
-    assert spec.split.seed == 42
-    assert spec.tokenization is not None
-    assert spec.tokenization.max_tokens == 32768
-
-    first_three, last_seven = spec.sources
-    assert first_three.gaia2 is not None
-    assert last_seven.gaia2 is not None
-    assert first_three.gaia2.logical_rollout_numbers == (1, 2, 3)
-    assert last_seven.gaia2.logical_rollout_numbers == (4, 5, 6, 7, 8, 9, 10)
-    assert first_three.expected_candidates == 330
-    assert last_seven.expected_candidates == 770
-    assert last_seven.path is not None
-    assert "sft_snapshots" in last_seven.path.parts
-
-    split_path = Path(
-        "sft/gaia2/split_manifests/"
-        "qwen35-gaia2-execution-110-n10-balanced-90-10.json"
-    )
-    split = json.loads(split_path.read_text(encoding="utf-8"))
-    assert split["summary"] == {
-        "groups": 110,
-        "groups_by_source": {
-            "gaia2-execution-deepseek-v4-flash-0731-"
-            "qwen35-4b-nonthinking-n10": 110
-        },
-        "train_groups": 99,
-        "validation_groups": 11,
-    }
-    train_groups = {
-        group["group_id"] for group in split["groups"] if group["partition"] == "train"
-    }
-    validation_groups = {
-        group["group_id"]
-        for group in split["groups"]
-        if group["partition"] == "validation"
-    }
-    assert len(train_groups) == 99
-    assert len(validation_groups) == 11
-    assert train_groups.isdisjoint(validation_groups)
-
-
-def test_qwen35_partial_mixed_spec_pins_snapshot_cardinality() -> None:
-    spec = load_build_spec(
-        Path(
-            "sft/specs/decomposer_mixed_deepseek_qwen35_4b_"
-            "nonthinking_v1_partial_3983f605_327_32k.yaml"
-        )
-    ).spec
-    assert spec.dataset.version == "v1-partial-3983f605-327-32k"
-    assert spec.selection.policy == "all_rewards"
-    workplace, toolathlon = spec.sources
-    assert workplace.expected_native_rollouts == 3765
-    assert workplace.expected_candidates == 1255
-    assert toolathlon.expected_native_rollouts == 327
-    assert toolathlon.expected_candidates == 327
-    assert toolathlon.require_completed_run is False
-    assert spec.tokenization is not None
-    assert spec.tokenization.max_tokens == 32768
-
-
-SFT_SPEC_PATHS = sorted(Path(__file__).resolve().parents[1].glob("sft/**/specs/*.yaml"))
+# Specs that still pin a tokenizer predate tokenizer-free releases and load only
+# at the commits that built them.
+SFT_SPEC_PATHS = sorted(
+    path
+    for path in Path(__file__).resolve().parents[1].glob("sft/**/specs/*.yaml")
+    if "tokenization" not in yaml.safe_load(path.read_text())
+)
 
 
 def test_sft_specs_live_under_sft():

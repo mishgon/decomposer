@@ -10,7 +10,6 @@ data:
   validation_file: /home/sukhorukov/decomposer_artifacts/datasets/sft/decomposer-workplace-deepseek-e4b-thinking/v2-32k/validation.jsonl
   manifest_file: /home/sukhorukov/decomposer_artifacts/datasets/sft/decomposer-workplace-deepseek-e4b-thinking/v2-32k/manifest.json
   include_reasoning: false
-  require_prepared_tokenization: true
   error_on_truncation: true
   # Retain every prepared trace up to the Gemma-4 32K context ceiling.
   # Any future overlength row is still excluded explicitly before TRL starts.

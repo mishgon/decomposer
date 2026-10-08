@@ -11,7 +11,6 @@ data:
   manifest_file: /home/sukhorukov/decomposer_artifacts/datasets/sft/decomposer-mixed-deepseek-qwen35-4b-nonthinking/v3-493c24c4-gaia2-execution-110-n7-teacher-prompt-wp-r1-tool-pass-qgt90-or-missing-gaia-r1-32k/manifest.json
   expected_system_prompt_profile: teacher
   include_reasoning: false
-  require_prepared_tokenization: true
   error_on_truncation: true
   exclude_overlength: true
   num_proc: 8

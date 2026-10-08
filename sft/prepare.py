@@ -55,7 +55,6 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "manifest_path": str(prepared.manifest_path),
                 "filtering": prepared.manifest["filtering"],
                 "records": prepared.manifest["records"],
-                "tokenization": prepared.manifest.get("tokenization"),
             },
             indent=2,
             ensure_ascii=False,

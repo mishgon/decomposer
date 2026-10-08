@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import math
 import os
 import tempfile
 from collections import Counter
@@ -109,57 +108,6 @@ def _read_selected_lines(
             f"source_id={source_id!r}."
         )
     return lines, records
-
-
-def _percentile(values: Sequence[int], fraction: float) -> int:
-    ordered = sorted(values)
-    return ordered[max(0, math.ceil(fraction * len(ordered)) - 1)]
-
-
-def _token_summary(records: Sequence[CanonicalRollout]) -> JsonObject:
-    lengths: list[int] = []
-    supervised: list[int] = []
-    for record in records:
-        prepared = record.attributes.get("prepared_tokenization")
-        if not isinstance(prepared, Mapping):
-            raise ValueError(
-                f"Record {record.id} has no prepared tokenization metadata."
-            )
-        tokens = prepared.get("tokens")
-        target_tokens = prepared.get("supervised_tokens")
-        if (
-            isinstance(tokens, bool)
-            or not isinstance(tokens, int)
-            or tokens <= 0
-            or isinstance(target_tokens, bool)
-            or not isinstance(target_tokens, int)
-            or target_tokens <= 0
-        ):
-            raise ValueError(f"Record {record.id} has invalid prepared token counts.")
-        lengths.append(tokens)
-        supervised.append(target_tokens)
-    return {
-        "records": len(records),
-        "tokens": {
-            "records": len(records),
-            "min": min(lengths),
-            "p50": _percentile(lengths, 0.50),
-            "p75": _percentile(lengths, 0.75),
-            "p90": _percentile(lengths, 0.90),
-            "p95": _percentile(lengths, 0.95),
-            "p99": _percentile(lengths, 0.99),
-            "max": max(lengths),
-            "total": sum(lengths),
-        },
-        "supervised_tokens": {
-            "records": len(records),
-            "min": min(supervised),
-            "p50": _percentile(supervised, 0.50),
-            "p95": _percentile(supervised, 0.95),
-            "max": max(supervised),
-            "total": sum(supervised),
-        },
-    }
 
 
 def _count_records(records: Sequence[CanonicalRollout], field: str) -> dict[str, int]:
@@ -283,29 +231,6 @@ def derive_source_view(
         "selector": selector,
         "split_policy": "preserve_parent_assignments",
     }
-    tokenization = deepcopy(parent.get("tokenization"))
-    if isinstance(tokenization, dict):
-        train_token_stats = _token_summary(train_records)
-        validation_token_stats = _token_summary(validation_records)
-        tokenization["splits"] = {
-            "train": {
-                "derivation": "inherited_parent_token_filter",
-                "before_filter": train_token_stats["tokens"],
-                "after_filter": train_token_stats["tokens"],
-                "excluded": 0,
-                "excluded_records": [],
-                "supervised_tokens": train_token_stats["supervised_tokens"],
-            },
-            "validation": {
-                "derivation": "inherited_parent_token_filter",
-                "before_filter": validation_token_stats["tokens"],
-                "after_filter": validation_token_stats["tokens"],
-                "excluded": 0,
-                "excluded_records": [],
-                "supervised_tokens": validation_token_stats["supervised_tokens"],
-            },
-        }
-
     manifest: JsonObject = {
         "format_version": MANIFEST_FORMAT_VERSION,
         "canonical_schema_version": CANONICAL_SCHEMA_VERSION,
@@ -368,8 +293,6 @@ def derive_source_view(
             },
         },
     }
-    if tokenization is not None:
-        manifest["tokenization"] = tokenization
 
     output_dir.parent.mkdir(parents=True, exist_ok=True)
     temporary_dir = Path(
@@ -441,7 +364,6 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "output_dir": str(derived.output_dir),
                 "records": derived.manifest["records"],
                 "split": derived.manifest["split"],
-                "tokenization": derived.manifest.get("tokenization"),
             },
             ensure_ascii=False,
             indent=2,

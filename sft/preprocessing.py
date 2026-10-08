@@ -6,16 +6,8 @@ from collections.abc import Mapping
 from typing import Any
 
 JsonObject = dict[str, Any]
-PREPARED_TOKENIZATION_ATTRIBUTE = "prepared_tokenization"
 GEMMA4_PREPARED_TOKENIZATION_PROFILE = "gemma4_sft_non_thinking"
 QWEN35_PREPARED_TOKENIZATION_PROFILE = "qwen35_sft_non_thinking"
-PREPARED_TOKENIZATION_PROFILE = GEMMA4_PREPARED_TOKENIZATION_PROFILE
-PREPARED_TOKENIZATION_PROFILES = frozenset(
-    {
-        GEMMA4_PREPARED_TOKENIZATION_PROFILE,
-        QWEN35_PREPARED_TOKENIZATION_PROFILE,
-    }
-)
 
 
 def clean_message(message: Mapping[str, Any], *, include_reasoning: bool) -> JsonObject:

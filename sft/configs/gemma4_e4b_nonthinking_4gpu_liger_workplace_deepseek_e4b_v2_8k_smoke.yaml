@@ -10,7 +10,6 @@ data:
   validation_file: /home/sukhorukov/decomposer_artifacts/datasets/sft/decomposer-workplace-deepseek-e4b-thinking/v2-8k/validation.jsonl
   manifest_file: /home/sukhorukov/decomposer_artifacts/datasets/sft/decomposer-workplace-deepseek-e4b-thinking/v2-8k/manifest.json
   include_reasoning: false
-  require_prepared_tokenization: true
   error_on_truncation: true
   exclude_overlength: true
   num_proc: 8

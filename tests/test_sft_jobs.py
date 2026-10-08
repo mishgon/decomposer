@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 from datetime import UTC, datetime
 from pathlib import Path
@@ -46,7 +45,6 @@ from sft.train import (
     _select_longest_by_token_length,
     _select_stratified_by_environment_and_length,
     _summarize_trainer_state,
-    _validate_prepared_tokenization,
 )
 from sft.qwen35_fast_runtime import (
     EXPECTED_RUNTIME,
@@ -721,7 +719,7 @@ def _tokenized_dataset(*lengths: int) -> Dataset:
 
 
 def test_overlength_policy_errors_by_default() -> None:
-    with pytest.raises(ValueError, match="explicitly enable data.exclude_overlength"):
+    with pytest.raises(ValueError, match="data.error_on_truncation: false"):
         _apply_overlength_policy(
             _tokenized_dataset(100, 35044),
             split="train",
@@ -732,7 +730,7 @@ def test_overlength_policy_errors_by_default() -> None:
 
 
 def test_overlength_policy_explicitly_excludes_and_records_trace() -> None:
-    filtered, excluded = _apply_overlength_policy(
+    filtered, excluded, truncated = _apply_overlength_policy(
         _tokenized_dataset(100, 35044, 200),
         split="train",
         max_length=32768,
@@ -741,6 +739,28 @@ def test_overlength_policy_explicitly_excludes_and_records_trace() -> None:
     )
     assert filtered["id"] == ["example-0", "example-2"]
     assert excluded == [
+        {
+            "id": "example-1",
+            "split": "train",
+            "token_length": 35044,
+            "max_length": 32768,
+        }
+    ]
+    assert truncated == []
+
+
+def test_overlength_policy_can_leave_traces_for_trl_to_cut() -> None:
+    dataset = _tokenized_dataset(100, 35044)
+    kept, excluded, truncated = _apply_overlength_policy(
+        dataset,
+        split="train",
+        max_length=32768,
+        exclude_overlength=False,
+        error_on_truncation=False,
+    )
+    assert kept is dataset
+    assert excluded == []
+    assert truncated == [
         {
             "id": "example-1",
             "split": "train",
@@ -758,87 +778,6 @@ def test_overlength_policy_refuses_to_empty_split() -> None:
             max_length=32768,
             exclude_overlength=True,
             error_on_truncation=True,
-        )
-
-
-def _prepared_tokenized_dataset(*, stored_tokens: int = 8) -> Dataset:
-    return Dataset.from_dict(
-        {
-            "id": ["example"],
-            "_token_length": [8],
-            "_supervised_tokens": [3],
-            "attributes": [
-                {
-                    "prepared_tokenization": {
-                        "profile": "gemma4_sft_non_thinking",
-                        "tokens": stored_tokens,
-                        "supervised_tokens": 3,
-                    }
-                }
-            ],
-        }
-    )
-
-
-def _prepared_tokenization_manifest(template: str = "template") -> dict:
-    return {
-        "tokenization": {
-            "profile": "gemma4_sft_non_thinking",
-            "tokenizer": "google/gemma-4-E4B-it",
-            "requested_revision": "main",
-            "resolved_revision": "fixture-revision",
-            "training_template_sha256": hashlib.sha256(
-                template.encode("utf-8")
-            ).hexdigest(),
-            "include_reasoning": False,
-            "max_tokens": 8192,
-        }
-    }
-
-
-def test_trainer_requires_and_verifies_prepared_token_metadata() -> None:
-    dataset = _prepared_tokenized_dataset()
-    prepared = _validate_prepared_tokenization(
-        _prepared_tokenization_manifest(),
-        train_dataset=dataset,
-        validation_dataset=dataset,
-        tokenizer=SimpleNamespace(init_kwargs={"_commit_hash": "fixture-revision"}),
-        training_template="template",
-        model_name_or_path="google/gemma-4-E4B-it",
-        model_revision="main",
-        include_reasoning=False,
-        max_length=8192,
-        required=True,
-    )
-    assert prepared is not None
-    assert prepared["max_tokens"] == 8192
-
-    with pytest.raises(ValueError, match="no mandatory prepared-tokenization"):
-        _validate_prepared_tokenization(
-            {},
-            train_dataset=dataset,
-            validation_dataset=dataset,
-            tokenizer=SimpleNamespace(init_kwargs={"_commit_hash": "fixture-revision"}),
-            training_template="template",
-            model_name_or_path="google/gemma-4-E4B-it",
-            model_revision="main",
-            include_reasoning=False,
-            max_length=8192,
-            required=True,
-        )
-
-    with pytest.raises(ValueError, match="does not match fresh tokenization"):
-        _validate_prepared_tokenization(
-            _prepared_tokenization_manifest(),
-            train_dataset=_prepared_tokenized_dataset(stored_tokens=7),
-            validation_dataset=dataset,
-            tokenizer=SimpleNamespace(init_kwargs={"_commit_hash": "fixture-revision"}),
-            training_template="template",
-            model_name_or_path="google/gemma-4-E4B-it",
-            model_revision="main",
-            include_reasoning=False,
-            max_length=8192,
-            required=True,
         )
 
 
@@ -1125,7 +1064,6 @@ def test_e4b_deepseek_v2_configs_require_matching_prepared_releases() -> None:
         assert f"/{version}/" in data["train_file"]
         assert f"/{version}/" in data["validation_file"]
         assert f"/{version}/" in data["manifest_file"]
-        assert data["require_prepared_tokenization"] is True
         assert data["include_reasoning"] is False
         assert data["exclude_overlength"] is True
         assert config["training"]["max_length"] == max_length
@@ -1238,7 +1176,6 @@ def test_qwen35_workplace_partial_config_is_pinned_and_uses_full_recipe() -> Non
     assert release in data["validation_file"]
     assert release in data["manifest_file"]
     assert data["include_reasoning"] is False
-    assert data["require_prepared_tokenization"] is True
     assert data["exclude_overlength"] is True
     assert data["error_on_truncation"] is True
     training = config["training"]
@@ -1284,7 +1221,6 @@ def test_qwen35_workplace_full_config_is_pinned_and_uses_full_recipe() -> None:
     assert release in data["validation_file"]
     assert release in data["manifest_file"]
     assert data["include_reasoning"] is False
-    assert data["require_prepared_tokenization"] is True
     assert data["exclude_overlength"] is True
     assert data["error_on_truncation"] is True
     training = config["training"]
@@ -1350,7 +1286,6 @@ def test_qwen35_final_mixed_config_pins_release_and_patience_one() -> None:
     assert release in config["data"]["train_file"]
     assert release in config["data"]["validation_file"]
     assert release in config["data"]["manifest_file"]
-    assert config["data"]["require_prepared_tokenization"] is True
     assert config["data"]["include_reasoning"] is False
     assert config["training"]["max_length"] == 32768
     assert config["training"]["global_batch_size"] == 4
@@ -1623,7 +1558,6 @@ def test_qwen35_partial_mixed_configs_use_snapshot_release_and_32k_recipe() -> N
         assert release in data["train_file"]
         assert release in data["validation_file"]
         assert release in data["manifest_file"]
-        assert data["require_prepared_tokenization"] is True
         assert data["include_reasoning"] is False
         assert config["training"]["max_length"] == 32768
         assert config["training"]["global_batch_size"] == 4

@@ -10,7 +10,6 @@ data:
   validation_file: /home/sukhorukov/decomposer_artifacts/datasets/sft/decomposer-mixed-deepseek-qwen35-4b-nonthinking/v1-final-493c24c4-404-wp-r1-tool-pass-or-qgt90-or-missing-32k/validation.jsonl
   manifest_file: /home/sukhorukov/decomposer_artifacts/datasets/sft/decomposer-mixed-deepseek-qwen35-4b-nonthinking/v1-final-493c24c4-404-wp-r1-tool-pass-or-qgt90-or-missing-32k/manifest.json
   include_reasoning: false
-  require_prepared_tokenization: true
   error_on_truncation: true
   exclude_overlength: true
   num_proc: 8

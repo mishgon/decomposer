@@ -56,10 +56,6 @@ from .model_support import (
     validate_reasoning_policy,
 )
 from .preprocessing import (
-    PREPARED_TOKENIZATION_ATTRIBUTE,
-    PREPARED_TOKENIZATION_PROFILE,
-)
-from .preprocessing import (
     configure_example as _configure_example,
 )
 from .preprocessing import (
@@ -749,115 +745,6 @@ def _validate_dataset_system_prompt_profile(
     }
 
 
-def _validate_prepared_tokenization(
-    manifest: Mapping[str, Any],
-    *,
-    train_dataset: Dataset,
-    validation_dataset: Dataset,
-    tokenizer: Any,
-    training_template: str,
-    model_name_or_path: str,
-    model_revision: str,
-    include_reasoning: bool,
-    max_length: int | None,
-    required: bool,
-    profile: str = PREPARED_TOKENIZATION_PROFILE,
-) -> JsonObject | None:
-    if not isinstance(required, bool):
-        raise ValueError("data.require_prepared_tokenization must be a boolean.")
-    prepared = manifest.get("tokenization")
-    if prepared is None:
-        if required:
-            raise ValueError(
-                "The selected dataset has no mandatory prepared-tokenization metadata."
-            )
-        return None
-    if not isinstance(prepared, Mapping):
-        raise ValueError("Prepared-data manifest tokenization must be an object.")
-    prepared = dict(prepared)
-    if prepared.get("profile") != profile:
-        raise ValueError("Prepared-data tokenization profile is unsupported.")
-    if prepared.get("tokenizer") != model_name_or_path:
-        raise ValueError(
-            "Prepared-data tokenizer does not match model.name_or_path: "
-            f"{prepared.get('tokenizer')!r} != {model_name_or_path!r}."
-        )
-    if prepared.get("requested_revision") != model_revision:
-        raise ValueError(
-            "Prepared-data tokenizer revision does not match model.revision."
-        )
-    if prepared.get("include_reasoning") is not include_reasoning:
-        raise ValueError(
-            "Prepared-data reasoning policy does not match data.include_reasoning."
-        )
-    prepared_max = prepared.get("max_tokens")
-    if (
-        isinstance(prepared_max, bool)
-        or not isinstance(prepared_max, int)
-        or prepared_max <= 0
-    ):
-        raise ValueError("Prepared-data tokenization has an invalid max_tokens.")
-    if max_length is None:
-        raise ValueError(
-            "Prepared-tokenized datasets require training.max_length to be set."
-        )
-    if int(max_length) > prepared_max:
-        raise ValueError(
-            f"training.max_length={max_length} exceeds the prepared dataset ceiling "
-            f"of {prepared_max} tokens."
-        )
-    expected_template_hash = hashlib.sha256(
-        training_template.encode("utf-8")
-    ).hexdigest()
-    if prepared.get("training_template_sha256") != expected_template_hash:
-        raise ValueError(
-            "Prepared-data training template does not match the runtime template."
-        )
-    init_kwargs = getattr(tokenizer, "init_kwargs", {})
-    runtime_revision = (
-        init_kwargs.get("_commit_hash") if isinstance(init_kwargs, Mapping) else None
-    )
-    prepared_revision = prepared.get("resolved_revision")
-    if prepared_revision != runtime_revision:
-        raise ValueError(
-            "Prepared-data resolved tokenizer revision does not match the runtime "
-            "tokenizer revision."
-        )
-
-    for split, dataset in (
-        ("train", train_dataset),
-        ("validation", validation_dataset),
-    ):
-        for index, example in enumerate(dataset):
-            attributes = example.get("attributes")
-            metadata = (
-                attributes.get(PREPARED_TOKENIZATION_ATTRIBUTE)
-                if isinstance(attributes, Mapping)
-                else None
-            )
-            if not isinstance(metadata, Mapping):
-                raise ValueError(
-                    f"Prepared {split} example {example.get('id', index)} has no "
-                    "mandatory token metadata."
-                )
-            if metadata.get("profile") != profile:
-                raise ValueError(
-                    f"Prepared {split} example {example.get('id', index)} has an "
-                    "unsupported tokenization profile."
-                )
-            if metadata.get("tokens") != int(example["_token_length"]):
-                raise ValueError(
-                    f"Prepared {split} example {example.get('id', index)} token count "
-                    "does not match fresh tokenization."
-                )
-            if metadata.get("supervised_tokens") != int(example["_supervised_tokens"]):
-                raise ValueError(
-                    f"Prepared {split} example {example.get('id', index)} supervised "
-                    "token count does not match fresh tokenization."
-                )
-    return prepared
-
-
 def _apply_overlength_policy(
     dataset: Dataset,
     *,
@@ -865,7 +752,13 @@ def _apply_overlength_policy(
     max_length: int | None,
     exclude_overlength: bool,
     error_on_truncation: bool,
-) -> tuple[Dataset, list[JsonObject]]:
+) -> tuple[Dataset, list[JsonObject], list[JsonObject]]:
+    """Return the dataset, the traces it excludes and the traces TRL will cut.
+
+    Over ``max_length`` a trace is excluded with ``data.exclude_overlength``, cut
+    from the end (TRL keeps its start) with ``data.error_on_truncation: false``,
+    and otherwise refused.
+    """
     if not isinstance(exclude_overlength, bool):
         raise ValueError("data.exclude_overlength must be a boolean.")
     if not isinstance(error_on_truncation, bool):
@@ -875,7 +768,7 @@ def _apply_overlength_policy(
             raise ValueError(
                 "data.exclude_overlength requires training.max_length to be set."
             )
-        return dataset, []
+        return dataset, [], []
 
     limit = int(max_length)
     excluded: list[JsonObject] = []
@@ -895,22 +788,22 @@ def _apply_overlength_policy(
         )
 
     if not excluded:
-        return dataset, []
+        return dataset, [], []
     if not exclude_overlength:
         if error_on_truncation:
             longest = max(item["token_length"] for item in excluded)
             raise ValueError(
                 f"The longest prepared trace has {longest} tokens, exceeding "
-                f"max_length={limit}. Increase max_length or explicitly enable "
-                "data.exclude_overlength; traces are never silently truncated by "
-                "the checked-in configs."
+                f"max_length={limit}. Increase max_length, enable "
+                "data.exclude_overlength, or set data.error_on_truncation: false "
+                "to cut such traces from the end."
             )
-        return dataset, []
+        return dataset, [], excluded
     if not retained_indices:
         raise ValueError(
             f"Excluding traces longer than {limit} tokens emptied the {split} split."
         )
-    return dataset.select(retained_indices), excluded
+    return dataset.select(retained_indices), excluded, []
 
 
 def _git_revision() -> str | None:
@@ -1786,29 +1679,24 @@ def main(argv: Sequence[str] | None = None) -> None:
         num_proc=num_proc,
     )
     max_length = training_config.get("max_length")
-    prepared_tokenization = _validate_prepared_tokenization(
-        manifest,
-        train_dataset=train_dataset,
-        validation_dataset=validation_dataset,
-        tokenizer=tokenizer,
-        training_template=training_template,
-        model_name_or_path=model_name_or_path,
-        model_revision=str(model_config.get("revision", "main")),
-        include_reasoning=include_reasoning,
-        max_length=max_length,
-        required=data_config.get("require_prepared_tokenization", False),
-        profile=tokenization_profile,
-    )
     exclude_overlength = data_config.get("exclude_overlength", False)
     error_on_truncation = data_config.get("error_on_truncation", True)
-    train_dataset, train_overlength_exclusions = _apply_overlength_policy(
+    (
+        train_dataset,
+        train_overlength_exclusions,
+        train_overlength_truncations,
+    ) = _apply_overlength_policy(
         train_dataset,
         split="train",
         max_length=max_length,
         exclude_overlength=exclude_overlength,
         error_on_truncation=error_on_truncation,
     )
-    validation_dataset, validation_overlength_exclusions = _apply_overlength_policy(
+    (
+        validation_dataset,
+        validation_overlength_exclusions,
+        validation_overlength_truncations,
+    ) = _apply_overlength_policy(
         validation_dataset,
         split="validation",
         max_length=max_length,
@@ -1818,6 +1706,10 @@ def main(argv: Sequence[str] | None = None) -> None:
     overlength_exclusions = [
         *train_overlength_exclusions,
         *validation_overlength_exclusions,
+    ]
+    overlength_truncations = [
+        *train_overlength_truncations,
+        *validation_overlength_truncations,
     ]
     longest_train_samples = data_config.get("longest_train_samples")
     train_dataset = _select_longest_by_token_length(
@@ -1845,6 +1737,11 @@ def main(argv: Sequence[str] | None = None) -> None:
         print(
             "Excluded overlength prepared traces: "
             + json.dumps(overlength_exclusions, sort_keys=True)
+        )
+    if _is_rank_zero() and overlength_truncations:
+        print(
+            f"Cutting {len(overlength_truncations)} traces at max_length={max_length}: "
+            + json.dumps(overlength_truncations, sort_keys=True)
         )
 
     training_config["assistant_only_loss"] = True
@@ -1913,12 +1810,12 @@ def main(argv: Sequence[str] | None = None) -> None:
             "include_reasoning": include_reasoning,
             "system_prompt": system_prompt_runtime,
             "tokenization_profile": tokenization_profile,
-            "prepared_tokenization": prepared_tokenization,
             "raw_train_token_stats": raw_train_token_stats,
             "raw_validation_token_stats": raw_validation_token_stats,
             "train_token_stats": train_token_stats,
             "validation_token_stats": validation_token_stats,
             "overlength_exclusions": overlength_exclusions,
+            "overlength_truncations": overlength_truncations,
             "effective_records": {
                 "train": len(train_dataset),
                 "validation": len(validation_dataset),
@@ -2113,6 +2010,7 @@ def main(argv: Sequence[str] | None = None) -> None:
                 "train_token_stats": train_token_stats,
                 "validation_token_stats": validation_token_stats,
                 "overlength_exclusions": overlength_exclusions,
+                "overlength_truncations": overlength_truncations,
                 "train_batch": batch_runtime,
                 "generation_config": generation_runtime,
                 "final_model_dir": str(final_dir),

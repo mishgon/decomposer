@@ -40,7 +40,6 @@ def prepare_sft(args: argparse.Namespace) -> int:
                 "release_dir": str(prepared.release_dir),
                 "manifest_path": str(prepared.manifest_path),
                 "filtering": prepared.manifest["filtering"],
-                "tokenization": prepared.manifest.get("tokenization"),
                 "records": prepared.manifest["records"],
             },
             indent=2,

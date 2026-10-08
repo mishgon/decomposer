@@ -7,7 +7,6 @@ from pathlib import Path
 import pytest
 
 from sft.gaia2.adapter import read_gaia2_source
-from sft.builder import load_build_spec
 from sft.schema import SelectionSpec, SourceSpec
 from sft.chat_tools import build_decomposer_chat_tools
 from decomposer.prompts import DECOMPOSER_SYSTEM_PROMPT, PARALLEL_WAIT_CALL_ERROR
@@ -377,39 +376,3 @@ def test_gaia2_trace_manifest_requires_terminal_full_grid(tmp_path: Path) -> Non
     _write_jsonl(source_dir / "trace_manifest.jsonl", tampered)
     with pytest.raises(ValueError, match="binary numeric reward"):
         _read(source)
-
-
-def test_gaia2_mixed_spec_and_split_pin_future_task_membership() -> None:
-    spec = load_build_spec(
-        "sft/specs/"
-        "decomposer_mixed_deepseek_qwen35_4b_nonthinking_"
-        "v2_gaia2_execution_110_n3_filtered_32k.yaml"
-    ).spec
-    assert spec.split.strategy == "pinned"
-    assert spec.split.manifest is not None
-    assert spec.tokenization is not None
-    assert spec.tokenization.revision == "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a"
-    gaia = spec.sources[2]
-    assert gaia.adapter == "gaia2"
-    assert gaia.expected_native_rollouts == 480
-    assert gaia.expected_candidates == 330
-    assert gaia.selection is not None and gaia.selection.policy == "exact_reward"
-    assert gaia.gaia2 is not None
-    assert gaia.gaia2.logical_rollout_numbers == (1, 2, 3)
-
-    manifest = json.loads(spec.split.manifest.read_text(encoding="utf-8"))
-    assert manifest["summary"] == {
-        "groups": 1361,
-        "train_groups": 1225,
-        "validation_groups": 136,
-        "groups_by_source": {
-            "gaia2-execution-deepseek-v4-flash-0731-qwen35-4b-nonthinking-n3": 110,
-            "toolathlon-deepseek-v4-flash-0731-qwen35-4b-nonthinking-n1": 298,
-            "workplace-deepseek-v4-flash-0731-qwen35-4b-nonthinking-n3": 953,
-        },
-    }
-    gaia_groups = [
-        group for group in manifest["groups"] if group["category"] == "gaia2_execution"
-    ]
-    assert len(gaia_groups) == 110
-    assert sum(group["partition"] == "validation" for group in gaia_groups) == 11

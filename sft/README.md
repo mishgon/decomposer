@@ -40,6 +40,11 @@ prompt, so their manifests no longer validate against
 experiment records, and the release walkthroughs below describe those
 historical builds.
 
+Specifications with a `tokenization:` block predate tokenizer-free releases
+(2026-10-08) and no longer load; rebuild them only from the commit that built
+them. Their releases still train: training ignores the token counts stored in
+them.
+
 ## Install
 
 From the repository root:
@@ -85,6 +90,11 @@ SHA-256 in the immutable manifest. Training configs may set
 `data.expected_system_prompt_profile` to fail if the selected release uses a
 different prompt. Hidden teacher reasoning remains controlled separately by
 `data.include_reasoning`.
+
+Releases do not depend on a model: they hold messages and tool schemas, with no
+token counts and no length limit. Training tokenizes every record with the
+model's own chat template and decides what to do with long ones (see
+[Length](#length)).
 
 ### Snapshots, releases and versioning
 
@@ -722,6 +732,16 @@ uv run --group train python -m sft.vllm_compat \
 The derived directory symlinks the original model tensor and adds identity
 `k_norm` tensors only for the KV-shared layers. Transformers consumers should
 continue to use `final/`; vLLM consumers should use `final-vllm/`.
+
+### Length
+
+`training.max_length` sets the longest sequence a run trains on. A record over
+it is refused by default (`data.error_on_truncation: true`). With
+`data.exclude_overlength: true` it is dropped, and with
+`data.error_on_truncation: false` it is cut from the end: TRL keeps its first
+`max_length` tokens, and a record left with no supervised token is dropped.
+`training_summary.json` lists dropped records under `overlength_exclusions` and
+cut ones under `overlength_truncations`.
 
 ### LoRA
 
