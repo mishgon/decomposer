@@ -3,42 +3,24 @@
 from __future__ import annotations
 
 import asyncio
-import fcntl
-import json
 import os
 import time
 import uuid
 from datetime import datetime, timezone
-from pathlib import Path
 
 from langchain.agents.middleware import wrap_model_call
 from langchain_core.messages import message_to_dict
+from decomposer.model_logging import append_record, request_delta as _request_delta
 
 
 LOG_PATH_ENV = "TOOLATHLON_AGENT_CALL_LOG"
-
-
-def _request_delta(messages):
-    last_ai = -1
-    for index, message in enumerate(messages):
-        if getattr(message, "type", None) == "ai":
-            last_ai = index
-    return messages if last_ai < 0 else messages[last_ai + 1 :]
 
 
 def _append_record(record: dict) -> None:
     configured = os.environ.get(LOG_PATH_ENV)
     if not configured:
         return
-    path = Path(configured)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    payload = json.dumps(record, ensure_ascii=False, default=str) + "\n"
-    with path.open("a", encoding="utf-8") as output:
-        fcntl.flock(output.fileno(), fcntl.LOCK_EX)
-        output.write(payload)
-        output.flush()
-        os.fsync(output.fileno())
-        fcntl.flock(output.fileno(), fcntl.LOCK_UN)
+    append_record(configured, record)
 
 
 @wrap_model_call

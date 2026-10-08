@@ -7,3 +7,6 @@
 [submodule "external/toolathlon"]
 	path = external/toolathlon
 	url = https://github.com/hkust-nlp/Toolathlon.git
+[submodule "external/RLinf"]
+	path = external/RLinf
+	url = https://github.com/RLinf/RLinf.git
