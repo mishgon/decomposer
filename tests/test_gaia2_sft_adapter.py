@@ -262,42 +262,35 @@ def test_gaia2_evaluation_filters_binary_reward_and_holdout(tmp_path: Path) -> N
     assert record.group_id == "gaia2:scenario_universe_21_a"
     assert record.outcome.reward == 1.0
     assert record.messages[0]["content"] == DECOMPOSER_SYSTEM_PROMPT
-    calls = [
-        message["tool_calls"][0]
+    call_messages = [
+        message
         for message in record.messages
         if message["role"] == "assistant" and message.get("tool_calls")
     ]
-    assert [(call["function"]["name"], call["id"]) for call in calls] == [
-        ("new", "new-a"),
-        ("new", "new-b"),
-        ("run", "run-a"),
-        ("run", "run-b"),
-        ("wait", "wait"),
+    # Parallel batches stay one message, refused wait included.
+    assert [
+        [(call["function"]["name"], call["id"]) for call in message["tool_calls"]]
+        for message in call_messages
+    ] == [
+        [("new", "new-a"), ("new", "new-b")],
+        [("run", "run-a"), ("run", "run-b"), ("wait", "early-wait")],
+        [("wait", "wait")],
     ]
-    new_messages = [
-        message
-        for message in record.messages
-        if message.get("tool_calls")
-        and message["tool_calls"][0]["function"]["name"] == "new"
-    ]
-    assert new_messages[0]["teacher_reasoning"] == "Delegate."
-    assert new_messages[0]["content"] == "I will delegate."
+    new_message = call_messages[0]
+    assert new_message["teacher_reasoning"] == "Delegate."
+    assert new_message["content"] == "I will delegate."
     assert all(
-        message["tool_calls"][0]["function"]["arguments"]["agent_type_id"]
-        == "qwen35_4b_non_thinking"
-        for message in new_messages
+        call["function"]["arguments"]["agent_type_id"] == "qwen35_4b_non_thinking"
+        for call in new_message["tool_calls"]
     )
-    assert record.attributes["parallel_call_normalization"] == {
-        "messages": 2,
-        "tool_calls": 4,
-    }
+    assert [
+        message["tool_call_id"]
+        for message in record.messages
+        if message["role"] == "tool"
+    ] == ["new-b", "new-a", "early-wait", "run-b", "run-a", "wait"]
     assert result.source_manifest["layout"]["holdout_rollouts"] == 4
     assert result.source_manifest["binary_reward_counts"] == {"0": 3, "1": 1}
-    assert result.source_manifest["adapter_version"] == 4
-    assert result.source_manifest["dropped_refused_calls"] == {
-        "tool_calls": 1,
-        "assistant_turns": 0,
-    }
+    assert result.source_manifest["adapter_version"] == 5
 
 
 @pytest.mark.parametrize(

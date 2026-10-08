@@ -57,6 +57,31 @@ def test_qwen35_training_template_preserves_render_and_masks_only_assistant() ->
             "tool_call_id": "call-1",
             "content": "TOOL_REPORT_SECRET",
         },
+        # A parallel batch stays one assistant message with several calls.
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "type": "function",
+                    "id": f"call-{index}",
+                    "function": {"name": "wait", "arguments": {}},
+                }
+                for index in (2, 3)
+            ],
+        },
+        {
+            "role": "tool",
+            "name": "wait",
+            "tool_call_id": "call-2",
+            "content": "SECOND_REPORT_SECRET",
+        },
+        {
+            "role": "tool",
+            "name": "wait",
+            "tool_call_id": "call-3",
+            "content": "THIRD_REPORT_SECRET",
+        },
         {"role": "assistant", "content": "ASSISTANT_FINAL", "tool_calls": []},
     ]
     kwargs = {"enable_thinking": False}
@@ -96,9 +121,10 @@ def test_qwen35_training_template_preserves_render_and_masks_only_assistant() ->
     )
     assert "ASSISTANT_NARRATION" in supervised
     assert "ASSISTANT_FINAL" in supervised
+    assert supervised.count("<tool_call>") == 3
     assert "SYSTEM_SECRET" not in supervised
     assert "USER_SECRET" not in supervised
-    assert "TOOL_REPORT_SECRET" not in supervised
+    assert "REPORT_SECRET" not in supervised
 
 
 def test_qwen35_template_fails_closed_on_unknown_template() -> None:

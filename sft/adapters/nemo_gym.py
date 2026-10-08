@@ -18,7 +18,6 @@ from typing import Any
 from .base import AdapterReadResult
 from ..schema import (
     EXCLUSION_REASONS,
-    PARALLEL_CALL_NORMALIZATION_ATTRIBUTE,
     CanonicalOutcome,
     CanonicalRollout,
     CanonicalSource,
@@ -31,14 +30,13 @@ from ..schema import (
     normalize_response_tools,
     reject_legacy_tool_name,
     require_mapping,
-    sequentialize_parallel_calls,
     sha256_file,
     sha256_text,
     validate_decomposer_messages,
 )
 from ..snapshots import SnapshotFile
 
-ADAPTER_VERSION = 7
+ADAPTER_VERSION = 8
 
 
 def _canonical_prompt_input(value: Any) -> str:
@@ -197,9 +195,7 @@ def _convert_message(message: Mapping[str, Any], index: int) -> JsonObject:
     }
 
 
-def _convert_messages(
-    messages: Any, system_prompt: str
-) -> tuple[list[JsonObject], int, int, int, int]:
+def _convert_messages(messages: Any, system_prompt: str) -> list[JsonObject]:
     if not isinstance(messages, list) or not messages:
         raise TraceValidationError(
             "excluded_missing_final_state",
@@ -222,21 +218,8 @@ def _convert_messages(
         {"role": "system", "content": system_prompt},
         *[_convert_message(message, index) for index, message in enumerate(messages)],
     ]
-    (
-        normalized,
-        normalized_messages,
-        normalized_calls,
-        dropped_calls,
-        dropped_turns,
-    ) = sequentialize_parallel_calls(converted, allow_core_errors=True)
-    validate_decomposer_messages(normalized, allow_core_errors=True)
-    return (
-        normalized,
-        normalized_messages,
-        normalized_calls,
-        dropped_calls,
-        dropped_turns,
-    )
+    validate_decomposer_messages(converted, allow_core_errors=True)
+    return converted
 
 
 def _materialized_inputs(path: Path) -> dict[tuple[int, int], JsonObject]:
@@ -416,8 +399,6 @@ def read_nemo_gym_source(
             f"candidate rollouts, found {candidate_rollouts}."
         )
     normalized_subagent_calls = 0
-    total_dropped_calls = 0
-    total_dropped_turns = 0
 
     with rollouts_path.open(encoding="utf-8") as file:
         for line_number, line in enumerate(file, start=1):
@@ -510,15 +491,7 @@ def read_nemo_gym_source(
                 response = require_mapping(
                     rollout.get("response"), "response", "excluded_invalid_tool_schema"
                 )
-                (
-                    messages,
-                    normalized_messages,
-                    normalized_calls,
-                    dropped_calls,
-                    dropped_turns,
-                ) = _convert_messages(final_state.get("messages"), system_prompt)
-                total_dropped_calls += dropped_calls
-                total_dropped_turns += dropped_turns
+                messages = _convert_messages(final_state.get("messages"), system_prompt)
                 native_tools = normalize_response_tools(response.get("tools"))
                 normalized_type_calls = normalize_subagent_type_ids(
                     messages,
@@ -583,16 +556,6 @@ def read_nemo_gym_source(
                                 if normalized_type_calls
                                 else {}
                             ),
-                            **(
-                                {
-                                    PARALLEL_CALL_NORMALIZATION_ATTRIBUTE: {
-                                        "messages": normalized_messages,
-                                        "tool_calls": normalized_calls,
-                                    }
-                                }
-                                if normalized_messages
-                                else {}
-                            ),
                         },
                     )
                 )
@@ -652,10 +615,6 @@ def read_nemo_gym_source(
             "subagent_type_normalization": {
                 "aliases": dict(sorted(source.subagent_type_aliases.items())),
                 "tool_calls": normalized_subagent_calls,
-            },
-            "dropped_refused_calls": {
-                "tool_calls": total_dropped_calls,
-                "assistant_turns": total_dropped_turns,
             },
         },
         counts=counts,

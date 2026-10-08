@@ -16,7 +16,6 @@ from ..adapters.base import AdapterReadResult
 from ..schema import (
     DECOMPOSER_TOOL_NAMES,
     EXCLUSION_REASONS,
-    PARALLEL_CALL_NORMALIZATION_ATTRIBUTE,
     CanonicalOutcome,
     CanonicalRollout,
     CanonicalSource,
@@ -27,12 +26,11 @@ from ..schema import (
     normalize_subagent_type_ids,
     reject_legacy_tool_name,
     require_mapping,
-    sequentialize_parallel_calls,
     sha256_file,
     validate_decomposer_messages,
 )
 
-ADAPTER_VERSION = 4
+ADAPTER_VERSION = 5
 # Sources recorded before prompt profiles existed carry no profile.
 _ACCEPTED_PROMPT_PROFILES = frozenset({None, *DECOMPOSER_PROMPT_PROFILES})
 
@@ -520,7 +518,7 @@ def _convert_message(raw: Mapping[str, Any], index: int) -> JsonObject:
 
 def _messages_from_sidecar(
     sidecar: Mapping[str, Any], system_prompt: str
-) -> tuple[list[JsonObject], int, int, int, int]:
+) -> list[JsonObject]:
     turns = sidecar.get("turns")
     if not isinstance(turns, list) or len(turns) != 1:
         raise TraceValidationError(
@@ -547,21 +545,8 @@ def _messages_from_sidecar(
         {"role": "system", "content": system_prompt},
         *[_convert_message(message, index) for index, message in enumerate(messages)],
     ]
-    (
-        normalized,
-        normalized_messages,
-        normalized_calls,
-        dropped_calls,
-        dropped_turns,
-    ) = sequentialize_parallel_calls(converted)
-    validate_decomposer_messages(normalized)
-    return (
-        normalized,
-        normalized_messages,
-        normalized_calls,
-        dropped_calls,
-        dropped_turns,
-    )
+    validate_decomposer_messages(converted)
+    return converted
 
 
 def _validate_sidecar_identity(
@@ -712,11 +697,7 @@ def read_gaia2_source(
     counts = _empty_counts()
     records: list[CanonicalRollout] = []
     sidecar_files: dict[str, JsonObject] = {}
-    normalized_call_messages = 0
-    normalized_parallel_calls = 0
     normalized_subagent_calls = 0
-    total_dropped_calls = 0
-    total_dropped_turns = 0
     revisions: set[tuple[Any, Any]] = set()
     reward_counts: Counter[str] = Counter()
     sidecar_failure_records = 0
@@ -767,15 +748,7 @@ def read_gaia2_source(
                 )
             sidecar = _load_sidecar(sidecar_path)
             identity = _validate_sidecar_identity(sidecar, row, marker, source)
-            (
-                messages,
-                normalized_messages,
-                normalized_calls,
-                dropped_calls,
-                dropped_turns,
-            ) = _messages_from_sidecar(sidecar, system_prompt)
-            total_dropped_calls += dropped_calls
-            total_dropped_turns += dropped_turns
+            messages = _messages_from_sidecar(sidecar, system_prompt)
             normalized_type_calls = normalize_subagent_type_ids(
                 messages,
                 allowed_ids=canonical_subagent_type_ids,
@@ -826,24 +799,12 @@ def read_gaia2_source(
                             if normalized_type_calls
                             else {}
                         ),
-                        **(
-                            {
-                                PARALLEL_CALL_NORMALIZATION_ATTRIBUTE: {
-                                    "messages": normalized_messages,
-                                    "tool_calls": normalized_calls,
-                                }
-                            }
-                            if normalized_messages
-                            else {}
-                        ),
                     },
                 )
             )
             counts["eligible"] += 1
             sidecar_files[relative] = _file_identity(sidecar_path)
             revisions.add((identity["decomposer_revision"], identity["gaia2_revision"]))
-            normalized_call_messages += normalized_messages
-            normalized_parallel_calls += normalized_calls
             normalized_subagent_calls += normalized_type_calls
         except (json.JSONDecodeError, TraceValidationError) as error:
             trace_error = (
@@ -895,17 +856,9 @@ def read_gaia2_source(
             },
             "eligible_revision_pairs": [list(pair) for pair in sorted(revisions)],
             "tool_schema_origin": "canonical_policy_interface",
-            PARALLEL_CALL_NORMALIZATION_ATTRIBUTE: {
-                "messages": normalized_call_messages,
-                "tool_calls": normalized_parallel_calls,
-            },
             "subagent_type_normalization": {
                 "aliases": dict(sorted(source.subagent_type_aliases.items())),
                 "tool_calls": normalized_subagent_calls,
-            },
-            "dropped_refused_calls": {
-                "tool_calls": total_dropped_calls,
-                "assistant_turns": total_dropped_turns,
             },
         },
         counts=counts,

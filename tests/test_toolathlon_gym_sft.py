@@ -389,26 +389,25 @@ def test_toolathlon_adapter_filters_and_normalizes_schema_v2_traces(
     }
     assert record.tools == TOOLS
     assert record.attributes["subagent_statuses"] == {"error": 1, "responded": 1}
-    assert record.attributes["parallel_call_normalization"] == {
-        "messages": 1,
-        "tool_calls": 2,
-    }
     call_messages = [
         message
         for message in record.messages
         if message.get("role") == "assistant" and message.get("tool_calls")
     ]
+    # The parallel batch stays one message, refused wait and results included.
     assert [
-        message["tool_calls"][0]["function"]["name"] for message in call_messages
-    ] == ["new", "fork", "run", "run", "wait"]
-    run_messages = call_messages[2:4]
-    assert run_messages[0]["teacher_reasoning"] == "The parts are independent."
-    assert "teacher_reasoning" not in run_messages[1]
-    assert PARALLEL_WAIT_CALL_ERROR not in json.dumps(record.messages)
-    assert result.source_manifest["dropped_refused_calls"] == {
-        "tool_calls": 1,
-        "assistant_turns": 0,
-    }
+        [call["function"]["name"] for call in message["tool_calls"]]
+        for message in call_messages
+    ] == [["new"], ["fork"], ["run", "run", "wait"], ["wait"]]
+    assert call_messages[2]["teacher_reasoning"] == "The parts are independent."
+    batch = call_messages[2]
+    batch_index = record.messages.index(batch)
+    results = record.messages[batch_index + 1 : batch_index + 4]
+    # Results keep the harness's order: the refused wait, then run B, then run A.
+    assert [result["tool_call_id"] for result in results] == [
+        batch["tool_calls"][index]["id"] for index in (2, 1, 0)
+    ]
+    assert results[0]["content"] == PARALLEL_WAIT_CALL_ERROR
     assert result.source_manifest["paired_records"] == 3
     assert result.source_manifest["unpaired_trace_records"] == 1
     assert result.source_manifest["sidecar_failure_records"] == 1
@@ -490,13 +489,7 @@ def test_canonical_builder_accepts_toolathlon_source(tmp_path: Path) -> None:
         row["messages"][0]["content"] == DECOMPOSER_SYSTEM_PROMPT
         for row in train
     )
-    assert prepared.manifest["preparation"]["adapter_versions"] == {"toolathlon_gym": 8}
-    assert prepared.manifest["normalization"] == {
-        "strategy": "parallel_calls_to_single_call_turns",
-        "traces": 10,
-        "messages": 10,
-        "tool_calls": 20,
-    }
+    assert prepared.manifest["preparation"]["adapter_versions"] == {"toolathlon_gym": 9}
 
 
 def test_canonical_builder_requires_one_tool_schema(tmp_path: Path) -> None:

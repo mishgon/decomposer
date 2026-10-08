@@ -18,8 +18,6 @@ from .builder import compute_dataset_fingerprint
 from .schema import (
     CANONICAL_SCHEMA_VERSION,
     MANIFEST_FORMAT_VERSION,
-    PARALLEL_CALL_NORMALIZATION_ATTRIBUTE,
-    PARALLEL_CALL_NORMALIZATION_STRATEGY,
     CanonicalRollout,
     canonical_json,
     sha256_file,
@@ -181,25 +179,6 @@ def _count_records(records: Sequence[CanonicalRollout], field: str) -> dict[str,
     return dict(sorted(Counter(values).items()))
 
 
-def _normalization_summary(records: Sequence[CanonicalRollout]) -> JsonObject:
-    traces = messages = tool_calls = 0
-    for record in records:
-        value = record.attributes.get(PARALLEL_CALL_NORMALIZATION_ATTRIBUTE)
-        if value is None:
-            continue
-        if not isinstance(value, Mapping):
-            raise ValueError(f"Record {record.id} has invalid normalization metadata.")
-        traces += 1
-        messages += int(value.get("messages", 0))
-        tool_calls += int(value.get("tool_calls", 0))
-    return {
-        "strategy": PARALLEL_CALL_NORMALIZATION_STRATEGY,
-        "traces": traces,
-        "messages": messages,
-        "tool_calls": tool_calls,
-    }
-
-
 def _write_bytes(path: Path, lines: Sequence[bytes]) -> None:
     with path.open("wb") as file:
         for line in lines:
@@ -353,7 +332,6 @@ def derive_source_view(
             - len(all_records),
             "included": len(all_records),
         },
-        "normalization": _normalization_summary(all_records),
         "split": {
             "strategy": "preserve_parent_assignments",
             "parent_fingerprint": parent_fingerprint,

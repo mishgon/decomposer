@@ -31,8 +31,6 @@ from .schema import (
     CANONICAL_SCHEMA_VERSION,
     EXCLUSION_REASONS,
     MANIFEST_FORMAT_VERSION,
-    PARALLEL_CALL_NORMALIZATION_ATTRIBUTE,
-    PARALLEL_CALL_NORMALIZATION_STRATEGY,
     BuildSpec,
     CanonicalRollout,
     JsonObject,
@@ -225,39 +223,6 @@ def _apply_prompt_teacher_cap(
 def _record_category(record: CanonicalRollout) -> str:
     category = record.attributes.get("category")
     return category if isinstance(category, str) and category else "uncategorized"
-
-
-def _parallel_call_normalization_counts(
-    records: Sequence[CanonicalRollout],
-) -> JsonObject:
-    traces = 0
-    messages = 0
-    tool_calls = 0
-    for record in records:
-        value = record.attributes.get(PARALLEL_CALL_NORMALIZATION_ATTRIBUTE)
-        if value is None:
-            continue
-        if not isinstance(value, Mapping):
-            raise ValueError(
-                f"Rollout {record.id} has invalid parallel-call normalization metadata."
-            )
-        record_messages = value.get("messages")
-        record_tool_calls = value.get("tool_calls")
-        if (
-            not isinstance(record_messages, int)
-            or isinstance(record_messages, bool)
-            or record_messages <= 0
-            or not isinstance(record_tool_calls, int)
-            or isinstance(record_tool_calls, bool)
-            or record_tool_calls < 2 * record_messages
-        ):
-            raise ValueError(
-                f"Rollout {record.id} has invalid parallel-call normalization counts."
-            )
-        traces += 1
-        messages += record_messages
-        tool_calls += record_tool_calls
-    return {"traces": traces, "messages": messages, "tool_calls": tool_calls}
 
 
 def _allocate_prompt_fixed_split(
@@ -830,9 +795,6 @@ def prepare_dataset(
         counts["included"] = len(source_records)
         _assert_filter_counts(counts, source_id)
         source_manifest["counts"] = _serialized_counts(counts)
-        source_manifest["normalization"] = _parallel_call_normalization_counts(
-            source_records
-        )
     if not retained:
         raise ValueError("No usable rollout traces were found.")
 
@@ -987,10 +949,6 @@ def prepare_dataset(
             "sidecar_failure_records": sum(
                 int(source["sidecar_failure_records"]) for source in source_manifests
             ),
-        },
-        "normalization": {
-            "strategy": PARALLEL_CALL_NORMALIZATION_STRATEGY,
-            **_parallel_call_normalization_counts(retained),
         },
         "split": split_manifest,
         "records": {

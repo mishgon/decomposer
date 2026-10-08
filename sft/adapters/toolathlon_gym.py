@@ -15,7 +15,6 @@ from typing import Any
 from ..schema import (
     DECOMPOSER_TOOL_NAMES,
     EXCLUSION_REASONS,
-    PARALLEL_CALL_NORMALIZATION_ATTRIBUTE,
     CanonicalOutcome,
     CanonicalRollout,
     CanonicalSource,
@@ -26,7 +25,6 @@ from ..schema import (
     canonical_json,
     normalize_subagent_type_ids,
     reject_legacy_tool_name,
-    sequentialize_parallel_calls,
     sha256_file,
     sha256_text,
     validate_chat_tools,
@@ -34,7 +32,7 @@ from ..schema import (
 )
 from .base import AdapterReadResult
 
-ADAPTER_VERSION = 8
+ADAPTER_VERSION = 9
 TRACE_SCHEMA_VERSION = 2
 IMPORT_SCHEMA_VERSION = 1
 TERMINAL_RUN_STATUSES = frozenset({"completed", "completed_with_errors"})
@@ -377,9 +375,7 @@ def _convert_message(wrapper: Any, index: int) -> JsonObject:
     }
 
 
-def _convert_messages(
-    messages: Any, system_prompt: str
-) -> tuple[list[JsonObject], int, int, int, int]:
+def _convert_messages(messages: Any, system_prompt: str) -> list[JsonObject]:
     if not isinstance(messages, list) or not messages:
         raise TraceValidationError(
             "excluded_missing_final_state", "trace.messages must be a non-empty list."
@@ -388,21 +384,8 @@ def _convert_messages(
         {"role": "system", "content": system_prompt},
         *[_convert_message(message, index) for index, message in enumerate(messages)],
     ]
-    (
-        normalized,
-        normalized_messages,
-        normalized_calls,
-        dropped_calls,
-        dropped_turns,
-    ) = sequentialize_parallel_calls(converted)
-    validate_decomposer_messages(normalized)
-    return (
-        normalized,
-        normalized_messages,
-        normalized_calls,
-        dropped_calls,
-        dropped_turns,
-    )
+    validate_decomposer_messages(converted)
+    return converted
 
 
 def _failed_attempts(run_manifest: Mapping[str, Any]) -> int:
@@ -543,8 +526,6 @@ def read_toolathlon_gym_source(
     paired_records = 0
     tool_schema_hashes: set[str] = set()
     normalized_subagent_calls = 0
-    total_dropped_calls = 0
-    total_dropped_turns = 0
     legacy_schema_traces = 0
     quality_counts: Counter[str] = Counter()
     quality_schema_counts: Counter[str] = Counter()
@@ -713,15 +694,7 @@ def read_toolathlon_gym_source(
                     f"Invalid runtime task metadata for {episode_from_path}.",
                 )
 
-            (
-                messages,
-                normalized_messages,
-                normalized_calls,
-                dropped_calls,
-                dropped_turns,
-            ) = _convert_messages(trace.get("messages"), system_prompt)
-            total_dropped_calls += dropped_calls
-            total_dropped_turns += dropped_turns
+            messages = _convert_messages(trace.get("messages"), system_prompt)
             normalized_type_calls = normalize_subagent_type_ids(
                 messages,
                 allowed_ids=canonical_subagent_type_ids,
@@ -794,11 +767,6 @@ def read_toolathlon_gym_source(
                     else {}
                 ),
             }
-            if normalized_messages:
-                attributes[PARALLEL_CALL_NORMALIZATION_ATTRIBUTE] = {
-                    "messages": normalized_messages,
-                    "tool_calls": normalized_calls,
-                }
             if check_quality is not None:
                 attributes["native_check_quality"] = {
                     "schema": check_quality.schema,
@@ -895,10 +863,6 @@ def read_toolathlon_gym_source(
             "subagent_type_normalization": {
                 "aliases": dict(sorted(source.subagent_type_aliases.items())),
                 "tool_calls": normalized_subagent_calls,
-            },
-            "dropped_refused_calls": {
-                "tool_calls": total_dropped_calls,
-                "assistant_turns": total_dropped_turns,
             },
             "eligible_tool_schema_sha256s": sorted(tool_schema_hashes),
             "selection": selection.model_dump(

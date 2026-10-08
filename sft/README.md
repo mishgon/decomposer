@@ -424,21 +424,17 @@ Submit the full five-epoch run only after that smoke succeeds:
   --priority high
 ```
 
-Canonical records keep one tool call per assistant message. When a teacher
-emits several calls in one message, preparation pairs each call with its result
-by call ID and writes ordered assistant/tool pairs. Shared visible content and
-hidden teacher reasoning are retained only on the first pair. Calls the harness
-refused without executing them are dropped together with their results: a
-`wait` sharing its message with any other call, a `fork` and `run` of the same
-subagent, and several `run` calls of the same subagent. They are recognized by
-the exact refusal text (`PARALLEL_WAIT_CALL_ERROR`,
-`PARALLEL_FORK_RUN_CALL_ERROR`, `PARALLEL_RUN_CALL_ERROR` in
-`decomposer.prompts`). A turn none of whose calls was executed is dropped
-entirely, including its text. Executed calls that failed, such as a `run` of an
-unknown subagent, keep their error results. Each record stores the
-sequentialized batches under the `parallel_call_normalization` attribute; the
-manifest totals them under `normalization`, and each source manifest counts
-dropped calls and turns under `dropped_refused_calls`.
+Canonical records keep every assistant message as the teacher emitted it. A
+message with several tool calls stays one message, and its results follow in
+the order the harness returned them, so the student learns the same turns that
+OPD and RL later sample. Calls the harness refused without executing them keep
+the core's refusal text as their result, like other mistakes the core answered:
+a `wait` sharing its message with any other call, a `fork` and `run` of the same
+subagent, and several `run` calls of the same subagent
+(`PARALLEL_WAIT_CALL_ERROR`, `PARALLEL_FORK_RUN_CALL_ERROR` and
+`PARALLEL_RUN_CALL_ERROR` in `decomposer.prompts`). Releases built before
+`nemo_gym` adapter 8, `toolathlon_gym` adapter 9 and `gaia2` adapter 5 split
+such messages into one call per turn.
 
 The historical adapter-v1 all-subagent source pair contains 2,497 rollouts.
 Canonical validation excludes 467 non-success rewards, 13 invalid tool-call

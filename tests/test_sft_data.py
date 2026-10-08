@@ -27,7 +27,6 @@ from sft.schema import (
     TraceValidationError,
     canonical_json,
     normalize_response_tools,
-    sequentialize_parallel_calls,
     sha256_text,
     validate_chat_tools,
     validate_decomposer_messages,
@@ -40,10 +39,7 @@ from decomposer.prompt_profiles import (
 from decomposer.prompts import (
     DECOMPOSER_SYSTEM_PROMPT,
     EARLY_RESPONSE_ERROR,
-    PARALLEL_FORK_RUN_CALL_ERROR,
-    PARALLEL_RUN_CALL_ERROR,
     PARALLEL_WAIT_CALL_ERROR,
-    UNKNOWN_AGENT_ERROR,
 )
 from sft.train import (
     _validate_dataset_system_prompt_profile,
@@ -424,7 +420,7 @@ def test_prepare_groups_teacher_variants_and_writes_manifest_v3(tmp_path: Path) 
         "wait",
     ]
     assert example["source"]["adapter"] == "nemo_gym"
-    assert example["source"]["adapter_version"] == 7
+    assert example["source"]["adapter_version"] == 8
     assert example["source"]["benchmark"] == "workplace_assistant"
     assert example["outcome"]["success"] is True
     for filename in ("train.jsonl", "validation.jsonl"):
@@ -635,99 +631,64 @@ def test_versioned_token_limits_produce_stable_strict_subset(
         assert metadata["tokens"] in {6, 12}
 
 
-@pytest.mark.parametrize("call_count", [2, 3, 7])
-def test_prepare_sequentializes_parallel_calls(
-    tmp_path: Path, call_count: int
-) -> None:
+def test_prepare_keeps_parallel_calls_as_emitted(tmp_path: Path) -> None:
     rollout = _rollout(0)
     messages = rollout["final_state"]["messages"]
-    new_calls = [
-        _call("new", f"new-{index}", agent_type_id="small")
-        for index in range(1, call_count + 1)
-    ]
-    run_calls = [
-        _call(
-            "run",
-            f"run-{index}",
-            agent_id=f"subagent-{index}",
-            prompt=f"Do independent subtask {index}.",
-        )
-        for index in range(1, call_count + 1)
-    ]
-    # Exercise ID-based matching: native results need not use call order.
+    new_call, new_result = messages[1]["tool_calls"][0], messages[2]
+    run_call, run_result = messages[3]["tool_calls"][0], messages[4]
+    extra_new = _call("new", "new-extra", agent_type_id="small")
+    extra_run = _call(
+        "run", "run-extra", agent_id="subagent-extra", prompt="Do the other part."
+    )
+    refused_wait = _call("wait", "refused-wait")
     messages[1:5] = [
         _ai(
-            "Create the subagents.",
-            reasoning="These subtasks are independent.",
-            tool_calls=new_calls,
+            "Create both.",
+            reasoning="Independent parts.",
+            tool_calls=[new_call, extra_new],
         ),
-        *reversed(
-            [
-                _result("new", call["id"], {"agent_id": f"subagent-{index}"})
-                for index, call in enumerate(new_calls, start=1)
-            ]
+        # Results need not follow call order.
+        _result("new", "new-extra", {"agent_id": "subagent-extra"}),
+        new_result,
+        _ai(
+            "Run both.",
+            reasoning="Start both.",
+            tool_calls=[run_call, extra_run, refused_wait],
         ),
-        _ai("Run them in parallel.", reasoning="Start all.", tool_calls=run_calls),
-        *reversed(
-            [
-                _result("run", call["id"], {"agent_run_id": f"sr-{index}"})
-                for index, call in enumerate(run_calls, start=1)
-            ]
-        ),
+        # The harness answers the refused wait before executing the runs.
+        _result("wait", "refused-wait", PARALLEL_WAIT_CALL_ERROR),
+        run_result,
+        _result("run", "run-extra", {"agent_run_id": "subagent-run-extra"}),
     ]
 
     source = _source(tmp_path, "teacher", [rollout], [_materialized(0)])
     prepared = _prepare_fixture_dataset([source], tmp_path / "prepared")
     records = _read_jsonl(prepared.train_path) + _read_jsonl(prepared.validation_path)
     assert len(records) == 1
-    record = records[0]
-    call_indices = [
-        index
-        for index, message in enumerate(record["messages"])
-        if message["role"] == "assistant" and message.get("tool_calls")
+    record_messages = records[0]["messages"]
+    assert [
+        [call["id"] for call in message["tool_calls"]]
+        for message in record_messages
+        if message["role"] == "assistant"
+    ] == [
+        ["new-0-0", "new-extra"],
+        ["run-0-0", "run-extra", "refused-wait"],
+        ["wait-0-0"],
+        [],
     ]
-    call_messages = [record["messages"][index] for index in call_indices]
-    expected_ids = [call["id"] for call in [*new_calls, *run_calls]] + ["wait-0-0"]
     assert [
-        message["tool_calls"][0]["id"] for message in call_messages
-    ] == expected_ids
-    assert [
-        record["messages"][index + 1]["tool_call_id"] for index in call_indices
-    ] == expected_ids
-    new_messages = call_messages[:call_count]
-    run_messages = call_messages[call_count : 2 * call_count]
-    assert new_messages[0]["content"] == "Create the subagents."
-    assert new_messages[0]["teacher_reasoning"] == "These subtasks are independent."
-    assert run_messages[0]["content"] == "Run them in parallel."
-    assert run_messages[0]["teacher_reasoning"] == "Start all."
-    for batch in (new_messages, run_messages):
-        assert [message["content"] for message in batch[1:]] == [""] * (
-            call_count - 1
-        )
-        assert all("teacher_reasoning" not in message for message in batch[1:])
-    assert record["attributes"]["parallel_call_normalization"] == {
-        "messages": 2,
-        "tool_calls": 2 * call_count,
-    }
-
-    assert prepared.manifest["preparation"]["adapter_versions"]["nemo_gym"] == 7
-    assert prepared.manifest["normalization"] == {
-        "strategy": "parallel_calls_to_single_call_turns",
-        "traces": 1,
-        "messages": 2,
-        "tool_calls": 2 * call_count,
-    }
-    assert prepared.manifest["sources"][0]["normalization"] == {
-        "traces": 1,
-        "messages": 2,
-        "tool_calls": 2 * call_count,
-    }
-    assert prepared.manifest["sources"][0]["dropped_refused_calls"] == {
-        "tool_calls": 0,
-        "assistant_turns": 0,
-    }
-    assert prepared.manifest["filtering"]["included"] == 1
-    assert prepared.manifest["filtering"]["excluded_multiple_tool_calls"] == 0
+        message["tool_call_id"]
+        for message in record_messages
+        if message["role"] == "tool"
+    ] == ["new-extra", "new-0-0", "refused-wait", "run-0-0", "run-extra", "wait-0-0"]
+    run_turn = next(m for m in record_messages if m["content"] == "Run both.")
+    assert run_turn["teacher_reasoning"] == "Start both."
+    refusal = next(
+        m for m in record_messages if m.get("tool_call_id") == "refused-wait"
+    )
+    assert refusal["content"] == PARALLEL_WAIT_CALL_ERROR
+    assert prepared.manifest["preparation"]["adapter_versions"]["nemo_gym"] == 8
+    assert "normalization" not in prepared.manifest
 
 
 def _chat_call(name: str, call_id: str, **arguments: str) -> dict:
@@ -742,188 +703,30 @@ def _chat_result(name: str, call_id: str, content: str) -> dict:
     return {"role": "tool", "content": content, "tool_call_id": call_id, "name": name}
 
 
-def _chat_turn(content: str, *calls: dict, reasoning: str | None = None) -> dict:
-    return {
-        "role": "assistant",
-        "content": content,
-        "tool_calls": list(calls),
-        "teacher_reasoning": reasoning,
-    }
+def _chat_turn(content: str, *calls: dict) -> dict:
+    return {"role": "assistant", "content": content, "tool_calls": list(calls)}
 
 
-def test_sequentializer_drops_refused_calls_and_splits_legal_batches() -> None:
-    legal = [
-        _chat_call("new", "new-a", agent_type_id="small"),
-        _chat_call("fork", "fork-b", agent_id="b"),
-        _chat_call("run", "run-c", agent_id="c", prompt="Do C."),
-    ]
-    mixed = [
-        _chat_call("run", "run-a1", agent_id="a", prompt="First."),
-        _chat_call("run", "run-d", agent_id="d", prompt="Do D."),
-        _chat_call("fork", "fork-e", agent_id="e"),
-        _chat_call("run", "run-a2", agent_id="a", prompt="Second."),
-        _chat_call("run", "run-e", agent_id="e", prompt="Do E."),
-        _chat_call("run", "run-x", agent_id="x", prompt="Do X."),
-        _chat_call("wait", "wait-mixed"),
-    ]
-    unknown_x = UNKNOWN_AGENT_ERROR.format(agent_id="x")
+def test_validator_accepts_parallel_calls_and_requires_every_result() -> None:
     messages = [
         {"role": "system", "content": "System."},
         {"role": "user", "content": "Task."},
-        _chat_turn("Plan.", *legal, reasoning="Independent."),
-        # Results arrive in any order and are paired by call ID.
-        _chat_result("run", "run-c", '{"agent_run_id": "sr-c"}'),
-        _chat_result("new", "new-a", '{"agent_id": "a"}'),
-        _chat_result("fork", "fork-b", '{"agent_id": "b2"}'),
-        _chat_turn("Go.", *mixed, reasoning="Start."),
-        # The harness answers refused calls first, then executes the rest.
-        _chat_result("run", "run-a1", PARALLEL_RUN_CALL_ERROR),
-        _chat_result("fork", "fork-e", PARALLEL_FORK_RUN_CALL_ERROR),
-        _chat_result("run", "run-a2", PARALLEL_RUN_CALL_ERROR),
-        _chat_result("run", "run-e", PARALLEL_FORK_RUN_CALL_ERROR),
+        _chat_turn(
+            "Go.",
+            _chat_call("new", "new-a", agent_type_id="small"),
+            _chat_call("wait", "wait-mixed"),
+        ),
         _chat_result("wait", "wait-mixed", PARALLEL_WAIT_CALL_ERROR),
-        _chat_result("run", "run-x", unknown_x),
-        _chat_result("run", "run-d", '{"agent_run_id": "sr-d"}'),
-        _chat_turn(
-            "Retry A twice.",
-            _chat_call("run", "retry-1", agent_id="a", prompt="First."),
-            _chat_call("run", "retry-2", agent_id="a", prompt="Second."),
-        ),
-        _chat_result("run", "retry-1", PARALLEL_RUN_CALL_ERROR),
-        _chat_result("run", "retry-2", PARALLEL_RUN_CALL_ERROR),
-        _chat_turn(
-            "Summary truncated mid-sen",
-            _chat_call("wait", "stray-1"),
-            _chat_call("wait", "stray-2"),
-        ),
-        _chat_result("wait", "stray-1", PARALLEL_WAIT_CALL_ERROR),
-        _chat_result("wait", "stray-2", PARALLEL_WAIT_CALL_ERROR),
+        _chat_result("new", "new-a", '{"agent_id": "a"}'),
         _chat_turn("", _chat_call("wait", "wait-1")),
         _chat_result("wait", "wait-1", "[]"),
         _chat_turn("Done."),
     ]
+    validate_decomposer_messages(messages, subagent_type_ids=frozenset({"small"}))
 
-    normalized, batches, calls, dropped_calls, dropped_turns = (
-        sequentialize_parallel_calls(deepcopy(messages))
-    )
-
-    assert (batches, calls, dropped_calls, dropped_turns) == (2, 5, 9, 2)
-    turns = [message for message in normalized if message["role"] == "assistant"]
-    assert [
-        [call["id"] for call in message["tool_calls"]] for message in turns
-    ] == [["new-a"], ["fork-b"], ["run-c"], ["run-d"], ["run-x"], ["wait-1"], []]
-    assert [message["content"] for message in turns] == [
-        "Plan.",
-        "",
-        "",
-        "Go.",
-        "",
-        "",
-        "Done.",
-    ]
-    assert [message.get("teacher_reasoning") for message in turns[:5]] == [
-        "Independent.",
-        None,
-        None,
-        "Start.",
-        None,
-    ]
-    assert "teacher_reasoning" not in turns[1]
-    assert "teacher_reasoning" not in turns[4]
-    # Every surviving call is immediately followed by its own result; executed
-    # calls that failed keep their error result.
-    for index, message in enumerate(normalized):
-        if message["role"] == "assistant" and message["tool_calls"]:
-            call_id = message["tool_calls"][0]["id"]
-            assert normalized[index + 1]["tool_call_id"] == call_id
-    assert _chat_result("run", "run-x", unknown_x) in normalized
-    refusals = {
-        PARALLEL_WAIT_CALL_ERROR,
-        PARALLEL_RUN_CALL_ERROR,
-        PARALLEL_FORK_RUN_CALL_ERROR,
-    }
-    assert not any(message.get("content") in refusals for message in normalized)
-    validate_decomposer_messages(
-        normalized, subagent_type_ids=frozenset({"small"})
-    )
-
-
-def test_sequentializer_keeps_single_calls_and_requires_every_result() -> None:
-    single = [
-        {"role": "system", "content": "System."},
-        {"role": "user", "content": "Task."},
-        _chat_turn("", _chat_call("wait", "wait-1")),
-        _chat_result("wait", "wait-1", "No active runs remain."),
-        _chat_turn("Done."),
-    ]
-    assert sequentialize_parallel_calls(deepcopy(single)) == (single, 0, 0, 0, 0)
-
-    missing = [
-        *single[:2],
-        _chat_turn(
-            "",
-            _chat_call("new", "new-a", agent_type_id="small"),
-            _chat_call("wait", "wait-1"),
-        ),
-        _chat_result("new", "new-a", '{"agent_id": "a"}'),
-        _chat_turn("Done."),
-    ]
-    with pytest.raises(TraceValidationError, match="exactly one matching tool result"):
-        sequentialize_parallel_calls(missing)
-
-
-def test_prepare_drops_refused_calls_with_their_results(tmp_path: Path) -> None:
-    rollout = _rollout(0)
-    messages = rollout["final_state"]["messages"]
-    run_call = messages[3]["tool_calls"][0]
-    first_run = {**run_call, "id": "refused-run"}
-    second_run = _call(
-        "run", "refused-again", agent_id="subagent-0", prompt="Do it again."
-    )
-    stray_wait = _call("wait", "stray-wait")
-    extra_new = _call("new", "new-extra", agent_type_id="small")
-    # Insert two refused batches before the executed run turn: one keeps an
-    # executed `new`, the other holds nothing but refused waits.
-    messages[3:3] = [
-        _ai(
-            "Run it twice.",
-            reasoning="Run.",
-            tool_calls=[first_run, second_run, stray_wait, extra_new],
-        ),
-        _result("run", first_run["id"], PARALLEL_RUN_CALL_ERROR),
-        _result("run", second_run["id"], PARALLEL_RUN_CALL_ERROR),
-        _result("wait", stray_wait["id"], PARALLEL_WAIT_CALL_ERROR),
-        _result("new", extra_new["id"], {"agent_id": "subagent-extra"}),
-        _ai(
-            "Summary truncated",
-            tool_calls=[_call("wait", "stray-1"), _call("wait", "stray-2")],
-        ),
-        _result("wait", "stray-1", PARALLEL_WAIT_CALL_ERROR),
-        _result("wait", "stray-2", PARALLEL_WAIT_CALL_ERROR),
-    ]
-
-    source = _source(tmp_path, "teacher", [rollout], [_materialized(0)])
-    prepared = _prepare_fixture_dataset([source], tmp_path / "prepared")
-    records = _read_jsonl(prepared.train_path) + _read_jsonl(prepared.validation_path)
-    assert len(records) == 1
-    call_turns = [
-        message for message in records[0]["messages"] if message.get("tool_calls")
-    ]
-    assert [message["tool_calls"][0]["id"] for message in call_turns] == [
-        "new-0-0",
-        "new-extra",
-        "run-0-0",
-        "wait-0-0",
-    ]
-    assert call_turns[1]["content"] == "Run it twice."
-    assert call_turns[1]["teacher_reasoning"] == "Run."
-    assert "Summary truncated" not in json.dumps(records[0]["messages"])
-    assert "parallel_call_normalization" not in records[0]["attributes"]
-    assert prepared.manifest["sources"][0]["dropped_refused_calls"] == {
-        "tool_calls": 5,
-        "assistant_turns": 1,
-    }
-    assert prepared.manifest["normalization"]["traces"] == 0
+    missing = [*messages[:4], *messages[5:]]
+    with pytest.raises(TraceValidationError, match="before tool results"):
+        validate_decomposer_messages(missing)
 
 
 def test_prompt_shared_by_two_categories_stays_on_one_side(tmp_path: Path) -> None:
@@ -1286,7 +1089,6 @@ def test_prepare_excludes_malformed_successful_traces_by_reason(tmp_path: Path) 
     assert filtering["excluded_missing_final_state"] == 1
     assert filtering["excluded_empty_training_target"] == 1
     assert filtering["excluded_invalid_tool_calls"] == 1
-    assert filtering["excluded_multiple_tool_calls"] == 0
     assert filtering["excluded_prompt_mismatch"] == 1
     assert filtering["excluded_invalid_tool_schema"] == 1
     assert filtering["excluded_reward"] == 1
@@ -1337,7 +1139,7 @@ def test_schema_rejects_legacy_spawn_subagent_traces() -> None:
     assert reason(lambda: normalize_response_tools(deepcopy(LEGACY_TOOLS))) == legacy
     assert reason(lambda: validate_chat_tools(legacy_chat_tools)) == legacy
     assert reason(lambda: validate_decomposer_messages(legacy_messages)) == legacy
-    assert reason(lambda: sequentialize_parallel_calls(parallel_legacy)) == legacy
+    assert reason(lambda: validate_decomposer_messages(parallel_legacy)) == legacy
     # A tool set missing fork/run is structurally invalid, not legacy.
     assert (
         reason(lambda: normalize_response_tools(deepcopy(TOOLS[:1] + TOOLS[3:])))
@@ -1581,7 +1383,7 @@ def test_nemo_gym_keeps_mistakes_the_core_answered(tmp_path: Path) -> None:
     messages = record["messages"]
     assert [message["role"] for message in messages] == [
         "system", "user",
-        "assistant", "tool", "assistant", "tool",
+        "assistant", "tool", "tool",
         "assistant", "tool",
         "assistant", "tool",
         "assistant", "user",
@@ -1597,7 +1399,7 @@ def test_nemo_gym_keeps_mistakes_the_core_answered(tmp_path: Path) -> None:
     assert calls[1]["arguments"] == {"agent_type_id": '"small"'}
     assert calls[3]["arguments"]["agent_id_note"] == "x"
     assert calls[4]["arguments"] == {"agent_id": "subagent-0"}
-    assert messages[11]["content"] == EARLY_RESPONSE_ERROR
+    assert messages[10]["content"] == EARLY_RESPONSE_ERROR
 
 
 def test_v2_without_subagent_types_keeps_each_source_native_schema(
@@ -1911,7 +1713,7 @@ def test_prepare_refuses_overwrite_and_bad_materialized_source(tmp_path: Path) -
                     prompt="Missing result.",
                 )
             ),
-            "exactly one matching tool result",
+            "before tool results",
         ),
         (
             lambda rollout: rollout.update(_legacy_rollout(0)),

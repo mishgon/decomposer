@@ -12,13 +12,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from decomposer.prompts import (
-    EARLY_RESPONSE_ERROR,
-    EMPTY_RESPONSE_ERROR,
-    PARALLEL_FORK_RUN_CALL_ERROR,
-    PARALLEL_RUN_CALL_ERROR,
-    PARALLEL_WAIT_CALL_ERROR,
-)
+from decomposer.prompts import EARLY_RESPONSE_ERROR, EMPTY_RESPONSE_ERROR
 
 JsonObject = dict[str, Any]
 InvalidPolicy = Literal["exclude", "error"]
@@ -47,7 +41,6 @@ EXCLUSION_REASONS = (
     "excluded_empty_training_target",
     "excluded_invalid_tool_schema",
     "excluded_invalid_tool_calls",
-    "excluded_multiple_tool_calls",
     "excluded_invalid_messages",
     "excluded_invalid_metadata",
     "excluded_prompt_teacher_cap",
@@ -55,7 +48,7 @@ EXCLUSION_REASONS = (
 )
 
 # The Decomposer manager's tool interface. Canonical SFT records use exactly these
-# tools, one call per assistant message.
+# tools, with assistant messages kept as emitted, several calls included.
 DECOMPOSER_TOOL_NAMES = frozenset({"new", "fork", "run", "wait"})
 # String parameters each tool requires; there are no optional parameters.
 DECOMPOSER_TOOL_PARAMETERS: dict[str, tuple[str, ...]] = {
@@ -67,21 +60,9 @@ DECOMPOSER_TOOL_PARAMETERS: dict[str, tuple[str, ...]] = {
 # Tools of the retired spawn_subagent/wait core. Preparation accepts only the
 # new/fork/run/wait interface and excludes traces that use these tools.
 LEGACY_DECOMPOSER_TOOL_NAMES = frozenset({"spawn_subagent"})
-# Exact tool-result contents with which the harness refuses, without executing,
-# calls that must not share one assistant message.
-REFUSED_PARALLEL_CALL_ERRORS = frozenset(
-    {
-        PARALLEL_WAIT_CALL_ERROR,
-        PARALLEL_FORK_RUN_CALL_ERROR,
-        PARALLEL_RUN_CALL_ERROR,
-    }
-)
 # Exact user messages the core injects when the manager answers before collecting
 # every run, or answers with empty text; the manager then continues.
 CORE_USER_MESSAGES = frozenset({EARLY_RESPONSE_ERROR, EMPTY_RESPONSE_ERROR})
-# Record attribute and manifest strategy for sequentialized parallel calls.
-PARALLEL_CALL_NORMALIZATION_ATTRIBUTE = "parallel_call_normalization"
-PARALLEL_CALL_NORMALIZATION_STRATEGY = "parallel_calls_to_single_call_turns"
 
 _IDENTIFIER = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
 _SNAPSHOT_REFERENCE = re.compile(r"^sha256:[0-9a-f]{64}$")
@@ -820,165 +801,6 @@ def normalize_subagent_type_ids(
     return normalized
 
 
-def _is_refused_call_result(result: Mapping[str, Any]) -> bool:
-    content = result.get("content")
-    return isinstance(content, str) and content in REFUSED_PARALLEL_CALL_ERRORS
-
-
-def sequentialize_parallel_calls(
-    messages: list[JsonObject],
-    *,
-    allow_core_errors: bool = False,
-) -> tuple[list[JsonObject], int, int, int, int]:
-    """Convert multi-call assistant messages into single-call assistant/tool turns.
-
-    Decomposer may emit several tool calls in one assistant message, and the
-    harness executes them concurrently. The canonical SFT format intentionally
-    keeps one tool call per assistant message, so each such batch is paired with
-    its tool results by call ID and emitted in the teacher's original call order.
-
-    Shared assistant content and teacher reasoning belong to the original
-    completion and are retained only on the first sequentialized turn.
-
-    Calls the harness refused are dropped along with the tool messages answering
-    them. ``DecomposerAgentMiddleware.after_model`` does not execute a ``wait``
-    that shares its message with any other call, a ``fork`` and a ``run`` of the
-    same subagent in one message, or several ``run`` calls of the same subagent in
-    one message; it answers each such call with exactly ``PARALLEL_WAIT_CALL_ERROR``,
-    ``PARALLEL_FORK_RUN_CALL_ERROR`` or ``PARALLEL_RUN_CALL_ERROR``. Refused calls
-    are identified by that exact tool-result content, so removing them reproduces
-    the actions the environment actually executed rather than editing away a real
-    action. Executed calls that failed, such as a ``run`` of an unknown subagent,
-    keep their error results.
-
-    When no call of a batch was executed the whole turn goes, text and all. For a
-    batch holding nothing but waits, what remains is usually a summary truncated
-    mid-sentence by the token limit that produced the stray calls in the first
-    place, and in general a turn without an executed call carries no supervision
-    worth keeping.
-
-    A single-call message is never refused and passes through untouched: only
-    multi-call messages are rewritten, matching the harness's own rule.
-
-    With ``allow_core_errors`` a batch may also hold calls of tools other than
-    new/fork/run/wait; the core answers each with an error result.
-
-    Returns the rewritten messages, the number of batches sequentialized (those
-    still holding several executed calls), the number of calls they contained,
-    the number of dropped refused calls, and the number of dropped turns.
-    """
-    normalized: list[JsonObject] = []
-    normalized_messages = 0
-    normalized_calls = 0
-    dropped_calls = 0
-    dropped_turns = 0
-    index = 0
-    while index < len(messages):
-        message = messages[index]
-        raw_calls = message.get("tool_calls") or []
-        if (
-            message.get("role") != "assistant"
-            or not isinstance(raw_calls, list)
-            or len(raw_calls) <= 1
-        ):
-            normalized.append(message)
-            index += 1
-            continue
-
-        calls: list[Mapping[str, Any]] = []
-        call_ids: list[str] = []
-        for raw_call in raw_calls:
-            call = require_mapping(
-                raw_call,
-                f"assistant message {index} tool call",
-                "excluded_invalid_tool_calls",
-            )
-            function = require_mapping(
-                call.get("function"),
-                f"assistant message {index} tool-call function",
-                "excluded_invalid_tool_calls",
-            )
-            call_id = call.get("id")
-            name = function.get("name")
-            reject_legacy_tool_name(name, f"Assistant message {index}")
-            known_name = (
-                isinstance(name, str) and bool(name)
-                if allow_core_errors
-                else name in DECOMPOSER_TOOL_NAMES
-            )
-            if (
-                call.get("type") != "function"
-                or not known_name
-                or not isinstance(call_id, str)
-                or not call_id
-            ):
-                raise TraceValidationError(
-                    "excluded_invalid_tool_calls",
-                    f"Assistant message {index} shares an invalid tool call.",
-                )
-            calls.append(call)
-            call_ids.append(call_id)
-        if len(call_ids) != len(set(call_ids)):
-            raise TraceValidationError(
-                "excluded_invalid_tool_calls",
-                f"Assistant message {index} contains duplicate tool-call IDs.",
-            )
-
-        result_end = index + 1
-        while result_end < len(messages) and messages[result_end].get("role") == "tool":
-            result_end += 1
-        results_by_id: dict[str, JsonObject] = {}
-        for result in messages[index + 1 : result_end]:
-            result_id = result.get("tool_call_id")
-            if not isinstance(result_id, str) or result_id in results_by_id:
-                raise TraceValidationError(
-                    "excluded_invalid_tool_calls",
-                    f"Parallel assistant message {index} has malformed tool results.",
-                )
-            results_by_id[result_id] = result
-        if set(results_by_id) != set(call_ids):
-            raise TraceValidationError(
-                "excluded_invalid_tool_calls",
-                f"Parallel assistant message {index} must be followed by exactly one "
-                "matching tool result for every call.",
-            )
-
-        executed = [
-            (call, call_id)
-            for call, call_id in zip(calls, call_ids)
-            if not _is_refused_call_result(results_by_id[call_id])
-        ]
-        dropped_calls += len(calls) - len(executed)
-        index = result_end
-        if not executed:
-            # Nothing the environment executed survives, so the turn carries no
-            # supervision worth keeping.
-            dropped_turns += 1
-            continue
-
-        for call_index, (call, call_id) in enumerate(executed):
-            split_message = dict(message)
-            split_message["tool_calls"] = [dict(call)]
-            if call_index:
-                split_message["content"] = ""
-                split_message.pop("teacher_reasoning", None)
-            normalized.extend((split_message, results_by_id[call_id]))
-
-        if len(executed) > 1:
-            # Only a batch that stayed parallel counts as sequentialized; once the
-            # refused calls are gone a lone call is an ordinary single-call turn.
-            normalized_messages += 1
-            normalized_calls += len(executed)
-
-    return (
-        normalized,
-        normalized_messages,
-        normalized_calls,
-        dropped_calls,
-        dropped_turns,
-    )
-
-
 def _validate_call_arguments(
     name: str,
     arguments: Mapping[str, Any],
@@ -1095,11 +917,6 @@ def validate_decomposer_messages(
                 raise TraceValidationError(
                     "excluded_invalid_tool_calls",
                     f"Assistant message {index} has invalid calls.",
-                )
-            if len(raw_calls) > 1:
-                raise TraceValidationError(
-                    "excluded_multiple_tool_calls",
-                    f"Assistant message {index} contains {len(raw_calls)} tool calls.",
                 )
             answered_empty = (
                 allow_core_errors
