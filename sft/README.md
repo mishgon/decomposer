@@ -704,6 +704,23 @@ the checkpoint, and per gym as `eval_<gym>_loss` when the split mixes gyms.
 ClearML plots each one separately and also all of them together in
 `eval/loss_by_dataset`. A config's `metric_for_best_model: eval_loss` means
 `eval_all_loss`.
+
+`sft/grid.py` runs a learning-rate × global-batch grid over one config, one run
+per GPU group at a time, and waits for each group's GPUs to be free:
+
+```bash
+nohup .venv/bin/python -m sft.grid \
+  --config sft/configs/qwen35_4b_unloop_nonthinking_mixed_v3_lora_32k_4gpu.yaml \
+  --learning-rates 5e-5 1e-4 2e-4 --global-batch-sizes 8 16 32 \
+  --gpu-groups 0,1,2,3 4,5,6,7 --output-root <grid root> > grid.log 2>&1 &
+.venv/bin/python -m sft.grid --report <grid root>
+```
+
+Each cell `<grid root>/lr<lr>-gb<batch>/` holds its config, `train.log` and the
+run in `run/`. A cell whose `run/` exists is skipped, so a grid resumes after an
+interruption, and a symlinked `run/` reuses an earlier run as a cell. The report
+lists each cell's best epoch with its overall and per-gym validation loss and
+saves them to `summary.json`.
 `sft/train_qwen35_h200.sh` sets the environment from
 `docs/sft_qwen35_h200_benchmark.md` and refuses any listed GPU that holds memory.
 
