@@ -70,6 +70,7 @@ from .qwen35_fast_runtime import (
 )
 
 JsonObject = dict[str, Any]
+DEFAULT_MAX_LENGTH = 16384
 _LAUNCHER_LOG_FILENAMES = frozenset({"console.log", "mlspace.log"})
 # Qwen3.5 language-model projections that receive LoRA adapters. The vision tower,
 # lm_head, the short convolutions and the tiny in_proj_a/b gate projections (32
@@ -757,9 +758,10 @@ def _apply_overlength_policy(
 ) -> tuple[Dataset, list[JsonObject], list[JsonObject]]:
     """Return the dataset, the traces it excludes and the traces TRL will cut.
 
-    Over ``max_length`` a trace is excluded with ``data.exclude_overlength``, cut
-    from the end (TRL keeps its start) with ``data.error_on_truncation: false``,
-    and otherwise refused.
+    Over ``max_length`` a trace is cut from the end (TRL keeps its start), and
+    each cut trace reports the supervised tokens it keeps. With
+    ``data.exclude_overlength`` it is excluded instead, and with
+    ``data.error_on_truncation: true`` it is refused.
     """
     if not isinstance(exclude_overlength, bool):
         raise ValueError("data.exclude_overlength must be a boolean.")
@@ -774,6 +776,7 @@ def _apply_overlength_policy(
 
     limit = int(max_length)
     excluded: list[JsonObject] = []
+    supervision: list[JsonObject] = []
     retained_indices: list[int] = []
     for index, example in enumerate(dataset):
         token_length = int(example["_token_length"])
@@ -788,6 +791,13 @@ def _apply_overlength_policy(
                 "max_length": limit,
             }
         )
+        masks = example["assistant_masks"]
+        supervision.append(
+            {
+                "supervised_tokens": sum(masks),
+                "supervised_tokens_kept": sum(masks[:limit]),
+            }
+        )
 
     if not excluded:
         return dataset, [], []
@@ -800,7 +810,10 @@ def _apply_overlength_policy(
                 "data.exclude_overlength, or set data.error_on_truncation: false "
                 "to cut such traces from the end."
             )
-        return dataset, [], excluded
+        truncated = [
+            {**item, **kept} for item, kept in zip(excluded, supervision, strict=True)
+        ]
+        return dataset, [], truncated
     if not retained_indices:
         raise ValueError(
             f"Excluding traces longer than {limit} tokens emptied the {split} split."
@@ -1436,6 +1449,10 @@ def _resolve_config(config: JsonObject, args: argparse.Namespace) -> JsonObject:
         data["include_reasoning"] = args.include_reasoning
     if args.max_length is not None:
         training["max_length"] = args.max_length
+    # By default, records over max_length are cut from the end: TRL keeps the
+    # start, which holds the system prompt, the tools and the task.
+    training.setdefault("max_length", DEFAULT_MAX_LENGTH)
+    data.setdefault("error_on_truncation", False)
     if args.max_steps is not None:
         training["max_steps"] = args.max_steps
     if args.use_liger_kernel is not None:
@@ -1682,7 +1699,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     )
     max_length = training_config.get("max_length")
     exclude_overlength = data_config.get("exclude_overlength", False)
-    error_on_truncation = data_config.get("error_on_truncation", True)
+    error_on_truncation = data_config["error_on_truncation"]
     (
         train_dataset,
         train_overlength_exclusions,
@@ -1747,8 +1764,11 @@ def main(argv: Sequence[str] | None = None) -> None:
             + json.dumps(overlength_exclusions, sort_keys=True)
         )
     if _is_rank_zero() and overlength_truncations:
+        kept = sum(item["supervised_tokens_kept"] for item in overlength_truncations)
+        total = sum(item["supervised_tokens"] for item in overlength_truncations)
         print(
-            f"Cutting {len(overlength_truncations)} traces at max_length={max_length}: "
+            f"Cutting {len(overlength_truncations)} traces at max_length={max_length}, "
+            f"keeping {kept} of their {total} supervised tokens: "
             + json.dumps(overlength_truncations, sort_keys=True)
         )
 

@@ -469,7 +469,33 @@ def test_benchmark_cli_can_override_prepared_dataset_paths() -> None:
         "train_file": "/candidate/train.jsonl",
         "validation_file": "/candidate/validation.jsonl",
         "manifest_file": "/candidate/manifest.json",
+        "error_on_truncation": False,
     }
+
+
+def test_config_cuts_at_16k_from_the_end_by_default() -> None:
+    sections = {"model": {}, "data": {}, "training": {}, "clearml": {}, "run": {}}
+    args = _build_parser().parse_args(["--config", "unused.yaml"])
+    resolved = _resolve_config(sections, args)
+    assert resolved["training"]["max_length"] == 16384
+    assert resolved["data"]["error_on_truncation"] is False
+
+    explicit = _resolve_config(
+        {
+            **sections,
+            "data": {"error_on_truncation": True},
+            "training": {"max_length": None},
+        },
+        args,
+    )
+    assert explicit["training"]["max_length"] is None
+    assert explicit["data"]["error_on_truncation"] is True
+
+    override = _resolve_config(
+        sections,
+        _build_parser().parse_args(["--config", "unused.yaml", "--max-length", "32768"]),
+    )
+    assert override["training"]["max_length"] == 32768
 
 
 def test_qwen35_linear_attention_runtime_reports_bound_implementations() -> None:
@@ -713,12 +739,13 @@ def _tokenized_dataset(*lengths: int) -> Dataset:
         {
             "id": [f"example-{index}" for index in range(len(lengths))],
             "_token_length": list(lengths),
-            "_supervised_tokens": [1] * len(lengths),
+            "_supervised_tokens": list(lengths),
+            "assistant_masks": [[1] * length for length in lengths],
         }
     )
 
 
-def test_overlength_policy_errors_by_default() -> None:
+def test_overlength_policy_refuses_with_error_on_truncation() -> None:
     with pytest.raises(ValueError, match="data.error_on_truncation: false"):
         _apply_overlength_policy(
             _tokenized_dataset(100, 35044),
@@ -766,6 +793,8 @@ def test_overlength_policy_can_leave_traces_for_trl_to_cut() -> None:
             "split": "train",
             "token_length": 35044,
             "max_length": 32768,
+            "supervised_tokens": 35044,
+            "supervised_tokens_kept": 32768,
         }
     ]
 

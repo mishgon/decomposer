@@ -253,9 +253,19 @@ of the records but 26% of the supervised tokens.
 | Toolathlon | 29.1K | 187 | 81 | 64.3K |
 | WideSeek | 20.5K | 42 | 16 | 54.8K |
 
-At `max_length: 32768` with `data.error_on_truncation: false`, training cuts the
-101 records over 32K. A two-step LoRA smoke on the 4 longest train records, each
-cut to 32,768 tokens, trained and exported
+Cutting from the end keeps this share of the supervised tokens; no record is
+left without any:
+
+| Gym | Cut at 16K | Kept at 16K | Cut at 32K | Kept at 32K |
+|---|---:|---:|---:|---:|
+| tau2 | 93 | 97% | 4 | 99% |
+| Workplace | 6 | 99% | 0 | 100% |
+| Toolathlon | 187 | 44% | 81 | 80% |
+| WideSeek | 42 | 55% | 16 | 88% |
+| All | 328 | 81% | 101 | 94% |
+
+A two-step LoRA smoke on the 4 longest train records, each cut to 32,768 tokens,
+trained and exported
 (`/mnt/share14T-2/sukhorukov/decomposer_artifacts/training/sft/smokes/mixed-v2-20261008`).
 
 The Toolathlon traces contain the LLM proxy master key: the task containers
@@ -779,13 +789,18 @@ continue to use `final/`; vLLM consumers should use `final-vllm/`.
 
 ### Length
 
-`training.max_length` sets the longest sequence a run trains on. A record over
-it is refused by default (`data.error_on_truncation: true`). With
-`data.exclude_overlength: true` it is dropped, and with
-`data.error_on_truncation: false` it is cut from the end: TRL keeps its first
-`max_length` tokens, and a record left with no supervised token is dropped.
-`training_summary.json` lists dropped records under `overlength_exclusions` and
-cut ones under `overlength_truncations`.
+`training.max_length` sets the longest sequence a run trains on; it defaults to
+16,384 (`max_length: null` means no limit). A record over it is cut from the end
+by default: TRL keeps its first `max_length` tokens, which hold the system
+prompt, the tools and the task, and drops a record left with no supervised
+token. A config can instead drop such records (`data.exclude_overlength: true`)
+or refuse them (`data.error_on_truncation: true`). `training_summary.json` lists
+dropped records under `overlength_exclusions` and cut ones under
+`overlength_truncations`, each with the supervised tokens it keeps.
+
+Training tokenizes each record once, at start-up, with the model's training
+template. That pass checks the assistant mask and measures lengths, and TRL
+trains on its token IDs without tokenizing again.
 
 ### LoRA
 
