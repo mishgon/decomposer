@@ -62,7 +62,8 @@ async def evaluate_markdown(
         s0 = s.astype(str).str.strip()
         num = pd.to_numeric(s0, errors="coerce")
         if num.notna().any():
-            return num.map(lambda x: "" if pd.isna(x) else f"{x:g}")
+            # Preserve text cells in mixed columns (e.g. Roman numerals and 50).
+            return num.map(lambda x: "" if pd.isna(x) else f"{x:g}").where(num.notna(), s0)
         else:
             return s0
 

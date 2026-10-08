@@ -10,6 +10,7 @@ import time
 from gyms.wideseek.evaluate import evaluate
 from gyms.wideseek import REPO_ROOT
 from gyms.wideseek.runtime import MODEL_PROFILES, close_model, model, model_metadata, save
+from gyms.wideseek.metrics import qualifies
 
 
 async def main(args):
@@ -18,7 +19,7 @@ async def main(args):
     manifest = json.loads((args.run / "manifest.json").read_text())
     if hashlib.sha256(data).hexdigest() != manifest["settings"]["data_sha256"]:
         raise ValueError("Dataset differs from the original run")
-    paths = sorted(args.run.glob("*/*/attempt-???/result.json"))
+    paths = sorted(args.run.glob("*/*/attempt-*/result.json"))
     if not paths:
         raise ValueError("No completed attempt results found")
     judge = model(args.judge_model)
@@ -31,6 +32,8 @@ async def main(args):
         "source_manifest": manifest, "judge_model": args.judge_model,
         "generation": generation,
         "revision": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=REPO_ROOT, text=True).strip(),
+        "scorer_sha256": hashlib.sha256((REPO_ROOT / 'external/wideseek_reward/table_reward.py').read_bytes()).hexdigest(),
+        "reuse_judge_calls": args.reuse_judge_calls,
         "started_at": time.time(), "attempts": len(paths)})
     semaphore = asyncio.Semaphore(args.concurrency)
 
@@ -41,7 +44,9 @@ async def main(args):
             started = time.time()
             try:
                 result = await asyncio.wait_for(evaluate(tasks[original["task_id"]], original["answer"],
-                    destination, judge_model_id=args.judge_model), 600)
+                    destination, judge_model_id=args.judge_model,
+                    cached_calls=(path.parent / original['execution_directory'] / 'judge_calls')
+                    if args.reuse_judge_calls else None), 600)
             except Exception as exc:
                 result = {"status": "evaluation_error", "score": None,
                           "error": f"{type(exc).__name__}: {exc}"}
@@ -49,6 +54,10 @@ async def main(args):
                "agent_status": original["status"], "previous_evaluation": original["evaluation"],
                "evaluation": result, "source_result_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
                "judge_model": args.judge_model, "started_at": started, "finished_at": time.time()}
+        trace_available = (path.parent / original['execution_directory'] / 'trace.json').is_file()
+        eligibility = {**original, 'trace_available': trace_available}
+        row['previous_qualified'] = qualifies(eligibility, .9)
+        row['qualified'] = qualifies({**eligibility, 'evaluation': result}, .9)
         save(destination / "result.json", row)
         print(json.dumps(row), flush=True)
         return row
@@ -61,6 +70,13 @@ async def main(args):
         summary[mode] = {"attempts": len(selected), "scored": len(scores), "unscored": len(selected)-len(scores),
             "mean_native_score": sum(scores)/len(scores) if scores else None,
             "mean_native_score_infra_zero": sum(scores)/len(selected)}
+        summary[mode].update(
+            previous_qualified=sum(r['previous_qualified'] for r in selected),
+            qualified=sum(r['qualified'] for r in selected),
+            gained=[f"{r['task_id']}::{r['attempt']}" for r in selected if r['qualified'] and not r['previous_qualified']],
+            lost=[f"{r['task_id']}::{r['attempt']}" for r in selected if r['previous_qualified'] and not r['qualified']],
+            covered_tasks=len({r['task_id'] for r in selected if r['qualified']}),
+            previous_covered_tasks=len({r['task_id'] for r in selected if r['previous_qualified']}))
     save(args.output / "summary.json", summary)
 
 
@@ -71,6 +87,8 @@ if __name__ == "__main__":
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--judge-model", choices=MODEL_PROFILES, required=True)
     parser.add_argument("--concurrency", type=int, default=2)
+    parser.add_argument("--reuse-judge-calls", action='store_true',
+                        help='Replay valid identical requests from the original judge; log provenance')
     args = parser.parse_args()
     if args.concurrency < 1:
         parser.error("Concurrency must be positive")

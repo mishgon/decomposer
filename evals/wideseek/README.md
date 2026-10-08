@@ -22,6 +22,14 @@ Run the two configurations separately, using distinct output directories.
 `rescore.py` scores saved answers with a selected registry judge into a new output
 directory, preserving every original result. Use each module's `--help`.
 
+After a scorer correction, pass `--reuse-judge-calls` to reuse valid archived
+responses only when the judge profile and complete request match. Changed
+requests still call the selected judge. Each replay records its source path;
+the rescore manifest records the scorer hash. Historical deployments behind a
+profile may differ, so inspect the source run's provider history when comparing
+old judgments with new calls. The summary includes gained/lost qualifying traces
+and task coverage at the collection threshold (>0.90).
+
 ```bash
 bash evals/wideseek/watch-wideseek.sh
 ```
