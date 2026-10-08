@@ -29,6 +29,7 @@ from sft.run_train_jobs import (
 )
 from sft.train import (
     _apply_overlength_policy,
+    _evaluation_datasets,
     _attention_backend_runtime,
     _benchmark_sample_manifest,
     _build_early_stopping_callback,
@@ -732,6 +733,24 @@ def test_gemma4_generation_rejects_missing_required_stop_token() -> None:
             GenerationConfig(eos_token_id=1),
             tokenizer=tokenizer,
         )
+
+
+def test_evaluation_datasets_add_one_subset_per_gym() -> None:
+    environments = ["tau2_gym", "wideseek", "tau2_gym", "workplace_assistant"]
+    dataset = Dataset.from_list(
+        [
+            {"id": f"r{index}", "source": {"environment": environment}}
+            for index, environment in enumerate(environments)
+        ]
+    )
+    datasets = _evaluation_datasets(dataset)
+    assert list(datasets) == ["all", "tau2_gym", "wideseek", "workplace_assistant"]
+    assert datasets["all"] is dataset
+    assert datasets["tau2_gym"]["id"] == ["r0", "r2"]
+    assert datasets["wideseek"]["id"] == ["r1"]
+
+    single = dataset.select([0, 2])
+    assert list(_evaluation_datasets(single)) == ["all"]
 
 
 def _tokenized_dataset(*lengths: int) -> Dataset:

@@ -105,3 +105,12 @@ class SeparatePlotsClearMLCallback(ClearMLCallback):
                 value=value,
                 iteration=step,
             )
+        # The loss of every evaluation set (`eval_<name>_loss`) also goes on one chart.
+        for key, value in metrics.items():
+            if key.startswith("eval_") and key.endswith("_loss") and key != "eval_loss":
+                clearml_logger.report_scalar(
+                    title="eval/loss_by_dataset",
+                    series=key[len("eval_") : -len("_loss")],
+                    value=float(value),
+                    iteration=step,
+                )

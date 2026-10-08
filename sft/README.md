@@ -698,6 +698,12 @@ output directory. Both use the H200 benchmark recipe with LoRA `r: 32`,
 `alpha: 64` and `dropout: 0.05`. They run 3 epochs, evaluating and saving after
 each one, and keep the checkpoint with the lowest validation loss; training
 stops after an epoch that does not improve it. Both log to ClearML.
+
+Validation loss is reported for the whole split as `eval_all_loss`, which picks
+the checkpoint, and per gym as `eval_<gym>_loss` when the split mixes gyms.
+ClearML plots each one separately and also all of them together in
+`eval/loss_by_dataset`. A config's `metric_for_best_model: eval_loss` means
+`eval_all_loss`.
 `sft/train_qwen35_h200.sh` sets the environment from
 `docs/sft_qwen35_h200_benchmark.md` and refuses any listed GPU that holds memory.
 

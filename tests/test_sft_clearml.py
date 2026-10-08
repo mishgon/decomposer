@@ -121,6 +121,28 @@ def test_callback_samples_weight_norm_at_first_tenth_and_final_logs(
     assert not {"train", "eval"} & {call["title"] for call in logger.calls}
 
 
+def test_callback_puts_each_evaluation_set_loss_on_one_chart() -> None:
+    callback, logger = _ready_callback()
+    for logs in (
+        {"eval_all_loss": 0.5, "eval_all_runtime": 3.0},
+        {"eval_tau2_gym_loss": 0.4, "eval_tau2_gym_runtime": 2.0},
+    ):
+        callback.on_log(
+            args=SimpleNamespace(),
+            state=SimpleNamespace(global_step=7, is_world_process_zero=True),
+            control=SimpleNamespace(),
+            model=torch.nn.Linear(1, 1),
+            logs=logs,
+        )
+
+    combined = [call for call in logger.calls if call["title"] == "eval/loss_by_dataset"]
+    assert [(call["series"], call["value"], call["iteration"]) for call in combined] == [
+        ("all", 0.5, 7),
+        ("tau2_gym", 0.4, 7),
+    ]
+    assert {"eval/all_loss", "eval/tau2_gym_loss"} <= {call["title"] for call in logger.calls}
+
+
 def test_nonzero_rank_computes_norm_without_reporting(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

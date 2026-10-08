@@ -478,6 +478,21 @@ def _select_stratified_by_environment_and_length(
     return dataset.select(selected)
 
 
+def _evaluation_datasets(dataset: Dataset) -> dict[str, Dataset]:
+    """The whole validation split as ``all``, plus one subset per gym if it mixes gyms.
+
+    Trainer logs each as ``eval_<name>_loss``.
+    """
+    environments = [source["environment"] for source in dataset["source"]]
+    datasets = {"all": dataset}
+    if len(set(environments)) > 1:
+        for environment in sorted(set(environments)):
+            datasets[environment] = dataset.select(
+                [index for index, value in enumerate(environments) if value == environment]
+            )
+    return datasets
+
+
 def _benchmark_sample_manifest(dataset: Dataset) -> JsonObject:
     """Return a portable identity for the exact ordered benchmark sample."""
     records = [
@@ -1775,6 +1790,9 @@ def main(argv: Sequence[str] | None = None) -> None:
     training_config["assistant_only_loss"] = True
     training_config["packing"] = False
     training_config["dataset_num_proc"] = num_proc
+    # The whole validation split is evaluated as `all` (see _evaluation_datasets).
+    if training_config.get("metric_for_best_model") == "eval_loss":
+        training_config["metric_for_best_model"] = "eval_all_loss"
     # A custom ClearML callback preserves the integration lifecycle while giving
     # every scalar its own plot instead of grouping all train/eval series.
     training_config["report_to"] = []
@@ -1876,7 +1894,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         args=sft_config,
         processing_class=tokenizer,
         train_dataset=train_dataset,
-        eval_dataset=validation_dataset,
+        eval_dataset=_evaluation_datasets(validation_dataset),
         callbacks=callbacks or None,
         peft_config=peft_config,
     )
