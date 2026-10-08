@@ -620,6 +620,7 @@ def _validate_manifest(
     validation_dataset: Dataset,
     *,
     limited: bool,
+    expected_fingerprint: Any = None,
 ) -> JsonObject:
     if not manifest_path.is_file():
         raise FileNotFoundError(
@@ -651,6 +652,13 @@ def _validate_manifest(
         raise ValueError(
             f"Prepared-data manifest fingerprint is {fingerprint}, but its contents "
             f"resolve to {actual_fingerprint}."
+        )
+    # A config can pin the exact release it was written for, not just a valid one.
+    if expected_fingerprint is not None and expected_fingerprint != fingerprint:
+        raise ValueError(
+            f"data.expected_fingerprint pins {expected_fingerprint}, but the "
+            f"prepared data is {identity['id']}/{identity['version']} with "
+            f"fingerprint {fingerprint}."
         )
     _validate_prepared_file(manifest, filename="train.jsonl", path=train_path)
     _validate_prepared_file(
@@ -1732,6 +1740,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         train_dataset,
         validation_dataset,
         limited=limited,
+        expected_fingerprint=data_config.get("expected_fingerprint"),
     )
     system_prompt_runtime = _validate_dataset_system_prompt_profile(
         manifest,

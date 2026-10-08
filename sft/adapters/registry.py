@@ -7,15 +7,18 @@ Gym-specific adapters (for example `sft/gaia2/adapter.py`) import the shared
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
+from pathlib import Path
 from typing import Protocol
 
 from ..schema import JsonObject, SelectionSpec, SourceSpec
+from ..snapshots import SnapshotFile
 from .base import AdapterReadResult
 from ..gaia2.adapter import ADAPTER_VERSION as GAIA2_ADAPTER_VERSION
 from ..gaia2.adapter import read_gaia2_source
 from .nemo_gym import ADAPTER_VERSION as NEMO_GYM_ADAPTER_VERSION
 from .nemo_gym import read_nemo_gym_source
+from .nemo_gym import snapshot_files as nemo_gym_snapshot_files
 from .toolathlon_gym import ADAPTER_VERSION as TOOLATHLON_GYM_ADAPTER_VERSION
 from .toolathlon_gym import read_toolathlon_gym_source
 
@@ -42,10 +45,15 @@ ADAPTER_VERSIONS = {
     "nemo_gym": NEMO_GYM_ADAPTER_VERSION,
     "toolathlon_gym": TOOLATHLON_GYM_ADAPTER_VERSION,
 }
+# The native files each adapter reads, for adapters whose sources can be snapshotted.
+SNAPSHOT_FILES: dict[str, Callable[[Path], list[SnapshotFile]]] = {
+    "nemo_gym": nemo_gym_snapshot_files,
+}
 
 __all__ = [
     "ADAPTERS",
     "ADAPTER_VERSIONS",
+    "SNAPSHOT_FILES",
     "AdapterReader",
     "AdapterReadResult",
     "GAIA2_ADAPTER_VERSION",

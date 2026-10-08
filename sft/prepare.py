@@ -8,6 +8,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from .builder import prepare_dataset
+from .snapshots import DEFAULT_SNAPSHOT_ROOT
 
 
 def _source_override(value: str) -> tuple[str, Path]:
@@ -28,6 +29,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         type=_source_override,
         metavar="SOURCE_ID=PATH",
     )
+    parser.add_argument(
+        "--snapshot-root",
+        type=Path,
+        default=DEFAULT_SNAPSHOT_ROOT,
+        help="where spec_version 4 snapshots are looked up by digest",
+    )
     args = parser.parse_args(argv)
     source_paths: dict[str, Path] = {}
     for source_id, path in args.source:
@@ -38,6 +45,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         args.spec,
         args.output_root,
         source_paths=source_paths,
+        snapshot_root=args.snapshot_root,
     )
     print(
         json.dumps(

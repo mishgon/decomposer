@@ -84,6 +84,7 @@ PARALLEL_CALL_NORMALIZATION_ATTRIBUTE = "parallel_call_normalization"
 PARALLEL_CALL_NORMALIZATION_STRATEGY = "parallel_calls_to_single_call_turns"
 
 _IDENTIFIER = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
+_SNAPSHOT_REFERENCE = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
 class StrictModel(BaseModel):
@@ -284,6 +285,8 @@ class SourceSpec(StrictModel):
     id: str
     adapter: Literal["gaia2", "nemo_gym", "toolathlon_gym"]
     path: Path | None = None
+    # spec_version 4 names each source by its snapshot digest (``sha256:<hex>``).
+    snapshot: str | None = None
     benchmark: str
     environment: str
     partition: SourcePartition
@@ -314,6 +317,13 @@ class SourceSpec(StrictModel):
     def validate_nonempty(cls, value: str) -> str:
         if not value.strip():
             raise ValueError("source string fields must be non-empty")
+        return value
+
+    @field_validator("snapshot")
+    @classmethod
+    def validate_snapshot(cls, value: str | None) -> str | None:
+        if value is not None and not _SNAPSHOT_REFERENCE.fullmatch(value):
+            raise ValueError("source.snapshot must look like sha256:<64 hex>")
         return value
 
     @field_validator("expected_native_rollouts", "expected_candidates")
@@ -452,7 +462,7 @@ class TokenizationSpec(StrictModel):
 
 
 class BuildSpec(StrictModel):
-    spec_version: Literal[1, 2, 3]
+    spec_version: Literal[1, 2, 3, 4]
     dataset: DatasetIdentity
     policy: PolicySpec
     sources: tuple[SourceSpec, ...]
@@ -519,6 +529,16 @@ class BuildSpec(StrictModel):
                         f"spec_version >=2 source {source.id!r} must pin "
                         "expected_candidates"
                     )
+        for source in self.sources:
+            if self.spec_version >= 4 and (
+                source.snapshot is None or source.path is not None
+            ):
+                raise ValueError(
+                    f"spec_version 4 source {source.id!r} must name a snapshot "
+                    "and no path"
+                )
+            if self.spec_version < 4 and source.snapshot is not None:
+                raise ValueError("source snapshots require spec_version 4")
         if self.spec_version < 3 and (
             self.selection.policy
             in {

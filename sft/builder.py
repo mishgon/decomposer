@@ -21,6 +21,12 @@ from decomposer.prompt_profiles import resolve_decomposer_system_prompt
 
 from .adapters.registry import ADAPTER_VERSIONS, ADAPTERS
 from .chat_tools import build_decomposer_chat_tools
+from .snapshots import (
+    DEFAULT_SNAPSHOT_ROOT,
+    load_snapshot,
+    snapshot_digest,
+    snapshot_directory,
+)
 from .schema import (
     CANONICAL_SCHEMA_VERSION,
     EXCLUSION_REASONS,
@@ -105,32 +111,53 @@ def load_build_spec(path: str | Path) -> LoadedBuildSpec:
     )
 
 
-def _git_revision(*, require_clean: bool) -> str:
-    repository = Path(__file__).resolve().parents[1]
+_REPOSITORY = Path(__file__).resolve().parents[1]
+
+
+def _git(repository: Path, *arguments: str) -> str:
+    return subprocess.run(
+        ["git", *arguments],
+        cwd=repository,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+
+def _git_revision(
+    *,
+    require_clean: bool,
+    spec_path: Path | None = None,
+    repository: Path = _REPOSITORY,
+) -> str:
     try:
-        revision = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
-            cwd=repository,
-            check=True,
-            capture_output=True,
-            text=True,
-        ).stdout.strip()
-        status = subprocess.run(
-            ["git", "status", "--short", "--untracked-files=no"],
-            cwd=repository,
-            check=True,
-            capture_output=True,
-            text=True,
-        ).stdout.strip()
+        revision = _git(repository, "rev-parse", "HEAD")
+        status = _git(repository, "status", "--short", "--untracked-files=no")
+        # A new adapter or spec that was never committed is not in the recorded revision.
+        untracked = _git(
+            repository, "ls-files", "--others", "--exclude-standard", "--", "sft", "src"
+        )
     except (OSError, subprocess.CalledProcessError) as error:
         raise RuntimeError(
             "Dataset releases must be built from a Git checkout."
         ) from error
-    if require_clean and status:
+    if not require_clean:
+        return revision
+    if status or untracked:
         raise RuntimeError(
-            "Dataset releases require a clean tracked worktree; commit the preparation "
-            "implementation and build specification first."
+            "Dataset releases require a clean worktree with no untracked files under "
+            "sft/ or src/; commit the preparation implementation and build "
+            "specification first."
         )
+    if spec_path is not None:
+        try:
+            relative_spec = spec_path.resolve().relative_to(repository.resolve())
+            _git(repository, "ls-files", "--error-unmatch", "--", str(relative_spec))
+        except (ValueError, subprocess.CalledProcessError) as error:
+            raise RuntimeError(
+                f"Dataset build specification {spec_path} must be committed in this "
+                "repository."
+            ) from error
     return revision
 
 
@@ -589,6 +616,8 @@ def _tokenize_and_filter_split(
 def _logical_spec(spec: BuildSpec) -> JsonObject:
     policy_exclude = {"subagent_types"} if spec.spec_version == 1 else set()
     source_exclude = {"path"}
+    if spec.spec_version < 4:
+        source_exclude.add("snapshot")
     if spec.spec_version < 3:
         source_exclude.add("selection")
     if spec.spec_version == 1:
@@ -678,6 +707,7 @@ def prepare_dataset(
     git_revision: str | None = None,
     require_clean_git: bool = True,
     source_paths: Mapping[str, str | Path] | None = None,
+    snapshot_root: str | Path = DEFAULT_SNAPSHOT_ROOT,
 ) -> PreparedDataset:
     """Build one immutable dataset release from a checked-in specification."""
     if not isinstance(loaded, LoadedBuildSpec):
@@ -693,10 +723,19 @@ def prepare_dataset(
         raise ValueError(
             "Unknown source path override IDs: " + ", ".join(unknown_overrides)
         )
-    resolved_sources = tuple(
-        source.model_copy(update={"path": overrides.get(source.id, source.path)})
-        for source in spec.sources
-    )
+    snapshot_root = Path(snapshot_root).resolve()
+    resolved_sources = []
+    for source in spec.sources:
+        path = overrides.get(source.id, source.path)
+        if source.snapshot is not None:
+            # A snapshot is located by its digest unless a test points elsewhere,
+            # and is verified file by file before its adapter reads it.
+            if path is None:
+                path = snapshot_directory(
+                    snapshot_root, source.adapter, snapshot_digest(source.snapshot)
+                )
+            load_snapshot(path, source.snapshot, adapter=source.adapter)
+        resolved_sources.append(source.model_copy(update={"path": path}))
     missing_paths = sorted(
         source.id for source in resolved_sources if source.path is None
     )
@@ -705,8 +744,10 @@ def prepare_dataset(
             "Dataset sources require explicit path overrides: "
             + ", ".join(missing_paths)
         )
-    spec = spec.model_copy(update={"sources": resolved_sources})
-    revision = git_revision or _git_revision(require_clean=require_clean_git)
+    spec = spec.model_copy(update={"sources": tuple(resolved_sources)})
+    revision = git_revision or _git_revision(
+        require_clean=require_clean_git, spec_path=loaded.path
+    )
     output_root = Path(output_root).resolve()
     release_dir = output_root / spec.dataset.id / spec.dataset.version
     if release_dir.exists():
@@ -762,6 +803,8 @@ def prepare_dataset(
                 raise ValueError(f"Duplicate canonical rollout ID: {record.id}")
             seen_ids.add(record.id)
         records.extend(result.records)
+        if source.snapshot is not None:
+            result.source_manifest["snapshot"] = source.snapshot
         source_manifests.append(result.source_manifest)
         counts_by_source[source.id] = result.counts
 

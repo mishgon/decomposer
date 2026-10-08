@@ -11,7 +11,9 @@ from datasets import Dataset
 from pydantic import ValidationError
 
 from sft import builder as builder_module
+from sft.adapters.registry import SNAPSHOT_FILES
 from sft.builder import LoadedBuildSpec, load_build_spec, prepare_dataset
+from sft.snapshots import create_snapshot
 from sft.derive_source_view import derive_source_view
 from sft.schema import (
     EXCLUSION_REASONS,
@@ -1130,6 +1132,95 @@ def test_training_manifest_validation_checks_prepared_file_hashes(
             validation,
             limited=False,
         )
+
+
+def _snapshot_spec(snapshot: str, *, version: str = "v1") -> LoadedBuildSpec:
+    spec = BuildSpec(
+        spec_version=4,
+        dataset=DatasetIdentity(id="snapshot-fixture", version=version),
+        policy=PolicySpec(id="decomposer-default"),
+        sources=(
+            SourceSpec(
+                id="workplace",
+                adapter="nemo_gym",
+                snapshot=snapshot,
+                benchmark="workplace_assistant",
+                environment="workplace",
+                partition="train",
+                teacher="teacher",
+                expected_native_rollouts=11,
+                expected_candidates=11,
+            ),
+        ),
+        selection=SelectionSpec(),
+        split=SplitSpec(strategy="prompt_fixed", validation_fraction=0.1, seed=42),
+    )
+    return LoadedBuildSpec(path=Path("spec.yaml"), sha256="0" * 64, spec=spec)
+
+
+def test_spec_v4_builds_only_from_the_pinned_snapshot(tmp_path: Path) -> None:
+    source_dir = _source(tmp_path, "teacher")
+    snapshot_dir, snapshot = create_snapshot(
+        "nemo_gym",
+        source_dir,
+        tmp_path / "snapshots",
+        SNAPSHOT_FILES["nemo_gym"](source_dir),
+    )
+    reference = snapshot["digest"]
+
+    prepared = prepare_dataset(
+        _snapshot_spec(reference),
+        tmp_path / "datasets",
+        git_revision="test-revision",
+        require_clean_git=False,
+        snapshot_root=tmp_path / "snapshots",
+    )
+    assert prepared.manifest["records"]["total"] == 10
+    assert prepared.manifest["sources"][0]["snapshot"] == reference
+    assert prepared.manifest["sources"][0]["locator"] == str(snapshot_dir)
+    assert prepared.manifest["build_spec"]["config"]["sources"][0]["snapshot"] == reference
+
+    (snapshot_dir / "rollouts.jsonl").write_text("{}\n")
+    with pytest.raises(ValueError, match="was modified"):
+        prepare_dataset(
+            _snapshot_spec(reference, version="v2"),
+            tmp_path / "datasets",
+            git_revision="test-revision",
+            require_clean_git=False,
+            snapshot_root=tmp_path / "snapshots",
+        )
+
+
+def test_spec_v4_requires_snapshots_and_older_specs_reject_them() -> None:
+    spec = _snapshot_spec("sha256:" + "a" * 64).spec.model_dump(mode="json")
+    with_path = {**spec["sources"][0], "snapshot": None, "path": "/tmp/source"}
+    with pytest.raises(ValidationError, match="must name a snapshot"):
+        BuildSpec.model_validate({**spec, "sources": [with_path]})
+    with pytest.raises(ValidationError, match="require spec_version 4"):
+        BuildSpec.model_validate({**spec, "spec_version": 3})
+    with pytest.raises(ValidationError, match="sha256:<64 hex>"):
+        SourceSpec.model_validate({**spec["sources"][0], "snapshot": "abc"})
+
+
+def test_training_can_pin_the_expected_release_fingerprint(tmp_path: Path) -> None:
+    prepared = _prepare_fixture_dataset(
+        [_source(tmp_path, "teacher")],
+        tmp_path / "prepared",
+        validation_fraction=0.2,
+    )
+    train = Dataset.from_list(_read_jsonl(prepared.train_path))
+    validation = Dataset.from_list(_read_jsonl(prepared.validation_path))
+    fingerprint = prepared.manifest["dataset"]["fingerprint"]
+    arguments = (
+        prepared.manifest_path,
+        prepared.train_path,
+        prepared.validation_path,
+        train,
+        validation,
+    )
+    _validate_manifest(*arguments, limited=False, expected_fingerprint=fingerprint)
+    with pytest.raises(ValueError, match="data.expected_fingerprint pins"):
+        _validate_manifest(*arguments, limited=False, expected_fingerprint="0" * 64)
 
 
 def test_training_rejects_legacy_or_tampered_manifests(tmp_path: Path) -> None:

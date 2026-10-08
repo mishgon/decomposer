@@ -85,6 +85,51 @@ SHA-256 in the immutable manifest. Training configs may set
 different prompt. Hidden teacher reasoning remains controlled separately by
 `data.include_reasoning`.
 
+### Snapshots, releases and versioning
+
+New build specifications (`spec_version: 4`) name every source by a snapshot
+digest instead of a path. A snapshot is an immutable copy of exactly the files
+the source's adapter reads:
+
+```bash
+source ~/.secrets/decomposer.env  # lets the snapshot check for leaked endpoints and keys
+uv run --group train python -m sft.snapshots --adapter nemo_gym \
+  --source /path/to/native/run
+```
+
+The command prints the reference to put in the spec, `snapshot: sha256:<hex>`.
+
+- **Layout.** A snapshot lives in
+  `/mnt/share14T-2/sukhorukov/decomposer_artifacts/datasets/sft/snapshots/<adapter>/<first 16 hex>/`
+  (`--output-root` changes the root). It keeps the files at their original
+  relative paths, plus `snapshot.json` with each file's size, hash and transform
+  and the origin path and host.
+- **Digest.** It covers only the adapter name and the file contents. Renaming or
+  moving the original source does not change it, and snapshotting unchanged files
+  again reuses the existing snapshot.
+- **Redaction.** JSON files the adapter marks lose their endpoint keys
+  (`base_url`, `agent_base_url`, `model_proxy_unix_socket`). A file that contains
+  the proxy host or an API key from the environment is refused; the error names
+  the variable, never its value.
+- **Build.** `python -m sft.prepare` finds each snapshot under `--snapshot-root`
+  (the root above by default) and verifies every file before its adapter reads
+  it. The manifest records each source's `snapshot`, and the digests are part of
+  the release fingerprint.
+- **Git.** The builder records `git rev-parse HEAD`. It refuses to build unless
+  tracked files are clean, `sft/` and `src/` have no untracked files, and the
+  spec itself is committed.
+- **Training.** `data.expected_fingerprint` in a training config pins the exact
+  release; training refuses any other.
+
+Adding data never changes a snapshot or a release: new traces for a gym become a
+new snapshot, used by a new spec file with a new dataset version. A new gym needs
+an adapter in `sft/adapters/registry.py` (`ADAPTERS`, `ADAPTER_VERSIONS`) and the
+list of files it reads in `SNAPSHOT_FILES`. Bump an adapter's `ADAPTER_VERSION`
+whenever its output changes. Snapshots and releases are self-contained
+directories, so either can later be uploaded unchanged, for example to a Hugging
+Face dataset repository, and pinned by revision. Specifications with
+`spec_version` 1 to 3 keep their paths and build as before.
+
 ### Qwen3.8 tau2 + Workplace release for the unloop student (current core)
 
 The first release of the current core trains the non-thinking Qwen3.5-4B unloop
