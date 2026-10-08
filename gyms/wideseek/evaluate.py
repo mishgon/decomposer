@@ -32,7 +32,7 @@ def validate_judge(text, messages):
     return text
 
 
-async def evaluate(task, answer, path, *, judge_model_id=None):
+async def evaluate(task, answer, path, *, judge_model_id=None, cached_calls=None):
     is_table = bool(task["unique_columns"])
     metric = "item_f1" if is_table else "qa_accuracy"
     if is_table:
@@ -43,6 +43,16 @@ async def evaluate(task, answer, path, *, judge_model_id=None):
     if parsed is None or (is_table and parsed.empty):
         return {"status": "scored", "metric": metric, "score": 0., "format_ok": False}
     judge_model_id = judge_model_id or DEFAULT_TEACHER
+    cached = {}
+    if cached_calls is not None:
+        for source in sorted(cached_calls.glob('*.json')):
+            saved = json.loads(source.read_text())
+            if saved.get('model') == judge_model_id and saved.get('response') and not saved.get('error'):
+                try:
+                    validate_judge(saved['response']['content'], saved['messages'])
+                except ValueError:
+                    continue
+                cached[json.dumps(saved['messages'], sort_keys=True)] = (source, saved)
     judge_model = model(judge_model_id)
     semaphore = asyncio.Semaphore(2)
     errors = []
@@ -51,6 +61,12 @@ async def evaluate(task, answer, path, *, judge_model_id=None):
         row = {"started_at": time.time(), "messages": messages, "model": judge_model_id,
                "temperature": 0., "presence_penalty": 0., "thinking": False}
         try:
+            previous = cached.get(json.dumps(messages, sort_keys=True))
+            if previous:
+                source, saved = previous
+                text = validate_judge(saved['response']['content'], messages)
+                row.update(response=saved['response'], replayed_from=str(source))
+                return text
             async with semaphore:
                 response = await judge_model.ainvoke(messages, temperature=0., presence_penalty=0.)
             row["response"] = response.model_dump(mode="json")

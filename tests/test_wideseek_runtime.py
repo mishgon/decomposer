@@ -47,6 +47,7 @@ class ScoreTests(unittest.IsolatedAsyncioTestCase):
             path = run / "simple/t/attempt-001/result.json"
             path.parent.mkdir(parents=True)
             original = {"mode": "simple", "task_id": "t", "attempt": 1, "status": "finished",
+                        "execution_directory": "execution-test",
                         "answer": "prediction", "evaluation": {"score": None}}
             path.write_text(json.dumps(original))
             before = path.read_bytes()
@@ -54,6 +55,7 @@ class ScoreTests(unittest.IsolatedAsyncioTestCase):
                 "data_sha256": hashlib.sha256(data.read_bytes()).hexdigest()}}))
             judge = AsyncMock(return_value={"score": .5, "status": "scored"})
             args = SimpleNamespace(data=data, run=run, output=root/"new-scores",
+                                   reuse_judge_calls=False,
                                    judge_model="lmrouter/qwen_3_8_flash_next_non_thinking", concurrency=2)
             with patch("evals.wideseek.rescore.evaluate", new=judge), \
                     patch("evals.wideseek.rescore.subprocess.check_output", return_value="test-revision"):
