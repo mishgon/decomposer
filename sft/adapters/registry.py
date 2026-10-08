@@ -21,6 +21,7 @@ from .nemo_gym import read_nemo_gym_source
 from .nemo_gym import snapshot_files as nemo_gym_snapshot_files
 from .toolathlon_gym import ADAPTER_VERSION as TOOLATHLON_GYM_ADAPTER_VERSION
 from .toolathlon_gym import read_toolathlon_gym_source
+from .toolathlon_gym import snapshot_files as toolathlon_gym_snapshot_files
 
 
 class AdapterReader(Protocol):
@@ -48,6 +49,8 @@ ADAPTER_VERSIONS = {
 # The native files each adapter reads, for adapters whose sources can be snapshotted.
 SNAPSHOT_FILES: dict[str, Callable[[Path], list[SnapshotFile]]] = {
     "nemo_gym": nemo_gym_snapshot_files,
+    # toolathlon_langgraph_v1 collections only; imports are already checksummed.
+    "toolathlon_gym": toolathlon_gym_snapshot_files,
 }
 
 __all__ = [

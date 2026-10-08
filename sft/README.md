@@ -23,7 +23,8 @@ manager made a mistake the core answered: a call of an unknown tool, malformed
 arguments, or an answer before collecting every run, which the core follows with
 an injected user message (`EARLY_RESPONSE_ERROR`, `EMPTY_RESPONSE_ERROR`). The
 trace must still be well formed: one task, every call answered, and a final
-text answer. The Toolathlon and GAIA2 adapters keep the strict checks.
+text answer. Current Toolathlon collections are read the same way (see below);
+older Toolathlon imports and the GAIA2 adapter keep the strict checks.
 
 ## Legacy specs and configs
 
@@ -108,9 +109,10 @@ The command prints the reference to put in the spec, `snapshot: sha256:<hex>`.
   moving the original source does not change it, and snapshotting unchanged files
   again reuses the existing snapshot.
 - **Redaction.** JSON files the adapter marks lose their endpoint keys
-  (`base_url`, `agent_base_url`, `model_proxy_unix_socket`). A file that contains
-  the proxy host or an API key from the environment is refused; the error names
-  the variable, never its value.
+  (`base_url`, `agent_base_url`, `openai_api_base`, `model_proxy_unix_socket`).
+  A file that contains the proxy host (host and port for a loopback proxy) or an
+  API key from the environment is refused; the error names the variable, never
+  its value.
 - **Build.** `python -m sft.prepare` finds each snapshot under `--snapshot-root`
   (the root above by default) and verifies every file before its adapter reads
   it. The manifest records each source's `snapshot`, and the digests are part of
@@ -129,6 +131,48 @@ whenever its output changes. Snapshots and releases are self-contained
 directories, so either can later be uploaded unchanged, for example to a Hugging
 Face dataset repository, and pinned by revision. Specifications with
 `spec_version` 1 to 3 keep their paths and build as before.
+
+### Toolathlon collections
+
+The Toolathlon adapter reads a collection written by `sft/toolathlon_gym`
+(`trace_format: toolathlon_langgraph_v1`), snapshotted with
+`--adapter toolathlon_gym`. The snapshot takes every finished episode: its
+`trace.json` and `runtime.json`, with endpoints redacted, and its evaluation
+`result.json`. Episodes still running have no evaluation yet and are left out,
+so a running collection can be snapshotted.
+
+- **Selection.** `selection.policy: collector_qualifies` keeps exactly the
+  traces the collector counts as successes
+  (`sft/toolathlon_gym/scheduler.LaunchOutcome.qualifies`): the agent finished,
+  and the task passed strictly or its check fraction exceeds
+  `selection.success_threshold` (0.9 for the collector). The record's reward is
+  1 for a strict pass and the check fraction otherwise.
+- **Tools.** The traces store no tool schemas. The source declares the subagent
+  types the collection offered (`native_subagent_types`, from
+  `gyms/toolathlon_gym/agents.py`), and the adapter rebuilds the manager's tools
+  from them with the Decomposer core. A trace that creates an undeclared type
+  stops the build.
+- **Messages.** The first message must equal the task in `runtime.json`.
+  Mistakes the core answered stay, as for the NeMo Gym adapter.
+
+```yaml
+- id: toolathlon-qwen38-flash-nonthinking-coverage
+  adapter: toolathlon_gym
+  snapshot: sha256:<hex>
+  benchmark: toolathlon_gym
+  environment: toolathlon_gym
+  partition: train
+  teacher: qwen38-flash-non-thinking
+  trace_format: toolathlon_langgraph_v1
+  native_subagent_types:
+    - id: qwen_3_5_4b_thinking
+      description: Qwen3.5-4B thinking agent equipped with all the available tools.
+  selection:
+    policy: collector_qualifies
+    success_threshold: 0.9
+  expected_native_rollouts: <finished episodes>
+  expected_candidates: <finished episodes>
+```
 
 ### Qwen3.8 tau2 + Workplace release for the unloop student (current core)
 

@@ -489,7 +489,7 @@ def test_canonical_builder_accepts_toolathlon_source(tmp_path: Path) -> None:
         row["messages"][0]["content"] == DECOMPOSER_SYSTEM_PROMPT
         for row in train
     )
-    assert prepared.manifest["preparation"]["adapter_versions"] == {"toolathlon_gym": 9}
+    assert prepared.manifest["preparation"]["adapter_versions"] == {"toolathlon_gym": 10}
 
 
 def test_canonical_builder_requires_one_tool_schema(tmp_path: Path) -> None:
@@ -680,6 +680,8 @@ def test_toolathlon_pass_or_quality_filter_preserves_binary_pass_precedence(
         "policy": "toolathlon_pass_or_quality",
         "success_reward": 1.0,
         "minimum_check_ratio_exclusive": 0.9,
+        "minimum_check_ratio_inclusive": None,
+        "success_threshold": None,
     }
     assert result.source_manifest["quality_filter"] == {
         "binary_fail": 5,

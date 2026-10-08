@@ -34,13 +34,17 @@ DEFAULT_SNAPSHOT_ROOT = Path(
 )
 SNAPSHOT_REFERENCE = re.compile(r"^sha256:([0-9a-f]{64})$")
 # JSON keys that hold internal model endpoints; redacted files drop them.
-ENDPOINT_KEYS = frozenset({"base_url", "agent_base_url", "model_proxy_unix_socket"})
-# Environment variables whose values must never reach a snapshot (for a URL, its host).
+ENDPOINT_KEYS = frozenset(
+    {"base_url", "agent_base_url", "openai_api_base", "model_proxy_unix_socket"}
+)
+# Environment variables whose values must never reach a snapshot: for a URL, its
+# host, or its host and port when the host is a loopback address.
 FORBIDDEN_ENVIRONMENT = (
     "LLM_PROXY_URL",
     "LLM_PROXY_MASTER_KEY",
     "OPENROUTER_API_KEY_DECOMPOSER",
 )
+LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1", "0.0.0.0"})
 _CHUNK_BYTES = 1 << 20
 
 
@@ -84,8 +88,14 @@ def _forbidden_values() -> dict[str, str]:
         value = os.environ.get(name, "").strip()
         if not value:
             continue
-        host = urlparse(value).hostname if "://" in value else None
-        values[name] = host or value
+        parsed = urlparse(value) if "://" in value else None
+        host = parsed.hostname if parsed is not None else None
+        # Traces mention loopback hosts for their own services; a loopback
+        # endpoint is identified by its port.
+        if parsed is not None and host in LOOPBACK_HOSTS:
+            values[name] = parsed.netloc
+        else:
+            values[name] = host or value
     return values
 
 

@@ -105,6 +105,20 @@ def test_snapshot_refuses_files_with_secret_values_without_printing_them(
     assert not list((tmp_path / "snapshots" / "nemo_gym").iterdir())
 
 
+def test_loopback_proxy_is_matched_by_port(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("LLM_PROXY_URL", "http://localhost:4100/v1")
+    source = _source(tmp_path)
+    # Tasks mention their own local services; only the proxy's port is refused.
+    (source / "rollouts.jsonl").write_text('{"note": "open http://localhost:8080"}\n')
+    create_snapshot("nemo_gym", source, tmp_path / "snapshots", FILES)
+
+    (source / "rollouts.jsonl").write_text('{"note": "called localhost:4100"}\n')
+    with pytest.raises(ValueError, match="contains the value of LLM_PROXY_URL"):
+        create_snapshot("nemo_gym", source, tmp_path / "other-snapshots", FILES)
+
+
 def test_snapshot_paths_must_be_relative_and_unique(tmp_path: Path) -> None:
     source = _source(tmp_path)
     for files in (

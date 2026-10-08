@@ -22,6 +22,7 @@ SelectionPolicy = Literal[
     "all_rewards",
     "toolathlon_pass_or_quality",
     "toolathlon_pass_or_quality_inclusive",
+    "collector_qualifies",
 ]
 
 CANONICAL_SCHEMA_VERSION = 1
@@ -172,6 +173,9 @@ class SourceSelectionSpec(StrictModel):
     success_reward: float = 1.0
     minimum_check_ratio_exclusive: float | None = None
     minimum_check_ratio_inclusive: float | None = None
+    # collector_qualifies keeps what the trace collector itself counted as a
+    # success: a strict pass, or a score above this threshold.
+    success_threshold: float | None = None
 
     @field_validator("success_reward")
     @classmethod
@@ -215,6 +219,18 @@ class SourceSelectionSpec(StrictModel):
                 "minimum_check_ratio_inclusive is only valid for "
                 "toolathlon_pass_or_quality_inclusive"
             )
+        if self.policy == "collector_qualifies":
+            threshold = self.success_threshold
+            if threshold is None or not math.isfinite(threshold):
+                raise ValueError(
+                    "collector_qualifies requires a finite success_threshold"
+                )
+            if not 0.0 <= threshold < 1.0:
+                raise ValueError(
+                    "success_threshold must be at least 0 and less than 1"
+                )
+        elif self.success_threshold is not None:
+            raise ValueError("success_threshold is only valid for collector_qualifies")
         return self
 
 
@@ -277,7 +293,12 @@ class SourceSpec(StrictModel):
         "toolathlon_legacy_unversioned",
         "gaia2_evaluation_v1",
         "gaia2_trace_manifest_v1",
+        "toolathlon_langgraph_v1",
     ] = "native"
+    # The subagent types a toolathlon_langgraph_v1 collection offered the
+    # manager. Its traces store no tool schemas, so the builder rebuilds them
+    # from these types with the Decomposer core.
+    native_subagent_types: tuple[SubagentInterfaceSpec, ...] = ()
     subagent_type_aliases: dict[str, str] = Field(default_factory=dict)
     sampling: SourceSamplingSpec | None = None
     selection: SourceSelectionSpec | None = None
@@ -339,6 +360,20 @@ class SourceSpec(StrictModel):
             )
         if (self.trace_format in gaia2_formats) != (self.adapter == "gaia2"):
             raise ValueError("GAIA2 trace formats are only valid for GAIA2 sources")
+        if (
+            self.trace_format == "toolathlon_langgraph_v1"
+            and self.adapter != "toolathlon_gym"
+        ):
+            raise ValueError(
+                "toolathlon_langgraph_v1 is only valid for Toolathlon sources"
+            )
+        if bool(self.native_subagent_types) != (
+            self.trace_format == "toolathlon_langgraph_v1"
+        ):
+            raise ValueError(
+                "toolathlon_langgraph_v1 sources, and only they, declare "
+                "native_subagent_types"
+            )
         if (self.gaia2 is not None) != (self.adapter == "gaia2"):
             raise ValueError("gaia2 options are required only for GAIA2 sources")
         if self.sampling is not None and self.adapter != "nemo_gym":
@@ -525,6 +560,7 @@ class BuildSpec(StrictModel):
             in {
                 "toolathlon_pass_or_quality",
                 "toolathlon_pass_or_quality_inclusive",
+                "collector_qualifies",
             }
             or any(source.selection is not None for source in self.sources)
         ):
@@ -545,6 +581,13 @@ class BuildSpec(StrictModel):
             ):
                 raise ValueError(
                     "toolathlon_pass_or_quality is only valid for Toolathlon sources"
+                )
+            if (effective_policy == "collector_qualifies") != (
+                source.trace_format == "toolathlon_langgraph_v1"
+            ):
+                raise ValueError(
+                    f"Source {source.id!r}: toolathlon_langgraph_v1 sources, and "
+                    "only they, select with collector_qualifies"
                 )
         return self
 
