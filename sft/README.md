@@ -23,8 +23,8 @@ manager made a mistake the core answered: a call of an unknown tool, malformed
 arguments, or an answer before collecting every run, which the core follows with
 an injected user message (`EARLY_RESPONSE_ERROR`, `EMPTY_RESPONSE_ERROR`). The
 trace must still be well formed: one task, every call answered, and a final
-text answer. Current Toolathlon collections are read the same way (see below);
-older Toolathlon imports and the GAIA2 adapter keep the strict checks.
+text answer. Current Toolathlon and WideSeek collections are read the same way
+(see below); older Toolathlon imports and the GAIA2 adapter keep the strict checks.
 
 ## Legacy specs and configs
 
@@ -172,6 +172,41 @@ so a running collection can be snapshotted.
     success_threshold: 0.9
   expected_native_rollouts: <finished episodes>
   expected_candidates: <finished episodes>
+```
+
+### WideSeek collections
+
+The WideSeek adapter (`adapter: wideseek`, `trace_format: wideseek_langgraph_v1`)
+reads a collection written by `sft/wideseek` on main, snapshotted with
+`--adapter wideseek`. Each attempt's `result.json` names the execution it scored.
+The snapshot takes, per finished attempt, that result, the execution's
+`trace.json`, and the manager's first logged model call, which holds the tools
+and system prompt the manager saw. Restarted executions that no result names, and
+the rest of the call log, are left out.
+
+- **Selection.** `collector_qualifies` applies the collector's rule
+  (`gyms/wideseek/metrics.qualifies` on main): a normal finish, a scored
+  evaluation, no cleanup errors, and a score of 1 or above `success_threshold`.
+  The record's reward is the score.
+- **Tools and prompt.** Records keep the logged tools. The logged system prompt
+  must be the teacher prompt, or the build stops.
+- **Messages.** The first message must equal the task in the logged call. Mistakes
+  the core answered stay.
+
+```yaml
+- id: wideseek-qwen38-flash-nonthinking-coverage
+  adapter: wideseek
+  snapshot: sha256:<hex>
+  benchmark: wideseek
+  environment: wideseek
+  partition: train
+  teacher: qwen38-flash-non-thinking
+  trace_format: wideseek_langgraph_v1
+  selection:
+    policy: collector_qualifies
+    success_threshold: 0.9
+  expected_native_rollouts: <finished attempts>
+  expected_candidates: <finished attempts>
 ```
 
 ### Qwen3.8 tau2 + Workplace release for the unloop student (current core)

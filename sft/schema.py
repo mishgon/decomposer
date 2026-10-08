@@ -65,6 +65,11 @@ LEGACY_DECOMPOSER_TOOL_NAMES = frozenset({"spawn_subagent"})
 # every run, or answers with empty text; the manager then continues.
 CORE_USER_MESSAGES = frozenset({EARLY_RESPONSE_ERROR, EMPTY_RESPONSE_ERROR})
 
+# Collection formats whose sources select with collector_qualifies.
+COLLECTION_TRACE_FORMATS = frozenset(
+    {"toolathlon_langgraph_v1", "wideseek_langgraph_v1"}
+)
+
 _IDENTIFIER = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
 _SNAPSHOT_REFERENCE = re.compile(r"^sha256:[0-9a-f]{64}$")
 
@@ -280,7 +285,7 @@ class Gaia2SourceSpec(StrictModel):
 
 class SourceSpec(StrictModel):
     id: str
-    adapter: Literal["gaia2", "nemo_gym", "toolathlon_gym"]
+    adapter: Literal["gaia2", "nemo_gym", "toolathlon_gym", "wideseek"]
     path: Path | None = None
     # spec_version 4 names each source by its snapshot digest (``sha256:<hex>``).
     snapshot: str | None = None
@@ -294,6 +299,7 @@ class SourceSpec(StrictModel):
         "gaia2_evaluation_v1",
         "gaia2_trace_manifest_v1",
         "toolathlon_langgraph_v1",
+        "wideseek_langgraph_v1",
     ] = "native"
     # The subagent types a toolathlon_langgraph_v1 collection offered the
     # manager. Its traces store no tool schemas, so the builder rebuilds them
@@ -366,6 +372,12 @@ class SourceSpec(StrictModel):
         ):
             raise ValueError(
                 "toolathlon_langgraph_v1 is only valid for Toolathlon sources"
+            )
+        if (self.trace_format == "wideseek_langgraph_v1") != (
+            self.adapter == "wideseek"
+        ):
+            raise ValueError(
+                "WideSeek sources, and only they, use wideseek_langgraph_v1"
             )
         if bool(self.native_subagent_types) != (
             self.trace_format == "toolathlon_langgraph_v1"
@@ -583,11 +595,12 @@ class BuildSpec(StrictModel):
                     "toolathlon_pass_or_quality is only valid for Toolathlon sources"
                 )
             if (effective_policy == "collector_qualifies") != (
-                source.trace_format == "toolathlon_langgraph_v1"
+                source.trace_format in COLLECTION_TRACE_FORMATS
             ):
                 raise ValueError(
-                    f"Source {source.id!r}: toolathlon_langgraph_v1 sources, and "
-                    "only they, select with collector_qualifies"
+                    f"Source {source.id!r}: collection sources "
+                    f"({', '.join(sorted(COLLECTION_TRACE_FORMATS))}), and only "
+                    "they, select with collector_qualifies"
                 )
         return self
 

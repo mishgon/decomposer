@@ -22,6 +22,9 @@ from .nemo_gym import snapshot_files as nemo_gym_snapshot_files
 from .toolathlon_gym import ADAPTER_VERSION as TOOLATHLON_GYM_ADAPTER_VERSION
 from .toolathlon_gym import read_toolathlon_gym_source
 from .toolathlon_gym import snapshot_files as toolathlon_gym_snapshot_files
+from ..wideseek.adapter import ADAPTER_VERSION as WIDESEEK_ADAPTER_VERSION
+from ..wideseek.adapter import read_wideseek_source
+from ..wideseek.adapter import snapshot_files as wideseek_snapshot_files
 
 
 class AdapterReader(Protocol):
@@ -40,17 +43,20 @@ ADAPTERS: dict[str, AdapterReader] = {
     "gaia2": read_gaia2_source,
     "nemo_gym": read_nemo_gym_source,
     "toolathlon_gym": read_toolathlon_gym_source,
+    "wideseek": read_wideseek_source,
 }
 ADAPTER_VERSIONS = {
     "gaia2": GAIA2_ADAPTER_VERSION,
     "nemo_gym": NEMO_GYM_ADAPTER_VERSION,
     "toolathlon_gym": TOOLATHLON_GYM_ADAPTER_VERSION,
+    "wideseek": WIDESEEK_ADAPTER_VERSION,
 }
 # The native files each adapter reads, for adapters whose sources can be snapshotted.
 SNAPSHOT_FILES: dict[str, Callable[[Path], list[SnapshotFile]]] = {
     "nemo_gym": nemo_gym_snapshot_files,
     # toolathlon_langgraph_v1 collections only; imports are already checksummed.
     "toolathlon_gym": toolathlon_gym_snapshot_files,
+    "wideseek": wideseek_snapshot_files,
 }
 
 __all__ = [
@@ -62,7 +68,9 @@ __all__ = [
     "GAIA2_ADAPTER_VERSION",
     "NEMO_GYM_ADAPTER_VERSION",
     "TOOLATHLON_GYM_ADAPTER_VERSION",
+    "WIDESEEK_ADAPTER_VERSION",
     "read_gaia2_source",
     "read_nemo_gym_source",
     "read_toolathlon_gym_source",
+    "read_wideseek_source",
 ]
