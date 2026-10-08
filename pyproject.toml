@@ -55,6 +55,7 @@ dev = [
     "langchain-mcp-adapters>=0.3.0,<0.4",
     "langgraph-cli[inmem]>=0.4.30",
     "mcp>=1.9.2,<2",
+    "pandas==2.2.3",
     "pytest>=9,<10",
     "pyyaml>=6,<7",
     "torch==2.11.0",
