@@ -219,6 +219,50 @@ the rest of the call log, are left out.
   expected_candidates: <finished attempts>
 ```
 
+### Qwen3.8 four-gym release v2 for the unloop student
+
+The v2 release (`v2-tau2-workplace-toolathlon-wideseek-20261008`) adds the
+Toolathlon and WideSeek coverage collections, as finished on 2026-10-08, to the
+Workplace traces of v1 and the tau2 rerun in which only subagents get the domain
+policy (FP8 teacher). Every source has the Qwen3.8-Flash non-thinking manager
+and Qwen3.5-4B-unlooped thinking subagents, and the records keep parallel tool
+calls as emitted. Build it on Hertz-2 from a clean checkout:
+
+```bash
+.venv/bin/python -m sft.prepare \
+  --spec sft/specs/decomposer_mixed_qwen38_qwen35_4b_unloop_nonthinking_v2.yaml \
+  --output-root /mnt/share14T-2/sukhorukov/decomposer_artifacts/datasets/sft
+```
+
+| Source | Snapshot | Rollouts | Selected | Rule |
+|---|---|---:|---:|---|
+| tau2 | `170d2e3d…` | 4,843 | 2,948 | reward 1 |
+| Workplace | `c36c909e…` | 1,255 | 988 | reward 1 |
+| Toolathlon | `35ea4233…` | 1,064 | 210 | collector: pass or check fraction > 0.9 |
+| WideSeek | `50cc2286…` | 242 | 64 | collector: score 1 or > 0.9 |
+
+That gives 4,210 records (3,789 train, 421 validation) with fingerprint
+`cb774a4e…f62573`. Each gym keeps its own tool schema. With the Qwen3.5 template
+the release has 38.1M tokens, 8.7M of them supervised; Toolathlon contributes 5%
+of the records but 26% of the supervised tokens.
+
+| Gym | Median tokens | Over 16K | Over 32K | Max |
+|---|---:|---:|---:|---:|
+| tau2 | 6.8K | 93 | 4 | 65.5K |
+| Workplace | 6.0K | 6 | 0 | 30.7K |
+| Toolathlon | 29.1K | 187 | 81 | 64.3K |
+| WideSeek | 20.5K | 42 | 16 | 54.8K |
+
+At `max_length: 32768` with `data.error_on_truncation: false`, training cuts the
+101 records over 32K. A two-step LoRA smoke on the 4 longest train records, each
+cut to 32,768 tokens, trained and exported
+(`/mnt/share14T-2/sukhorukov/decomposer_artifacts/training/sft/smokes/mixed-v2-20261008`).
+
+The Toolathlon traces contain the LLM proxy master key: the task containers
+exposed it, and subagents listed their environment while looking for API
+tokens. The snapshot keeps the traces as collected, so it must not be
+published.
+
 ### Qwen3.8 tau2 + Workplace release for the unloop student (current core)
 
 The first release of the current core trains the non-thinking Qwen3.5-4B unloop
@@ -771,12 +815,12 @@ lora:
   dropout: 0.0
 ```
 
-Dropout is 0 for single-epoch runs. The tau2 + Workplace release
-(`v1-tau2-broad-workplace-train-n1-32k`) has about 30M tokens, roughly 6M of them
-supervised. The LoRA config trains 1 epoch, so every record is seen once. In a
-single pass there is little to overfit, and dropout mostly adds noise and costs about
-4% of throughput (`docs/sft_qwen35_h200_benchmark.md`). For multi-epoch runs, raise it
-(for example to 0.05) if validation loss starts rising.
+Dropout is 0 for single-epoch runs. The four-gym release
+(`v2-tau2-workplace-toolathlon-wideseek-20261008`) has about 38M tokens, roughly
+9M of them supervised. The LoRA config trains 1 epoch, so every record is seen
+once. In a single pass there is little to overfit, and dropout mostly adds noise
+and costs about 4% of throughput (`docs/sft_qwen35_h200_benchmark.md`). For
+multi-epoch runs, raise it (for example to 0.05) if validation loss starts rising.
 
 ## ClearML
 
