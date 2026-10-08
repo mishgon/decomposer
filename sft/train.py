@@ -59,7 +59,7 @@ from .preprocessing import (
     configure_example as _configure_example,
 )
 from .preprocessing import (
-    tokenization_stats as _tokenization_stats,
+    tokenize_example as _tokenize_example,
 )
 from .qwen35_fast_runtime import (
     DEFAULT_BUNDLE_DIR,
@@ -551,17 +551,19 @@ def _preflight_tokenization(
     training_template: str,
     num_proc: int,
 ) -> tuple[Dataset, JsonObject]:
+    # TRL skips its own tokenization when input_ids are present, so it trains on
+    # exactly the tokens and assistant masks checked here.
     workers = min(max(1, num_proc), len(dataset))
-    with_stats = dataset.map(
-        _tokenization_stats,
+    tokenized = dataset.map(
+        _tokenize_example,
         fn_kwargs={
             "tokenizer": tokenizer,
             "training_template": training_template,
         },
         num_proc=workers,
-        desc="Validating assistant masks and lengths",
+        desc="Tokenizing and validating assistant masks",
     )
-    return with_stats, _summarize_tokenization(with_stats)
+    return tokenized, _summarize_tokenization(tokenized)
 
 
 def _sha256_file(path: Path) -> str:

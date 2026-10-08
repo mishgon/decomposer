@@ -10,6 +10,7 @@ from sft.model_support import (
     tokenization_profile_for_model_config,
     validate_reasoning_policy,
 )
+from sft.preprocessing import tokenize_example
 from sft.qwen35_template import (
     UnsupportedQwen35TemplateError,
     build_qwen35_training_template,
@@ -125,6 +126,16 @@ def test_qwen35_training_template_preserves_render_and_masks_only_assistant() ->
     assert "SYSTEM_SECRET" not in supervised
     assert "USER_SECRET" not in supervised
     assert "REPORT_SECRET" not in supervised
+
+    tokenized = tokenize_example(
+        {"messages": messages, "tools": tools, "chat_template_kwargs": kwargs},
+        tokenizer=tokenizer,
+        training_template=training_template,
+    )
+    assert tokenized["input_ids"] == encoded["input_ids"]
+    assert tokenized["assistant_masks"] == encoded["assistant_masks"]
+    assert tokenized["_token_length"] == len(encoded["input_ids"])
+    assert tokenized["_supervised_tokens"] == sum(encoded["assistant_masks"])
 
 
 def test_qwen35_template_fails_closed_on_unknown_template() -> None:

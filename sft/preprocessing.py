@@ -38,12 +38,13 @@ def configure_example(
     }
 
 
-def tokenization_stats(
+def tokenize_example(
     example: Mapping[str, Any],
     *,
     tokenizer: Any,
     training_template: str,
 ) -> JsonObject:
+    """Tokenize once for training: TRL trains on these IDs and assistant mask."""
     kwargs = dict(example.get("chat_template_kwargs") or {})
     encoded = tokenizer.apply_chat_template(
         example["messages"],
@@ -65,6 +66,8 @@ def tokenization_stats(
             f"Prepared example {example.get('id')} has no supervised tokens."
         )
     return {
+        "input_ids": encoded["input_ids"],
+        "assistant_masks": assistant_mask,
         "_token_length": len(encoded["input_ids"]),
         "_supervised_tokens": supervised_tokens,
     }
