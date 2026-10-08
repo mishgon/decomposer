@@ -231,7 +231,7 @@ def test_collection_checks_prompts_and_declared_agent_types(tmp_path: Path) -> N
         _read(_source(tmp_path))
 
 
-def test_collection_snapshot_takes_finished_episodes_and_redacts_endpoints(
+def test_collection_snapshot_copies_finished_episodes_exactly(
     tmp_path: Path,
 ) -> None:
     source = tmp_path / "collection"
@@ -244,10 +244,8 @@ def test_collection_snapshot_takes_finished_episodes_and_redacts_endpoints(
 
     assert len(manifest["files"]) == 12
     assert not any(episodes["running"] in path for path in manifest["files"])
-    trace_path = directory / "traces" / "alpha-task" / episodes["strict"]
-    trace = json.loads((trace_path / "trace.json").read_text())
-    assert "agent_base_url" not in trace
-    assert "openai_api_base" not in trace["decomposer_generation_config"]
+    for name in manifest["files"]:
+        assert (directory / name).read_bytes() == (source / name).read_bytes()
     assert [record.id for record in _read(_source(directory)).records] == [
         record.id for record in _read(_source(source)).records
     ]

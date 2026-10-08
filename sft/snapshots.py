@@ -4,7 +4,8 @@ A build spec (spec_version 4) names each source by its snapshot digest, so a
 release is pinned to exact source contents: renaming, moving, or extending the
 original directory changes nothing, and any changed file fails the build. A
 snapshot holds only the files its adapter reads, at the same relative paths, so
-the adapter reads a snapshot exactly like the original source directory.
+the adapter reads a snapshot exactly like the original source directory. Files
+are copied byte for byte: a snapshot never changes a trace.
 """
 
 from __future__ import annotations
@@ -16,14 +17,11 @@ import os
 import re
 import shutil
 import socket
-import sys
 import tempfile
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
-from typing import Any
-from urllib.parse import urlparse
 
 from .schema import JsonObject, canonical_json, sha256_text
 
@@ -33,27 +31,14 @@ DEFAULT_SNAPSHOT_ROOT = Path(
     "/mnt/share14T-2/sukhorukov/decomposer_artifacts/datasets/sft/snapshots"
 )
 SNAPSHOT_REFERENCE = re.compile(r"^sha256:([0-9a-f]{64})$")
-# JSON keys that hold internal model endpoints; redacted files drop them.
-ENDPOINT_KEYS = frozenset(
-    {"base_url", "agent_base_url", "openai_api_base", "model_proxy_unix_socket"}
-)
-# Environment variables whose values must never reach a snapshot: for a URL, its
-# host, or its host and port when the host is a loopback address.
-FORBIDDEN_ENVIRONMENT = (
-    "LLM_PROXY_URL",
-    "LLM_PROXY_MASTER_KEY",
-    "OPENROUTER_API_KEY_DECOMPOSER",
-)
-LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1", "0.0.0.0"})
 _CHUNK_BYTES = 1 << 20
 
 
 @dataclass(frozen=True)
 class SnapshotFile:
-    """A native file an adapter reads: copied as is, or with endpoint keys dropped."""
+    """A native file an adapter reads, at its path relative to the source."""
 
     path: str
-    redact_endpoints: bool = False
 
 
 def snapshot_digest(reference: str) -> str:
@@ -82,41 +67,6 @@ def _content_digest(adapter: str, files: dict[str, JsonObject]) -> str:
     )
 
 
-def _forbidden_values() -> dict[str, str]:
-    values = {}
-    for name in FORBIDDEN_ENVIRONMENT:
-        value = os.environ.get(name, "").strip()
-        if not value:
-            continue
-        parsed = urlparse(value) if "://" in value else None
-        host = parsed.hostname if parsed is not None else None
-        # Traces mention loopback hosts for their own services; a loopback
-        # endpoint is identified by its port.
-        if parsed is not None and host in LOOPBACK_HOSTS:
-            values[name] = parsed.netloc
-        else:
-            values[name] = host or value
-    return values
-
-
-def _without_endpoints(value: Any) -> Any:
-    if isinstance(value, dict):
-        return {
-            key: _without_endpoints(item)
-            for key, item in value.items()
-            if key not in ENDPOINT_KEYS
-        }
-    if isinstance(value, list):
-        return [_without_endpoints(item) for item in value]
-    return value
-
-
-def redact_endpoints(content: bytes) -> bytes:
-    """Drop endpoint keys at any depth of a JSON document."""
-    redacted = _without_endpoints(json.loads(content))
-    return (json.dumps(redacted, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
-
-
 def _hash_file(path: Path) -> tuple[int, str]:
     digest = hashlib.sha256()
     size = 0
@@ -125,23 +75,6 @@ def _hash_file(path: Path) -> tuple[int, str]:
             digest.update(chunk)
             size += len(chunk)
     return size, digest.hexdigest()
-
-
-def _forbidden_variable_in(path: Path, forbidden: dict[str, str]) -> str | None:
-    """Name the environment variable whose value occurs in a file, without its value."""
-    if not forbidden:
-        return None
-    needles = {name: value.encode("utf-8") for name, value in forbidden.items()}
-    overlap = max((len(needle) for needle in needles.values()), default=1) - 1
-    tail = b""
-    with path.open("rb") as file:
-        while chunk := file.read(_CHUNK_BYTES):
-            window = tail + chunk
-            for name, needle in needles.items():
-                if needle in window:
-                    return name
-            tail = window[-overlap:] if overlap else b""
-    return None
 
 
 def _relative_path(path: str) -> str:
@@ -171,7 +104,6 @@ def create_snapshot(
         raise ValueError("A snapshot needs at least one file.")
     if len(paths) != len(set(paths)):
         raise ValueError("Snapshot file paths must be unique.")
-    forbidden = _forbidden_values()
     adapter_root = output_root / adapter
     adapter_root.mkdir(parents=True, exist_ok=True)
     temporary_dir = Path(tempfile.mkdtemp(prefix=".snapshot-", dir=adapter_root))
@@ -183,25 +115,9 @@ def create_snapshot(
                 raise FileNotFoundError(f"Snapshot source file does not exist: {origin}")
             target = temporary_dir / file.path
             target.parent.mkdir(parents=True, exist_ok=True)
-            entry: JsonObject
-            if file.redact_endpoints:
-                content = origin.read_bytes()
-                target.write_bytes(redact_endpoints(content))
-                entry = {
-                    "transform": "redact_endpoints",
-                    "origin_sha256": hashlib.sha256(content).hexdigest(),
-                }
-            else:
-                shutil.copyfile(origin, target)
-                entry = {"transform": "copy"}
-            leaked = _forbidden_variable_in(target, forbidden)
-            if leaked is not None:
-                raise ValueError(
-                    f"Snapshot file {file.path} contains the value of {leaked}; "
-                    "redact it before snapshotting."
-                )
-            entry["bytes"], entry["sha256"] = _hash_file(target)
-            entries[file.path] = entry
+            shutil.copyfile(origin, target)
+            size, sha256 = _hash_file(target)
+            entries[file.path] = {"bytes": size, "sha256": sha256}
         digest = _content_digest(adapter, entries)
         manifest = {
             "schema_version": SNAPSHOT_SCHEMA_VERSION,
@@ -284,14 +200,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--source", type=Path, required=True)
     parser.add_argument("--output-root", type=Path, default=DEFAULT_SNAPSHOT_ROOT)
     args = parser.parse_args(argv)
-    if not _forbidden_values():
-        print(
-            "warning: none of "
-            + ", ".join(FORBIDDEN_ENVIRONMENT)
-            + " is set, so the endpoint guard checks nothing; load the secrets "
-            "environment first.",
-            file=sys.stderr,
-        )
     files = SNAPSHOT_FILES[args.adapter](args.source.resolve())
     directory, manifest = create_snapshot(
         args.adapter, args.source, args.output_root, files

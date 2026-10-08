@@ -12,7 +12,6 @@ from sft.snapshots import (
     SnapshotFile,
     create_snapshot,
     load_snapshot,
-    redact_endpoints,
     snapshot_directory,
 )
 
@@ -28,7 +27,7 @@ def _source(root: Path) -> Path:
     return source
 
 
-FILES = [SnapshotFile("rollouts.jsonl"), SnapshotFile("traces/trace.json", redact_endpoints=True)]
+FILES = [SnapshotFile("rollouts.jsonl"), SnapshotFile("traces/trace.json")]
 
 
 def test_snapshot_round_trip_copies_only_listed_files(tmp_path: Path) -> None:
@@ -39,8 +38,8 @@ def test_snapshot_round_trip_copies_only_listed_files(tmp_path: Path) -> None:
     assert directory == snapshot_directory(tmp_path / "snapshots", "nemo_gym", digest[7:])
     assert sorted(manifest["files"]) == ["rollouts.jsonl", "traces/trace.json"]
     assert not (directory / "unread.log").exists()
-    assert manifest["files"]["traces/trace.json"]["transform"] == "redact_endpoints"
-    assert "agent_base_url" not in json.loads((directory / "traces" / "trace.json").read_text())
+    for name in manifest["files"]:
+        assert (directory / name).read_bytes() == (source / name).read_bytes()
     assert load_snapshot(directory, digest, adapter="nemo_gym")["digest"] == digest
     with pytest.raises(ValueError, match="belongs to adapter"):
         load_snapshot(directory, digest, adapter="toolathlon_gym")
@@ -78,45 +77,6 @@ def test_modified_extra_or_missing_files_are_rejected(tmp_path: Path) -> None:
     (directory / "rollouts.jsonl").unlink()
     with pytest.raises(ValueError, match="file set differs"):
         load_snapshot(directory, digest, adapter="nemo_gym")
-
-
-def test_redaction_drops_endpoint_keys_at_any_depth() -> None:
-    document = {
-        "model": {"name": "m", "base_url": "http://a"},
-        "runs": [{"agent_base_url": "http://b", "model_proxy_unix_socket": "/s", "ok": 1}],
-    }
-    assert json.loads(redact_endpoints(json.dumps(document).encode())) == {
-        "model": {"name": "m"},
-        "runs": [{"ok": 1}],
-    }
-
-
-def test_snapshot_refuses_files_with_secret_values_without_printing_them(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv("LLM_PROXY_URL", "https://proxy.example.test:9443/v1")
-    source = _source(tmp_path)
-    (source / "rollouts.jsonl").write_text('{"note": "called proxy.example.test"}\n')
-
-    with pytest.raises(ValueError) as error:
-        create_snapshot("nemo_gym", source, tmp_path / "snapshots", FILES)
-    assert "rollouts.jsonl contains the value of LLM_PROXY_URL" in str(error.value)
-    assert "proxy.example.test" not in str(error.value)
-    assert not list((tmp_path / "snapshots" / "nemo_gym").iterdir())
-
-
-def test_loopback_proxy_is_matched_by_port(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv("LLM_PROXY_URL", "http://localhost:4100/v1")
-    source = _source(tmp_path)
-    # Tasks mention their own local services; only the proxy's port is refused.
-    (source / "rollouts.jsonl").write_text('{"note": "open http://localhost:8080"}\n')
-    create_snapshot("nemo_gym", source, tmp_path / "snapshots", FILES)
-
-    (source / "rollouts.jsonl").write_text('{"note": "called localhost:4100"}\n')
-    with pytest.raises(ValueError, match="contains the value of LLM_PROXY_URL"):
-        create_snapshot("nemo_gym", source, tmp_path / "other-snapshots", FILES)
 
 
 def test_snapshot_paths_must_be_relative_and_unique(tmp_path: Path) -> None:

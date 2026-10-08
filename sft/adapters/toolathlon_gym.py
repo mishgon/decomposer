@@ -923,12 +923,8 @@ def snapshot_files(source_dir: Path) -> list[SnapshotFile]:
             continue
         files.extend(
             (
-                SnapshotFile(
-                    (episode / "trace.json").as_posix(), redact_endpoints=True
-                ),
-                SnapshotFile(
-                    (episode / "runtime.json").as_posix(), redact_endpoints=True
-                ),
+                SnapshotFile((episode / "trace.json").as_posix()),
+                SnapshotFile((episode / "runtime.json").as_posix()),
                 SnapshotFile(result_path.relative_to(source_dir).as_posix()),
             )
         )

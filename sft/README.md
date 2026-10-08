@@ -103,7 +103,6 @@ digest instead of a path. A snapshot is an immutable copy of exactly the files
 the source's adapter reads:
 
 ```bash
-source ~/.secrets/decomposer.env  # lets the snapshot check for leaked endpoints and keys
 uv run --group train python -m sft.snapshots --adapter nemo_gym \
   --source /path/to/native/run
 ```
@@ -113,16 +112,14 @@ The command prints the reference to put in the spec, `snapshot: sha256:<hex>`.
 - **Layout.** A snapshot lives in
   `/mnt/share14T-2/sukhorukov/decomposer_artifacts/datasets/sft/snapshots/<adapter>/<first 16 hex>/`
   (`--output-root` changes the root). It keeps the files at their original
-  relative paths, plus `snapshot.json` with each file's size, hash and transform
-  and the origin path and host.
+  relative paths, plus `snapshot.json` with each file's size and hash and the
+  origin path and host.
 - **Digest.** It covers only the adapter name and the file contents. Renaming or
   moving the original source does not change it, and snapshotting unchanged files
   again reuses the existing snapshot.
-- **Redaction.** JSON files the adapter marks lose their endpoint keys
-  (`base_url`, `agent_base_url`, `openai_api_base`, `model_proxy_unix_socket`).
-  A file that contains the proxy host (host and port for a loopback proxy) or an
-  API key from the environment is refused; the error names the variable, never
-  its value.
+- **Exact copies.** Files are copied byte for byte, so a snapshot holds whatever
+  the traces hold, including endpoints and any keys a task exposed. Snapshots
+  stay local and are never published.
 - **Build.** `python -m sft.prepare` finds each snapshot under `--snapshot-root`
   (the root above by default) and verifies every file before its adapter reads
   it. The manifest records each source's `snapshot`, and the digests are part of
@@ -147,8 +144,7 @@ Face dataset repository, and pinned by revision. Specifications with
 The Toolathlon adapter reads a collection written by `sft/toolathlon_gym`
 (`trace_format: toolathlon_langgraph_v1`), snapshotted with
 `--adapter toolathlon_gym`. The snapshot takes every finished episode: its
-`trace.json` and `runtime.json`, with endpoints redacted, and its evaluation
-`result.json`. Episodes still running have no evaluation yet and are left out,
+`trace.json` and `runtime.json`, and its evaluation `result.json`. Episodes still running have no evaluation yet and are left out,
 so a running collection can be snapshotted.
 
 - **Selection.** `selection.policy: collector_qualifies` keeps exactly the
