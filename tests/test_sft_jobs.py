@@ -1031,6 +1031,35 @@ def test_smoke_config_evaluates_clearml_metrics_after_one_step() -> None:
     assert "gradient_accumulation_steps" not in config["training"]
 
 
+def test_qwen35_unloop_v3_lora_configs_differ_only_in_length() -> None:
+    root = Path("sft/configs")
+    configs = {
+        length: yaml.safe_load(
+            (root / f"qwen35_4b_unloop_nonthinking_mixed_v3_lora_{length}_4gpu.yaml").read_text()
+        )
+        for length in ("16k", "32k")
+    }
+    for length, max_length in (("16k", 16384), ("32k", 32768)):
+        config = configs[length]
+        assert config["training"]["max_length"] == max_length
+        assert config["training"]["output_dir"].endswith(f"mixed-v3-lora-{length}")
+        assert config["data"]["expected_fingerprint"] == (
+            "50a733439db998f83c559946eb5f57fc77c811916142b787bdf2245d1fdb8df4"
+        )
+        assert config["data"]["expected_system_prompt_profile"] == "teacher"
+        assert config["lora"] == {"r": 32, "alpha": 64, "dropout": 0.05}
+        assert config["training"]["fsdp"] is False
+        assert _build_early_stopping_callback(config["run"], config["training"]) is not None
+
+    def without_length(config: dict) -> str:
+        text = yaml.safe_dump(config)
+        for length in ("16k", "32k", "16K", "32K", "16384", "32768"):
+            text = text.replace(length, "")
+        return text
+
+    assert without_length(configs["16k"]) == without_length(configs["32k"])
+
+
 def test_e4b_deepseek_v1_8k_configs_are_oom_safe_and_non_thinking() -> None:
     root = Path("sft/configs")
     filenames = (

@@ -684,6 +684,23 @@ metadata before loading a model.
 
 ## Train
 
+LoRA for the Qwen3.5-4B unloop student on the v3 four-gym release, on Hertz-2:
+
+```bash
+cd ~/decomposer_sft
+nohup sft/train_qwen35_h200.sh \
+  sft/configs/qwen35_4b_unloop_nonthinking_mixed_v3_lora_16k_4gpu.yaml 4,5,6,7 \
+  > ~/qwen35-v3-lora-16k.log 2>&1 &
+```
+
+The 32K config (`…_lora_32k_4gpu.yaml`) differs only in `max_length` and the
+output directory. Both use the H200 benchmark recipe with LoRA `r: 32`,
+`alpha: 64` and `dropout: 0.05`. They run 3 epochs, evaluating and saving after
+each one, and keep the checkpoint with the lowest validation loss; training
+stops after an epoch that does not improve it. Both log to ClearML.
+`sft/train_qwen35_h200.sh` sets the environment from
+`docs/sft_qwen35_h200_benchmark.md` and refuses any listed GPU that holds memory.
+
 Four-GPU E2B with fused CE and global batch eight:
 
 ```bash
