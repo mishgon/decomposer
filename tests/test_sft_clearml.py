@@ -143,6 +143,27 @@ def test_callback_puts_each_evaluation_set_loss_on_one_chart() -> None:
     assert {"eval/all_loss", "eval/tau2_gym_loss"} <= {call["title"] for call in logger.calls}
 
 
+def test_callback_names_trl_eval_metrics_after_their_evaluation_set() -> None:
+    callback, logger = _ready_callback()
+    for name, accuracy in (("all", 0.89), ("tau2_gym", 0.88)):
+        callback.on_log(
+            args=SimpleNamespace(),
+            state=SimpleNamespace(global_step=7, is_world_process_zero=True),
+            control=SimpleNamespace(),
+            model=torch.nn.Linear(1, 1),
+            logs={
+                f"eval_{name}_loss": 0.4,
+                "eval_mean_token_accuracy": accuracy,
+                "epoch": 1.0,
+            },
+        )
+
+    values = {call["title"]: call["value"] for call in logger.calls}
+    assert values["eval/all_mean_token_accuracy"] == 0.89
+    assert values["eval/tau2_gym_mean_token_accuracy"] == 0.88
+    assert "eval/mean_token_accuracy" not in values
+
+
 def test_nonzero_rank_computes_norm_without_reporting(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

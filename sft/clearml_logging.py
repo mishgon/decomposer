@@ -24,6 +24,31 @@ def _metric_phase(logs: Mapping[str, Any]) -> str:
     return "train"
 
 
+def _name_eval_metrics(logs: Mapping[str, Any]) -> dict[str, Any]:
+    """Give TRL's eval metrics the name of the evaluation set they belong to.
+
+    With several evaluation sets, Trainer names each set's metrics
+    (`eval_<name>_loss`), but TRL logs `eval_mean_token_accuracy` and the like
+    without the name, so every set would land in the same ClearML series.
+    """
+    names = [
+        key.removeprefix("eval_").removesuffix("_loss")
+        for key in logs
+        if key.startswith("eval_") and key.endswith("_loss") and key != "eval_loss"
+    ]
+    if len(names) != 1:
+        return dict(logs)
+    prefix = f"eval_{names[0]}_"
+    return {
+        (
+            prefix + key.removeprefix("eval_")
+            if key.startswith("eval_") and not key.startswith(prefix)
+            else key
+        ): value
+        for key, value in logs.items()
+    }
+
+
 def clearml_scalars(logs: Mapping[str, Any]) -> list[tuple[str, float]]:
     """Map one Trainer log event to independent ClearML plot titles."""
     phase = _metric_phase(logs)
@@ -82,7 +107,7 @@ class SeparatePlotsClearMLCallback(ClearMLCallback):
         logs: Mapping[str, Any] | None = None,
         **kwargs: Any,
     ) -> None:
-        metrics = dict(logs or {})
+        metrics = _name_eval_metrics(logs or {})
         step = int(state.global_step)
         if self._should_report_weight_norm(step=step, logs=metrics):
             if model is None:
