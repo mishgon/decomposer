@@ -787,6 +787,16 @@ run in `run/`. A cell whose `run/` exists is skipped, so a grid resumes after an
 interruption, and a symlinked `run/` reuses an earlier run as a cell. The report
 lists each cell's best epoch with its overall and per-gym validation loss and
 saves them to `summary.json`.
+
+Release 1.0.0 has a LoRA and a full-SFT config,
+`qwen35_4b_unloop_nonthinking_manager_sft_1.0.0_{lora,full}_32k_4gpu.yaml`. Both
+use the grid's best cell: 32K and global batch 8, with learning rate 2e-4 for
+LoRA. The full config takes the benchmark's full recipe (fp32 weights, frozen
+`model.visual`) at learning rate 2e-5. Both evaluate and save every 0.2 epoch
+(95 steps) and stop after three evaluations without improvement. A run resumed
+with `--resume-from-checkpoint <output>/checkpoint-<step>` (passed after the
+GPUs to `sft/train_qwen35_h200.sh`) keeps its early-stopping count.
+
 `sft/train_qwen35_h200.sh` sets the environment from
 `docs/sft_qwen35_h200_benchmark.md` and refuses any listed GPU that holds memory.
 

@@ -360,3 +360,43 @@ def test_qwen35_unloop_v3_lora_configs_differ_only_in_length() -> None:
         return text
 
     assert without_length(configs["16k"]) == without_length(configs["32k"])
+
+
+def test_qwen35_unloop_manager_sft_1_0_0_configs_differ_only_in_mode() -> None:
+    root = Path("sft/configs")
+    full, lora = (
+        yaml.safe_load(
+            (
+                root / f"qwen35_4b_unloop_nonthinking_manager_sft_1.0.0_{mode}_32k_4gpu.yaml"
+            ).read_text()
+        )
+        for mode in ("full", "lora")
+    )
+    for config in (full, lora):
+        training = config["training"]
+        assert config["data"]["expected_fingerprint"] == (
+            "fb6d86f62061f540947636fb5706832542e4ce73577e26f0e6b87df1c0a25556"
+        )
+        # 0.2 epoch: 3,797 records make 475 steps per epoch at global batch 8 on 4 GPUs.
+        assert training["global_batch_size"] == 8
+        assert config["run"]["expected_world_size"] == 4
+        assert training["eval_strategy"] == training["save_strategy"] == "steps"
+        assert training["eval_steps"] == training["save_steps"] == 95
+        assert training["restore_callback_states_from_checkpoint"] is True
+        assert config["run"]["early_stopping"]["patience"] == 3
+        assert _build_early_stopping_callback(config["run"], training) is not None
+
+    assert full["model"].pop("dtype") == "float32"
+    assert lora["model"].pop("dtype") == "bfloat16"
+    assert full["model"].pop("freeze_modules") == ["model.visual"]
+    assert full["training"].pop("learning_rate") == 2.0e-5
+    assert lora["training"].pop("learning_rate") == 2.0e-4
+    assert lora.pop("lora") == {"r": 32, "alpha": 64, "dropout": 0.05}
+
+    def without_mode(config: dict) -> str:
+        text = yaml.safe_dump(config)
+        for mode in ("full", "lora", "LoRA"):
+            text = text.replace(mode, "")
+        return text
+
+    assert without_mode(full) == without_mode(lora)
