@@ -418,9 +418,10 @@ def _select_longest_by_token_length(
         return dataset
     if not isinstance(limit, int) or isinstance(limit, bool) or limit <= 0:
         raise ValueError("data.longest_train_samples must be a positive integer.")
+    lengths = list(dataset["_token_length"])
     indices = sorted(
         range(len(dataset)),
-        key=lambda index: (-int(dataset[index]["_token_length"]), index),
+        key=lambda index: (-int(lengths[index]), index),
     )
     return dataset.select(indices[: min(limit, len(indices))])
 
@@ -435,10 +436,10 @@ def _select_stratified_by_environment_and_length(
     if not isinstance(limit, int) or isinstance(limit, bool) or limit <= 0:
         raise ValueError("data.stratified_train_samples must be a positive integer.")
     limit = min(limit, len(dataset))
+    lengths = list(dataset["_token_length"])
     groups: dict[str, list[int]] = {}
-    for index in range(len(dataset)):
-        source = dataset[index].get("source") or {}
-        environment = str(source.get("environment", "unknown"))
+    for index, source in enumerate(dataset["source"]):
+        environment = str((source or {}).get("environment", "unknown"))
         groups.setdefault(environment, []).append(index)
 
     exact_quotas = {
@@ -460,7 +461,7 @@ def _select_stratified_by_environment_and_length(
     for environment in sorted(groups):
         indices = sorted(
             groups[environment],
-            key=lambda index: (int(dataset[index]["_token_length"]), index),
+            key=lambda index: (int(lengths[index]), index),
         )
         quota = quotas[environment]
         if quota == 0:
@@ -497,11 +498,16 @@ def _benchmark_sample_manifest(dataset: Dataset) -> JsonObject:
     """Return a portable identity for the exact ordered benchmark sample."""
     records = [
         {
-            "id": str(dataset[index]["id"]),
-            "token_length": int(dataset[index]["_token_length"]),
-            "supervised_tokens": int(dataset[index]["_supervised_tokens"]),
+            "id": str(record_id),
+            "token_length": int(token_length),
+            "supervised_tokens": int(supervised_tokens),
         }
-        for index in range(len(dataset))
+        for record_id, token_length, supervised_tokens in zip(
+            dataset["id"],
+            dataset["_token_length"],
+            dataset["_supervised_tokens"],
+            strict=True,
+        )
     ]
     ids = [record["id"] for record in records]
     return {
@@ -790,32 +796,28 @@ def _apply_overlength_policy(
         return dataset, [], []
 
     limit = int(max_length)
-    excluded: list[JsonObject] = []
-    supervision: list[JsonObject] = []
-    retained_indices: list[int] = []
-    for index, example in enumerate(dataset):
-        token_length = int(example["_token_length"])
-        if token_length <= limit:
-            retained_indices.append(index)
-            continue
-        excluded.append(
-            {
-                "id": str(example.get("id", f"{split}:{index}")),
-                "split": split,
-                "token_length": token_length,
-                "max_length": limit,
-            }
-        )
-        masks = example["assistant_masks"]
-        supervision.append(
-            {
-                "supervised_tokens": sum(masks),
-                "supervised_tokens_kept": sum(masks[:limit]),
-            }
-        )
-
-    if not excluded:
+    # Every row carries its token IDs and masks: read single columns, and masks only
+    # for the overlength rows.
+    lengths = list(dataset["_token_length"])
+    retained_indices = [
+        index for index, length in enumerate(lengths) if length <= limit
+    ]
+    if len(retained_indices) == len(dataset):
         return dataset, [], []
+    overlength = dataset.select(
+        [index for index, length in enumerate(lengths) if length > limit]
+    )
+    excluded = [
+        {
+            "id": str(record_id),
+            "split": split,
+            "token_length": int(token_length),
+            "max_length": limit,
+        }
+        for record_id, token_length in zip(
+            overlength["id"], overlength["_token_length"], strict=True
+        )
+    ]
     if not exclude_overlength:
         if error_on_truncation:
             longest = max(item["token_length"] for item in excluded)
@@ -826,7 +828,12 @@ def _apply_overlength_policy(
                 "to cut such traces from the end."
             )
         truncated = [
-            {**item, **kept} for item, kept in zip(excluded, supervision, strict=True)
+            {
+                **item,
+                "supervised_tokens": sum(masks),
+                "supervised_tokens_kept": sum(masks[:limit]),
+            }
+            for item, masks in zip(excluded, overlength["assistant_masks"], strict=True)
         ]
         return dataset, [], truncated
     if not retained_indices:
