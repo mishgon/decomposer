@@ -72,6 +72,39 @@ schemas as `sft_format`; historical traces without them need those inputs suppli
 explicitly through the Python API. This branch does not change the training code
 maintained on the separate `sft` branch.
 
+### Integration Into SFT Training
+
+The inspected SFT revision (`83f1bf34`, retained as `origin/sft` locally) has
+`training/sft/train.py::_tokenization_stats`, which receives a prepared row with
+`messages`, `tools` and `chat_template_kwargs`. That branch is no longer advertised
+by GitLab; confirm the equivalent location in the trainer's current checkout.
+Replace only its `tokenizer.apply_chat_template(...)` call with:
+
+```python
+from sft.filtering import tokenize_student
+
+encoded = tokenize_student(
+    example,
+    tokenizer=tokenizer,
+    training_template=training_template,
+    return_assistant_tokens_mask=True,
+)
+```
+
+Keep its assistant-mask validation, `_token_length = len(encoded['input_ids'])`,
+dataset statistics and `_apply_overlength_policy` unchanged. Set training's
+`max_length` to `32768` and enable `exclude_overlength`. Exactly 32,768 tokens
+are allowed; longer examples are excluded rather than truncated.
+
+Both collection and this replacement use the same tokenization function.
+Training retains control of message preparation, reasoning settings and its
+assistant-mask template. Matching counts also requires the same student
+tokenizer, system prompt, tool schemas and rendered messages. A different
+training template or preprocessing can change lengths; verify token-ID equality
+on a saved example before treating the collection count as the training count.
+The raw-trace CLI deliberately checks the recorded template hash, while the
+prepared-row function accepts the trainer's explicit template.
+
 ## Coverage Policy
 
 Each wave launches one attempt per task with no qualifying trace. A native pass

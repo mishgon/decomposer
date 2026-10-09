@@ -12,6 +12,22 @@ from langchain_core.utils.function_calling import convert_to_openai_tool
 MAX_SEQUENCE_LENGTH = 32768
 
 
+def tokenize_student(example, *, tokenizer, training_template=None,
+                     return_assistant_tokens_mask=False):
+    """Tokenize a prepared SFT row without truncation, padding or a generation prompt.
+
+    Accepts the training pipeline's messages/tools/chat_template_kwargs schema.
+    Keep message preparation and assistant-mask validation in the caller.
+    """
+    kwargs = {'enable_thinking': False, 'preserve_thinking': False,
+              **(example.get('chat_template_kwargs') or {})}
+    return tokenizer.apply_chat_template(
+        example['messages'], tools=example.get('tools'),
+        chat_template=training_template, tokenize=True, return_dict=True,
+        return_assistant_tokens_mask=return_assistant_tokens_mask,
+        add_generation_prompt=False, truncation=False, padding=False, **kwargs)
+
+
 def student_messages(messages, system_message=None):
     normalized = []
     for message in messages:
@@ -62,10 +78,9 @@ class StudentSequenceFilter:
         from langchain_core.messages import SystemMessage
         system = SystemMessage(format['system_message']) if format['system_message'] is not None else None
         rows = student_messages(messages, system)
-        ids = self.tokenizer.apply_chat_template(rows, tools=format['tools'] or None,
-            tokenize=True, return_dict=False, add_generation_prompt=False,
-            enable_thinking=False, preserve_thinking=False)
-        return SequenceCheck(len(ids), self.limit)
+        encoded = tokenize_student({'messages': rows, 'tools': format['tools'] or None},
+                                   tokenizer=self.tokenizer)
+        return SequenceCheck(len(encoded['input_ids']), self.limit)
 
 
 def main():

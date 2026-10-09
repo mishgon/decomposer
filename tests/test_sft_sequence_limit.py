@@ -9,7 +9,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, mess
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langgraph.checkpoint.memory import InMemorySaver
 
-from sft.filtering import StudentSequenceFilter, student_messages
+from sft.filtering import StudentSequenceFilter, student_messages, tokenize_student
 from sft.sequence_limit import StudentSequenceLimit
 
 
@@ -45,7 +45,35 @@ class Tokenizer:
 
     def apply_chat_template(self, messages, **kwargs):
         self.messages, self.kwargs = messages, kwargs
-        return range(self.count)
+        return {'input_ids': range(self.count)}
+
+
+def test_prepared_training_row_preserves_template_masks_and_reasoning_settings():
+    from copy import deepcopy
+    example = {'messages': [{'role': 'user', 'content': 'task'},
+                            {'role': 'assistant', 'content': 'answer'}],
+               'tools': [], 'chat_template_kwargs': {
+                   'enable_thinking': False, 'preserve_thinking': False}}
+    original = deepcopy(example)
+
+    class TrainingTokenizer(Tokenizer):
+        def apply_chat_template(self, messages, **kwargs):
+            encoded = super().apply_chat_template(messages, **kwargs)
+            encoded['assistant_masks'] = [0, 1]
+            return encoded
+
+    tokenizer = TrainingTokenizer(2)
+    encoded = tokenize_student(example, tokenizer=tokenizer,
+                               training_template='training-template',
+                               return_assistant_tokens_mask=True)
+    assert len(encoded['input_ids']) == 2
+    assert sum(encoded['assistant_masks']) == 1
+    assert tokenizer.kwargs == {
+        'tools': [], 'chat_template': 'training-template', 'tokenize': True,
+        'return_dict': True, 'return_assistant_tokens_mask': True,
+        'add_generation_prompt': False, 'truncation': False, 'padding': False,
+        'enable_thinking': False, 'preserve_thinking': False}
+    assert example == original
 
 
 def test_skip_is_terminal_but_never_successful(tmp_path):
@@ -153,6 +181,13 @@ def test_real_student_template_and_raw_serialization():
     assert count == checker.check([message_to_dict(m) for m in messages], format).tokens
     assert count == checker.check([m.model_dump(mode='json') for m in messages], format).tokens
     plain = student_messages(messages, SystemMessage('system'))
+    prepared = {'messages': plain, 'tools': tools, 'chat_template_kwargs': {
+        'enable_thinking': False, 'preserve_thinking': False}}
+    shared = tokenize_student(prepared, tokenizer=tokenizer)
+    assert count == len(shared['input_ids'])
+    assert shared['input_ids'] == tokenizer.apply_chat_template(
+        plain, tools=tools, tokenize=True, return_dict=False,
+        add_generation_prompt=False, enable_thinking=False, preserve_thinking=False)
     assert count == len(tokenizer.apply_chat_template(plain, tools=tools, tokenize=True,
         return_dict=False, add_generation_prompt=False, enable_thinking=False, preserve_thinking=False))
     messages[-1] = AIMessage('answer')
