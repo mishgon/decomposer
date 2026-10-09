@@ -338,7 +338,6 @@ def _logical_spec(spec: BuildSpec) -> JsonObject:
                 "sampling",
                 "expected_native_rollouts",
                 "expected_candidates",
-                "require_completed_run",
             }
         )
     logical_sources = [

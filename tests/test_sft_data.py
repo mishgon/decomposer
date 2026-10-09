@@ -1309,6 +1309,15 @@ def test_v2_without_subagent_types_keeps_each_source_native_schema(
     assert prepared.manifest["policy"]["system_prompt_profile"] == "teacher"
 
 
+def test_each_source_must_use_one_tool_schema(tmp_path: Path) -> None:
+    changed = _rollout(1)
+    changed["response"]["tools"][0]["description"] = "A different teacher schema."
+    source = _source(tmp_path, "teacher", [_rollout(0), changed])
+
+    with pytest.raises(ValueError, match="Expected one consistent tool schema"):
+        _prepare_fixture_dataset([source], tmp_path / "prepared")
+
+
 def test_invalid_policy_error_reports_source_line(tmp_path: Path) -> None:
     rollouts = [_rollout(0), _rollout(1)]
     rollouts[1]["final_state"]["messages"][2]["tool_call_id"] = "unknown"
@@ -1585,12 +1594,12 @@ def test_strict_tool_call_validation_in_error_mode(
         )
 
 
-# Specs that still pin a tokenizer predate tokenizer-free releases and load only
-# at the commits that built them.
+# Specs before spec_version 4 are records of older releases; they build only at
+# the commits that built them.
 SFT_SPEC_PATHS = sorted(
     path
     for path in Path(__file__).resolve().parents[1].glob("sft/**/specs/*.yaml")
-    if "tokenization" not in yaml.safe_load(path.read_text())
+    if yaml.safe_load(path.read_text())["spec_version"] == 4
 )
 
 

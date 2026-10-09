@@ -17,13 +17,7 @@ from decomposer.prompts import EARLY_RESPONSE_ERROR, EMPTY_RESPONSE_ERROR
 JsonObject = dict[str, Any]
 InvalidPolicy = Literal["exclude", "error"]
 SourcePartition = Literal["train", "validation", "test"]
-SelectionPolicy = Literal[
-    "exact_reward",
-    "all_rewards",
-    "toolathlon_pass_or_quality",
-    "toolathlon_pass_or_quality_inclusive",
-    "collector_qualifies",
-]
+SelectionPolicy = Literal["exact_reward", "all_rewards", "collector_qualifies"]
 
 CANONICAL_SCHEMA_VERSION = 1
 MANIFEST_FORMAT_VERSION = 3
@@ -176,8 +170,6 @@ class SourceSamplingSpec(StrictModel):
 class SourceSelectionSpec(StrictModel):
     policy: SelectionPolicy = "exact_reward"
     success_reward: float = 1.0
-    minimum_check_ratio_exclusive: float | None = None
-    minimum_check_ratio_inclusive: float | None = None
     # collector_qualifies keeps what the trace collector itself counted as a
     # success: a strict pass, or a score above this threshold.
     success_threshold: float | None = None
@@ -191,39 +183,6 @@ class SourceSelectionSpec(StrictModel):
 
     @model_validator(mode="after")
     def validate_quality_threshold(self) -> "SourceSelectionSpec":
-        if self.policy == "toolathlon_pass_or_quality":
-            threshold = self.minimum_check_ratio_exclusive
-            if threshold is None or not math.isfinite(threshold):
-                raise ValueError(
-                    "toolathlon_pass_or_quality requires a finite "
-                    "minimum_check_ratio_exclusive"
-                )
-            if not 0.0 <= threshold < 1.0:
-                raise ValueError(
-                    "minimum_check_ratio_exclusive must be at least 0 and less than 1"
-                )
-        elif self.minimum_check_ratio_exclusive is not None:
-            raise ValueError(
-                "minimum_check_ratio_exclusive is only valid for "
-                "toolathlon_pass_or_quality"
-            )
-        if self.policy == "toolathlon_pass_or_quality_inclusive":
-            threshold = self.minimum_check_ratio_inclusive
-            if threshold is None or not math.isfinite(threshold):
-                raise ValueError(
-                    "toolathlon_pass_or_quality_inclusive requires a finite "
-                    "minimum_check_ratio_inclusive"
-                )
-            if not 0.0 < threshold <= 1.0:
-                raise ValueError(
-                    "minimum_check_ratio_inclusive must be greater than 0 "
-                    "and at most 1"
-                )
-        elif self.minimum_check_ratio_inclusive is not None:
-            raise ValueError(
-                "minimum_check_ratio_inclusive is only valid for "
-                "toolathlon_pass_or_quality_inclusive"
-            )
         if self.policy == "collector_qualifies":
             threshold = self.success_threshold
             if threshold is None or not math.isfinite(threshold):
@@ -265,7 +224,6 @@ class SourceSpec(StrictModel):
     teacher: str
     trace_format: Literal[
         "native",
-        "toolathlon_legacy_unversioned",
         "toolathlon_langgraph_v1",
         "wideseek_langgraph_v1",
     ] = "native"
@@ -278,7 +236,6 @@ class SourceSpec(StrictModel):
     selection: SourceSelectionSpec | None = None
     expected_native_rollouts: int | None = None
     expected_candidates: int | None = None
-    require_completed_run: bool = False
 
     @field_validator("id")
     @classmethod
@@ -323,19 +280,11 @@ class SourceSpec(StrictModel):
 
     @model_validator(mode="after")
     def validate_adapter_options(self) -> "SourceSpec":
-        if (
-            self.trace_format == "toolathlon_legacy_unversioned"
-            and self.adapter != "toolathlon_gym"
+        if (self.trace_format == "toolathlon_langgraph_v1") != (
+            self.adapter == "toolathlon_gym"
         ):
             raise ValueError(
-                "toolathlon_legacy_unversioned is only valid for Toolathlon sources"
-            )
-        if (
-            self.trace_format == "toolathlon_langgraph_v1"
-            and self.adapter != "toolathlon_gym"
-        ):
-            raise ValueError(
-                "toolathlon_langgraph_v1 is only valid for Toolathlon sources"
+                "Toolathlon sources, and only they, use toolathlon_langgraph_v1"
             )
         if (self.trace_format == "wideseek_langgraph_v1") != (
             self.adapter == "wideseek"
@@ -352,20 +301,6 @@ class SourceSpec(StrictModel):
             )
         if self.sampling is not None and self.adapter != "nemo_gym":
             raise ValueError("source task sampling is only supported for NeMo Gym")
-        if self.require_completed_run and self.adapter != "toolathlon_gym":
-            raise ValueError("require_completed_run is only valid for Toolathlon")
-        if (
-            self.selection is not None
-            and self.selection.policy
-            in {
-                "toolathlon_pass_or_quality",
-                "toolathlon_pass_or_quality_inclusive",
-            }
-            and self.adapter != "toolathlon_gym"
-        ):
-            raise ValueError(
-                "toolathlon_pass_or_quality is only valid for Toolathlon sources"
-            )
         if self.sampling is not None and self.expected_native_rollouts is not None:
             expected = (
                 self.sampling.expected_tasks * self.sampling.expected_rollouts_per_task
@@ -440,7 +375,6 @@ class BuildSpec(StrictModel):
                 or source.sampling is not None
                 or source.expected_native_rollouts is not None
                 or source.expected_candidates is not None
-                or source.require_completed_run
                 or source.selection is not None
                 for source in self.sources
             ):
@@ -478,12 +412,7 @@ class BuildSpec(StrictModel):
             if self.spec_version < 4 and source.snapshot is not None:
                 raise ValueError("source snapshots require spec_version 4")
         if self.spec_version < 3 and (
-            self.selection.policy
-            in {
-                "toolathlon_pass_or_quality",
-                "toolathlon_pass_or_quality_inclusive",
-                "collector_qualifies",
-            }
+            self.selection.policy == "collector_qualifies"
             or any(source.selection is not None for source in self.sources)
         ):
             raise ValueError("source-specific selection requires spec_version 3")
@@ -493,17 +422,6 @@ class BuildSpec(StrictModel):
                 if source.selection is not None
                 else self.selection.policy
             )
-            if (
-                effective_policy
-                in {
-                    "toolathlon_pass_or_quality",
-                    "toolathlon_pass_or_quality_inclusive",
-                }
-                and source.adapter != "toolathlon_gym"
-            ):
-                raise ValueError(
-                    "toolathlon_pass_or_quality is only valid for Toolathlon sources"
-                )
             if (effective_policy == "collector_qualifies") != (
                 source.trace_format in COLLECTION_TRACE_FORMATS
             ):
