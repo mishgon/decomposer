@@ -268,33 +268,6 @@ def _allocate_prompt_fixed_split(
     )
 
 
-def _preserve_source_split(
-    records: Sequence[CanonicalRollout],
-) -> tuple[list[CanonicalRollout], list[CanonicalRollout], JsonObject]:
-    train = [record for record in records if record.source.partition == "train"]
-    validation = [
-        record for record in records if record.source.partition == "validation"
-    ]
-    train_groups = {record.group_id for record in train}
-    validation_groups = {record.group_id for record in validation}
-    overlap = train_groups & validation_groups
-    if overlap:
-        raise ValueError(
-            "Source partitions leak task groups across train and validation: "
-            + ", ".join(sorted(overlap)[:5])
-        )
-    return (
-        train,
-        validation,
-        {
-            "strategy": "preserve",
-            "group_key": "adapter-supplied stable task group ID",
-            "train_groups": len(train_groups),
-            "validation_groups": len(validation_groups),
-        },
-    )
-
-
 def _sort_records(records: Sequence[CanonicalRollout]) -> list[CanonicalRollout]:
     return sorted(
         records,
@@ -330,7 +303,6 @@ def _logical_spec(spec: BuildSpec) -> JsonObject:
         source_exclude.update(
             {
                 "trace_format",
-                "sampling",
                 "expected_native_rollouts",
                 "expected_candidates",
             }
@@ -339,7 +311,7 @@ def _logical_spec(spec: BuildSpec) -> JsonObject:
         source.model_dump(mode="json", exclude=source_exclude)
         for source in spec.sources
     ]
-    logical_split = spec.split.model_dump(mode="json", exclude_none=True)
+    logical_split = spec.split.model_dump(mode="json")
     logical = {
         "spec_version": spec.spec_version,
         "dataset": spec.dataset.model_dump(mode="json"),
@@ -476,18 +448,11 @@ def prepare_dataset(
         source_manifests.append(result.source_manifest)
         counts_by_source[source.id] = result.counts
 
-    train_candidates = [
-        record for record in records if record.source.partition == "train"
-    ]
-    retained_train, cap_exclusions = _apply_prompt_teacher_cap(
-        train_candidates,
+    retained, cap_exclusions = _apply_prompt_teacher_cap(
+        records,
         limit=spec.selection.max_traces_per_prompt_per_teacher,
         seed=spec.split.seed,
     )
-    retained = [
-        *retained_train,
-        *(record for record in records if record.source.partition == "validation"),
-    ]
     for source_manifest in source_manifests:
         source_id = str(source_manifest["id"])
         counts = counts_by_source[source_id]
@@ -522,18 +487,11 @@ def prepare_dataset(
     tool_schema_sha256s = sorted(
         {sha256_text(canonical_json(record.tools)) for record in retained}
     )
-    if spec.split.strategy == "prompt_fixed":
-        train_records, validation_records, split_manifest = (
-            _allocate_prompt_fixed_split(
-                retained,
-                validation_fraction=float(spec.split.validation_fraction),
-                seed=spec.split.seed,
-            )
-        )
-    else:
-        train_records, validation_records, split_manifest = _preserve_source_split(
-            retained
-        )
+    train_records, validation_records, split_manifest = _allocate_prompt_fixed_split(
+        retained,
+        validation_fraction=spec.split.validation_fraction,
+        seed=spec.split.seed,
+    )
     train_records = _sort_records(train_records)
     validation_records = _sort_records(validation_records)
 

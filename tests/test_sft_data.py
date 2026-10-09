@@ -573,7 +573,7 @@ def test_validator_accepts_parallel_calls_and_requires_every_result() -> None:
         _chat_result("wait", "wait-1", "[]"),
         _chat_turn("Done."),
     ]
-    validate_decomposer_messages(messages, subagent_type_ids=frozenset({"small"}))
+    validate_decomposer_messages(messages)
 
     missing = [*messages[:4], *messages[5:]]
     with pytest.raises(TraceValidationError, match="before tool results"):
@@ -696,64 +696,8 @@ def test_build_spec_is_strict_and_rejects_test_partitions(tmp_path: Path) -> Non
 
     raw.pop("unknown")
     path.write_text(yaml.safe_dump(raw))
-    with pytest.raises(ValidationError, match="test partitions"):
+    with pytest.raises(ValidationError, match="partition"):
         load_build_spec(path)
-
-
-def test_preserve_split_keeps_declared_source_partitions(tmp_path: Path) -> None:
-    train_source = _source(
-        tmp_path,
-        "teacher-train",
-        [_rollout(index) for index in range(5)],
-        [_materialized(index) for index in range(5)],
-    )
-    validation_source = _source(
-        tmp_path,
-        "teacher-validation",
-        [_rollout(index) for index in range(5, 10)],
-        [_materialized(index) for index in range(5, 10)],
-    )
-    spec = BuildSpec(
-        spec_version=1,
-        dataset=DatasetIdentity(id="preserved", version="v3"),
-        policy=PolicySpec(id="decomposer-default"),
-        sources=(
-            SourceSpec(
-                id="train-source",
-                adapter="nemo_gym",
-                path=train_source,
-                benchmark="workplace_assistant",
-                environment="workplace",
-                partition="train",
-                teacher="teacher-train",
-            ),
-            SourceSpec(
-                id="validation-source",
-                adapter="nemo_gym",
-                path=validation_source,
-                benchmark="workplace_assistant",
-                environment="workplace",
-                partition="validation",
-                teacher="teacher-validation",
-            ),
-        ),
-        selection=SelectionSpec(),
-        split=SplitSpec(strategy="preserve", seed=42),
-    )
-    prepared = prepare_dataset(
-        LoadedBuildSpec(path=tmp_path / "spec.yaml", sha256="2" * 64, spec=spec),
-        tmp_path / "datasets",
-        git_revision="test-revision",
-        require_clean_git=False,
-    )
-    assert {
-        record["source"]["partition"] for record in _read_jsonl(prepared.train_path)
-    } == {"train"}
-    assert {
-        record["source"]["partition"]
-        for record in _read_jsonl(prepared.validation_path)
-    } == {"validation"}
-    assert prepared.manifest["split"]["strategy"] == "preserve"
 
 
 def test_training_manifest_validation_checks_prepared_file_hashes(
@@ -936,6 +880,10 @@ def test_prepare_excludes_malformed_successful_traces_by_reason(tmp_path: Path) 
     filtering = prepared.manifest["filtering"]
     # rollouts[4]'s argument-less `new` is a mistake the core answers, so it stays.
     assert filtering["included"] == 2
+    assert filtering["excluded_malformed"] == 8
+    assert filtering["excluded_malformed_by_source"] == {"teacher": 8}
+    source_manifest = prepared.manifest["sources"][0]
+    assert source_manifest["native_rollouts"] == source_manifest["candidate_rollouts"] == 11
     assert filtering["excluded_invalid_agent_ref"] == 1
     assert filtering["excluded_missing_final_state"] == 1
     assert filtering["excluded_empty_training_target"] == 1
@@ -1327,99 +1275,6 @@ def test_prompt_teacher_cap_is_deterministic_and_keeps_split_groups(
     )
 
 
-def test_v2_samples_before_validation_and_keeps_all_rewards(tmp_path: Path) -> None:
-    source_id = "teacher"
-    rollouts = [
-        _rollout(
-            task_index,
-            rollout_index=rollout_index,
-            reward=0.0 if task_index == 0 else 1.0,
-        )
-        for task_index in range(3)
-        for rollout_index in range(3)
-    ]
-    materialized = [
-        _materialized(task_index, rollout_index=rollout_index)
-        for task_index in range(3)
-        for rollout_index in range(3)
-    ]
-
-    def selected_rollout(task_index: int) -> int:
-        return min(
-            range(3),
-            key=lambda rollout_index: sha256_text(
-                "42\0nemo_gym:workplace_assistant:"
-                f"{source_id}:{task_index}:{rollout_index}"
-            ),
-        )
-
-    selected_invalid = next(
-        rollout
-        for rollout in rollouts
-        if rollout["_ng_task_index"] == 1
-        and rollout["_ng_rollout_index"] == selected_rollout(1)
-    )
-    selected_invalid["final_state"]["messages"][1]["tool_calls"][0]["args"] = "{"
-    unselected_invalid = next(
-        rollout
-        for rollout in rollouts
-        if rollout["_ng_task_index"] == 2
-        and rollout["_ng_rollout_index"] != selected_rollout(2)
-    )
-    unselected_invalid["final_state"] = None
-
-    source = _source(tmp_path, source_id, rollouts, materialized)
-    spec = BuildSpec(
-        spec_version=2,
-        dataset=DatasetIdentity(id="sample-before-filter", version="v1"),
-        policy=PolicySpec(id="decomposer-default"),
-        sources=(
-            SourceSpec(
-                id=source_id,
-                adapter="nemo_gym",
-                path=source,
-                benchmark="workplace_assistant",
-                environment="workplace",
-                partition="train",
-                teacher="teacher",
-                sampling={
-                    "strategy": "task_hash",
-                    "seed": 42,
-                    "max_per_task": 1,
-                    "expected_tasks": 3,
-                    "expected_rollouts_per_task": 3,
-                },
-                expected_native_rollouts=9,
-                expected_candidates=3,
-            ),
-        ),
-        selection=SelectionSpec(policy="all_rewards"),
-        split=SplitSpec(strategy="prompt_fixed", validation_fraction=0.5, seed=42),
-    )
-    prepared = prepare_dataset(
-        LoadedBuildSpec(path=tmp_path / "spec.yaml", sha256="2" * 64, spec=spec),
-        tmp_path / "datasets",
-        git_revision="test-revision",
-        require_clean_git=False,
-    )
-    records = _read_jsonl(prepared.train_path) + _read_jsonl(prepared.validation_path)
-    assert len(records) == 2
-    assert {record["outcome"]["success"] for record in records} == {False, True}
-    assert {record["outcome"]["reward"] for record in records} == {0.0, 1.0}
-    assert all(record["tools"] == records[0]["tools"] for record in records)
-    filtering = prepared.manifest["filtering"]
-    assert filtering["rollouts"] == 3
-    assert filtering["excluded_reward"] == 0
-    assert filtering["excluded_malformed"] == 1
-    assert filtering["excluded_malformed_by_source"] == {source_id: 1}
-    assert filtering["excluded_invalid_tool_calls"] == 1
-    assert filtering["included"] == 2
-    source_manifest = prepared.manifest["sources"][0]
-    assert source_manifest["native_rollouts"] == 9
-    assert source_manifest["candidate_rollouts"] == 3
-    assert source_manifest["sampling"]["not_selected"] == 6
-
-
 def test_prepare_refuses_overwrite_and_bad_materialized_source(tmp_path: Path) -> None:
     source = _source(tmp_path, "teacher")
     output = tmp_path / "prepared"
@@ -1469,7 +1324,7 @@ def test_prepare_refuses_overwrite_and_bad_materialized_source(tmp_path: Path) -
         ),
     ],
 )
-def test_strict_tool_call_validation_in_error_mode(
+def test_malformed_tool_calls_raise_in_error_mode(
     tmp_path: Path, mutation: Callable[[dict], None], match: str
 ) -> None:
     rollout = _rollout(0)

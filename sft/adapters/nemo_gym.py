@@ -101,90 +101,6 @@ def _count_nonempty_lines(path: Path) -> int:
         return sum(bool(line.strip()) for line in file)
 
 
-def _sample_rollout_line_numbers(
-    path: Path,
-    source: SourceSpec,
-) -> tuple[set[int], JsonObject]:
-    sampling = source.sampling
-    if sampling is None:
-        raise AssertionError("Sampling configuration is required.")
-    groups: dict[int, list[tuple[int, int, str]]] = {}
-    with path.open(encoding="utf-8") as file:
-        for line_number, line in enumerate(file, start=1):
-            if not line.strip():
-                continue
-            try:
-                rollout = json.loads(line)
-            except json.JSONDecodeError as error:
-                raise ValueError(
-                    f"Cannot sample malformed JSON in {path} at line {line_number}: "
-                    f"{error}"
-                ) from error
-            if not isinstance(rollout, Mapping):
-                raise ValueError(
-                    f"Cannot sample a non-object rollout in {path} at line "
-                    f"{line_number}."
-                )
-            task_index = rollout.get("_ng_task_index")
-            rollout_index = rollout.get("_ng_rollout_index")
-            if (
-                not isinstance(task_index, int)
-                or isinstance(task_index, bool)
-                or not isinstance(rollout_index, int)
-                or isinstance(rollout_index, bool)
-            ):
-                raise ValueError(
-                    f"Cannot sample invalid task/rollout indices in {path} at "
-                    f"line {line_number}."
-                )
-            native_id = (
-                f"nemo_gym:{source.benchmark}:{source.id}:"
-                f"{task_index}:{rollout_index}"
-            )
-            groups.setdefault(task_index, []).append(
-                (rollout_index, line_number, native_id)
-            )
-
-    if len(groups) != sampling.expected_tasks:
-        raise ValueError(
-            f"Source {source.id!r} expected {sampling.expected_tasks} tasks before "
-            f"sampling, found {len(groups)}."
-        )
-    selected: set[int] = set()
-    for task_index, candidates in groups.items():
-        rollout_indices = [rollout_index for rollout_index, _, _ in candidates]
-        if (
-            len(candidates) != sampling.expected_rollouts_per_task
-            or len(rollout_indices) != len(set(rollout_indices))
-        ):
-            raise ValueError(
-                f"Source {source.id!r} task {task_index} expected "
-                f"{sampling.expected_rollouts_per_task} unique rollouts, found "
-                f"{len(candidates)}."
-            )
-        ranked = sorted(
-            candidates,
-            key=lambda item: sha256_text(f"{sampling.seed}\0{item[2]}"),
-        )
-        selected.update(
-            line_number
-            for _rollout_index, line_number, _native_id in ranked[
-                : sampling.max_per_task
-            ]
-        )
-    native_rollouts = sum(len(candidates) for candidates in groups.values())
-    return selected, {
-        "strategy": sampling.strategy,
-        "seed": sampling.seed,
-        "max_per_task": sampling.max_per_task,
-        "tasks": len(groups),
-        "expected_rollouts_per_task": sampling.expected_rollouts_per_task,
-        "native_rollouts": native_rollouts,
-        "candidates": len(selected),
-        "not_selected": native_rollouts - len(selected),
-    }
-
-
 def _empty_counts() -> Counter[str]:
     return Counter({reason: 0 for reason in EXCLUSION_REASONS})
 
@@ -228,34 +144,18 @@ def read_nemo_gym_source(
             f"Source {source.id!r} expected {source.expected_native_rollouts} "
             f"native rollouts, found {native_rollouts}."
         )
-    selected_line_numbers: set[int] | None = None
-    sampling_manifest: JsonObject | None = None
-    if source.sampling is not None:
-        selected_line_numbers, sampling_manifest = _sample_rollout_line_numbers(
-            rollouts_path, source
-        )
-    candidate_rollouts = (
-        native_rollouts
-        if selected_line_numbers is None
-        else len(selected_line_numbers)
-    )
     if (
         source.expected_candidates is not None
-        and candidate_rollouts != source.expected_candidates
+        and native_rollouts != source.expected_candidates
     ):
         raise ValueError(
             f"Source {source.id!r} expected {source.expected_candidates} "
-            f"candidate rollouts, found {candidate_rollouts}."
+            f"candidate rollouts, found {native_rollouts}."
         )
 
     with rollouts_path.open(encoding="utf-8") as file:
         for line_number, line in enumerate(file, start=1):
             if not line.strip():
-                continue
-            if (
-                selected_line_numbers is not None
-                and line_number not in selected_line_numbers
-            ):
                 continue
             counts["rollouts"] += 1
             try:
@@ -278,10 +178,7 @@ def read_nemo_gym_source(
                     raise TraceValidationError(
                         "excluded_invalid_reward", "A rollout reward must be numeric."
                     )
-                if (
-                    selection.policy == "exact_reward"
-                    and numeric_reward != selection.success_reward
-                ):
+                if numeric_reward != selection.success_reward:
                     counts["excluded_reward"] += 1
                     continue
 
@@ -376,7 +273,7 @@ def read_nemo_gym_source(
                             rollout_id=str(rollout_index),
                         ),
                         outcome=CanonicalOutcome(
-                            success=numeric_reward == selection.success_reward,
+                            success=True,
                             reward=numeric_reward,
                             metrics={"reward": numeric_reward},
                         ),
@@ -426,8 +323,7 @@ def read_nemo_gym_source(
             "locator": str(source_dir),
             "files": files,
             "native_rollouts": native_rollouts,
-            "candidate_rollouts": candidate_rollouts,
-            "sampling": sampling_manifest,
+            "candidate_rollouts": native_rollouts,
             "materialized_records": len(materialized),
             "sidecar_failure_records": _count_nonempty_lines(failures_path),
             "tool_schema_origin": "response.tools",

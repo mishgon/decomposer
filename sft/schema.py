@@ -16,8 +16,8 @@ from decomposer.prompts import EARLY_RESPONSE_ERROR, EMPTY_RESPONSE_ERROR
 
 JsonObject = dict[str, Any]
 InvalidPolicy = Literal["exclude", "error"]
-SourcePartition = Literal["train", "validation", "test"]
-SelectionPolicy = Literal["exact_reward", "all_rewards", "collector_qualifies"]
+SourcePartition = Literal["train"]
+SelectionPolicy = Literal["exact_reward", "collector_qualifies"]
 
 CANONICAL_SCHEMA_VERSION = 1
 MANIFEST_FORMAT_VERSION = 3
@@ -140,29 +140,6 @@ class PolicySpec(StrictModel):
         return "teacher"
 
 
-class SourceSamplingSpec(StrictModel):
-    strategy: Literal["task_hash"] = "task_hash"
-    seed: int = 42
-    max_per_task: int = 1
-    expected_tasks: int
-    expected_rollouts_per_task: int
-
-    @field_validator("max_per_task", "expected_tasks", "expected_rollouts_per_task")
-    @classmethod
-    def validate_positive(cls, value: int) -> int:
-        if isinstance(value, bool) or value <= 0:
-            raise ValueError("source sampling counts must be positive integers")
-        return value
-
-    @model_validator(mode="after")
-    def validate_limit(self) -> "SourceSamplingSpec":
-        if self.max_per_task > self.expected_rollouts_per_task:
-            raise ValueError(
-                "sampling.max_per_task must not exceed expected_rollouts_per_task"
-            )
-        return self
-
-
 class SourceSelectionSpec(StrictModel):
     policy: SelectionPolicy = "exact_reward"
     success_reward: float = 1.0
@@ -227,7 +204,6 @@ class SourceSpec(StrictModel):
     # manager. Its traces store no tool schemas, so the builder rebuilds them
     # from these types with the Decomposer core.
     native_subagent_types: tuple[SubagentInterfaceSpec, ...] = ()
-    sampling: SourceSamplingSpec | None = None
     selection: SourceSelectionSpec | None = None
     expected_native_rollouts: int | None = None
     expected_candidates: int | None = None
@@ -281,42 +257,20 @@ class SourceSpec(StrictModel):
                 "toolathlon_langgraph_v1 sources, and only they, declare "
                 "native_subagent_types"
             )
-        if self.sampling is not None and self.adapter != "nemo_gym":
-            raise ValueError("source task sampling is only supported for NeMo Gym")
-        if self.sampling is not None and self.expected_native_rollouts is not None:
-            expected = (
-                self.sampling.expected_tasks * self.sampling.expected_rollouts_per_task
-            )
-            if self.expected_native_rollouts != expected:
-                raise ValueError(
-                    "expected_native_rollouts must match the sampling task layout"
-                )
-        if self.sampling is not None and self.expected_candidates is not None:
-            expected = self.sampling.expected_tasks * self.sampling.max_per_task
-            if self.expected_candidates != expected:
-                raise ValueError(
-                    "expected_candidates must match the sampling task layout"
-                )
         return self
 
 
 class SplitSpec(StrictModel):
-    strategy: Literal["prompt_fixed", "preserve"]
+    strategy: Literal["prompt_fixed"]
     seed: int = 42
-    validation_fraction: float | None = None
+    validation_fraction: float
 
     @model_validator(mode="after")
-    def validate_strategy(self) -> "SplitSpec":
-        if self.strategy == "prompt_fixed":
-            if (
-                self.validation_fraction is None
-                or not 0.0 < self.validation_fraction < 1.0
-            ):
-                raise ValueError(
-                    "prompt_fixed split requires validation_fraction strictly between 0 and 1"
-                )
-        elif self.validation_fraction is not None:
-            raise ValueError("preserve split must not set validation_fraction")
+    def validate_fraction(self) -> "SplitSpec":
+        if not 0.0 < self.validation_fraction < 1.0:
+            raise ValueError(
+                "prompt_fixed split requires validation_fraction strictly between 0 and 1"
+            )
         return self
 
 
@@ -335,21 +289,11 @@ class BuildSpec(StrictModel):
         ids = [source.id for source in self.sources]
         if len(ids) != len(set(ids)):
             raise ValueError("Dataset source IDs must be unique")
-        if any(source.partition == "test" for source in self.sources):
-            raise ValueError("SFT dataset builds must not include test partitions")
-        partitions = {source.partition for source in self.sources}
-        if self.split.strategy == "prompt_fixed" and partitions != {"train"}:
-            raise ValueError("prompt_fixed split accepts only train sources")
-        if self.split.strategy == "preserve" and not {"train", "validation"}.issubset(
-            partitions
-        ):
-            raise ValueError("preserve split requires train and validation sources")
         if self.spec_version == 1:
             if self.selection.policy != "exact_reward":
                 raise ValueError("spec_version 1 requires exact_reward selection")
             if any(
                 source.trace_format != "native"
-                or source.sampling is not None
                 or source.expected_native_rollouts is not None
                 or source.expected_candidates is not None
                 or source.selection is not None
@@ -406,7 +350,7 @@ class CanonicalSource(StrictModel):
     source_id: str
     benchmark: str
     environment: str
-    partition: Literal["train", "validation"]
+    partition: SourcePartition
     teacher: str
     task_id: str
     rollout_id: str
@@ -596,70 +540,15 @@ def validate_chat_tools(tools: Any) -> list[JsonObject]:
     return validated
 
 
-def _validate_call_arguments(
-    name: str,
-    arguments: Mapping[str, Any],
-    subagent_type_ids: frozenset[str],
-) -> None:
-    if name == "new":
-        type_id = arguments.get("agent_type_id")
-        if (
-            set(arguments) != {"agent_type_id"}
-            or not isinstance(type_id, str)
-            or not type_id.strip()
-        ):
-            raise TraceValidationError(
-                "excluded_invalid_tool_calls",
-                "new requires exactly one non-empty agent_type_id string.",
-            )
-        if subagent_type_ids and type_id not in subagent_type_ids:
-            raise TraceValidationError(
-                "excluded_invalid_tool_calls",
-                f"Unknown agent_type_id {type_id!r}.",
-            )
-    elif name == "fork":
-        if set(arguments) != {"agent_id"} or not isinstance(
-            arguments["agent_id"], str
-        ):
-            raise TraceValidationError(
-                "excluded_invalid_tool_calls",
-                "fork requires exactly one agent_id string.",
-            )
-    elif name == "run":
-        prompt = arguments.get("prompt")
-        if (
-            set(arguments) != {"agent_id", "prompt"}
-            or not isinstance(arguments["agent_id"], str)
-            or not isinstance(prompt, str)
-            or not prompt.strip()
-        ):
-            raise TraceValidationError(
-                "excluded_invalid_tool_calls",
-                "run requires an agent_id string and a non-empty prompt string.",
-            )
-    elif arguments:
-        raise TraceValidationError(
-            "excluded_invalid_tool_calls", "wait arguments must be empty."
-        )
-
-
-def validate_decomposer_messages(
-    messages: list[JsonObject],
-    *,
-    subagent_type_ids: frozenset[str] = frozenset(),
-    allow_core_errors: bool = False,
-) -> None:
+def validate_decomposer_messages(messages: list[JsonObject]) -> None:
     """Validate the benchmark-neutral Decomposer tool-calling trajectory.
 
-    ``subagent_type_ids``, when non-empty, lists the subagent types ``new`` may
-    create; otherwise any non-empty type ID is accepted.
-
-    ``allow_core_errors`` keeps the mistakes the core answered and the manager
-    recovered from: calls of any tool name with any arguments, which the core
-    rejects with an error result or runs ignoring extra arguments, and the user
-    messages the core injects (``CORE_USER_MESSAGES``), including the empty
-    answer that precedes ``EMPTY_RESPONSE_ERROR``. The structure is still
-    checked: one task, every call answered, and a final text answer.
+    It keeps the mistakes the core answered and the manager recovered from:
+    calls of any tool name with any arguments, which the core rejects with an
+    error result or runs ignoring extra arguments, and the user messages the
+    core injects (``CORE_USER_MESSAGES``), including the empty answer that
+    precedes ``EMPTY_RESPONSE_ERROR``. The structure is still checked: one task,
+    every call answered, and a final text answer.
     """
     if len(messages) < 3 or messages[0].get("role") != "system":
         raise TraceValidationError(
@@ -694,7 +583,7 @@ def validate_decomposer_messages(
                 f"Message {index} content must be a string.",
             )
         if role == "user":
-            injected = allow_core_errors and content in CORE_USER_MESSAGES
+            injected = content in CORE_USER_MESSAGES
             if (index != 1 and not injected) or pending:
                 raise TraceValidationError(
                     "excluded_invalid_messages",
@@ -714,8 +603,7 @@ def validate_decomposer_messages(
                     f"Assistant message {index} has invalid calls.",
                 )
             answered_empty = (
-                allow_core_errors
-                and index + 1 < len(messages)
+                index + 1 < len(messages)
                 and messages[index + 1].get("role") == "user"
                 and messages[index + 1].get("content") == EMPTY_RESPONSE_ERROR
             )
@@ -739,24 +627,18 @@ def validate_decomposer_messages(
                 name = function.get("name")
                 arguments = function.get("arguments")
                 reject_legacy_tool_name(name, f"Assistant message {index}")
-                known_name = (
-                    isinstance(name, str) and bool(name)
-                    if allow_core_errors
-                    else name in DECOMPOSER_TOOL_NAMES
-                )
                 if (
                     call.get("type") != "function"
                     or not isinstance(call_id, str)
                     or not call_id
-                    or not known_name
+                    or not isinstance(name, str)
+                    or not name
                     or not isinstance(arguments, Mapping)
                 ):
                     raise TraceValidationError(
                         "excluded_invalid_tool_calls",
                         f"Assistant message {index} has an invalid call.",
                     )
-                if not allow_core_errors:
-                    _validate_call_arguments(str(name), arguments, subagent_type_ids)
                 if call_id in seen_call_ids:
                     raise TraceValidationError(
                         "excluded_invalid_tool_calls",

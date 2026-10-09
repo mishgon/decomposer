@@ -161,5 +161,5 @@ def convert_langgraph_messages(messages: Any, system_prompt: str) -> list[JsonOb
         {"role": "system", "content": system_prompt},
         *[_convert_message(message, index) for index, message in enumerate(messages)],
     ]
-    validate_decomposer_messages(converted, allow_core_errors=True)
+    validate_decomposer_messages(converted)
     return converted
