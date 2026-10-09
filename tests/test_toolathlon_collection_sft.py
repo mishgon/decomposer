@@ -261,9 +261,9 @@ def test_collection_snapshot_copies_finished_episodes_exactly(
 def test_collection_must_match_its_expected_counts(tmp_path: Path) -> None:
     _collection(tmp_path)  # Four episodes have finished.
     with pytest.raises(ValueError, match="expected 5 native rollouts, found 4"):
-        _read(tmp_path, expected_native_rollouts=5)
-    with pytest.raises(ValueError, match="expected 5 candidate rollouts, found 4"):
-        _read(tmp_path, expected_candidates=5)
+        _read(tmp_path, expected_native_rollouts=5, expected_candidates=5)
+    with pytest.raises(ValidationError, match="expected_candidates must equal"):
+        _source(tmp_path, expected_candidates=5)
 
 
 def test_collection_format_requires_its_agent_types_and_selection(

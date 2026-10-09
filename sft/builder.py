@@ -19,6 +19,7 @@ import yaml
 
 from decomposer.prompt_profiles import resolve_decomposer_system_prompt
 
+from .adapters.base import empty_counts
 from .adapters.registry import ADAPTER_VERSIONS, ADAPTERS
 from .snapshots import (
     DEFAULT_SNAPSHOT_ROOT,
@@ -126,10 +127,6 @@ def _git_revision(
                 "repository."
             ) from error
     return revision
-
-
-def _empty_counts() -> Counter[str]:
-    return Counter({reason: 0 for reason in EXCLUSION_REASONS})
 
 
 def _serialized_counts(counts: Counter[str]) -> JsonObject:
@@ -440,7 +437,7 @@ def prepare_dataset(
         {record.group_id for record in validation_records}
     )
 
-    total_counts = _empty_counts()
+    total_counts = empty_counts()
     for counts in counts_by_source.values():
         total_counts.update(counts)
     _assert_filter_counts(total_counts, "all sources")

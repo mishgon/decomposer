@@ -12,33 +12,24 @@ from pathlib import Path
 
 from ..chat_tools import build_decomposer_chat_tools
 from ..schema import (
-    EXCLUSION_REASONS,
     CanonicalOutcome,
     CanonicalRollout,
-    CanonicalSource,
-    JsonObject,
     SelectionSpec,
     SourceSpec,
     TraceValidationError,
     validate_chat_tools,
 )
 from ..toolathlon_gym.scheduler import load_launch_outcome
-from .base import AdapterReadResult
+from .base import (
+    AdapterReadResult,
+    canonical_source,
+    check_native_rollouts,
+    empty_counts,
+    load_json,
+)
 from .langgraph_messages import convert_langgraph_messages
 
 ADAPTER_VERSION = 10
-
-
-def _empty_counts() -> Counter[str]:
-    return Counter({reason: 0 for reason in EXCLUSION_REASONS})
-
-
-def _load_json(path: Path) -> JsonObject:
-    with path.open(encoding="utf-8") as file:
-        value = json.load(file)
-    if not isinstance(value, dict):
-        raise TypeError(f"Expected {path} to contain a JSON object.")
-    return value
 
 
 def snapshot_files(source_dir: Path) -> list[str]:
@@ -97,19 +88,10 @@ def read_toolathlon_gym_source(
     )
     result_paths = sorted(source_dir.glob("evals/*/*/result.json"))
     native_rollouts = len(result_paths)
-    if native_rollouts != source.expected_native_rollouts:
-        raise ValueError(
-            f"Source {source.id!r} expected {source.expected_native_rollouts} "
-            f"native rollouts, found {native_rollouts}."
-        )
-    if native_rollouts != source.expected_candidates:
-        raise ValueError(
-            f"Source {source.id!r} expected {source.expected_candidates} "
-            f"candidate rollouts, found {native_rollouts}."
-        )
+    check_native_rollouts(source, native_rollouts)
 
     records: list[CanonicalRollout] = []
-    counts = _empty_counts()
+    counts = empty_counts()
     run_ids: set[str] = set()
     for result_path in result_paths:
         counts["rollouts"] += 1
@@ -117,7 +99,7 @@ def read_toolathlon_gym_source(
         episode_id = result_path.parent.name
         episode_dir = source_dir / "traces" / task / episode_id
         try:
-            result = _load_json(result_path)
+            result = load_json(result_path)
             if result.get("episode_id") != episode_id or result.get("task") != task:
                 raise TraceValidationError(
                     "excluded_invalid_metadata",
@@ -137,8 +119,8 @@ def read_toolathlon_gym_source(
                     "excluded_missing_materialized_input",
                     f"Missing runtime.json for {episode_id}.",
                 )
-            trace = _load_json(episode_dir / "trace.json")
-            runtime = _load_json(episode_dir / "runtime.json")
+            trace = load_json(episode_dir / "trace.json")
+            runtime = load_json(episode_dir / "runtime.json")
             run_id = trace.get("run_id")
             if (
                 trace.get("episode_id") != episode_id
@@ -215,14 +197,9 @@ def read_toolathlon_gym_source(
                     group_id=f"toolathlon_gym:{task}",
                     messages=messages,
                     tools=tools,
-                    source=CanonicalSource(
-                        adapter=source.adapter,
-                        adapter_version=ADAPTER_VERSION,
-                        source_id=source.id,
-                        benchmark=source.benchmark,
-                        environment=source.environment,
-                        partition=source.partition,
-                        teacher=source.teacher,
+                    source=canonical_source(
+                        source,
+                        ADAPTER_VERSION,
                         task_id=task,
                         rollout_id=f"{run_id}:r{repetition:03d}:a{attempt:03d}",
                     ),

@@ -9,18 +9,20 @@ from __future__ import annotations
 
 import json
 import math
-from collections import Counter
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
-from .base import AdapterReadResult
+from .base import (
+    AdapterReadResult,
+    canonical_source,
+    check_native_rollouts,
+    empty_counts,
+)
 from .langgraph_messages import convert_langgraph_messages
 from ..schema import (
-    EXCLUSION_REASONS,
     CanonicalOutcome,
     CanonicalRollout,
-    CanonicalSource,
     JsonObject,
     SelectionSpec,
     SourceSpec,
@@ -100,10 +102,6 @@ def _count_nonempty_lines(path: Path) -> int:
         return sum(bool(line.strip()) for line in file)
 
 
-def _empty_counts() -> Counter[str]:
-    return Counter({reason: 0 for reason in EXCLUSION_REASONS})
-
-
 def snapshot_files(source_dir: Path) -> list[str]:
     """The result files `read_nemo_gym_source` reads."""
     files = ["rollouts.jsonl", "rollouts_materialized_inputs.jsonl"]
@@ -131,18 +129,9 @@ def read_nemo_gym_source(
 
     materialized = _materialized_inputs(materialized_path)
     records: list[CanonicalRollout] = []
-    counts = _empty_counts()
+    counts = empty_counts()
     native_rollouts = _count_nonempty_lines(rollouts_path)
-    if native_rollouts != source.expected_native_rollouts:
-        raise ValueError(
-            f"Source {source.id!r} expected {source.expected_native_rollouts} "
-            f"native rollouts, found {native_rollouts}."
-        )
-    if native_rollouts != source.expected_candidates:
-        raise ValueError(
-            f"Source {source.id!r} expected {source.expected_candidates} "
-            f"candidate rollouts, found {native_rollouts}."
-        )
+    check_native_rollouts(source, native_rollouts)
 
     with rollouts_path.open(encoding="utf-8") as file:
         for line_number, line in enumerate(file, start=1):
@@ -252,14 +241,9 @@ def read_nemo_gym_source(
                         group_id=group_id,
                         messages=messages,
                         tools=tools,
-                        source=CanonicalSource(
-                            adapter=source.adapter,
-                            adapter_version=ADAPTER_VERSION,
-                            source_id=source.id,
-                            benchmark=source.benchmark,
-                            environment=source.environment,
-                            partition=source.partition,
-                            teacher=source.teacher,
+                        source=canonical_source(
+                            source,
+                            ADAPTER_VERSION,
                             task_id=str(task_index),
                             rollout_id=str(rollout_index),
                         ),

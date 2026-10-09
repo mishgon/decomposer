@@ -239,6 +239,9 @@ class SourceSpec(StrictModel):
                 "toolathlon_langgraph_v1 sources, and only they, declare "
                 "native_subagent_types"
             )
+        # Specs pin both counts, and every native rollout is a candidate.
+        if self.expected_candidates != self.expected_native_rollouts:
+            raise ValueError("expected_candidates must equal expected_native_rollouts")
         return self
 
 

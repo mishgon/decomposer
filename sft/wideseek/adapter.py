@@ -11,20 +11,23 @@ from __future__ import annotations
 
 import json
 import math
-from collections import Counter
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
 from decomposer.prompt_profiles import resolve_decomposer_system_prompt
 
-from ..adapters.base import AdapterReadResult
+from ..adapters.base import (
+    AdapterReadResult,
+    canonical_source,
+    check_native_rollouts,
+    empty_counts,
+    load_json,
+)
 from ..adapters.langgraph_messages import convert_langgraph_messages
 from ..schema import (
-    EXCLUSION_REASONS,
     CanonicalOutcome,
     CanonicalRollout,
-    CanonicalSource,
     JsonObject,
     SelectionSpec,
     SourceSpec,
@@ -33,14 +36,6 @@ from ..schema import (
 )
 
 ADAPTER_VERSION = 1
-
-
-def _load_json(path: Path) -> JsonObject:
-    with path.open(encoding="utf-8") as file:
-        value = json.load(file)
-    if not isinstance(value, dict):
-        raise TypeError(f"Expected {path} to contain a JSON object.")
-    return value
 
 
 def _qualifies(result: Mapping[str, Any], threshold: float) -> bool:
@@ -74,7 +69,7 @@ def _execution_dir(result_path: Path, result: Mapping[str, Any]) -> Path:
 def _first_manager_call(execution_dir: Path) -> tuple[Path, JsonObject] | None:
     first: tuple[float, str, Path, JsonObject] | None = None
     for path in execution_dir.glob("model_calls/*.json"):
-        call = _load_json(path)
+        call = load_json(path)
         if call.get("role") != "decomposer":
             continue
         started_at = call.get("started_at")
@@ -96,7 +91,7 @@ def snapshot_files(source_dir: Path) -> list[str]:
     """
     files: list[str] = []
     for result_path in sorted(source_dir.glob("decomposer/*/attempt-*/result.json")):
-        execution_dir = _execution_dir(result_path, _load_json(result_path))
+        execution_dir = _execution_dir(result_path, load_json(result_path))
         first = _first_manager_call(execution_dir)
         if first is None or not (execution_dir / "trace.json").is_file():
             continue
@@ -125,25 +120,16 @@ def read_wideseek_source(
     source_dir = source_dir.resolve()
     result_paths = sorted(source_dir.glob("decomposer/*/attempt-*/result.json"))
     native_rollouts = len(result_paths)
-    if native_rollouts != source.expected_native_rollouts:
-        raise ValueError(
-            f"Source {source.id!r} expected {source.expected_native_rollouts} "
-            f"native rollouts, found {native_rollouts}."
-        )
-    if native_rollouts != source.expected_candidates:
-        raise ValueError(
-            f"Source {source.id!r} expected {source.expected_candidates} "
-            f"candidate rollouts, found {native_rollouts}."
-        )
+    check_native_rollouts(source, native_rollouts)
 
     records: list[CanonicalRollout] = []
-    counts = Counter({reason: 0 for reason in EXCLUSION_REASONS})
+    counts = empty_counts()
     revisions: set[str] = set()
     for result_path in result_paths:
         counts["rollouts"] += 1
         task_id = result_path.parents[1].name
         try:
-            result = _load_json(result_path)
+            result = load_json(result_path)
             attempt = result.get("attempt")
             if (
                 result.get("task_id") != task_id
@@ -182,7 +168,7 @@ def read_wideseek_source(
                     "logged system prompt is not the teacher prompt."
                 )
             native_tools = validate_chat_tools(call.get("tools"))
-            trace = _load_json(execution_dir / "trace.json")
+            trace = load_json(execution_dir / "trace.json")
             messages = convert_langgraph_messages(trace.get("messages"), system_prompt)
             logged_tasks = [
                 message.get("content")
@@ -205,14 +191,9 @@ def read_wideseek_source(
                     group_id=f"wideseek:{task_id}",
                     messages=messages,
                     tools=native_tools,
-                    source=CanonicalSource(
-                        adapter=source.adapter,
-                        adapter_version=ADAPTER_VERSION,
-                        source_id=source.id,
-                        benchmark=source.benchmark,
-                        environment=source.environment,
-                        partition=source.partition,
-                        teacher=source.teacher,
+                    source=canonical_source(
+                        source,
+                        ADAPTER_VERSION,
                         task_id=task_id,
                         rollout_id=f"attempt-{attempt:03d}/{execution_dir.name}",
                     ),
