@@ -1,6 +1,6 @@
 """Prepare Workplace Assistant evaluation inputs.
 
-SFT releases are built by `sft.workplace_assistant.prepare`.
+SFT releases are built by `sft.prepare` (see `sft/README.md`).
 """
 
 from __future__ import annotations

@@ -136,18 +136,12 @@ def read_nemo_gym_source(
     records: list[CanonicalRollout] = []
     counts = _empty_counts()
     native_rollouts = _count_nonempty_lines(rollouts_path)
-    if (
-        source.expected_native_rollouts is not None
-        and native_rollouts != source.expected_native_rollouts
-    ):
+    if native_rollouts != source.expected_native_rollouts:
         raise ValueError(
             f"Source {source.id!r} expected {source.expected_native_rollouts} "
             f"native rollouts, found {native_rollouts}."
         )
-    if (
-        source.expected_candidates is not None
-        and native_rollouts != source.expected_candidates
-    ):
+    if native_rollouts != source.expected_candidates:
         raise ValueError(
             f"Source {source.id!r} expected {source.expected_candidates} "
             f"candidate rollouts, found {native_rollouts}."

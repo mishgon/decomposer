@@ -148,12 +148,17 @@ def _collection(root: Path) -> dict[str, str]:
     }
 
 
-def _source(path: Path, **overrides: object) -> SourceSpec:
+def _source(root: Path, **overrides: object) -> SourceSpec:
+    results = len(list(root.glob("evals/*/*/result.json")))
     return SourceSpec(
         **{
             "id": "toolathlon-collection",
             "adapter": "toolathlon_gym",
-            "path": path,
+            "path": root,
+            # Adapters read the path; only the builder resolves the snapshot.
+            "snapshot": "sha256:" + "0" * 64,
+            "expected_native_rollouts": results,
+            "expected_candidates": results,
             "benchmark": "toolathlon_gym",
             "environment": "toolathlon_gym",
             "partition": "train",
@@ -251,17 +256,26 @@ def test_collection_snapshot_copies_finished_episodes_exactly(
     ]
 
 
+def test_collection_must_match_its_expected_counts(tmp_path: Path) -> None:
+    _collection(tmp_path)  # Four episodes have finished.
+    with pytest.raises(ValueError, match="expected 5 native rollouts, found 4"):
+        _read(_source(tmp_path, expected_native_rollouts=5))
+    with pytest.raises(ValueError, match="expected 5 candidate rollouts, found 4"):
+        _read(_source(tmp_path, expected_candidates=5))
+
+
 def test_collection_format_requires_its_agent_types_and_selection(
     tmp_path: Path,
 ) -> None:
+    counts = {"expected_native_rollouts": 1, "expected_candidates": 1}
     with pytest.raises(ValidationError, match="native_subagent_types"):
-        _source(tmp_path, native_subagent_types=[])
+        _source(tmp_path, native_subagent_types=[], **counts)
     with pytest.raises(ValidationError, match="success_threshold"):
         SelectionSpec(policy="collector_qualifies")
 
     def spec(source: SourceSpec) -> BuildSpec:
         return BuildSpec(
-            spec_version=3,
+            spec_version=4,
             dataset=DatasetIdentity(id="collection", version="v1"),
             policy=PolicySpec(id="decomposer-default"),
             sources=(source,),
@@ -271,8 +285,7 @@ def test_collection_format_requires_its_agent_types_and_selection(
             ),
         )
 
-    counts = {"expected_native_rollouts": 1, "expected_candidates": 1}
     with pytest.raises(ValidationError, match="select with collector_qualifies"):
-        spec(_source(tmp_path, **counts))
+        spec(_source(tmp_path, path=None, **counts))
     selection = {"policy": "collector_qualifies", "success_threshold": 0.9}
-    assert spec(_source(tmp_path, selection=selection, **counts))
+    assert spec(_source(tmp_path, path=None, selection=selection, **counts))

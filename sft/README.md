@@ -40,10 +40,12 @@ prompt, so their manifests no longer validate against
 experiment records, and the release walkthroughs below describe those
 historical builds.
 
-Specifications with a `tokenization:` block predate tokenizer-free releases
-(2026-10-08) and no longer load; rebuild them only from the commit that built
-them. Their releases still train: training ignores the token counts stored in
-them.
+The current code builds only `spec_version` 4 specifications, whose sources are
+digest-pinned snapshots (see [Snapshots, releases and
+versioning](#snapshots-releases-and-versioning)). Older specifications no longer
+load; rebuild them only from the commit that built them. Releases built from a
+specification with a `tokenization:` block (before tokenizer-free releases,
+2026-10-08) still train: training ignores the token counts stored in them.
 
 ## Install
 
@@ -57,31 +59,23 @@ The root and `external/Gym` environments remain separate.
 
 ## Prepare the dataset
 
-Dataset releases are defined by strict, checked-in build specifications. Build
-the original all-subagent Workplace source pair with:
+Dataset releases are defined by strict, checked-in build specifications whose
+sources are snapshots (see [Snapshots, releases and
+versioning](#snapshots-releases-and-versioning)). Build one with:
 
 ```bash
-uv run --group train python -m sft.workplace_assistant.prepare \
-  --dataset workplace-all-v3 \
-  --output-root /home/sukhorukov/decomposer_artifacts/datasets/sft
+.venv/bin/python -m sft.prepare --spec sft/specs/<spec>.yaml \
+  --output-root /mnt/share14T-2/sukhorukov/decomposer_artifacts/datasets/sft
 ```
 
-Build the 26B-A4B non-thinking source pair with:
+The current specifications keep tau2 and Workplace rollouts with reward `1.0`
+and Toolathlon and WideSeek episodes by their collectors' own success rule, and
+split by prompt with validation fraction `0.1` and seed `42`. All rollouts of
+one prompt are assigned to the same split. The builder requires a clean Git
+worktree and refuses to replace an existing `<dataset-id>/<version>` directory.
 
-```bash
-uv run --group train python -m sft.workplace_assistant.prepare \
-  --dataset workplace-26b-nonthinking-v3 \
-  --output-root /home/sukhorukov/decomposer_artifacts/datasets/sft
-```
-
-Both specifications use exact reward `1.0`, prompt-fixed validation fraction
-`0.1`, and seed `42`. All teacher variants of one prompt are assigned to the
-same split. The builder requires a clean Git worktree and refuses to replace an
-existing `<dataset-id>/<version>` directory.
-
-New build specifications choose `policy.system_prompt_profile: student` or
-`teacher`; a specification without a profile uses `teacher`, and the legacy
-`policy.system_prompt: decomposer_default` keeps `student`. `teacher` is the
+Build specifications choose `policy.system_prompt_profile: student` or
+`teacher`; a specification without a profile uses `teacher`. `teacher` is the
 core's orchestration prompt (`decomposer.prompts.DECOMPOSER_SYSTEM_PROMPT`),
 and `student` is the legacy one-line manager prompt
 (`decomposer.prompt_profiles.DECOMPOSER_STUDENT_SYSTEM_PROMPT`). The builder
@@ -98,8 +92,8 @@ model's own chat template and decides what to do with long ones (see
 
 ### Snapshots, releases and versioning
 
-New build specifications (`spec_version: 4`) name every source by a snapshot
-digest instead of a path. A snapshot is an immutable copy of exactly the files
+Build specifications (`spec_version: 4`) name every source by a snapshot
+digest. A snapshot is an immutable copy of exactly the files
 the source's adapter reads:
 
 ```bash
@@ -136,8 +130,7 @@ an adapter in `sft/adapters/registry.py` (`ADAPTERS`, `ADAPTER_VERSIONS`) and th
 list of files it reads in `SNAPSHOT_FILES`. Bump an adapter's `ADAPTER_VERSION`
 whenever its output changes. Snapshots and releases are self-contained
 directories, so either can later be uploaded unchanged, for example to a Hugging
-Face dataset repository, and pinned by revision. Specifications with
-`spec_version` 1 to 3 keep their paths and build as before.
+Face dataset repository, and pinned by revision.
 
 **Dataset versions.** Releases carry a semantic version, MAJOR.MINOR.PATCH,
 decided when each release is cut:
@@ -259,8 +252,8 @@ the rest of the call log, are left out.
 
 Version 1.0.0 is the v3 release below, rebuilt under its published name:
 `sft/specs/decomposer_manager_sft_1.0.0.yaml` is the v3 spec with the dataset
-renamed `decomposer-manager-sft`, version `1.0.0`. Build it on Hertz-2 from a
-clean checkout:
+renamed `decomposer-manager-sft`, version `1.0.0`. It was built on Hertz-2 at
+commit `53a88d8` with:
 
 ```bash
 .venv/bin/python -m sft.prepare \
@@ -270,7 +263,9 @@ clean checkout:
 
 Its `train.jsonl` and `validation.jsonl` are byte-identical to v3's. Only the
 manifest's name, spec and git revision differ, so the fingerprint is
-`fb6d86f6…c0a25556` instead of `50a73343…1fdb8df4`. The v3 directory stays,
+`fb6d86f6…c0a25556` instead of `50a73343…1fdb8df4`. Later commits rebuild the
+same records, but their manifests leave out spec fields removed since, so the
+fingerprint of a rebuild differs. The v3 directory stays,
 because the checkpoints trained on it pin its fingerprint; new training configs
 use 1.0.0.
 

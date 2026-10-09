@@ -79,11 +79,6 @@ def read_toolathlon_gym_source(
     no tool schemas; the spec's ``native_subagent_types`` rebuild them with the
     Decomposer core.
     """
-    if selection.policy != "collector_qualifies":
-        raise ValueError(
-            f"Source {source.id!r}: toolathlon_langgraph_v1 selects with "
-            "collector_qualifies."
-        )
     threshold = selection.success_threshold
     assert threshold is not None
     source_dir = source.path.resolve()
@@ -102,18 +97,12 @@ def read_toolathlon_gym_source(
     )
     result_paths = sorted(source_dir.glob("evals/*/*/result.json"))
     native_rollouts = len(result_paths)
-    if (
-        source.expected_native_rollouts is not None
-        and native_rollouts != source.expected_native_rollouts
-    ):
+    if native_rollouts != source.expected_native_rollouts:
         raise ValueError(
             f"Source {source.id!r} expected {source.expected_native_rollouts} "
             f"native rollouts, found {native_rollouts}."
         )
-    if (
-        source.expected_candidates is not None
-        and native_rollouts != source.expected_candidates
-    ):
+    if native_rollouts != source.expected_candidates:
         raise ValueError(
             f"Source {source.id!r} expected {source.expected_candidates} "
             f"candidate rollouts, found {native_rollouts}."

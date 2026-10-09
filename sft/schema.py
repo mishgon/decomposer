@@ -108,9 +108,6 @@ class SubagentInterfaceSpec(StrictModel):
 
 class PolicySpec(StrictModel):
     id: str
-    # ``system_prompt`` is retained solely so immutable legacy build specs keep
-    # loading. New specs select an explicit shared prompt profile.
-    system_prompt: Literal["decomposer_default"] | None = None
     system_prompt_profile: Literal["student", "teacher"] | None = None
 
     @field_validator("id")
@@ -120,24 +117,10 @@ class PolicySpec(StrictModel):
             raise ValueError("policy.id must be a lowercase identifier")
         return value
 
-    @model_validator(mode="after")
-    def validate_system_prompt(self) -> "PolicySpec":
-        if self.system_prompt is not None and self.system_prompt_profile is not None:
-            raise ValueError(
-                "policy.system_prompt and policy.system_prompt_profile are mutually "
-                "exclusive"
-            )
-        return self
-
     @property
     def resolved_system_prompt_profile(self) -> Literal["student", "teacher"]:
-        # Legacy ``decomposer_default`` keeps its historical student prompt; a
-        # spec that names no prompt trains with the teacher's own prompt.
-        if self.system_prompt_profile is not None:
-            return self.system_prompt_profile
-        if self.system_prompt == "decomposer_default":
-            return "student"
-        return "teacher"
+        # A spec that names no prompt trains with the teacher's own prompt.
+        return self.system_prompt_profile or "teacher"
 
 
 class SourceSelectionSpec(StrictModel):
@@ -188,9 +171,11 @@ class SelectionSpec(SourceSelectionSpec):
 class SourceSpec(StrictModel):
     id: str
     adapter: Literal["nemo_gym", "toolathlon_gym", "wideseek"]
+    # The snapshot directory, which the builder finds by the digest below; specs
+    # never set it.
     path: Path | None = None
-    # spec_version 4 names each source by its snapshot digest (``sha256:<hex>``).
-    snapshot: str | None = None
+    # The source's snapshot digest (``sha256:<hex>``).
+    snapshot: str
     benchmark: str
     environment: str
     partition: SourcePartition
@@ -205,8 +190,8 @@ class SourceSpec(StrictModel):
     # from these types with the Decomposer core.
     native_subagent_types: tuple[SubagentInterfaceSpec, ...] = ()
     selection: SourceSelectionSpec | None = None
-    expected_native_rollouts: int | None = None
-    expected_candidates: int | None = None
+    expected_native_rollouts: int
+    expected_candidates: int
 
     @field_validator("id")
     @classmethod
@@ -224,15 +209,15 @@ class SourceSpec(StrictModel):
 
     @field_validator("snapshot")
     @classmethod
-    def validate_snapshot(cls, value: str | None) -> str | None:
-        if value is not None and not _SNAPSHOT_REFERENCE.fullmatch(value):
+    def validate_snapshot(cls, value: str) -> str:
+        if not _SNAPSHOT_REFERENCE.fullmatch(value):
             raise ValueError("source.snapshot must look like sha256:<64 hex>")
         return value
 
     @field_validator("expected_native_rollouts", "expected_candidates")
     @classmethod
-    def validate_expected_count(cls, value: int | None) -> int | None:
-        if value is not None and (isinstance(value, bool) or value <= 0):
+    def validate_expected_count(cls, value: int) -> int:
+        if value <= 0:
             raise ValueError("expected source counts must be positive integers")
         return value
 
@@ -275,7 +260,7 @@ class SplitSpec(StrictModel):
 
 
 class BuildSpec(StrictModel):
-    spec_version: Literal[1, 2, 3, 4]
+    spec_version: Literal[4]
     dataset: DatasetIdentity
     policy: PolicySpec
     sources: tuple[SourceSpec, ...]
@@ -289,45 +274,12 @@ class BuildSpec(StrictModel):
         ids = [source.id for source in self.sources]
         if len(ids) != len(set(ids)):
             raise ValueError("Dataset source IDs must be unique")
-        if self.spec_version == 1:
-            if self.selection.policy != "exact_reward":
-                raise ValueError("spec_version 1 requires exact_reward selection")
-            if any(
-                source.trace_format != "native"
-                or source.expected_native_rollouts is not None
-                or source.expected_candidates is not None
-                or source.selection is not None
-                for source in self.sources
-            ):
-                raise ValueError("spec_version 1 does not support v2 source options")
-        else:
-            for source in self.sources:
-                if source.expected_native_rollouts is None:
-                    raise ValueError(
-                        f"spec_version >=2 source {source.id!r} must pin "
-                        "expected_native_rollouts"
-                    )
-                if source.expected_candidates is None:
-                    raise ValueError(
-                        f"spec_version >=2 source {source.id!r} must pin "
-                        "expected_candidates"
-                    )
         for source in self.sources:
-            if self.spec_version >= 4 and (
-                source.snapshot is None or source.path is not None
-            ):
+            if source.path is not None:
                 raise ValueError(
-                    f"spec_version 4 source {source.id!r} must name a snapshot "
-                    "and no path"
+                    f"Source {source.id!r} is found by its snapshot and must not "
+                    "set a path"
                 )
-            if self.spec_version < 4 and source.snapshot is not None:
-                raise ValueError("source snapshots require spec_version 4")
-        if self.spec_version < 3 and (
-            self.selection.policy == "collector_qualifies"
-            or any(source.selection is not None for source in self.sources)
-        ):
-            raise ValueError("source-specific selection requires spec_version 3")
-        for source in self.sources:
             effective_policy = (
                 source.selection.policy
                 if source.selection is not None

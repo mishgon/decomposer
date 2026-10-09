@@ -45,10 +45,9 @@ ADAPTER_VERSIONS = {
     "toolathlon_gym": TOOLATHLON_GYM_ADAPTER_VERSION,
     "wideseek": WIDESEEK_ADAPTER_VERSION,
 }
-# The native files each adapter reads, for adapters whose sources can be snapshotted.
+# The native files each adapter reads; a source's snapshot holds exactly these.
 SNAPSHOT_FILES: dict[str, Callable[[Path], list[SnapshotFile]]] = {
     "nemo_gym": nemo_gym_snapshot_files,
-    # toolathlon_langgraph_v1 collections only; imports are already checksummed.
     "toolathlon_gym": toolathlon_gym_snapshot_files,
     "wideseek": wideseek_snapshot_files,
 }

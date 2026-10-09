@@ -256,6 +256,30 @@ def _read_jsonl(path: Path) -> list[dict]:
     return [json.loads(line) for line in path.read_text().splitlines()]
 
 
+def _nemo_source(source: Path, snapshot_root: Path, **fields: object) -> SourceSpec:
+    """A spec source for a fixture NeMo Gym run, pinned by a snapshot of it."""
+    _, snapshot = create_snapshot(
+        "nemo_gym", source, snapshot_root, SNAPSHOT_FILES["nemo_gym"](source)
+    )
+    rollouts = sum(
+        bool(line.strip()) for line in (source / "rollouts.jsonl").read_text().splitlines()
+    )
+    return SourceSpec(
+        **{
+            "id": source.name,
+            "adapter": "nemo_gym",
+            "snapshot": snapshot["digest"],
+            "benchmark": "workplace_assistant",
+            "environment": "workplace",
+            "partition": "train",
+            "teacher": source.name,
+            "expected_native_rollouts": rollouts,
+            "expected_candidates": rollouts,
+            **fields,
+        }
+    )
+
+
 def _prepare_fixture_dataset(
     source_dirs: list[Path],
     output_dir: Path,
@@ -269,25 +293,15 @@ def _prepare_fixture_dataset(
     system_prompt_profile: str | None = None,
 ):
     """Test helper that exercises the new canonical builder without Git state."""
+    snapshot_root = output_dir.parent / "snapshots"
     spec = BuildSpec(
-        spec_version=1,
+        spec_version=4,
         dataset=DatasetIdentity(id=output_dir.name, version=version),
         policy=PolicySpec(
             id="decomposer-default",
             system_prompt_profile=system_prompt_profile,
         ),
-        sources=tuple(
-            SourceSpec(
-                id=source.name,
-                adapter="nemo_gym",
-                path=source,
-                benchmark="workplace_assistant",
-                environment="workplace",
-                partition="train",
-                teacher=source.name,
-            )
-            for source in source_dirs
-        ),
+        sources=tuple(_nemo_source(source, snapshot_root) for source in source_dirs),
         selection=SelectionSpec(
             success_reward=success_reward,
             invalid_policy=invalid_policy,
@@ -308,66 +322,8 @@ def _prepare_fixture_dataset(
         output_dir.parent,
         git_revision="test-revision",
         require_clean_git=False,
+        snapshot_root=snapshot_root,
     )
-
-
-def test_source_paths_can_be_required_and_overridden_explicitly(
-    tmp_path: Path,
-) -> None:
-    source_dir = _source(tmp_path, "teacher")
-    spec = BuildSpec(
-        spec_version=1,
-        dataset=DatasetIdentity(id="override-fixture", version="v1"),
-        policy=PolicySpec(id="decomposer-default"),
-        sources=(
-            SourceSpec(
-                id="workplace",
-                adapter="nemo_gym",
-                benchmark="workplace_assistant",
-                environment="workplace",
-                partition="train",
-                teacher="teacher",
-            ),
-        ),
-        selection=SelectionSpec(),
-        split=SplitSpec(
-            strategy="prompt_fixed",
-            validation_fraction=0.1,
-            seed=42,
-        ),
-    )
-    loaded = LoadedBuildSpec(
-        path=tmp_path / "spec.yaml",
-        sha256="0" * 64,
-        spec=spec,
-    )
-    with pytest.raises(ValueError, match="require explicit path overrides"):
-        prepare_dataset(
-            loaded,
-            tmp_path / "missing",
-            git_revision="test",
-            require_clean_git=False,
-        )
-    with pytest.raises(ValueError, match="Unknown source path override"):
-        prepare_dataset(
-            loaded,
-            tmp_path / "unknown",
-            git_revision="test",
-            require_clean_git=False,
-            source_paths={"unknown": source_dir},
-        )
-
-    prepared = prepare_dataset(
-        loaded,
-        tmp_path / "prepared-overrides",
-        git_revision="test",
-        require_clean_git=False,
-        source_paths={"workplace": source_dir},
-    )
-    assert prepared.manifest["records"]["total"] == 10
-    assert prepared.manifest["records"]["train"] == 9
-    assert prepared.manifest["records"]["validation"] == 1
-    assert prepared.manifest["sources"][0]["locator"] == str(source_dir.resolve())
 
 
 def test_prepare_groups_teacher_variants_and_writes_manifest_v3(tmp_path: Path) -> None:
@@ -460,26 +416,16 @@ def test_teacher_prompt_profile_is_materialized_and_training_validated(
         )
 
 
-def test_prompt_profile_resolver_and_legacy_policy_are_strict() -> None:
+def test_prompt_profile_resolver_is_strict() -> None:
     assert (
         resolve_decomposer_system_prompt("student") == DECOMPOSER_STUDENT_SYSTEM_PROMPT
     )
     assert resolve_decomposer_system_prompt("teacher") == DECOMPOSER_SYSTEM_PROMPT
-    assert (
-        PolicySpec(
-            id="legacy", system_prompt="decomposer_default"
-        ).resolved_system_prompt_profile
-        == "student"
-    )
     assert PolicySpec(id="default").resolved_system_prompt_profile == "teacher"
+    student = PolicySpec(id="student", system_prompt_profile="student")
+    assert student.resolved_system_prompt_profile == "student"
     with pytest.raises(ValueError, match="Unknown Decomposer prompt profile"):
         resolve_decomposer_system_prompt("unknown")
-    with pytest.raises(ValidationError, match="mutually exclusive"):
-        PolicySpec(
-            id="invalid",
-            system_prompt="decomposer_default",
-            system_prompt_profile="teacher",
-        )
 
 
 def test_prepare_keeps_parallel_calls_as_emitted(tmp_path: Path) -> None:
@@ -625,22 +571,12 @@ def test_prepare_is_reproducible(tmp_path: Path) -> None:
 
 
 def test_dataset_fingerprint_is_portable_across_output_roots(tmp_path: Path) -> None:
-    source = _source(tmp_path, "teacher")
+    snapshot_root = tmp_path / "snapshots"
     spec = BuildSpec(
-        spec_version=1,
+        spec_version=4,
         dataset=DatasetIdentity(id="portable", version="v3"),
         policy=PolicySpec(id="decomposer-default"),
-        sources=(
-            SourceSpec(
-                id="source",
-                adapter="nemo_gym",
-                path=source,
-                benchmark="workplace_assistant",
-                environment="workplace",
-                partition="train",
-                teacher="teacher",
-            ),
-        ),
+        sources=(_nemo_source(_source(tmp_path, "teacher"), snapshot_root, id="source"),),
         selection=SelectionSpec(),
         split=SplitSpec(strategy="prompt_fixed", validation_fraction=0.2, seed=42),
     )
@@ -650,12 +586,14 @@ def test_dataset_fingerprint_is_portable_across_output_roots(tmp_path: Path) -> 
         tmp_path / "root-a",
         git_revision="test-revision",
         require_clean_git=False,
+        snapshot_root=snapshot_root,
     )
     second = prepare_dataset(
         loaded,
         tmp_path / "root-b",
         git_revision="test-revision",
         require_clean_git=False,
+        snapshot_root=snapshot_root,
     )
     assert first.train_path.read_bytes() == second.train_path.read_bytes()
     assert first.validation_path.read_bytes() == second.validation_path.read_bytes()
@@ -667,18 +605,20 @@ def test_dataset_fingerprint_is_portable_across_output_roots(tmp_path: Path) -> 
 
 def test_build_spec_is_strict_and_rejects_test_partitions(tmp_path: Path) -> None:
     raw = {
-        "spec_version": 1,
+        "spec_version": 4,
         "dataset": {"id": "strict", "version": "v3"},
         "policy": {"id": "decomposer-default"},
         "sources": [
             {
                 "id": "source",
                 "adapter": "nemo_gym",
-                "path": "source",
+                "snapshot": "sha256:" + "a" * 64,
                 "benchmark": "benchmark",
                 "environment": "environment",
                 "partition": "test",
                 "teacher": "teacher",
+                "expected_native_rollouts": 1,
+                "expected_candidates": 1,
             }
         ],
         "selection": {"policy": "exact_reward"},
@@ -756,7 +696,7 @@ def _snapshot_spec(snapshot: str, *, version: str = "v1") -> LoadedBuildSpec:
     return LoadedBuildSpec(path=Path("spec.yaml"), sha256="0" * 64, spec=spec)
 
 
-def test_spec_v4_builds_only_from_the_pinned_snapshot(tmp_path: Path) -> None:
+def test_builds_only_from_the_pinned_snapshot(tmp_path: Path) -> None:
     source_dir = _source(tmp_path, "teacher")
     snapshot_dir, snapshot = create_snapshot(
         "nemo_gym",
@@ -787,14 +727,24 @@ def test_spec_v4_builds_only_from_the_pinned_snapshot(tmp_path: Path) -> None:
             require_clean_git=False,
             snapshot_root=tmp_path / "snapshots",
         )
+    with pytest.raises(FileNotFoundError, match="Snapshot manifest does not exist"):
+        prepare_dataset(
+            _snapshot_spec("sha256:" + "b" * 64, version="v3"),
+            tmp_path / "datasets",
+            git_revision="test-revision",
+            require_clean_git=False,
+            snapshot_root=tmp_path / "snapshots",
+        )
 
 
-def test_spec_v4_requires_snapshots_and_older_specs_reject_them() -> None:
+def test_build_specs_require_spec_version_4_and_snapshot_sources() -> None:
     spec = _snapshot_spec("sha256:" + "a" * 64).spec.model_dump(mode="json")
-    with_path = {**spec["sources"][0], "snapshot": None, "path": "/tmp/source"}
-    with pytest.raises(ValidationError, match="must name a snapshot"):
+    with_path = {**spec["sources"][0], "path": "/tmp/source"}
+    with pytest.raises(ValidationError, match="must not set a path"):
         BuildSpec.model_validate({**spec, "sources": [with_path]})
-    with pytest.raises(ValidationError, match="require spec_version 4"):
+    with pytest.raises(ValidationError, match="snapshot"):
+        SourceSpec.model_validate({**spec["sources"][0], "snapshot": None})
+    with pytest.raises(ValidationError, match="spec_version"):
         BuildSpec.model_validate({**spec, "spec_version": 3})
     with pytest.raises(ValidationError, match="sha256:<64 hex>"):
         SourceSpec.model_validate({**spec["sources"][0], "snapshot": "abc"})
@@ -1102,28 +1052,20 @@ def test_nemo_gym_keeps_mistakes_the_core_answered(tmp_path: Path) -> None:
 def test_each_source_keeps_its_native_tool_schema(
     tmp_path: Path,
 ) -> None:
+    snapshot_root = tmp_path / "snapshots"
     sources = []
     for name, description in (("gym-a", "The new tool."), ("gym-b", "Other types.")):
         rollouts = [_rollout(index) for index in range(4)]
         for rollout in rollouts:
             rollout["response"]["tools"][0]["description"] = description
+        source = _source(
+            tmp_path, name, rollouts, [_materialized(index) for index in range(4)]
+        )
         sources.append(
-            SourceSpec(
-                id=name,
-                adapter="nemo_gym",
-                path=_source(
-                    tmp_path, name, rollouts, [_materialized(index) for index in range(4)]
-                ),
-                benchmark=name,
-                environment="workplace",
-                partition="train",
-                teacher="teacher",
-                expected_native_rollouts=4,
-                expected_candidates=4,
-            )
+            _nemo_source(source, snapshot_root, benchmark=name, teacher="teacher")
         )
     spec = BuildSpec(
-        spec_version=2,
+        spec_version=4,
         dataset=DatasetIdentity(id="native-schemas", version="v1"),
         policy=PolicySpec(id="decomposer-default"),
         sources=tuple(sources),
@@ -1136,6 +1078,7 @@ def test_each_source_keeps_its_native_tool_schema(
         tmp_path / "datasets",
         git_revision="test-revision",
         require_clean_git=False,
+        snapshot_root=snapshot_root,
     )
 
     records = _read_jsonl(prepared.train_path) + _read_jsonl(prepared.validation_path)
@@ -1336,8 +1279,8 @@ def test_malformed_tool_calls_raise_in_error_mode(
         )
 
 
-# Specs before spec_version 4 are records of older releases; they build only at
-# the commits that built them.
+# Specs before spec_version 4 are records of older releases; they load and build
+# only at the commits that built them.
 SFT_SPEC_PATHS = sorted(
     path
     for path in Path(__file__).resolve().parents[1].glob("sft/**/specs/*.yaml")

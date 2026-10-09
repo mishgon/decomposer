@@ -64,7 +64,7 @@ class PreparedDataset:
 
 
 def load_build_spec(path: str | Path) -> LoadedBuildSpec:
-    """Load a strict spec and resolve native source paths relative to the spec."""
+    """Load a strict build specification."""
     path = Path(path).resolve()
     if not path.is_file():
         raise FileNotFoundError(f"Dataset build specification does not exist: {path}")
@@ -72,25 +72,10 @@ def load_build_spec(path: str | Path) -> LoadedBuildSpec:
         raw = yaml.safe_load(file)
     if not isinstance(raw, Mapping):
         raise ValueError(f"Dataset build specification {path} must contain an object.")
-    spec = BuildSpec.model_validate(raw)
-
-    def resolve(candidate: Path | None) -> Path | None:
-        if candidate is None:
-            return None
-        return (
-            candidate.resolve()
-            if candidate.is_absolute()
-            else (path.parent / candidate).resolve()
-        )
-
-    resolved_sources = tuple(
-        source.model_copy(update={"path": resolve(source.path)})
-        for source in spec.sources
-    )
     return LoadedBuildSpec(
         path=path,
         sha256=sha256_file(path),
-        spec=spec.model_copy(update={"sources": resolved_sources}),
+        spec=BuildSpec.model_validate(raw),
     )
 
 
@@ -294,33 +279,17 @@ def _count_by(records: Sequence[CanonicalRollout], field: str) -> dict[str, int]
 
 
 def _logical_spec(spec: BuildSpec) -> JsonObject:
-    source_exclude = {"path"}
-    if spec.spec_version < 4:
-        source_exclude.add("snapshot")
-    if spec.spec_version < 3:
-        source_exclude.add("selection")
-    if spec.spec_version == 1:
-        source_exclude.update(
-            {
-                "trace_format",
-                "expected_native_rollouts",
-                "expected_candidates",
-            }
-        )
-    logical_sources = [
-        source.model_dump(mode="json", exclude=source_exclude)
-        for source in spec.sources
-    ]
-    logical_split = spec.split.model_dump(mode="json")
-    logical = {
+    return {
         "spec_version": spec.spec_version,
         "dataset": spec.dataset.model_dump(mode="json"),
         "policy": spec.policy.model_dump(mode="json"),
-        "sources": logical_sources,
+        "sources": [
+            source.model_dump(mode="json", exclude={"path"})
+            for source in spec.sources
+        ],
         "selection": spec.selection.model_dump(mode="json"),
-        "split": logical_split,
+        "split": spec.split.model_dump(mode="json"),
     }
-    return logical
 
 
 def compute_dataset_fingerprint(manifest: Mapping[str, Any]) -> str:
@@ -373,44 +342,22 @@ def prepare_dataset(
     *,
     git_revision: str | None = None,
     require_clean_git: bool = True,
-    source_paths: Mapping[str, str | Path] | None = None,
     snapshot_root: str | Path = DEFAULT_SNAPSHOT_ROOT,
 ) -> PreparedDataset:
     """Build one immutable dataset release from a checked-in specification."""
     if not isinstance(loaded, LoadedBuildSpec):
         loaded = load_build_spec(loaded)
     spec = loaded.spec
-    overrides = {
-        source_id: Path(path).expanduser().resolve()
-        for source_id, path in (source_paths or {}).items()
-    }
-    known_source_ids = {source.id for source in spec.sources}
-    unknown_overrides = sorted(set(overrides) - known_source_ids)
-    if unknown_overrides:
-        raise ValueError(
-            "Unknown source path override IDs: " + ", ".join(unknown_overrides)
-        )
     snapshot_root = Path(snapshot_root).resolve()
     resolved_sources = []
     for source in spec.sources:
-        path = overrides.get(source.id, source.path)
-        if source.snapshot is not None:
-            # A snapshot is located by its digest unless a test points elsewhere,
-            # and is verified file by file before its adapter reads it.
-            if path is None:
-                path = snapshot_directory(
-                    snapshot_root, source.adapter, snapshot_digest(source.snapshot)
-                )
-            load_snapshot(path, source.snapshot, adapter=source.adapter)
-        resolved_sources.append(source.model_copy(update={"path": path}))
-    missing_paths = sorted(
-        source.id for source in resolved_sources if source.path is None
-    )
-    if missing_paths:
-        raise ValueError(
-            "Dataset sources require explicit path overrides: "
-            + ", ".join(missing_paths)
+        # A snapshot is located by its digest and verified file by file before
+        # its adapter reads it.
+        path = snapshot_directory(
+            snapshot_root, source.adapter, snapshot_digest(source.snapshot)
         )
+        load_snapshot(path, source.snapshot, adapter=source.adapter)
+        resolved_sources.append(source.model_copy(update={"path": path}))
     spec = spec.model_copy(update={"sources": tuple(resolved_sources)})
     revision = git_revision or _git_revision(
         require_clean=require_clean_git, spec_path=loaded.path
@@ -443,8 +390,7 @@ def prepare_dataset(
                 raise ValueError(f"Duplicate canonical rollout ID: {record.id}")
             seen_ids.add(record.id)
         records.extend(result.records)
-        if source.snapshot is not None:
-            result.source_manifest["snapshot"] = source.snapshot
+        result.source_manifest["snapshot"] = source.snapshot
         source_manifests.append(result.source_manifest)
         counts_by_source[source.id] = result.counts
 

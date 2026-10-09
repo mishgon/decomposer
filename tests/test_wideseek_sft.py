@@ -136,10 +136,15 @@ def _attempt(
 
 
 def _source(path: Path) -> SourceSpec:
+    results = len(list(path.glob("decomposer/*/attempt-*/result.json")))
     return SourceSpec(
         id="wideseek-collection",
         adapter="wideseek",
         path=path,
+        # Adapters read the path; only the builder resolves the snapshot.
+        snapshot="sha256:" + "0" * 64,
+        expected_native_rollouts=results,
+        expected_candidates=results,
         benchmark="wideseek",
         environment="wideseek",
         partition="train",

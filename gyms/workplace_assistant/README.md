@@ -2,7 +2,8 @@
 
 This package owns Workplace Assistant dataset preparation, local execution,
 MLSpace submission, and experiment profiles. Turning successful Decomposer
-rollouts into canonical SFT releases lives in `sft/workplace_assistant`. The pinned `external/Gym`
+rollouts into canonical SFT releases lives in `sft/` (the NeMo Gym adapter and
+`python -m sft.prepare`). The pinned `external/Gym`
 submodule remains an upstream runtime dependency; this package does not use its
 baseline job shell script.
 
@@ -448,7 +449,9 @@ payloads. The live allocation's selected instance types are kept in
 
 ## SFT releases
 
-The named Workplace SFT releases and their specs live in
+Current SFT releases mix Workplace with the other gyms; see
+[`sft/README.md`](../../sft/README.md). The specs of the earlier Workplace-only
+releases are kept as records in
 [`sft/workplace_assistant`](../../sft/workplace_assistant/README.md).
 
 ## Artifact layout
