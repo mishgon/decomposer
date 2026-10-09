@@ -15,5 +15,7 @@ core names the tool arguments `agent_type_id` and `agent_id`; see
 `policy.subagent_types` keeps each gym's native tool schemas, and one that
 names no prompt profile trains with the `teacher` prompt. The first such
 specification is `decomposer_mixed_qwen38_qwen35_4b_unloop_nonthinking_v1_32k.yaml`.
-New specifications set `dataset.version` to the release's semantic version; see
-*Snapshots, releases and versioning* in `sft/README.md`.
+New specifications name the dataset `decomposer-manager-sft` and set
+`dataset.version` to the release's semantic version; see *Snapshots, releases
+and versioning* in `sft/README.md`. The first is
+`decomposer_manager_sft_1.0.0.yaml`.

@@ -150,9 +150,11 @@ decided when each release is cut:
 - **PATCH.** Fixes without new data, such as dropping or correcting a few
   records.
 
-A new spec sets `dataset.version` to that version, so the release directory, the
-manifest and the Hugging Face folder share one name. Releases built before this
-rule keep their internal names (`v1` to `v3`); v3 is published as 1.0.0. A
+A new spec names the dataset `decomposer-manager-sft` and sets `dataset.version`
+to that version, so the release directory
+(`…/datasets/sft/decomposer-manager-sft/<version>/`), the manifest and the
+Hugging Face folder share one name. Earlier releases keep their internal names
+(`v1` to `v3`); v3 was rebuilt as 1.0.0. A
 published version never changes: any change, however small, becomes a new
 version. A minor release must keep every existing record on its side of the
 split, which the `prompt_fixed` split does not guarantee (it moved 15 records
@@ -253,6 +255,37 @@ the rest of the call log, are left out.
   expected_candidates: <finished attempts>
 ```
 
+### Release 1.0.0 of decomposer-manager-sft
+
+Version 1.0.0 is the v3 release below, rebuilt under its published name:
+`sft/specs/decomposer_manager_sft_1.0.0.yaml` is the v3 spec with the dataset
+renamed `decomposer-manager-sft`, version `1.0.0`. Build it on Hertz-2 from a
+clean checkout:
+
+```bash
+.venv/bin/python -m sft.prepare \
+  --spec sft/specs/decomposer_manager_sft_1.0.0.yaml \
+  --output-root /mnt/share14T-2/sukhorukov/decomposer_artifacts/datasets/sft
+```
+
+Its `train.jsonl` and `validation.jsonl` are byte-identical to v3's. Only the
+manifest's name, spec and git revision differ, so the fingerprint is
+`fb6d86f6…c0a25556` instead of `50a73343…1fdb8df4`. The v3 directory stays,
+because the checkpoints trained on it pin its fingerprint; new training configs
+use 1.0.0.
+
+Version 1.0.0 is published unchanged on Hugging Face as
+`decomposer-datasets/decomposer-manager-sft` (folder `1.0.0/`, tag `v1.0.0`).
+The published files hold no proxy-key value. In the Toolathlon snapshot the key
+appears inside subagent runs (149 episodes), which records leave out, and in
+`wait` results of 3 episodes, none of which qualified; one record names the
+variable without a value. After joining the organization, download it with:
+
+```bash
+hf download decomposer-datasets/decomposer-manager-sft --repo-type dataset \
+  --revision v1.0.0 --local-dir <dir>
+```
+
 ### Qwen3.8 four-gym release v3 for the unloop student
 
 The v3 release (`v3-tau2-workplace-toolathlon-wideseek-20261008`) has the same
@@ -293,18 +326,6 @@ with the training defaults (16K) trained and exported
 (`/mnt/share14T-2/sukhorukov/decomposer_artifacts/training/sft/smokes/mixed-v3-20261008`).
 The Toolathlon snapshot holds the proxy key, like v2's, and must not be
 published.
-
-Version 1.0.0 of `decomposer-datasets/decomposer-manager-sft` is this release,
-unchanged; its `manifest.json` still names it `v3-…`. The published files hold no
-proxy-key value. In the Toolathlon snapshot the key appears inside subagent runs
-(149 episodes), which records leave out, and in `wait` results of 3 episodes,
-none of which qualified; one record names the variable without a value. After
-joining the organization, download it with:
-
-```bash
-hf download decomposer-datasets/decomposer-manager-sft --repo-type dataset \
-  --revision v1.0.0 --local-dir <dir>
-```
 
 ### Qwen3.8 four-gym release v2 for the unloop student
 

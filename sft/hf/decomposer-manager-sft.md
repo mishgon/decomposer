@@ -22,16 +22,16 @@ Supervised fine-tuning data for the manager of Decomposer, a multi-agent harness
 
 ## Versions
 
-| Version | Folder and tag | Records (train / validation) | Gyms | Built | Internal build |
-|---|---|---|---|---|---|
-| **1.0.0** | `1.0.0/`, tag `v1.0.0` | 4,220 (3,797 / 423) | tau2, Workplace, Toolathlon, WideSeek | 2026-10-08 | `v3-tau2-workplace-toolathlon-wideseek-20261008` |
+| Version | Folder and tag | Records (train / validation) | Gyms | Data collected through |
+|---|---|---|---|---|
+| **1.0.0** | `1.0.0/`, tag `v1.0.0` | 4,220 (3,797 / 423) | tau2, Workplace, Toolathlon, WideSeek | 2026-10-08 |
 
 Each version folder holds `train.jsonl`, `validation.jsonl` and `manifest.json`. The manifest records the full provenance: source snapshot digests, selection and split rules, per-source counts and file hashes. Pin a version with its tag, for example `revision="v1.0.0"`.
 
 **1.0.0:**
-- **Fingerprint:** `50a733439db998f83c559946eb5f57fc77c811916142b787bdf2245d1fdb8df4`.
-- **Build:** spec `sft/specs/decomposer_mixed_qwen38_qwen35_4b_unloop_nonthinking_v3.yaml` at commit `6716e23`; adapters `nemo_gym` 8, `toolathlon_gym` 10, `wideseek` 1.
-- **Manifest label:** the manifest still names the internal build `v3-…`, because renaming it would change the fingerprint.
+- **Fingerprint:** `fb6d86f62061f540947636fb5706832542e4ce73577e26f0e6b87df1c0a25556`.
+- **Build:** spec `sft/specs/decomposer_manager_sft_1.0.0.yaml` at commit `53a88d8`; adapters `nemo_gym` 8, `toolathlon_gym` 10, `wideseek` 1.
+- **Same data as v3:** `train.jsonl` and `validation.jsonl` are byte-identical to the internal release `v3-tau2-workplace-toolathlon-wideseek-20261008` (fingerprint `50a73343…`). That is the name checkpoints trained before the rename refer to.
 
 ## Versioning
 
@@ -45,7 +45,9 @@ A published version folder never changes; every change becomes a new version wit
 
 ## Changelog
 
-- **1.0.0** (published 2026-10-09): first published release. It is internal build `v3-tau2-workplace-toolathlon-wideseek-20261008`, the data the October 2026 LoRA runs were trained on. The Toolathlon and WideSeek collections in it are partial; see Partial Data and Known Issues.
+- **1.0.0** (published 2026-10-09): first published release, with the same data as the internal v3 release that the October 2026 LoRA runs were trained on. The Toolathlon and WideSeek collections in it are partial; see Partial Data and Known Issues.
+  - **Rebuilt the same day:** under its published name (dataset `decomposer-manager-sft`, version `1.0.0`), with byte-identical data files.
+  - **Manifest replaced:** with the rebuilt one, before anyone else had access. This is the one exception to the rule that published versions never change.
 
 ## Models
 
