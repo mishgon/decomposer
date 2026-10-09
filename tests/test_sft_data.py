@@ -28,7 +28,6 @@ from sft.schema import (
     validate_chat_tools,
     validate_decomposer_messages,
 )
-from sft.chat_tools import build_decomposer_chat_tools
 from decomposer.prompt_profiles import (
     DECOMPOSER_STUDENT_SYSTEM_PROMPT,
     resolve_decomposer_system_prompt,
@@ -1002,82 +1001,11 @@ def test_schema_rejects_legacy_spawn_subagent_traces() -> None:
     ] == ["new", "fork", "run", "wait"]
 
 
-def test_builder_canonical_tools_are_exactly_new_fork_run_wait(
-    tmp_path: Path,
-) -> None:
-    source = _source(
-        tmp_path,
-        "teacher",
-        [_rollout(index) for index in range(4)],
-        [_materialized(index) for index in range(4)],
-    )
-    subagent_type = {"id": "small", "description": "Fixture subagent."}
-    spec = BuildSpec(
-        spec_version=2,
-        dataset=DatasetIdentity(id="canonical-tools", version="v1"),
-        policy=PolicySpec(
-            id="decomposer-default",
-            system_prompt_profile="teacher",
-            subagent_types=(subagent_type,),
-        ),
-        sources=(
-            SourceSpec(
-                id="teacher",
-                adapter="nemo_gym",
-                path=source,
-                benchmark="workplace_assistant",
-                environment="workplace",
-                partition="train",
-                teacher="teacher",
-                expected_native_rollouts=4,
-                expected_candidates=4,
-            ),
-        ),
-        selection=SelectionSpec(),
-        split=SplitSpec(strategy="prompt_fixed", validation_fraction=0.25, seed=42),
-    )
-    prepared = prepare_dataset(
-        LoadedBuildSpec(path=tmp_path / "spec.yaml", sha256="4" * 64, spec=spec),
-        tmp_path / "datasets",
-        git_revision="test-revision",
-        require_clean_git=False,
-    )
-    expected = build_decomposer_chat_tools(
-        [
-            {
-                "agent_type_id": "small",
-                "description": "Fixture subagent.",
-                "assistant_id": "small",
-            }
-        ]
-    )
-    assert [tool["function"]["name"] for tool in expected] == [
-        "new",
-        "fork",
-        "run",
-        "wait",
-    ]
-    records = _read_jsonl(prepared.train_path) + _read_jsonl(prepared.validation_path)
-    assert len(records) == 4
-    assert all(record["tools"] == expected for record in records)
-    assert all(
-        record["messages"][0]["content"] == DECOMPOSER_SYSTEM_PROMPT
-        for record in records
-    )
-    assert prepared.manifest["sources"][0]["tool_schema_origin"] == (
-        "canonical_policy_interface"
-    )
-    assert prepared.manifest["content"]["tool_schema_sha256s"] == [
-        sha256_text(canonical_json(expected))
-    ]
-
-
 def _renamed_core_rollout(task_index: int) -> dict:
     """new -> run -> wait -> fork -> run -> wait -> answer, as the renamed core records it."""
     rollout = _rollout(task_index)
     state = rollout["final_state"]
     messages = state["messages"]
-    messages[1]["tool_calls"][0]["args"]["agent_type_id"] = "small-alias"
     agent_id, fork_id = f"subagent-{task_index}", f"fork-{task_index}"
     messages[-1:-1] = [
         _ai("", reasoning="Fork it.", tool_calls=[_call("fork", f"f-{task_index}", agent_id=agent_id)]),
@@ -1119,51 +1047,20 @@ def _renamed_core_rollout(task_index: int) -> dict:
     return rollout
 
 
-def test_renamed_core_rollouts_load_with_canonical_tools(tmp_path: Path) -> None:
+def test_renamed_core_rollouts_load(tmp_path: Path) -> None:
     source = _source(
         tmp_path,
         "teacher",
         [_renamed_core_rollout(index) for index in range(4)],
         [_materialized(index) for index in range(4)],
     )
-    spec = BuildSpec(
-        spec_version=2,
-        dataset=DatasetIdentity(id="renamed-core", version="v1"),
-        policy=PolicySpec(
-            id="decomposer-default",
-            system_prompt_profile="teacher",
-            subagent_types=({"id": "small", "description": "Fixture subagent."},),
-        ),
-        sources=(
-            SourceSpec(
-                id="teacher",
-                adapter="nemo_gym",
-                path=source,
-                benchmark="workplace_assistant",
-                environment="workplace",
-                partition="train",
-                teacher="teacher",
-                expected_native_rollouts=4,
-                expected_candidates=4,
-                subagent_type_aliases={"small-alias": "small"},
-            ),
-        ),
-        selection=SelectionSpec(),
-        split=SplitSpec(strategy="prompt_fixed", validation_fraction=0.25, seed=42),
-    )
-    prepared = prepare_dataset(
-        LoadedBuildSpec(path=tmp_path / "spec.yaml", sha256="5" * 64, spec=spec),
-        tmp_path / "datasets",
-        git_revision="test-revision",
-        require_clean_git=False,
-    )
-    expected_tools = build_decomposer_chat_tools(
-        [{"agent_type_id": "small", "description": "Fixture subagent.", "assistant_id": "small"}]
+    prepared = _prepare_fixture_dataset(
+        [source], tmp_path / "prepared", validation_fraction=0.25
     )
     records = _read_jsonl(prepared.train_path) + _read_jsonl(prepared.validation_path)
     assert len(records) == 4
     for record in records:
-        assert record["tools"] == expected_tools
+        assert record["tools"] == normalize_response_tools(deepcopy(TOOLS))
         calls = [
             call["function"]
             for message in record["messages"]
@@ -1254,7 +1151,7 @@ def test_nemo_gym_keeps_mistakes_the_core_answered(tmp_path: Path) -> None:
     assert messages[10]["content"] == EARLY_RESPONSE_ERROR
 
 
-def test_v2_without_subagent_types_keeps_each_source_native_schema(
+def test_each_source_keeps_its_native_tool_schema(
     tmp_path: Path,
 ) -> None:
     sources = []
@@ -1462,9 +1359,7 @@ def test_v2_samples_before_validation_and_keeps_all_rewards(tmp_path: Path) -> N
         if rollout["_ng_task_index"] == 1
         and rollout["_ng_rollout_index"] == selected_rollout(1)
     )
-    selected_invalid["final_state"]["messages"][1]["tool_calls"][0]["args"][
-        "agent_type_id"
-    ] = "unknown"
+    selected_invalid["final_state"]["messages"][1]["tool_calls"][0]["args"] = "{"
     unselected_invalid = next(
         rollout
         for rollout in rollouts
@@ -1477,15 +1372,7 @@ def test_v2_samples_before_validation_and_keeps_all_rewards(tmp_path: Path) -> N
     spec = BuildSpec(
         spec_version=2,
         dataset=DatasetIdentity(id="sample-before-filter", version="v1"),
-        policy=PolicySpec(
-            id="decomposer-default",
-            subagent_types=(
-                {
-                    "id": "small",
-                    "description": "General-purpose fixture subagent.",
-                },
-            ),
-        ),
+        policy=PolicySpec(id="decomposer-default"),
         sources=(
             SourceSpec(
                 id=source_id,

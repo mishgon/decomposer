@@ -112,7 +112,6 @@ class PolicySpec(StrictModel):
     # loading. New specs select an explicit shared prompt profile.
     system_prompt: Literal["decomposer_default"] | None = None
     system_prompt_profile: Literal["student", "teacher"] | None = None
-    subagent_types: tuple[SubagentInterfaceSpec, ...] = ()
 
     @field_validator("id")
     @classmethod
@@ -122,15 +121,12 @@ class PolicySpec(StrictModel):
         return value
 
     @model_validator(mode="after")
-    def validate_subagent_types(self) -> "PolicySpec":
+    def validate_system_prompt(self) -> "PolicySpec":
         if self.system_prompt is not None and self.system_prompt_profile is not None:
             raise ValueError(
                 "policy.system_prompt and policy.system_prompt_profile are mutually "
                 "exclusive"
             )
-        ids = [subagent.id for subagent in self.subagent_types]
-        if len(ids) != len(set(ids)):
-            raise ValueError("policy.subagent_types IDs must be unique")
         return self
 
     @property
@@ -231,7 +227,6 @@ class SourceSpec(StrictModel):
     # manager. Its traces store no tool schemas, so the builder rebuilds them
     # from these types with the Decomposer core.
     native_subagent_types: tuple[SubagentInterfaceSpec, ...] = ()
-    subagent_type_aliases: dict[str, str] = Field(default_factory=dict)
     sampling: SourceSamplingSpec | None = None
     selection: SourceSelectionSpec | None = None
     expected_native_rollouts: int | None = None
@@ -263,19 +258,6 @@ class SourceSpec(StrictModel):
     def validate_expected_count(cls, value: int | None) -> int | None:
         if value is not None and (isinstance(value, bool) or value <= 0):
             raise ValueError("expected source counts must be positive integers")
-        return value
-
-    @field_validator("subagent_type_aliases")
-    @classmethod
-    def validate_aliases(cls, value: dict[str, str]) -> dict[str, str]:
-        if any(
-            not isinstance(source_id, str)
-            or not source_id.strip()
-            or not isinstance(target_id, str)
-            or not target_id.strip()
-            for source_id, target_id in value.items()
-        ):
-            raise ValueError("subagent type aliases must map non-empty strings")
         return value
 
     @model_validator(mode="after")
@@ -363,15 +345,10 @@ class BuildSpec(StrictModel):
         ):
             raise ValueError("preserve split requires train and validation sources")
         if self.spec_version == 1:
-            if self.policy.subagent_types:
-                raise ValueError(
-                    "spec_version 1 does not support policy subagent types"
-                )
             if self.selection.policy != "exact_reward":
                 raise ValueError("spec_version 1 requires exact_reward selection")
             if any(
                 source.trace_format != "native"
-                or source.subagent_type_aliases
                 or source.sampling is not None
                 or source.expected_native_rollouts is not None
                 or source.expected_candidates is not None
@@ -380,17 +357,7 @@ class BuildSpec(StrictModel):
             ):
                 raise ValueError("spec_version 1 does not support v2 source options")
         else:
-            # Without policy.subagent_types, records keep their native tool schemas.
-            allowed_ids = {subagent.id for subagent in self.policy.subagent_types}
             for source in self.sources:
-                unknown_targets = sorted(
-                    set(source.subagent_type_aliases.values()) - allowed_ids
-                )
-                if unknown_targets:
-                    raise ValueError(
-                        f"Source {source.id!r} aliases unknown canonical subagent "
-                        "types: " + ", ".join(unknown_targets)
-                    )
                 if source.expected_native_rollouts is None:
                     raise ValueError(
                         f"spec_version >=2 source {source.id!r} must pin "
@@ -627,62 +594,6 @@ def validate_chat_tools(tools: Any) -> list[JsonObject]:
             "Exposed tools must be exactly one each of new, fork, run, and wait.",
         )
     return validated
-
-
-def normalize_subagent_type_ids(
-    messages: list[JsonObject],
-    *,
-    allowed_ids: frozenset[str],
-    aliases: Mapping[str, str],
-) -> int:
-    """Normalize ``new``-call ``agent_type_id`` values to one canonical policy interface.
-
-    Only ``new`` names a subagent type; ``fork`` and ``run`` address existing
-    subagents by ``agent_id`` and inherit their type.
-    """
-    if not allowed_ids:
-        return 0
-    normalized = 0
-    for message_index, message in enumerate(messages):
-        for raw_call in message.get("tool_calls") or []:
-            call = require_mapping(
-                raw_call,
-                f"assistant message {message_index} tool call",
-                "excluded_invalid_tool_calls",
-            )
-            function = require_mapping(
-                call.get("function"),
-                "tool-call function",
-                "excluded_invalid_tool_calls",
-            )
-            if function.get("name") != "new":
-                continue
-            arguments = require_mapping(
-                function.get("arguments"),
-                "new arguments",
-                "excluded_invalid_tool_calls",
-            )
-            raw_id = arguments.get("agent_type_id")
-            if not isinstance(raw_id, str) or not raw_id.strip():
-                raise TraceValidationError(
-                    "excluded_invalid_tool_calls",
-                    "new has no valid agent_type_id.",
-                )
-            canonical_id = aliases.get(raw_id, raw_id)
-            if canonical_id not in allowed_ids:
-                raise TraceValidationError(
-                    "excluded_invalid_tool_calls",
-                    f"Unknown agent_type_id {raw_id!r}.",
-                )
-            if canonical_id != raw_id:
-                if not isinstance(arguments, dict):
-                    raise TraceValidationError(
-                        "excluded_invalid_tool_calls",
-                        "new arguments must be mutable JSON objects.",
-                    )
-                arguments["agent_type_id"] = canonical_id
-                normalized += 1
-    return normalized
 
 
 def _validate_call_arguments(

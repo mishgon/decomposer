@@ -52,9 +52,8 @@ OPENROUTER_API_KEY_ENV = "OPENROUTER_API_KEY_DECOMPOSER"
 LLM_PROXY_URL_ENV = "LLM_PROXY_URL"
 LLM_PROXY_API_KEY_ENV = "LLM_PROXY_MASTER_KEY"
 
-# The `new` tool's type-table entry. Specs without policy.subagent_types keep it as
-# is, so the teacher, the SFT data, student evaluation and OPD rollouts all see one
-# tool schema. The description tells the manager that subagents have the domain
+# The `new` tool's type-table entry. SFT records keep it as is, so the teacher, the
+# SFT data, student evaluation and OPD rollouts all see one tool schema. The description tells the manager that subagents have the domain
 # policy (subagents/graph.py); legacy specs stamp the older text without it.
 SUBAGENT_TYPE_ID = "subagent_non_thinking"
 SUBAGENT_DESCRIPTION = "General-purpose tool-calling agent with access to the environment tools and the domain policy."

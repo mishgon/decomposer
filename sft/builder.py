@@ -20,7 +20,6 @@ import yaml
 from decomposer.prompt_profiles import resolve_decomposer_system_prompt
 
 from .adapters.registry import ADAPTER_VERSIONS, ADAPTERS
-from .chat_tools import build_decomposer_chat_tools
 from .snapshots import (
     DEFAULT_SNAPSHOT_ROOT,
     load_snapshot,
@@ -34,11 +33,9 @@ from .schema import (
     BuildSpec,
     CanonicalRollout,
     JsonObject,
-    TraceValidationError,
     canonical_json,
     sha256_file,
     sha256_text,
-    validate_chat_tools,
 )
 
 _SELECTION_EXCLUSION_REASONS = frozenset(
@@ -324,7 +321,6 @@ def _count_by(records: Sequence[CanonicalRollout], field: str) -> dict[str, int]
 
 
 def _logical_spec(spec: BuildSpec) -> JsonObject:
-    policy_exclude = {"subagent_types"} if spec.spec_version == 1 else set()
     source_exclude = {"path"}
     if spec.spec_version < 4:
         source_exclude.add("snapshot")
@@ -334,7 +330,6 @@ def _logical_spec(spec: BuildSpec) -> JsonObject:
         source_exclude.update(
             {
                 "trace_format",
-                "subagent_type_aliases",
                 "sampling",
                 "expected_native_rollouts",
                 "expected_candidates",
@@ -348,7 +343,7 @@ def _logical_spec(spec: BuildSpec) -> JsonObject:
     logical = {
         "spec_version": spec.spec_version,
         "dataset": spec.dataset.model_dump(mode="json"),
-        "policy": spec.policy.model_dump(mode="json", exclude=policy_exclude),
+        "policy": spec.policy.model_dump(mode="json"),
         "sources": logical_sources,
         "selection": spec.selection.model_dump(mode="json"),
         "split": logical_split,
@@ -457,27 +452,6 @@ def prepare_dataset(
 
     system_prompt_profile = spec.policy.resolved_system_prompt_profile
     system_prompt = resolve_decomposer_system_prompt(system_prompt_profile)
-    canonical_subagent_type_ids = frozenset(
-        subagent.id for subagent in spec.policy.subagent_types
-    )
-    canonical_tools: list[JsonObject] | None = None
-    if spec.policy.subagent_types:
-        canonical_tools = build_decomposer_chat_tools(
-            [
-                {
-                    "agent_type_id": subagent.id,
-                    "description": subagent.description,
-                    "assistant_id": subagent.id,
-                }
-                for subagent in spec.policy.subagent_types
-            ]
-        )
-        try:
-            validate_chat_tools(canonical_tools)
-        except TraceValidationError as error:
-            raise ValueError(
-                f"Decomposer core exposes an unsupported tool interface: {error}"
-            ) from error
     records: list[CanonicalRollout] = []
     source_manifests: list[JsonObject] = []
     counts_by_source: dict[str, Counter[str]] = {}
@@ -491,13 +465,7 @@ def prepare_dataset(
             source_selection = spec.selection.model_copy(
                 update=source.selection.model_dump()
             )
-        result = adapter(
-            source,
-            source_selection,
-            system_prompt=system_prompt,
-            canonical_tools=canonical_tools,
-            canonical_subagent_type_ids=canonical_subagent_type_ids,
-        )
+        result = adapter(source, source_selection, system_prompt=system_prompt)
         for record in result.records:
             if record.id in seen_ids:
                 raise ValueError(f"Duplicate canonical rollout ID: {record.id}")
@@ -612,10 +580,6 @@ def prepare_dataset(
             "id": spec.policy.id,
             "system_prompt_profile": system_prompt_profile,
             "system_prompt_sha256": sha256_text(system_prompt),
-            "subagent_types": [
-                subagent.model_dump(mode="json")
-                for subagent in spec.policy.subagent_types
-            ],
         },
         "sources": source_manifests,
         "filtering": {

@@ -10,8 +10,7 @@ from __future__ import annotations
 import json
 import math
 from collections import Counter
-from collections.abc import Iterable, Mapping, Sequence
-from copy import deepcopy
+from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -27,12 +26,10 @@ from ..schema import (
     SourceSpec,
     TraceValidationError,
     canonical_json,
-    normalize_subagent_type_ids,
     normalize_response_tools,
     require_mapping,
     sha256_file,
     sha256_text,
-    validate_decomposer_messages,
 )
 from ..snapshots import SnapshotFile
 
@@ -208,8 +205,6 @@ def read_nemo_gym_source(
     selection: SelectionSpec,
     *,
     system_prompt: str,
-    canonical_tools: Sequence[JsonObject] | None = None,
-    canonical_subagent_type_ids: frozenset[str] = frozenset(),
 ) -> AdapterReadResult:
     """Read one immutable NeMo Gym result directory."""
     source_dir = source.path.resolve()
@@ -252,7 +247,6 @@ def read_nemo_gym_source(
             f"Source {source.id!r} expected {source.expected_candidates} "
             f"candidate rollouts, found {candidate_rollouts}."
         )
-    normalized_subagent_calls = 0
 
     with rollouts_path.open(encoding="utf-8") as file:
         for line_number, line in enumerate(file, start=1):
@@ -348,22 +342,7 @@ def read_nemo_gym_source(
                 messages = convert_langgraph_messages(
                     final_state.get("messages"), system_prompt
                 )
-                native_tools = normalize_response_tools(response.get("tools"))
-                normalized_type_calls = normalize_subagent_type_ids(
-                    messages,
-                    allowed_ids=canonical_subagent_type_ids,
-                    aliases=source.subagent_type_aliases,
-                )
-                validate_decomposer_messages(
-                    messages,
-                    subagent_type_ids=canonical_subagent_type_ids,
-                    allow_core_errors=True,
-                )
-                tools = (
-                    deepcopy(list(canonical_tools))
-                    if canonical_tools is not None
-                    else native_tools
-                )
+                tools = normalize_response_tools(response.get("tools"))
                 category = materialized_input.get("category")
                 environment = materialized_input.get("environment_name")
                 if not isinstance(category, str) or not category:
@@ -401,22 +380,10 @@ def read_nemo_gym_source(
                             reward=numeric_reward,
                             metrics={"reward": numeric_reward},
                         ),
-                        attributes={
-                            "category": category,
-                            **(
-                                {
-                                    "subagent_type_normalization": {
-                                        "tool_calls": normalized_type_calls,
-                                    }
-                                }
-                                if normalized_type_calls
-                                else {}
-                            ),
-                        },
+                        attributes={"category": category},
                     )
                 )
                 counts["eligible"] += 1
-                normalized_subagent_calls += normalized_type_calls
             except json.JSONDecodeError as error:
                 trace_error = TraceValidationError("excluded_invalid_json", str(error))
                 if selection.invalid_policy == "error":
@@ -463,15 +430,7 @@ def read_nemo_gym_source(
             "sampling": sampling_manifest,
             "materialized_records": len(materialized),
             "sidecar_failure_records": _count_nonempty_lines(failures_path),
-            "tool_schema_origin": (
-                "canonical_policy_interface"
-                if canonical_tools is not None
-                else "response.tools"
-            ),
-            "subagent_type_normalization": {
-                "aliases": dict(sorted(source.subagent_type_aliases.items())),
-                "tool_calls": normalized_subagent_calls,
-            },
+            "tool_schema_origin": "response.tools",
         },
         counts=counts,
     )

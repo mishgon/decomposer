@@ -11,12 +11,12 @@ of the renamed core (2026-10-05): `new(agent_type_id)`, `fork(agent_id)` and
 `run(agent_id, prompt)`. Traces of the retired `spawn_subagent`/`wait` core are
 excluded with reason `excluded_legacy_tool_interface`; they are never converted.
 Traces recorded before the rename (`subagent_type_id`, `subagent_id`) are
-rejected as invalid tool calls. The canonical tool schemas come from
-`sft/chat_tools.py`, which builds them from the live core.
+rejected as invalid tool calls.
 
-A specification without `policy.subagent_types` keeps each record's native tool
-schemas instead, so every gym keeps its own agent types. Each source must use
-one schema; the manifest records its hash per source (`tool_schema_sha256`) and
+Records keep the tool schemas each source's manager saw, so every gym keeps its
+own agent types. Toolathlon collections store none; `sft/chat_tools.py`
+rebuilds them from the live core and the spec's `native_subagent_types`. Each
+source must use one schema; the manifest records its hash per source (`tool_schema_sha256`) and
 lists the dataset's hashes (`content.tool_schema_sha256s`). The
 NeMo Gym adapter (tau2, Workplace) keeps successful rollouts in which the
 manager made a mistake the core answered: a call of an unknown tool, malformed

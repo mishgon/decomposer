@@ -7,8 +7,7 @@ from __future__ import annotations
 
 import json
 from collections import Counter
-from collections.abc import Mapping, Sequence
-from copy import deepcopy
+from collections.abc import Mapping
 from pathlib import Path
 
 from ..chat_tools import build_decomposer_chat_tools
@@ -21,9 +20,7 @@ from ..schema import (
     SelectionSpec,
     SourceSpec,
     TraceValidationError,
-    normalize_subagent_type_ids,
     validate_chat_tools,
-    validate_decomposer_messages,
 )
 from ..snapshots import SnapshotFile
 from ..toolathlon_gym.scheduler import load_launch_outcome
@@ -74,8 +71,6 @@ def read_toolathlon_gym_source(
     selection: SelectionSpec,
     *,
     system_prompt: str,
-    canonical_tools: Sequence[JsonObject] | None = None,
-    canonical_subagent_type_ids: frozenset[str] = frozenset(),
 ) -> AdapterReadResult:
     """Read the finished episodes of a toolathlon_langgraph_v1 collection.
 
@@ -93,20 +88,16 @@ def read_toolathlon_gym_source(
     assert threshold is not None
     source_dir = source.path.resolve()
     native_type_ids = {subagent.id for subagent in source.native_subagent_types}
-    tools = (
-        deepcopy(list(canonical_tools))
-        if canonical_tools is not None
-        else validate_chat_tools(
-            build_decomposer_chat_tools(
-                [
-                    {
-                        "agent_type_id": subagent.id,
-                        "description": subagent.description,
-                        "assistant_id": subagent.id,
-                    }
-                    for subagent in source.native_subagent_types
-                ]
-            )
+    tools = validate_chat_tools(
+        build_decomposer_chat_tools(
+            [
+                {
+                    "agent_type_id": subagent.id,
+                    "description": subagent.description,
+                    "assistant_id": subagent.id,
+                }
+                for subagent in source.native_subagent_types
+            ]
         )
     )
     result_paths = sorted(source_dir.glob("evals/*/*/result.json"))
@@ -131,7 +122,6 @@ def read_toolathlon_gym_source(
     records: list[CanonicalRollout] = []
     counts = _empty_counts()
     run_ids: set[str] = set()
-    normalized_subagent_calls = 0
     for result_path in result_paths:
         counts["rollouts"] += 1
         task = result_path.parents[1].name
@@ -202,16 +192,6 @@ def read_toolathlon_gym_source(
                     "excluded_prompt_mismatch",
                     f"Trace/runtime prompt mismatch for {episode_id}.",
                 )
-            normalized_type_calls = normalize_subagent_type_ids(
-                messages,
-                allowed_ids=canonical_subagent_type_ids,
-                aliases=source.subagent_type_aliases,
-            )
-            validate_decomposer_messages(
-                messages,
-                subagent_type_ids=canonical_subagent_type_ids,
-                allow_core_errors=True,
-            )
             repetition = trace.get("repetition")
             attempt = trace.get("attempt")
             if (
@@ -280,21 +260,11 @@ def read_toolathlon_gym_source(
                             if partial is not None
                             else {}
                         ),
-                        **(
-                            {
-                                "subagent_type_normalization": {
-                                    "tool_calls": normalized_type_calls,
-                                }
-                            }
-                            if normalized_type_calls
-                            else {}
-                        ),
                     },
                 )
             )
             run_ids.add(run_id)
             counts["eligible"] += 1
-            normalized_subagent_calls += normalized_type_calls
         except (json.JSONDecodeError, TypeError) as error:
             trace_error = TraceValidationError("excluded_invalid_json", str(error))
             if selection.invalid_policy == "error":
@@ -324,15 +294,7 @@ def read_toolathlon_gym_source(
             "native_rollouts": native_rollouts,
             "candidate_rollouts": native_rollouts,
             "sidecar_failure_records": 0,
-            "tool_schema_origin": (
-                "canonical_policy_interface"
-                if canonical_tools is not None
-                else "native_subagent_types"
-            ),
-            "subagent_type_normalization": {
-                "aliases": dict(sorted(source.subagent_type_aliases.items())),
-                "tool_calls": normalized_subagent_calls,
-            },
+            "tool_schema_origin": "native_subagent_types",
             "selection": selection.model_dump(
                 mode="json",
                 exclude={"invalid_policy", "max_traces_per_prompt_per_teacher"},

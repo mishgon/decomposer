@@ -7,11 +7,11 @@ Gym-specific adapters (for example `sft/wideseek/adapter.py`) import the shared
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from pathlib import Path
 from typing import Protocol
 
-from ..schema import JsonObject, SelectionSpec, SourceSpec
+from ..schema import SelectionSpec, SourceSpec
 from ..snapshots import SnapshotFile
 from .base import AdapterReadResult
 from .nemo_gym import ADAPTER_VERSION as NEMO_GYM_ADAPTER_VERSION
@@ -32,8 +32,6 @@ class AdapterReader(Protocol):
         selection: SelectionSpec,
         *,
         system_prompt: str,
-        canonical_tools: Sequence[JsonObject] | None = None,
-        canonical_subagent_type_ids: frozenset[str] = frozenset(),
     ) -> AdapterReadResult: ...
 
 
