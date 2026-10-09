@@ -116,7 +116,7 @@ async def episode(task, mode, attempt, root, args, *, middleware=()):
                                context={"directory": str(path.resolve())}), args.timeout)
         result["status"] = "finished"
         if state.get("stop_reason"):
-            result.update(status=state["stop_reason"], error=state["stop_reason"],
+            result.update(status="skipped", stop_reason=state["stop_reason"],
                           sequence_length=state.get("sequence_length"))
     except Exception as exc:
         result["status"] = ("timeout" if isinstance(exc, TimeoutError) else
@@ -128,6 +128,8 @@ async def episode(task, mode, attempt, root, args, *, middleware=()):
         state = state or dict(snapshot.values)
         if errors := await cleanup_workers(client, state, path):
             result["cleanup_errors"] = errors
+            if result.get("status") == "skipped":
+                result.update(status="error", error="Agent cleanup failed after sequence limit")
         await close_model(policy)
         result["agent_finished_at"] = time.time()
         messages = state.get("messages", [])

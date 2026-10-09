@@ -45,7 +45,7 @@ student tokenizer and chat template, system message, tool schemas, and reasoning
 removal. This change provides the shared batch API; it does not wire that API into
 an existing training dataset loader.
 
-Collection reporting still needs to classify `sequence_limit` as **skipped**.
+Collection reporting classifies `sequence_limit` as **skipped**.
 Such an attempt consumes an attempt slot but counts as neither an error nor a
 success. Raw traces and any diagnostic native score must remain available.
-Do not merge until the collectors and watchers implement this classification.
+Skips are terminal for resume and excluded from error rates and success counts.

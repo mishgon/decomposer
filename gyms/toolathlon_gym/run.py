@@ -422,9 +422,6 @@ def run_episode(args) -> None:
             config={"recursion_limit": 410},
         ))
         agent_error = repr(agent_exception) if agent_exception is not None else None
-        if state.get("stop_reason"):
-            agent_error = state["stop_reason"]
-            agent_exception = RuntimeError(agent_error)
         messages = state.get("messages", [])
         serialized_messages = serialize_messages(messages)
         agent_runs = state.get("agent_runs", {})
@@ -536,7 +533,7 @@ def run_episode(args) -> None:
             evaluation = {
                 "episode_id": episode_id,
                 "task": args.task,
-                "pass": completed.returncode == 0 and agent_exception is None,
+                "pass": completed.returncode == 0 and agent_exception is None and not state.get("stop_reason"),
                 "native_pass": completed.returncode == 0,
                 "agent_error": agent_error,
                 "returncode": completed.returncode,
@@ -544,6 +541,7 @@ def run_episode(args) -> None:
                 "stdout": completed.stdout,
                 "stderr": completed.stderr,
             }
+        evaluation["stop_reason"] = state.get("stop_reason")
         evaluation_path.parent.mkdir(parents=True, exist_ok=True)
         evaluation_path.write_text(
             json.dumps(evaluation, indent=2, ensure_ascii=False),

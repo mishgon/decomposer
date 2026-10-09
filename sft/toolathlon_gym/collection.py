@@ -142,7 +142,7 @@ class ProviderBackoffBarrier:
 
 def openrouter_transient_failure(result: dict[str, Any]) -> str | None:
     """Return evidence only for transient failures in the Decomposer provider path."""
-    if result.get("status") == "completed":
+    if result.get("status") in {"completed", "skipped"}:
         return None
     evidence: list[str] = []
     error = result.get("error")
@@ -288,7 +288,7 @@ def select_tasks(tasks_dir: Path, run_all: bool, requested: Sequence[str] | None
 
 
 def count_statuses(manifest: dict[str, Any]) -> dict[str, int]:
-    counts = {name: 0 for name in ("pending", "running", "completed", "failed")}
+    counts = {name: 0 for name in ("pending", "running", "completed", "failed", "skipped")}
     for episode in manifest["episodes"]:
         counts[episode["status"]] += 1
     counts["total"] = len(manifest["episodes"])
@@ -484,6 +484,7 @@ def execute_episode(
     evaluation_path = root / "evals" / task / episode_id / "result.json"
     score = None
     partial_score = None
+    evaluation = {}
     if evaluation_path.is_file():
         try:
             evaluation = json.loads(evaluation_path.read_text(encoding="utf-8"))
@@ -498,7 +499,9 @@ def execute_episode(
                 }
         except (json.JSONDecodeError, OSError):
             pass
-    completed = not timed_out and returncode == 0 and evaluation_path.is_file()
+    completed = (not timed_out and returncode == 0 and evaluation_path.is_file()
+                 and not evaluation.get("agent_shutdown_error"))
+    skipped = completed and evaluation.get("stop_reason") == "sequence_limit"
     error = None
     if not completed:
         stderr_tail = (attempt_dir / "runner.stderr.log").read_text(
@@ -516,8 +519,9 @@ def execute_episode(
         }
     result = {
         "attempt": attempt,
-        "status": "completed" if completed else "failed",
-        "score": score,
+        "status": "skipped" if skipped else "completed" if completed else "failed",
+        "stop_reason": "sequence_limit" if skipped else None,
+        "score": None if skipped else score,
         "partial_score": partial_score,
         "artifact_path": str(artifact_dir if artifact_dir.is_dir() else attempt_dir),
         "attempt_log_path": str(attempt_dir),
@@ -551,7 +555,7 @@ def next_attempt(run_dir: Path, episode: dict[str, Any]) -> tuple[int, bool]:
         if (
             isinstance(saved, dict)
             and saved.get("attempt") == number
-            and saved.get("status") in {"completed", "failed"}
+            and saved.get("status") in {"completed", "failed", "skipped"}
         ):
             saved.pop("command", None)
             episode["attempts"].append(saved)
@@ -709,7 +713,7 @@ def _run_collection(args, run_dir, *, repo_root, toolathlon_root, docker):
                 terminal = episode["status"] in (
                     adaptive_scheduler.TERMINAL_EPISODE_STATUSES
                     if args.adaptive
-                    else {"completed"}
+                    else {"completed", "skipped"}
                 )
                 if terminal:
                     continue
@@ -883,7 +887,7 @@ def _run_collection(args, run_dir, *, repo_root, toolathlon_root, docker):
         }
         raise
     finally:
-        incomplete = any(item["status"] != "completed" for item in manifest["episodes"])
+        incomplete = any(item["status"] not in {"completed", "skipped"} for item in manifest["episodes"])
         manifest["status"] = (
             "interrupted"
             if interrupted

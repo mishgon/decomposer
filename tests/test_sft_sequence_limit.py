@@ -49,6 +49,29 @@ class Tokenizer:
         return range(self.count)
 
 
+def test_skip_is_terminal_but_never_successful(tmp_path):
+    import json
+    from sft.toolathlon_gym.collection import count_statuses, next_attempt
+    from sft.toolathlon_gym.scheduler import TERMINAL_EPISODE_STATUSES, load_launch_outcome
+    from gyms.wideseek.metrics import qualifies
+
+    result = tmp_path / 'evaluation.json'
+    result.write_text(json.dumps({'pass': True, 'stop_reason': 'sequence_limit'}))
+    assert not load_launch_outcome('task', str(result)).qualifies(.9)
+    assert 'skipped' in TERMINAL_EPISODE_STATUSES
+    assert not qualifies({'status': 'skipped', 'evaluation': {'status': 'scored', 'score': 1.}}, .9)
+    saved = {'attempt': 1, 'status': 'skipped', 'stop_reason': 'sequence_limit', 'error': None}
+    path = tmp_path / 'attempts/task/rep-001/attempt-001'
+    path.mkdir(parents=True)
+    (path / 'attempt.json').write_text(json.dumps(saved))
+    episode = {'task': 'task', 'repetition': 1, 'attempts': [], 'status': 'pending'}
+    assert next_attempt(tmp_path, episode) == (2, True)
+    assert episode['status'] == 'skipped'
+    counts = count_statuses({'episodes': [episode]})
+    assert counts['skipped'] == counts['total'] == 1
+    assert counts['failed'] == counts['completed'] == 0
+
+
 class Policy(BaseChatModel):
     @property
     def _llm_type(self):

@@ -12,8 +12,8 @@ from gyms.toolathlon_gym import run as gym
 from gyms.toolathlon_gym.task import model_metadata
 
 
-@pytest.mark.parametrize("agent_failed", [False, True])
-def test_render_failure_preserves_evaluation_and_container_metadata(tmp_path, monkeypatch, caplog, agent_failed):
+@pytest.mark.parametrize("agent_failed,skipped", [(False, False), (True, False), (False, True)])
+def test_render_failure_preserves_evaluation_and_container_metadata(tmp_path, monkeypatch, caplog, agent_failed, skipped):
     monkeypatch.delenv("LLM_PROXY_MASTER_KEY", raising=False)
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-openrouter-secret")
     monkeypatch.delenv("LLM_PROXY_UNIX_SOCKET", raising=False)
@@ -63,6 +63,8 @@ def test_render_failure_preserves_evaluation_and_container_metadata(tmp_path, mo
         "messages": [{"type": "ai", "content": "Answer"}],
         "decomposer_agent_runs": [{"status": "error" if agent_failed else "responded"}],
     }
+    if skipped:
+        state.update(stop_reason="sequence_limit", sequence_length=33043)
     monkeypatch.setattr(gym, "invoke_and_capture", AsyncMock(return_value=(state, error)))
     evaluation_saved_before_render = []
 
@@ -85,7 +87,10 @@ def test_render_failure_preserves_evaluation_and_container_metadata(tmp_path, mo
     assert "broken renderer" in caplog.text
     evaluation = json.loads(result_path.read_text())
     assert evaluation["native_pass"] is True
-    assert evaluation["pass"] is not agent_failed
+    assert evaluation["pass"] == (not agent_failed and not skipped)
+    if skipped:
+        assert evaluation["agent_error"] is None
+        assert evaluation["stop_reason"] == "sequence_limit"
     trace = json.loads((episode / "trace.json").read_text())
     assert trace["model"] == trace["agent_model_id"] == "container/model"
     assert trace["agent_base_url"] == "http://image-provider/v1"
