@@ -31,7 +31,6 @@ from ..schema import (
     sha256_file,
     sha256_text,
 )
-from ..snapshots import SnapshotFile
 
 ADAPTER_VERSION = 8
 
@@ -105,14 +104,11 @@ def _empty_counts() -> Counter[str]:
     return Counter({reason: 0 for reason in EXCLUSION_REASONS})
 
 
-def snapshot_files(source_dir: Path) -> list[SnapshotFile]:
+def snapshot_files(source_dir: Path) -> list[str]:
     """The result files `read_nemo_gym_source` reads."""
-    files = [
-        SnapshotFile("rollouts.jsonl"),
-        SnapshotFile("rollouts_materialized_inputs.jsonl"),
-    ]
+    files = ["rollouts.jsonl", "rollouts_materialized_inputs.jsonl"]
     if (source_dir / "rollouts_failures.jsonl").is_file():
-        files.append(SnapshotFile("rollouts_failures.jsonl"))
+        files.append("rollouts_failures.jsonl")
     return files
 
 

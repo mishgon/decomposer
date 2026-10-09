@@ -22,7 +22,6 @@ from ..schema import (
     TraceValidationError,
     validate_chat_tools,
 )
-from ..snapshots import SnapshotFile
 from ..toolathlon_gym.scheduler import load_launch_outcome
 from .base import AdapterReadResult
 from .langgraph_messages import convert_langgraph_messages
@@ -42,13 +41,13 @@ def _load_json(path: Path) -> JsonObject:
     return value
 
 
-def snapshot_files(source_dir: Path) -> list[SnapshotFile]:
+def snapshot_files(source_dir: Path) -> list[str]:
     """The files of every finished episode of a toolathlon_langgraph_v1 collection.
 
     An episode is finished once its evaluation exists: the collector writes
     ``result.json`` after the trace, so episodes still running are left out.
     """
-    files: list[SnapshotFile] = []
+    files: list[str] = []
     for result_path in sorted(source_dir.glob("evals/*/*/result.json")):
         episode = Path("traces") / result_path.parent.relative_to(source_dir / "evals")
         if not all(
@@ -58,9 +57,9 @@ def snapshot_files(source_dir: Path) -> list[SnapshotFile]:
             continue
         files.extend(
             (
-                SnapshotFile((episode / "trace.json").as_posix()),
-                SnapshotFile((episode / "runtime.json").as_posix()),
-                SnapshotFile(result_path.relative_to(source_dir).as_posix()),
+                (episode / "trace.json").as_posix(),
+                (episode / "runtime.json").as_posix(),
+                result_path.relative_to(source_dir).as_posix(),
             )
         )
     return files

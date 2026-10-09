@@ -7,13 +7,7 @@ from pathlib import Path
 import pytest
 
 from sft.builder import _git_revision
-from sft.snapshots import (
-    SNAPSHOT_MANIFEST_NAME,
-    SnapshotFile,
-    create_snapshot,
-    load_snapshot,
-    snapshot_directory,
-)
+from sft.snapshots import create_snapshot, load_snapshot, snapshot_directory
 
 
 def _source(root: Path) -> Path:
@@ -27,7 +21,7 @@ def _source(root: Path) -> Path:
     return source
 
 
-FILES = [SnapshotFile("rollouts.jsonl"), SnapshotFile("traces/trace.json")]
+FILES = ["rollouts.jsonl", "traces/trace.json"]
 
 
 def test_snapshot_round_trip_copies_only_listed_files(tmp_path: Path) -> None:
@@ -77,18 +71,6 @@ def test_modified_extra_or_missing_files_are_rejected(tmp_path: Path) -> None:
     (directory / "rollouts.jsonl").unlink()
     with pytest.raises(ValueError, match="file set differs"):
         load_snapshot(directory, digest, adapter="nemo_gym")
-
-
-def test_snapshot_paths_must_be_relative_and_unique(tmp_path: Path) -> None:
-    source = _source(tmp_path)
-    for files in (
-        [SnapshotFile("../rollouts.jsonl")],
-        [SnapshotFile("/etc/passwd")],
-        [SnapshotFile(SNAPSHOT_MANIFEST_NAME)],
-        [SnapshotFile("rollouts.jsonl"), SnapshotFile("rollouts.jsonl")],
-    ):
-        with pytest.raises(ValueError):
-            create_snapshot("nemo_gym", source, tmp_path / "snapshots", files)
 
 
 def _git(repository: Path, *arguments: str) -> None:

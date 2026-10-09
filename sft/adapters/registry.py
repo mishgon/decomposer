@@ -12,7 +12,6 @@ from pathlib import Path
 from typing import Protocol
 
 from ..schema import SelectionSpec, SourceSpec
-from ..snapshots import SnapshotFile
 from .base import AdapterReadResult
 from .nemo_gym import ADAPTER_VERSION as NEMO_GYM_ADAPTER_VERSION
 from .nemo_gym import read_nemo_gym_source
@@ -46,7 +45,7 @@ ADAPTER_VERSIONS = {
     "wideseek": WIDESEEK_ADAPTER_VERSION,
 }
 # The native files each adapter reads; a source's snapshot holds exactly these.
-SNAPSHOT_FILES: dict[str, Callable[[Path], list[SnapshotFile]]] = {
+SNAPSHOT_FILES: dict[str, Callable[[Path], list[str]]] = {
     "nemo_gym": nemo_gym_snapshot_files,
     "toolathlon_gym": toolathlon_gym_snapshot_files,
     "wideseek": wideseek_snapshot_files,

@@ -11,42 +11,22 @@ are copied byte for byte: a snapshot never changes a trace.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
-import re
 import shutil
 import socket
 import tempfile
 from collections.abc import Sequence
-from dataclasses import dataclass
 from datetime import UTC, datetime
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 
-from .schema import JsonObject, canonical_json, sha256_text
+from .schema import JsonObject, canonical_json, sha256_file, sha256_text
 
 SNAPSHOT_SCHEMA_VERSION = 1
 SNAPSHOT_MANIFEST_NAME = "snapshot.json"
 DEFAULT_SNAPSHOT_ROOT = Path(
     "/mnt/share14T-2/sukhorukov/decomposer_artifacts/datasets/sft/snapshots"
 )
-SNAPSHOT_REFERENCE = re.compile(r"^sha256:([0-9a-f]{64})$")
-_CHUNK_BYTES = 1 << 20
-
-
-@dataclass(frozen=True)
-class SnapshotFile:
-    """A native file an adapter reads, at its path relative to the source."""
-
-    path: str
-
-
-def snapshot_digest(reference: str) -> str:
-    """Return the hex digest of a ``sha256:<hex>`` snapshot reference."""
-    match = SNAPSHOT_REFERENCE.fullmatch(reference)
-    if match is None:
-        raise ValueError(f"Snapshot references must look like sha256:<64 hex>: {reference!r}")
-    return match.group(1)
 
 
 def snapshot_directory(root: Path, adapter: str, digest: str) -> Path:
@@ -67,30 +47,11 @@ def _content_digest(adapter: str, files: dict[str, JsonObject]) -> str:
     )
 
 
-def _hash_file(path: Path) -> tuple[int, str]:
-    digest = hashlib.sha256()
-    size = 0
-    with path.open("rb") as file:
-        while chunk := file.read(_CHUNK_BYTES):
-            digest.update(chunk)
-            size += len(chunk)
-    return size, digest.hexdigest()
-
-
-def _relative_path(path: str) -> str:
-    pure = PurePosixPath(path)
-    if pure.is_absolute() or ".." in pure.parts or not pure.parts or path != str(pure):
-        raise ValueError(f"Snapshot file paths must be normalized relative paths: {path!r}")
-    if path == SNAPSHOT_MANIFEST_NAME:
-        raise ValueError(f"{SNAPSHOT_MANIFEST_NAME} is reserved for the snapshot manifest")
-    return path
-
-
 def create_snapshot(
     adapter: str,
     source_dir: str | Path,
     output_root: str | Path,
-    files: Sequence[SnapshotFile],
+    files: Sequence[str],
 ) -> tuple[Path, JsonObject]:
     """Copy an adapter's files into ``<root>/<adapter>/<digest[:16]>``.
 
@@ -99,25 +60,24 @@ def create_snapshot(
     """
     source_dir = Path(source_dir).resolve()
     output_root = Path(output_root).resolve()
-    paths = [_relative_path(file.path) for file in files]
-    if not paths:
+    if not files:
         raise ValueError("A snapshot needs at least one file.")
-    if len(paths) != len(set(paths)):
-        raise ValueError("Snapshot file paths must be unique.")
     adapter_root = output_root / adapter
     adapter_root.mkdir(parents=True, exist_ok=True)
     temporary_dir = Path(tempfile.mkdtemp(prefix=".snapshot-", dir=adapter_root))
     try:
         entries: dict[str, JsonObject] = {}
-        for file in sorted(files, key=lambda item: item.path):
-            origin = source_dir / file.path
+        for path in sorted(files):
+            origin = source_dir / path
             if not origin.is_file():
                 raise FileNotFoundError(f"Snapshot source file does not exist: {origin}")
-            target = temporary_dir / file.path
+            target = temporary_dir / path
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(origin, target)
-            size, sha256 = _hash_file(target)
-            entries[file.path] = {"bytes": size, "sha256": sha256}
+            entries[path] = {
+                "bytes": target.stat().st_size,
+                "sha256": sha256_file(target),
+            }
         digest = _content_digest(adapter, entries)
         manifest = {
             "schema_version": SNAPSHOT_SCHEMA_VERSION,
@@ -153,7 +113,6 @@ def create_snapshot(
 def load_snapshot(directory: str | Path, reference: str, *, adapter: str) -> JsonObject:
     """Verify a snapshot's digest, exact file set, and every file's size and hash."""
     directory = Path(directory)
-    expected = snapshot_digest(reference)
     manifest_path = directory / SNAPSHOT_MANIFEST_NAME
     if not manifest_path.is_file():
         raise FileNotFoundError(f"Snapshot manifest does not exist: {manifest_path}")
@@ -168,11 +127,9 @@ def load_snapshot(directory: str | Path, reference: str, *, adapter: str) -> Jso
     files = manifest.get("files")
     if not isinstance(files, dict) or not files:
         raise ValueError(f"Snapshot manifest {manifest_path} lists no files.")
-    digest = _content_digest(adapter, files)
-    if manifest.get("digest") != f"sha256:{digest}" or digest != expected:
-        raise ValueError(
-            f"Snapshot {directory} resolves to sha256:{digest}, not {reference}."
-        )
+    digest = f"sha256:{_content_digest(adapter, files)}"
+    if manifest.get("digest") != digest or digest != reference:
+        raise ValueError(f"Snapshot {directory} resolves to {digest}, not {reference}.")
     present = {
         path.relative_to(directory).as_posix()
         for path in directory.rglob("*")
@@ -186,9 +143,12 @@ def load_snapshot(directory: str | Path, reference: str, *, adapter: str) -> Jso
             f"(unexpected: {unexpected[:5]}, missing: {missing[:5]})."
         )
     for path, entry in sorted(files.items()):
-        size, sha256 = _hash_file(directory / path)
-        if size != entry.get("bytes") or sha256 != entry.get("sha256"):
-            raise ValueError(f"Snapshot file {directory / path} was modified.")
+        file_path = directory / path
+        if (
+            file_path.stat().st_size != entry.get("bytes")
+            or sha256_file(file_path) != entry.get("sha256")
+        ):
+            raise ValueError(f"Snapshot file {file_path} was modified.")
     return manifest
 
 

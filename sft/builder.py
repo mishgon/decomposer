@@ -23,7 +23,6 @@ from .adapters.registry import ADAPTER_VERSIONS, ADAPTERS
 from .snapshots import (
     DEFAULT_SNAPSHOT_ROOT,
     load_snapshot,
-    snapshot_digest,
     snapshot_directory,
 )
 from .schema import (
@@ -354,7 +353,7 @@ def prepare_dataset(
         # A snapshot is located by its digest and verified file by file before
         # its adapter reads it.
         path = snapshot_directory(
-            snapshot_root, source.adapter, snapshot_digest(source.snapshot)
+            snapshot_root, source.adapter, source.snapshot.removeprefix("sha256:")
         )
         load_snapshot(path, source.snapshot, adapter=source.adapter)
         resolved_sources.append(source.model_copy(update={"path": path}))

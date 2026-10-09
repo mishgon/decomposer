@@ -31,7 +31,6 @@ from ..schema import (
     TraceValidationError,
     validate_chat_tools,
 )
-from ..snapshots import SnapshotFile
 
 ADAPTER_VERSION = 1
 
@@ -88,21 +87,21 @@ def _first_manager_call(execution_dir: Path) -> tuple[Path, JsonObject] | None:
     return None if first is None else (first[2], first[3])
 
 
-def snapshot_files(source_dir: Path) -> list[SnapshotFile]:
+def snapshot_files(source_dir: Path) -> list[str]:
     """Each finished attempt's result, trace and first manager model call.
 
     The collector writes ``result.json`` when an attempt ends, so attempts still
     running are left out. Executions no result names (restarted ones) are left
     out too.
     """
-    files: list[SnapshotFile] = []
+    files: list[str] = []
     for result_path in sorted(source_dir.glob("decomposer/*/attempt-*/result.json")):
         execution_dir = _execution_dir(result_path, _load_json(result_path))
         first = _first_manager_call(execution_dir)
         if first is None or not (execution_dir / "trace.json").is_file():
             continue
         files.extend(
-            SnapshotFile(path.relative_to(source_dir).as_posix())
+            path.relative_to(source_dir).as_posix()
             for path in (result_path, execution_dir / "trace.json", first[0])
         )
     return files
