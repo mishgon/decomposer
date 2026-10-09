@@ -2,6 +2,30 @@ import asyncio
 import os
 import pytest
 
+
+def test_collection_tokenizer_loads_outside_event_loop(monkeypatch):
+    import importlib.util
+    from pathlib import Path
+    import sys
+    import threading
+    from types import SimpleNamespace
+
+    main_thread = threading.get_ident()
+    def load(path, *, local_files_only):
+        assert threading.get_ident() != main_thread
+        assert path == '/opt/sft-tokenizer' and local_files_only
+        return Tokenizer(1)
+
+    monkeypatch.setitem(sys.modules, 'transformers', SimpleNamespace(
+        AutoTokenizer=SimpleNamespace(from_pretrained=load)))
+    monkeypatch.setitem(sys.modules, 'agents', SimpleNamespace(decomposer=lambda **kw: kw))
+    path = Path(__file__).resolve().parents[1] / 'sft/toolathlon_gym/agents.py'
+    spec = importlib.util.spec_from_file_location('collection_agents_test', path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    graph = asyncio.run(module.decomposer())
+    assert isinstance(graph['middleware'][0], StudentSequenceLimit)
+
 from langchain.agents import create_agent
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_core.language_models.chat_models import BaseChatModel
