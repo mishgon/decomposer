@@ -1,0 +1,2 @@
+- name: synth_decomposer
+  _target_: opd.synth.agent_loop.SynthAgentLoop
