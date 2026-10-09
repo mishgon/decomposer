@@ -116,10 +116,11 @@ def read_nemo_gym_source(
     source: SourceSpec,
     selection: SelectionSpec,
     *,
+    source_dir: Path,
     system_prompt: str,
 ) -> AdapterReadResult:
     """Read one immutable NeMo Gym result directory."""
-    source_dir = source.path.resolve()
+    source_dir = source_dir.resolve()
     rollouts_path = source_dir / "rollouts.jsonl"
     materialized_path = source_dir / "rollouts_materialized_inputs.jsonl"
     failures_path = source_dir / "rollouts_failures.jsonl"

@@ -111,6 +111,7 @@ def read_wideseek_source(
     source: SourceSpec,
     selection: SelectionSpec,
     *,
+    source_dir: Path,
     system_prompt: str,
 ) -> AdapterReadResult:
     """Read the attempts the collector counts as successes.
@@ -121,7 +122,7 @@ def read_wideseek_source(
     threshold = selection.success_threshold
     assert threshold is not None
     teacher_prompt = resolve_decomposer_system_prompt("teacher")
-    source_dir = source.path.resolve()
+    source_dir = source_dir.resolve()
     result_paths = sorted(source_dir.glob("decomposer/*/attempt-*/result.json"))
     native_rollouts = len(result_paths)
     if native_rollouts != source.expected_native_rollouts:

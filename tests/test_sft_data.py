@@ -740,7 +740,7 @@ def test_builds_only_from_the_pinned_snapshot(tmp_path: Path) -> None:
 def test_build_specs_require_spec_version_4_and_snapshot_sources() -> None:
     spec = _snapshot_spec("sha256:" + "a" * 64).spec.model_dump(mode="json")
     with_path = {**spec["sources"][0], "path": "/tmp/source"}
-    with pytest.raises(ValidationError, match="must not set a path"):
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
         BuildSpec.model_validate({**spec, "sources": [with_path]})
     with pytest.raises(ValidationError, match="snapshot"):
         SourceSpec.model_validate({**spec["sources"][0], "snapshot": None})

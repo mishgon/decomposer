@@ -140,8 +140,7 @@ def _source(path: Path) -> SourceSpec:
     return SourceSpec(
         id="wideseek-collection",
         adapter="wideseek",
-        path=path,
-        # Adapters read the path; only the builder resolves the snapshot.
+        # Only the builder resolves snapshots; these tests read the fixture.
         snapshot="sha256:" + "0" * 64,
         expected_native_rollouts=results,
         expected_candidates=results,
@@ -155,7 +154,10 @@ def _source(path: Path) -> SourceSpec:
 
 def _read(path: Path):
     return read_wideseek_source(
-        _source(path), SELECTION, system_prompt=DECOMPOSER_SYSTEM_PROMPT
+        _source(path),
+        SELECTION,
+        source_dir=path,
+        system_prompt=DECOMPOSER_SYSTEM_PROMPT,
     )
 
 

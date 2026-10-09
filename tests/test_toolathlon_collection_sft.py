@@ -154,8 +154,7 @@ def _source(root: Path, **overrides: object) -> SourceSpec:
         **{
             "id": "toolathlon-collection",
             "adapter": "toolathlon_gym",
-            "path": root,
-            # Adapters read the path; only the builder resolves the snapshot.
+            # Only the builder resolves snapshots; these tests read the fixture.
             "snapshot": "sha256:" + "0" * 64,
             "expected_native_rollouts": results,
             "expected_candidates": results,
@@ -172,16 +171,19 @@ def _source(root: Path, **overrides: object) -> SourceSpec:
     )
 
 
-def _read(source: SourceSpec):
+def _read(root: Path, **overrides: object):
     return read_toolathlon_gym_source(
-        source, SELECTION, system_prompt=DECOMPOSER_SYSTEM_PROMPT
+        _source(root, **overrides),
+        SELECTION,
+        source_dir=root,
+        system_prompt=DECOMPOSER_SYSTEM_PROMPT,
     )
 
 
 def test_collection_keeps_what_the_collector_counts_as_success(tmp_path: Path) -> None:
     episodes = _collection(tmp_path)
 
-    result = _read(_source(tmp_path))
+    result = _read(tmp_path)
 
     # The running episode has no evaluation yet; 18/20 is not above 0.9, and an
     # agent error never qualifies, even with a pass.
@@ -227,13 +229,13 @@ def test_collection_checks_prompts_and_declared_agent_types(tmp_path: Path) -> N
     runtime["task_config"]["task_str"] = "Another task."
     runtime_path.write_text(json.dumps(runtime))
 
-    result = _read(_source(tmp_path))
+    result = _read(tmp_path)
     assert result.counts["excluded_prompt_mismatch"] == 1
     assert result.counts["eligible"] == 1
 
     _episode(tmp_path, "gamma-task", 1, passed=True, agent_type="other_type")
     with pytest.raises(ValueError, match="undeclared subagent types: other_type"):
-        _read(_source(tmp_path))
+        _read(tmp_path)
 
 
 def test_collection_snapshot_copies_finished_episodes_exactly(
@@ -251,17 +253,17 @@ def test_collection_snapshot_copies_finished_episodes_exactly(
     assert not any(episodes["running"] in path for path in manifest["files"])
     for name in manifest["files"]:
         assert (directory / name).read_bytes() == (source / name).read_bytes()
-    assert [record.id for record in _read(_source(directory)).records] == [
-        record.id for record in _read(_source(source)).records
+    assert [record.id for record in _read(directory).records] == [
+        record.id for record in _read(source).records
     ]
 
 
 def test_collection_must_match_its_expected_counts(tmp_path: Path) -> None:
     _collection(tmp_path)  # Four episodes have finished.
     with pytest.raises(ValueError, match="expected 5 native rollouts, found 4"):
-        _read(_source(tmp_path, expected_native_rollouts=5))
+        _read(tmp_path, expected_native_rollouts=5)
     with pytest.raises(ValueError, match="expected 5 candidate rollouts, found 4"):
-        _read(_source(tmp_path, expected_candidates=5))
+        _read(tmp_path, expected_candidates=5)
 
 
 def test_collection_format_requires_its_agent_types_and_selection(
@@ -286,6 +288,6 @@ def test_collection_format_requires_its_agent_types_and_selection(
         )
 
     with pytest.raises(ValidationError, match="select with collector_qualifies"):
-        spec(_source(tmp_path, path=None, **counts))
+        spec(_source(tmp_path, **counts))
     selection = {"policy": "collector_qualifies", "success_threshold": 0.9}
-    assert spec(_source(tmp_path, path=None, selection=selection, **counts))
+    assert spec(_source(tmp_path, selection=selection, **counts))

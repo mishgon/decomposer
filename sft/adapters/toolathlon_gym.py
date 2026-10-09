@@ -69,6 +69,7 @@ def read_toolathlon_gym_source(
     source: SourceSpec,
     selection: SelectionSpec,
     *,
+    source_dir: Path,
     system_prompt: str,
 ) -> AdapterReadResult:
     """Read the finished episodes of a toolathlon_langgraph_v1 collection.
@@ -80,7 +81,7 @@ def read_toolathlon_gym_source(
     """
     threshold = selection.success_threshold
     assert threshold is not None
-    source_dir = source.path.resolve()
+    source_dir = source_dir.resolve()
     native_type_ids = {subagent.id for subagent in source.native_subagent_types}
     tools = validate_chat_tools(
         build_decomposer_chat_tools(

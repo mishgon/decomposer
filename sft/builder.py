@@ -282,10 +282,7 @@ def _logical_spec(spec: BuildSpec) -> JsonObject:
         "spec_version": spec.spec_version,
         "dataset": spec.dataset.model_dump(mode="json"),
         "policy": spec.policy.model_dump(mode="json"),
-        "sources": [
-            source.model_dump(mode="json", exclude={"path"})
-            for source in spec.sources
-        ],
+        "sources": [source.model_dump(mode="json") for source in spec.sources],
         "selection": spec.selection.model_dump(mode="json"),
         "split": spec.split.model_dump(mode="json"),
     }
@@ -348,16 +345,14 @@ def prepare_dataset(
         loaded = load_build_spec(loaded)
     spec = loaded.spec
     snapshot_root = Path(snapshot_root).resolve()
-    resolved_sources = []
+    source_dirs: dict[str, Path] = {}
     for source in spec.sources:
         # A snapshot is located by its digest and verified file by file before
         # its adapter reads it.
-        path = snapshot_directory(
+        source_dirs[source.id] = snapshot_directory(
             snapshot_root, source.adapter, source.snapshot.removeprefix("sha256:")
         )
-        load_snapshot(path, source.snapshot, adapter=source.adapter)
-        resolved_sources.append(source.model_copy(update={"path": path}))
-    spec = spec.model_copy(update={"sources": tuple(resolved_sources)})
+        load_snapshot(source_dirs[source.id], source.snapshot, adapter=source.adapter)
     revision = git_revision or _git_revision(
         require_clean=require_clean_git, spec_path=loaded.path
     )
@@ -375,15 +370,17 @@ def prepare_dataset(
     counts_by_source: dict[str, Counter[str]] = {}
     seen_ids: set[str] = set()
     for source in spec.sources:
-        adapter = ADAPTERS.get(source.adapter)
-        if adapter is None:
-            raise ValueError(f"Unsupported dataset adapter: {source.adapter}")
         source_selection = spec.selection
         if source.selection is not None:
             source_selection = spec.selection.model_copy(
                 update=source.selection.model_dump()
             )
-        result = adapter(source, source_selection, system_prompt=system_prompt)
+        result = ADAPTERS[source.adapter](
+            source,
+            source_selection,
+            source_dir=source_dirs[source.id],
+            system_prompt=system_prompt,
+        )
         for record in result.records:
             if record.id in seen_ids:
                 raise ValueError(f"Duplicate canonical rollout ID: {record.id}")
@@ -416,7 +413,7 @@ def prepare_dataset(
     tool_schemas_by_source: defaultdict[str, set[str]] = defaultdict(set)
     for record in retained:
         tool_schemas_by_source[record.source.source_id].add(
-            canonical_json(record.tools)
+            sha256_text(canonical_json(record.tools))
         )
     for source_manifest in source_manifests:
         source_id = str(source_manifest["id"])
@@ -426,12 +423,8 @@ def prepare_dataset(
                 f"Expected one consistent tool schema in source {source_id!r}, "
                 f"found {len(schemas)}."
             )
-        source_manifest["tool_schema_sha256"] = next(
-            (sha256_text(schema) for schema in schemas), None
-        )
-    tool_schema_sha256s = sorted(
-        {sha256_text(canonical_json(record.tools)) for record in retained}
-    )
+        source_manifest["tool_schema_sha256"] = next(iter(schemas), None)
+    tool_schema_sha256s = sorted(set().union(*tool_schemas_by_source.values()))
     train_records, validation_records, split_manifest = _allocate_prompt_fixed_split(
         retained,
         validation_fraction=spec.split.validation_fraction,

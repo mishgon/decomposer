@@ -171,9 +171,6 @@ class SelectionSpec(SourceSelectionSpec):
 class SourceSpec(StrictModel):
     id: str
     adapter: Literal["nemo_gym", "toolathlon_gym", "wideseek"]
-    # The snapshot directory, which the builder finds by the digest below; specs
-    # never set it.
-    path: Path | None = None
     # The source's snapshot digest (``sha256:<hex>``).
     snapshot: str
     benchmark: str
@@ -275,11 +272,6 @@ class BuildSpec(StrictModel):
         if len(ids) != len(set(ids)):
             raise ValueError("Dataset source IDs must be unique")
         for source in self.sources:
-            if source.path is not None:
-                raise ValueError(
-                    f"Source {source.id!r} is found by its snapshot and must not "
-                    "set a path"
-                )
             effective_policy = (
                 source.selection.policy
                 if source.selection is not None

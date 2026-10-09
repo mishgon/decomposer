@@ -30,6 +30,7 @@ class AdapterReader(Protocol):
         source: SourceSpec,
         selection: SelectionSpec,
         *,
+        source_dir: Path,
         system_prompt: str,
     ) -> AdapterReadResult: ...
 
@@ -50,17 +51,3 @@ SNAPSHOT_FILES: dict[str, Callable[[Path], list[str]]] = {
     "toolathlon_gym": toolathlon_gym_snapshot_files,
     "wideseek": wideseek_snapshot_files,
 }
-
-__all__ = [
-    "ADAPTERS",
-    "ADAPTER_VERSIONS",
-    "SNAPSHOT_FILES",
-    "AdapterReader",
-    "AdapterReadResult",
-    "NEMO_GYM_ADAPTER_VERSION",
-    "TOOLATHLON_GYM_ADAPTER_VERSION",
-    "WIDESEEK_ADAPTER_VERSION",
-    "read_nemo_gym_source",
-    "read_toolathlon_gym_source",
-    "read_wideseek_source",
-]
