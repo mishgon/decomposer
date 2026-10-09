@@ -1,0 +1,8 @@
+ARG COLLECTION_IMAGE
+FROM ${COLLECTION_IMAGE}
+COPY sft/filtering.py sft/sequence_limit.py /opt/decomposer/sft/
+COPY sft/toolathlon_gym/agents.py /opt/decomposer/gyms/toolathlon_gym/sft_agents.py
+COPY gyms/toolathlon_gym/agents.py /opt/decomposer/gyms/toolathlon_gym/agents.py
+COPY sft/toolathlon_gym/langgraph.json /opt/decomposer/gyms/toolathlon_gym/langgraph.json
+COPY student-tokenizer/ /opt/sft-tokenizer/
+ENV PYTHONPATH=/opt/decomposer

@@ -422,6 +422,9 @@ def run_episode(args) -> None:
             config={"recursion_limit": 410},
         ))
         agent_error = repr(agent_exception) if agent_exception is not None else None
+        if state.get("stop_reason"):
+            agent_error = state["stop_reason"]
+            agent_exception = RuntimeError(agent_error)
         messages = state.get("messages", [])
         serialized_messages = serialize_messages(messages)
         agent_runs = state.get("agent_runs", {})
@@ -458,6 +461,9 @@ def run_episode(args) -> None:
                     "finished_at": datetime.now(timezone.utc).isoformat(),
                     "decomposer_agent_runs": state.get("decomposer_agent_runs", []),
                     "agent_error": agent_error,
+                    "stop_reason": state.get("stop_reason"),
+                    "sequence_length": state.get("sequence_length"),
+                    "sft_format": state.get("sft_format"),
                     "messages": serialized_messages,
                     "agents": agents,
                     "agent_runs": agent_runs,

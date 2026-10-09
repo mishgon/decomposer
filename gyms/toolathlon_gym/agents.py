@@ -20,7 +20,7 @@ def qwen_3_5_4b_thinking():
     )
 
 
-def decomposer():
+def decomposer(*, middleware=()):
     return create_decomposer_agent(
         decomposer_model=create_model(DECOMPOSER_MODEL_ID),
         agent_types=[{
@@ -30,4 +30,5 @@ def decomposer():
             "url": "http://127.0.0.1:2024",
         }],
         agent_recursion_limit=410,
+        middleware=middleware,
     )

@@ -19,7 +19,8 @@ def test_named_agent_cli_rejects_model_overrides_and_legacy_flags():
             parser.parse_args(["--agent", "react", "--output", "/tmp/raw", flag])
     from sft.wideseek.run import create_collection_parser
     assert create_collection_parser().parse_args([
-        "--agent", "react", "--output", "/tmp/raw", "--resume"]).resume
+        "--agent", "react", "--output", "/tmp/raw", "--resume",
+        "--student-tokenizer", "/tmp/tokenizer"]).resume
 
 
 def test_researcher_id_is_explicit_and_matches_server(monkeypatch):
