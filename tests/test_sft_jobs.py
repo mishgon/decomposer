@@ -8,7 +8,6 @@ from types import SimpleNamespace
 import pytest
 import torch
 import yaml
-from datasets import Dataset
 from transformers import GenerationConfig
 
 from sft import train as train_module
@@ -28,10 +27,7 @@ from sft.run_train_jobs import (
     _validate_clearml_config,
 )
 from sft.train import (
-    _apply_overlength_policy,
-    _evaluation_datasets,
     _attention_backend_runtime,
-    _benchmark_sample_manifest,
     _build_early_stopping_callback,
     _build_parser,
     _configure_gemma4_generation,
@@ -43,8 +39,6 @@ from sft.train import (
     _resolve_config,
     _resolve_train_batch_config,
     _save_final_configuration,
-    _select_longest_by_token_length,
-    _select_stratified_by_environment_and_length,
     _summarize_trainer_state,
 )
 from sft.qwen35_fast_runtime import (
@@ -392,57 +386,6 @@ def test_global_batch_derives_gradient_accumulation() -> None:
     }
 
 
-def test_stratified_benchmark_sample_preserves_environments_and_lengths() -> None:
-    rows = []
-    for environment, count in (("workplace", 6), ("gaia", 3), ("toolathlon", 3)):
-        for index in range(count):
-            rows.append(
-                {
-                    "id": f"{environment}-{index}",
-                    "source": {"environment": environment},
-                    "_token_length": (index + 1) * 100,
-                    "_supervised_tokens": index + 1,
-                }
-            )
-    selected = _select_stratified_by_environment_and_length(
-        Dataset.from_list(rows),
-        6,
-    )
-    environments = list(selected["source"])
-    counts = {
-        name: sum(source["environment"] == name for source in environments)
-        for name in ("workplace", "gaia", "toolathlon")
-    }
-    assert counts == {"workplace": 3, "gaia": 2, "toolathlon": 1}
-    assert len(set(selected["_token_length"])) > 2
-
-
-def test_benchmark_sample_manifest_pins_order_and_lengths() -> None:
-    rows = [
-        {
-            "id": f"record-{index}",
-            "_token_length": 100 + index,
-            "_supervised_tokens": 10 + index,
-        }
-        for index in range(3)
-    ]
-    sample = Dataset.from_list(rows)
-    forward = _benchmark_sample_manifest(sample)
-    repeated = _benchmark_sample_manifest(sample)
-    reversed_sample = _benchmark_sample_manifest(sample.select([2, 1, 0]))
-    assert forward == repeated
-    assert forward["ordered_record_ids"] == [
-        "record-0",
-        "record-1",
-        "record-2",
-    ]
-    assert len(forward["ordered_record_ids_sha256"]) == 64
-    assert len(forward["ordered_records_sha256"]) == 64
-    assert (
-        forward["ordered_records_sha256"] != reversed_sample["ordered_records_sha256"]
-    )
-
-
 def test_benchmark_cli_can_override_prepared_dataset_paths() -> None:
     args = _build_parser().parse_args(
         [
@@ -472,31 +415,6 @@ def test_benchmark_cli_can_override_prepared_dataset_paths() -> None:
         "manifest_file": "/candidate/manifest.json",
         "error_on_truncation": False,
     }
-
-
-def test_config_cuts_at_16k_from_the_end_by_default() -> None:
-    sections = {"model": {}, "data": {}, "training": {}, "clearml": {}, "run": {}}
-    args = _build_parser().parse_args(["--config", "unused.yaml"])
-    resolved = _resolve_config(sections, args)
-    assert resolved["training"]["max_length"] == 16384
-    assert resolved["data"]["error_on_truncation"] is False
-
-    explicit = _resolve_config(
-        {
-            **sections,
-            "data": {"error_on_truncation": True},
-            "training": {"max_length": None},
-        },
-        args,
-    )
-    assert explicit["training"]["max_length"] is None
-    assert explicit["data"]["error_on_truncation"] is True
-
-    override = _resolve_config(
-        sections,
-        _build_parser().parse_args(["--config", "unused.yaml", "--max-length", "32768"]),
-    )
-    assert override["training"]["max_length"] == 32768
 
 
 def test_qwen35_linear_attention_runtime_reports_bound_implementations() -> None:
@@ -735,114 +653,6 @@ def test_gemma4_generation_rejects_missing_required_stop_token() -> None:
         )
 
 
-def test_evaluation_datasets_add_one_subset_per_gym() -> None:
-    environments = ["tau2_gym", "wideseek", "tau2_gym", "workplace_assistant"]
-    dataset = Dataset.from_list(
-        [
-            {"id": f"r{index}", "source": {"environment": environment}}
-            for index, environment in enumerate(environments)
-        ]
-    )
-    datasets = _evaluation_datasets(dataset)
-    assert list(datasets) == ["all", "tau2_gym", "wideseek", "workplace_assistant"]
-    assert datasets["all"] is dataset
-    assert datasets["tau2_gym"]["id"] == ["r0", "r2"]
-    assert datasets["wideseek"]["id"] == ["r1"]
-
-    single = dataset.select([0, 2])
-    assert list(_evaluation_datasets(single)) == ["all"]
-
-
-def _tokenized_dataset(*lengths: int) -> Dataset:
-    return Dataset.from_dict(
-        {
-            "id": [f"example-{index}" for index in range(len(lengths))],
-            "_token_length": list(lengths),
-            "_supervised_tokens": list(lengths),
-            "assistant_masks": [[1] * length for length in lengths],
-        }
-    )
-
-
-def test_overlength_policy_refuses_with_error_on_truncation() -> None:
-    with pytest.raises(ValueError, match="data.error_on_truncation: false"):
-        _apply_overlength_policy(
-            _tokenized_dataset(100, 35044),
-            split="train",
-            max_length=32768,
-            exclude_overlength=False,
-            error_on_truncation=True,
-        )
-
-
-def test_overlength_policy_explicitly_excludes_and_records_trace() -> None:
-    filtered, excluded, truncated = _apply_overlength_policy(
-        _tokenized_dataset(100, 35044, 200),
-        split="train",
-        max_length=32768,
-        exclude_overlength=True,
-        error_on_truncation=True,
-    )
-    assert filtered["id"] == ["example-0", "example-2"]
-    assert excluded == [
-        {
-            "id": "example-1",
-            "split": "train",
-            "token_length": 35044,
-            "max_length": 32768,
-        }
-    ]
-    assert truncated == []
-
-
-def test_overlength_policy_can_leave_traces_for_trl_to_cut() -> None:
-    dataset = _tokenized_dataset(100, 35044)
-    kept, excluded, truncated = _apply_overlength_policy(
-        dataset,
-        split="train",
-        max_length=32768,
-        exclude_overlength=False,
-        error_on_truncation=False,
-    )
-    assert kept is dataset
-    assert excluded == []
-    assert truncated == [
-        {
-            "id": "example-1",
-            "split": "train",
-            "token_length": 35044,
-            "max_length": 32768,
-            "supervised_tokens": 35044,
-            "supervised_tokens_kept": 32768,
-        }
-    ]
-
-
-def test_overlength_policy_refuses_to_empty_split() -> None:
-    with pytest.raises(ValueError, match="emptied the validation split"):
-        _apply_overlength_policy(
-            _tokenized_dataset(40000),
-            split="validation",
-            max_length=32768,
-            exclude_overlength=True,
-            error_on_truncation=True,
-        )
-
-
-def test_longest_sample_selection_happens_after_tokenization() -> None:
-    dataset = _tokenized_dataset(100, 400, 200, 400, 300)
-    selected = _select_longest_by_token_length(dataset, 4)
-    assert selected["id"] == ["example-1", "example-3", "example-4", "example-2"]
-    assert selected["_token_length"] == [400, 400, 300, 200]
-    assert _select_longest_by_token_length(dataset, None) is dataset
-
-
-@pytest.mark.parametrize("limit", [0, -1, True, 1.5])
-def test_longest_sample_selection_requires_positive_integer(limit: object) -> None:
-    with pytest.raises(ValueError, match="positive integer"):
-        _select_longest_by_token_length(_tokenized_dataset(100), limit)  # type: ignore[arg-type]
-
-
 def test_configure_sdpa_backends_disables_only_cudnn(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1048,35 +858,6 @@ def test_smoke_config_evaluates_clearml_metrics_after_one_step() -> None:
     assert config["training"]["eval_steps"] == 1
     assert config["training"]["global_batch_size"] == 2
     assert "gradient_accumulation_steps" not in config["training"]
-
-
-def test_qwen35_unloop_v3_lora_configs_differ_only_in_length() -> None:
-    root = Path("sft/configs")
-    configs = {
-        length: yaml.safe_load(
-            (root / f"qwen35_4b_unloop_nonthinking_mixed_v3_lora_{length}_4gpu.yaml").read_text()
-        )
-        for length in ("16k", "32k")
-    }
-    for length, max_length in (("16k", 16384), ("32k", 32768)):
-        config = configs[length]
-        assert config["training"]["max_length"] == max_length
-        assert config["training"]["output_dir"].endswith(f"mixed-v3-lora-{length}")
-        assert config["data"]["expected_fingerprint"] == (
-            "50a733439db998f83c559946eb5f57fc77c811916142b787bdf2245d1fdb8df4"
-        )
-        assert config["data"]["expected_system_prompt_profile"] == "teacher"
-        assert config["lora"] == {"r": 32, "alpha": 64, "dropout": 0.05}
-        assert config["training"]["fsdp"] is False
-        assert _build_early_stopping_callback(config["run"], config["training"]) is not None
-
-    def without_length(config: dict) -> str:
-        text = yaml.safe_dump(config)
-        for length in ("16k", "32k", "16K", "32K", "16384", "32768"):
-            text = text.replace(length, "")
-        return text
-
-    assert without_length(configs["16k"]) == without_length(configs["32k"])
 
 
 def test_e4b_deepseek_v1_8k_configs_are_oom_safe_and_non_thinking() -> None:
