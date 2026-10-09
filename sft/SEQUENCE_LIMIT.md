@@ -37,3 +37,15 @@ context's `student-tokenizer/` directory. No model weights are needed there.
 
 Only the teacher trajectory is counted. Worker conversations stay raw and do not
 contribute unless their reports appear in the teacher's tool observations.
+
+## Review Before Merging
+
+The SFT owner should confirm that this rendering matches the training input:
+student tokenizer and chat template, system message, tool schemas, and reasoning
+removal. This change provides the shared batch API; it does not wire that API into
+an existing training dataset loader.
+
+Collection reporting still needs to classify `sequence_limit` as **skipped**.
+Such an attempt consumes an attempt slot but counts as neither an error nor a
+success. Raw traces and any diagnostic native score must remain available.
+Do not merge until the collectors and watchers implement this classification.
