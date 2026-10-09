@@ -216,6 +216,6 @@ marimo/_lsp/
 __marimo__/
 
 # OPD runtime installed by opd/setup.sh
-.venv-opd/
-.venv-workers/
-external/verl/
+.venv-opd
+.venv-workers
+/external/verl
