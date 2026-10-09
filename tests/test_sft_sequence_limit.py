@@ -2,6 +2,16 @@ import asyncio
 import os
 import pytest
 
+from langchain.agents import create_agent
+from langchain.agents.middleware.types import ModelRequest, ModelResponse
+from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, message_to_dict
+from langchain_core.outputs import ChatGeneration, ChatResult
+from langgraph.checkpoint.memory import InMemorySaver
+
+from sft.filtering import StudentSequenceFilter, student_messages
+from sft.sequence_limit import StudentSequenceLimit
+
 
 def test_collection_tokenizer_loads_outside_event_loop(monkeypatch):
     import importlib.util
@@ -25,17 +35,6 @@ def test_collection_tokenizer_loads_outside_event_loop(monkeypatch):
     spec.loader.exec_module(module)
     graph = asyncio.run(module.decomposer())
     assert isinstance(graph['middleware'][0], StudentSequenceLimit)
-
-from langchain.agents import create_agent
-from langchain.agents.middleware.types import ModelRequest, ModelResponse
-from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, message_to_dict
-from langchain_core.outputs import ChatGeneration, ChatResult
-from langgraph.checkpoint.memory import InMemorySaver
-
-from sft.filtering import StudentSequenceFilter, student_messages
-from sft.sequence_limit import StudentSequenceLimit
-
 
 class Tokenizer:
     name_or_path = 'test-tokenizer'
@@ -70,6 +69,28 @@ def test_skip_is_terminal_but_never_successful(tmp_path):
     counts = count_statuses({'episodes': [episode]})
     assert counts['skipped'] == counts['total'] == 1
     assert counts['failed'] == counts['completed'] == 0
+
+
+def test_collection_entrypoint_defaults_to_guarded_image(monkeypatch):
+    from sft.toolathlon_gym import run
+    calls = []
+    monkeypatch.setattr(run.collection, 'main', lambda argv, **kw: calls.append((argv, kw)))
+    run.main(['--tasks', 'task'])
+    assert calls[0][1]['default_image'] == 'decomposer-toolathlon-sft:latest'
+
+
+def test_collection_rejects_plain_gym_image(tmp_path):
+    import json
+    from subprocess import CompletedProcess
+    from sft.toolathlon_gym import collection
+
+    (tmp_path / 'tasks/finalpool/task').mkdir(parents=True)
+    def docker(*args):
+        assert args == ('image', 'inspect', 'plain-gym')
+        return CompletedProcess(args, 0, stdout=json.dumps([{'Config': {'Labels': {}}}]))
+    with pytest.raises(ValueError, match='plain gym image has no SFT guard'):
+        collection.main(['--tasks', 'task'], repo_root=tmp_path, toolathlon_root=tmp_path,
+                        default_artifacts_dir=tmp_path/'artifacts', default_image='plain-gym', docker=docker)
 
 
 class Policy(BaseChatModel):
