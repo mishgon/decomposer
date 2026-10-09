@@ -43,6 +43,12 @@ def test_cell_config_changes_only_the_grid_keys(tmp_path: Path) -> None:
     assert BASE["training"]["learning_rate"] == 1.0e-4
 
 
+def test_cell_names_keep_every_learning_rate_apart() -> None:
+    names = [cell_name(rate, 16) for rate in (1e-4, 1.5e-4, 2e-4, 2.5e-4, 3e-4)]
+    assert names[:2] == ["lr0.0001-gb16", "lr0.00015-gb16"]
+    assert len(set(names)) == 5
+
+
 def test_cells_with_a_run_directory_are_skipped(tmp_path: Path) -> None:
     done, reused, pending = (tmp_path / name for name in ("a", "b", "c"))
     (done / "run" / "final").mkdir(parents=True)
@@ -94,10 +100,10 @@ def test_report_takes_per_gym_losses_at_the_best_checkpoint(tmp_path: Path) -> N
     _write_cell(tmp_path, 2e-4, 8, None)
     rows = {row["cell"]: row for row in report(tmp_path)}
 
-    done = rows["lr1e-04-gb8"]
+    done = rows["lr0.0001-gb8"]
     assert done["status"] == "done"
     assert done["best_epoch"] == 2.0
     assert done["eval_all_loss"] == 0.45
     assert abs(done["eval_tau2_gym_loss"] - 0.54) < 1e-12
-    assert rows["lr2e-04-gb8"]["status"] == "failed (exit 1)"
-    assert json.loads((tmp_path / "summary.json").read_text())[0]["cell"] == "lr1e-04-gb8"
+    assert rows["lr0.0002-gb8"]["status"] == "failed (exit 1)"
+    assert json.loads((tmp_path / "summary.json").read_text())[0]["cell"] == "lr0.0001-gb8"

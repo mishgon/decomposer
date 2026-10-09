@@ -40,7 +40,7 @@ LAUNCH_ATTEMPTS = 3
 
 
 def cell_name(learning_rate: float, global_batch_size: int) -> str:
-    return f"lr{learning_rate:.0e}-gb{global_batch_size}"
+    return f"lr{learning_rate:g}-gb{global_batch_size}"
 
 
 def cell_config(
