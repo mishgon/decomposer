@@ -24,7 +24,7 @@ arguments, or an answer before collecting every run, which the core follows with
 an injected user message (`EARLY_RESPONSE_ERROR`, `EMPTY_RESPONSE_ERROR`). The
 trace must still be well formed: one task, every call answered, and a final
 text answer. Current Toolathlon and WideSeek collections are read the same way
-(see below); older Toolathlon imports and the GAIA2 adapter keep the strict checks.
+(see below); older Toolathlon imports keep the strict checks.
 
 ## Legacy specs and configs
 

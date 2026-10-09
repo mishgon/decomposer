@@ -134,7 +134,6 @@ from gyms.gaia2.run import (
     validate_run_identity,
 )
 from gyms.gaia2.run_eval import build_payload, normalize_job_desc, redact_payload
-from sft.gaia2.snapshot_trace_prefix import create_trace_prefix_snapshot
 
 
 def _default_chat_template_kwargs(command: list[str]) -> dict:
@@ -2685,46 +2684,6 @@ def test_trace_rounds_use_logical_numbers_four_through_ten_and_aggregate_failure
     assert failed["hf_trace"] is None
     assert failed["lite_trace"] is None
     assert len((tmp_path / "trace_manifest.jsonl").read_text().splitlines()) == 14
-
-
-def test_trace_prefix_snapshot_is_compact_complete_and_immutable(tmp_path) -> None:
-    source = tmp_path / "source"
-    output = tmp_path / "snapshot"
-    scenario_ids = ("scenario_a", "scenario_b")
-    for logical in (4, 5):
-        _write_trace_round(
-            source,
-            logical,
-            scenario_ids,
-            failed_scenarios=(
-                frozenset({"scenario_b"}) if logical == 5 else frozenset()
-            ),
-        )
-    marker = create_trace_prefix_snapshot(
-        source,
-        output,
-        logical_rollout_numbers=(4, 5),
-        scenario_ids=scenario_ids,
-    )
-    assert marker["state"] == "complete"
-    assert marker["attempted_rollouts"] == 4
-    assert marker["passed_rollouts"] == 3
-    rows = [
-        json.loads(line)
-        for line in (output / "trace_manifest.jsonl").read_text().splitlines()
-    ]
-    assert len(rows) == 4
-    assert all("hf_trace" not in row and "lite_trace" not in row for row in rows)
-    assert not (output / "round_04" / "hf").exists()
-    passing = [row for row in rows if row["reward"] == 1.0]
-    assert all((output / row["sidecar"]).is_file() for row in passing)
-    with pytest.raises(FileExistsError, match="already exists"):
-        create_trace_prefix_snapshot(
-            source,
-            output,
-            logical_rollout_numbers=(4, 5),
-            scenario_ids=scenario_ids,
-        )
 
 
 def test_trace_dry_plan_dispatches_round_robin_with_one_native_run(tmp_path) -> None:

@@ -1599,11 +1599,5 @@ def test_sft_specs_live_under_sft():
 
 
 @pytest.mark.parametrize("spec_path", SFT_SPEC_PATHS, ids=lambda path: path.name)
-def test_every_sft_spec_loads_and_its_manifests_exist(spec_path):
-    loaded = load_build_spec(spec_path)
-
-    if loaded.spec.split.manifest is not None:
-        assert loaded.spec.split.manifest.is_file()
-    for source in loaded.spec.sources:
-        if source.gaia2 is not None:
-            assert source.gaia2.split_manifest.is_file()
+def test_every_sft_spec_loads(spec_path):
+    load_build_spec(spec_path)

@@ -1,6 +1,6 @@
 """Registry of native rollout adapters, keyed by the name a build spec uses.
 
-Gym-specific adapters (for example `sft/gaia2/adapter.py`) import the shared
+Gym-specific adapters (for example `sft/wideseek/adapter.py`) import the shared
 `sft.adapters.base`, so the registry lives here rather than in the package
 `__init__`: importing it there would make every adapter import the registry.
 """
@@ -14,8 +14,6 @@ from typing import Protocol
 from ..schema import JsonObject, SelectionSpec, SourceSpec
 from ..snapshots import SnapshotFile
 from .base import AdapterReadResult
-from ..gaia2.adapter import ADAPTER_VERSION as GAIA2_ADAPTER_VERSION
-from ..gaia2.adapter import read_gaia2_source
 from .nemo_gym import ADAPTER_VERSION as NEMO_GYM_ADAPTER_VERSION
 from .nemo_gym import read_nemo_gym_source
 from .nemo_gym import snapshot_files as nemo_gym_snapshot_files
@@ -40,13 +38,11 @@ class AdapterReader(Protocol):
 
 
 ADAPTERS: dict[str, AdapterReader] = {
-    "gaia2": read_gaia2_source,
     "nemo_gym": read_nemo_gym_source,
     "toolathlon_gym": read_toolathlon_gym_source,
     "wideseek": read_wideseek_source,
 }
 ADAPTER_VERSIONS = {
-    "gaia2": GAIA2_ADAPTER_VERSION,
     "nemo_gym": NEMO_GYM_ADAPTER_VERSION,
     "toolathlon_gym": TOOLATHLON_GYM_ADAPTER_VERSION,
     "wideseek": WIDESEEK_ADAPTER_VERSION,
@@ -65,11 +61,9 @@ __all__ = [
     "SNAPSHOT_FILES",
     "AdapterReader",
     "AdapterReadResult",
-    "GAIA2_ADAPTER_VERSION",
     "NEMO_GYM_ADAPTER_VERSION",
     "TOOLATHLON_GYM_ADAPTER_VERSION",
     "WIDESEEK_ADAPTER_VERSION",
-    "read_gaia2_source",
     "read_nemo_gym_source",
     "read_toolathlon_gym_source",
     "read_wideseek_source",
