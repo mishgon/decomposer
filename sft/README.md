@@ -139,6 +139,44 @@ directories, so either can later be uploaded unchanged, for example to a Hugging
 Face dataset repository, and pinned by revision. Specifications with
 `spec_version` 1 to 3 keep their paths and build as before.
 
+**Dataset versions.** Releases carry a semantic version, MAJOR.MINOR.PATCH,
+decided when each release is cut:
+
+- **MAJOR.** A change that breaks training or comparisons: a new record format,
+  a different system prompt, tools or core interface, a different teacher or
+  harness setup, or a reassigned train/validation split.
+- **MINOR.** More data that stays compatible: new snapshots, finished
+  collections, a new gym, or optional new fields.
+- **PATCH.** Fixes without new data, such as dropping or correcting a few
+  records.
+
+A new spec sets `dataset.version` to that version, so the release directory, the
+manifest and the Hugging Face folder share one name. Releases built before this
+rule keep their internal names (`v1` to `v3`); v3 is published as 1.0.0. A
+published version never changes: any change, however small, becomes a new
+version. A minor release must keep every existing record on its side of the
+split, which the `prompt_fixed` split does not guarantee (it moved 15 records
+between v2 and v3), so compare the two manifests' `split.validation_group_ids`
+before calling a release minor.
+
+**Publishing.** Releases are published unchanged to the private Hugging Face
+dataset `decomposer-datasets/decomposer-manager-sft`: one folder per version
+(`<version>/` with `train.jsonl`, `validation.jsonl` and `manifest.json`) and
+one tag per version (`v<version>`). Access is by membership in the
+`decomposer-datasets` organization. The dataset card's source is
+`sft/hf/decomposer-manager-sft.md`; with each release, update its versions table
+and changelog, and upload it as the repository's `README.md` in the same commit
+as the data. Stage the card and the version folder in one directory, then:
+
+```bash
+.venv/bin/hf upload decomposer-datasets/decomposer-manager-sft <stage-dir> . \
+  --repo-type dataset --commit-message "Add <version>"
+.venv/bin/hf repos tag create decomposer-datasets/decomposer-manager-sft \
+  v<version> --repo-type dataset
+```
+
+Check the uploaded files' sha256 against `prepared_files` in the manifest.
+
 ### Toolathlon collections
 
 The Toolathlon adapter reads a collection written by `sft/toolathlon_gym`
@@ -255,6 +293,18 @@ with the training defaults (16K) trained and exported
 (`/mnt/share14T-2/sukhorukov/decomposer_artifacts/training/sft/smokes/mixed-v3-20261008`).
 The Toolathlon snapshot holds the proxy key, like v2's, and must not be
 published.
+
+Version 1.0.0 of `decomposer-datasets/decomposer-manager-sft` is this release,
+unchanged; its `manifest.json` still names it `v3-…`. The published files hold no
+proxy-key value. In the Toolathlon snapshot the key appears inside subagent runs
+(149 episodes), which records leave out, and in `wait` results of 3 episodes,
+none of which qualified; one record names the variable without a value. After
+joining the organization, download it with:
+
+```bash
+hf download decomposer-datasets/decomposer-manager-sft --repo-type dataset \
+  --revision v1.0.0 --local-dir <dir>
+```
 
 ### Qwen3.8 four-gym release v2 for the unloop student
 
