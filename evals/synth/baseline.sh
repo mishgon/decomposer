@@ -22,10 +22,18 @@ CUDA_VISIBLE_DEVICES="$gpu" setsid python -m vllm.entrypoints.cli.main serve "$c
     --served-model-name Qwen/Qwen3.5-4B --host 127.0.0.1 --port 8024 \
     --max-model-len 32768 --gpu-memory-utilization 0.45 --language-model-only \
     --enable-auto-tool-choice --tool-call-parser qwen3_coder --reasoning-parser qwen3 \
-    --enable-prefix-caching --enforce-eager \
+    --enable-prefix-caching --enforce-eager --additional-config '{"gdn_prefill_backend":"triton"}' \
     > "${output}.logs/vllm.log" 2>&1 &
 server_pid=$!
-cleanup() { kill -TERM -- "-$server_pid" 2>/dev/null || true; wait "$server_pid" 2>/dev/null || true; }
+cleanup() {
+    kill -TERM -- "-$server_pid" 2>/dev/null || true
+    for ((i=0; i<30; i++)); do
+        kill -0 -- "-$server_pid" 2>/dev/null || break
+        sleep 1
+    done
+    kill -KILL -- "-$server_pid" 2>/dev/null || true
+    wait "$server_pid" 2>/dev/null || true
+}
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
