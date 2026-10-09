@@ -52,7 +52,8 @@ async def main(args, overrides):
                                             {"role": "assistant", "content": "I will delegate the copy."}],
             tokenize=True, return_dict=False, enable_thinking=False)
         await asyncio.wait_for(score(ids, tokenizer=tokenizer, output=output / "teacher-preflight.json"), 90)
-        async with agent_server(ROOT / "gyms/synth/langgraph.json", port=port, n_jobs_per_worker=64):
+        async with agent_server(ROOT / "gyms/synth/langgraph.json", port=port, n_jobs_per_worker=64,
+                                python_executable=args.worker_python):
             command = [sys.executable, "-u", "-m", "opd.synth.trainer", "--config-path",
                        str(ROOT / "opd/synth"), "--config-name", "experiment",
                        "hydra.searchpath=[pkg://verl.trainer.config]", *overrides]
@@ -83,5 +84,6 @@ if __name__ == "__main__":
     parser.add_argument("--model", type=Path, default=Path.home() / "models/Qwen3.5-4B")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--gpus", nargs=2, type=int, required=True)
+    parser.add_argument("--worker-python", type=Path, default=ROOT / ".venv-workers/bin/python")
     args, overrides = parser.parse_known_args()
     asyncio.run(main(args, overrides))

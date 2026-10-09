@@ -28,6 +28,11 @@ decoded token meaning and prompt logprobs. A failed preflight aborts training.
 The hosted teacher uses the model registry's authenticated connection. No
 OpenRouter fallback or automatic paid-provider substitution is implemented.
 
+Setup creates a separate CPU-only `.venv-workers` for Agent Server because its
+web dependencies conflict with the pinned vLLM training environment. The common
+server launcher accepts an optional Python executable; the core orchestration
+loop is unchanged. `--worker-python` can select an existing compatible environment.
+
 ## Fixed Recipe
 
 | Setting | Value |

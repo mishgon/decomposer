@@ -82,6 +82,7 @@ if __name__ == "__main__":
     parser.add_argument("--split", choices=["train", "eval"], default="eval")
     parser.add_argument("--index", type=int, default=0)
     parser.add_argument("--model", default="vllm/qwen_3_5_4b_non_thinking")
+    parser.add_argument("--worker-python", type=Path, default=ROOT / ".venv-workers/bin/python")
     parser.add_argument("--output", type=Path, default=ROOT / "artifacts/gyms/synth" / uuid4().hex[:8])
     args = parser.parse_args()
 
@@ -93,7 +94,8 @@ if __name__ == "__main__":
             port = listener.getsockname()[1]
         policy = create_model(args.model)
         try:
-            async with agent_server(ROOT / "gyms/synth/langgraph.json", port=port) as url:
+            async with agent_server(ROOT / "gyms/synth/langgraph.json", port=port,
+                                    python_executable=args.worker_python) as url:
                 print(json.dumps(await episode(make_task(args.split, args.index), policy, args.output, url), indent=2))
         finally:
             policy.http_client.close()

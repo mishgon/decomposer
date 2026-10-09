@@ -19,3 +19,6 @@ test -d .venv-opd || "$uv_bin" venv --python 3.12 .venv-opd
 "$uv_bin" pip install --python .venv-opd/bin/python --no-deps -e external/verl -e .
 PYTHONPATH="$PWD:$PWD/src:$PWD/external/verl" .venv-opd/bin/python -c \
     'import torch, vllm, verl; print(torch.__version__, vllm.__version__, verl.__version__)'
+# Agent Server and vLLM have incompatible web-stack pins. Keep the CPU workers separate.
+test -d .venv-workers || "$uv_bin" venv --python 3.12 .venv-workers
+"$uv_bin" pip install --python .venv-workers/bin/python -e . 'langgraph-cli[inmem]>=0.4.31'

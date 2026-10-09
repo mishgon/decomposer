@@ -217,4 +217,5 @@ __marimo__/
 
 # OPD runtime installed by opd/setup.sh
 .venv-opd/
+.venv-workers/
 external/verl/

@@ -60,7 +60,8 @@ async def main(args):
             print(f"{len(manifest['episodes'])}/{args.tasks * args.repetitions}: "
                   f"{task['task_id']} score={result['score']} parallel={result['parallel']}", flush=True)
     try:
-        async with agent_server(ROOT / "gyms/synth/langgraph.json", port=port, n_jobs_per_worker=64) as url:
+        async with agent_server(ROOT / "gyms/synth/langgraph.json", port=port, n_jobs_per_worker=64,
+                                python_executable=args.worker_python) as url:
             # TaskGroup cancels and joins episodes before stopping their shared server.
             async with asyncio.TaskGroup() as group:
                 for index in range(args.tasks):
@@ -82,6 +83,7 @@ async def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model", default="vllm/qwen_3_5_4b_non_thinking")
+    parser.add_argument("--worker-python", type=Path, default=ROOT / ".venv-workers/bin/python")
     parser.add_argument("--split", choices=["train", "eval"], default="eval")
     parser.add_argument("--tasks", type=int, default=8)
     parser.add_argument("-n", "--repetitions", type=int, default=4)
