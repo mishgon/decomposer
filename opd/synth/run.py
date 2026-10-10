@@ -23,6 +23,14 @@ async def main(args, overrides):
     if len(set(args.gpus)) != 2:
         raise ValueError("Choose distinct training and rollout GPUs")
     model = args.model.resolve()
+    if args.resume_from:
+        checkpoint = args.resume_from.resolve()
+        for name in ('data.pt', 'actor/model_world_size_1_rank_0.pt',
+                     'actor/optim_world_size_1_rank_0.pt', 'actor/extra_state_world_size_1_rank_0.pt'):
+            if not (checkpoint / name).is_file():
+                raise ValueError(f"Incomplete resume checkpoint: {checkpoint / name}")
+        overrides = [*overrides, 'trainer.resume_mode=resume_path',
+                     f'trainer.resume_from_path={checkpoint}']
     if not (model / "config.json").exists():
         raise ValueError("Student checkpoint does not exist")
     for patch in (ROOT / "opd/patches").glob("*.patch"):
@@ -45,6 +53,8 @@ async def main(args, overrides):
     manifest = {"status": "preflight", "started_at": time.time(), "model": str(model),
                 "baseline": str(args.baseline.resolve()), "gpus": args.gpus,
                 "overrides": overrides, "pid": os.getpid()}
+    if args.resume_from:
+        manifest['resume_from'] = str(checkpoint)
     try:
         from transformers import AutoTokenizer
         tokenizer = AutoTokenizer.from_pretrained(model)
@@ -84,6 +94,7 @@ if __name__ == "__main__":
     parser.add_argument("--model", type=Path, default=Path.home() / "models/Qwen3.5-4B")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--gpus", nargs=2, type=int, required=True)
+    parser.add_argument("--resume-from", type=Path, help="Restore full veRL checkpoint into a new output directory")
     parser.add_argument("--worker-python", type=Path, default=ROOT / ".venv-workers/bin/python")
     args, overrides = parser.parse_known_args()
     asyncio.run(main(args, overrides))

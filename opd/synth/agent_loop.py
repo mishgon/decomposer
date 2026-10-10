@@ -8,11 +8,15 @@ from verl.experimental.agent_loop.agent_loop import AgentLoopBase, AgentLoopOutp
 from gyms.synth.run import episode
 from gyms.synth.task import make_task
 from opd.policy import PolicyTokens, VerlChatModel
+from opd.synth.retry import EpisodeTransportError, retry_episode
 
 
 @register("synth_decomposer")
 class SynthAgentLoop(AgentLoopBase):
     async def run(self, sampling_params, **kwargs):
+        return await retry_episode(lambda: self._run_attempt(sampling_params, **kwargs))
+
+    async def _run_attempt(self, sampling_params, **kwargs):
         task_id = kwargs["extra_info"]["task_id"]
         split, index = task_id.split("-")
         task = make_task(split, int(index))
@@ -33,6 +37,9 @@ class SynthAgentLoop(AgentLoopBase):
                                    self.config.synth.worker_url, timeout=180)
             if result["cleanup_errors"]:
                 raise RuntimeError("Synthetic worker cleanup failed")
+            if result.get("error_type") in {"ReadError", "WriteError", "ConnectError",
+                                            "RemoteProtocolError", "ReadTimeout", "ConnectTimeout"}:
+                raise EpisodeTransportError(f"{result['error_type']}; saved episode: {directory}")
             if result["status"] == "error" and not result["error"].startswith(
                     ("RolloutBudgetExceeded", "GraphRecursionError", "TimeoutError")):
                 raise RuntimeError(f"Rollout infrastructure failure: {result['error']}")

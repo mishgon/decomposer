@@ -2,6 +2,7 @@
 import asyncio
 from datetime import datetime, timezone
 import json
+import traceback
 
 from langchain_core.messages import message_to_dict
 from langgraph.checkpoint.memory import InMemorySaver
@@ -30,6 +31,7 @@ async def episode(task, policy, directory, worker_url, *, timeout=180, recursion
             context=Context(str(directory.resolve()))), timeout)
     except Exception as exc:
         error = exc
+        (directory / "error.txt").write_text(traceback.format_exc())
     finally:
         snapshot = await agent.aget_state(config)
         state = state or dict(snapshot.values)
@@ -59,6 +61,7 @@ async def episode(task, policy, directory, worker_url, *, timeout=180, recursion
     result = {"task_id": task["task_id"], "split": task["split"],
               "status": "finished" if error is None and not cleanup_errors else "error",
               "error": repr(error) if error else None, "cleanup_errors": cleanup_errors,
+              "error_type": type(error).__name__ if error else None,
               **grade(task, workspace, state.get("agent_runs", {}))}
     result["passed"] = result["status"] == "finished" and result["score"] == 1
     (directory / "result.json").write_text(json.dumps(result, indent=2))

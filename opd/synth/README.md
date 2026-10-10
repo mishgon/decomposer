@@ -61,5 +61,12 @@ scores and pass rates alongside loss. The training tasks are not held-out eviden
 
 Artifacts include `trainer.log`, `run.json`, prepared data, per-episode traces and
 token masks, teacher requests/logprobs, checkpoints, TensorBoard and ClearML
-metrics. This first launcher starts fresh runs only; checkpoints retain the
-state needed to add explicit resume handling without overwriting prior results.
+metrics. To resume, pass `--resume-from /previous/run/checkpoints/global_step_15`
+and a new `--output` directory. veRL restores model, optimizer and dataloader
+state; previous artifacts remain untouched. Keep the model and training recipe
+unchanged when resuming.
+
+Worker transport errors retry the entire episode in a fresh workspace, at most
+twice. Failed attempts retain their traces and traceback but do not enter the
+training batch or validation average. Cleanup failures, model outcomes and
+exhausted retries are not silently converted into successful episodes.
