@@ -17,6 +17,7 @@ from langgraph.runtime import Runtime
 from are.simulation.schema_reminders import render_openai_tool_retry_reminder
 
 from decomposer.models import ChatVLLM
+from decomposer.run_budget import RunBudgetMiddleware
 from gyms.gaia2.model_overflow import (
     ExactModelCallLimitMiddleware,
     Gaia2ModelOverflowMiddleware,
@@ -300,6 +301,7 @@ async def run_subagent(
     )
     max_model_calls = _max_model_calls()
     middleware: list[AgentMiddleware] = [
+        RunBudgetMiddleware(),
         Gaia2ModelOverflowMiddleware(
             "subagent",
             max_completion_tokens=_max_completion_tokens(),

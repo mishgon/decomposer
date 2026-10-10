@@ -14,6 +14,7 @@ from responses_api_agents.decomposer_agent.subagents.graph import (
 
 from decomposer.models import ChatVLLM, create_model
 from decomposer.prompts import AGENT_SYSTEM_PROMPT
+from decomposer.run_budget import RunBudgetMiddleware
 from gyms.workplace_assistant.model_presets import QWEN35_UNLOOPED_THINKING_PRESET
 from gyms.qwen_sampling import non_thinking_subagent_sampling_kwargs
 
@@ -71,6 +72,7 @@ def _create_subagent(model: BaseChatModel) -> CompiledStateGraph:
         model=model,
         tools=[],
         middleware=[
+            RunBudgetMiddleware(),
             NeMoGymSubagentMiddleware(),
             ModelCallLimitMiddleware(
                 run_limit=SUBAGENT_MAX_MODEL_CALLS,

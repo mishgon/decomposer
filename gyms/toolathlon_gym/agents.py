@@ -1,4 +1,5 @@
 from decomposer.core import create_decomposer_agent
+from decomposer.run_budget import RunBudgetMiddleware
 from decomposer.models import create_model
 from decomposer.prompts import AGENT_SYSTEM_PROMPT
 from langchain.agents import create_agent
@@ -16,7 +17,7 @@ def qwen_3_5_4b_thinking():
         model=create_model(QWEN_3_5_4B_THINKING_MODEL_ID),
         tools=get_tools(),
         system_prompt=AGENT_SYSTEM_PROMPT,
-        middleware=[durable_model_call_log, truncate_mcp_tool_output],
+        middleware=[RunBudgetMiddleware(), durable_model_call_log, truncate_mcp_tool_output],
     )
 
 

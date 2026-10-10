@@ -1230,7 +1230,7 @@ def create_decomposer_agent(
     checkpointer: Checkpointer | None = None,
     decomposer_recursion_limit: int | None = None,
     agent_recursion_limit: int | None = None,
-    agent_run_budget_seconds: float | None = None,
+    agent_run_budget_seconds: float | None = 60.0,
     agent_shutdown_grace_seconds: float = 60.0,
 ) -> CompiledStateGraph:
     if agent_run_budget_seconds is not None and agent_run_budget_seconds <= 0:

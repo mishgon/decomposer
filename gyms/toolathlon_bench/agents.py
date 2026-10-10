@@ -1,4 +1,5 @@
 from decomposer.core import create_decomposer_agent
+from decomposer.run_budget import RunBudgetMiddleware
 from decomposer.models import create_model
 from langchain.agents import create_agent
 
@@ -16,7 +17,7 @@ def qwen_3_5_4b_thinking():
         tools=get_tools(),
         # The task prompt names the workspace directory and the completion tool.
         system_prompt=get_runtime()["agent_system_prompt"],
-        middleware=[durable_model_call_log, truncate_mcp_tool_output],
+        middleware=[RunBudgetMiddleware(), durable_model_call_log, truncate_mcp_tool_output],
     )
 
 

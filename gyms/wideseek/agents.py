@@ -2,6 +2,7 @@
 from langchain.agents import create_agent
 
 from decomposer.core import create_decomposer_agent
+from decomposer.run_budget import RunBudgetMiddleware
 from gyms.wideseek.runtime import Context, ModelLog, model
 from gyms.wideseek.worker import SYSTEM_PROMPT, access, search
 
@@ -15,12 +16,12 @@ RESEARCHER_ID = "researcher"
 
 def researcher():
     return create_agent(model(RESEARCHER_MODEL), tools=[search, access], context_schema=Context,
-        middleware=[ModelLog("researcher")], system_prompt=SYSTEM_PROMPT)
+        middleware=[RunBudgetMiddleware(), ModelLog("researcher")], system_prompt=SYSTEM_PROMPT)
 
 
 def react(policy, checkpointer):
     return create_agent(policy, tools=[search, access], system_prompt=SYSTEM_PROMPT,
-        context_schema=Context, middleware=[ModelLog("researcher")], checkpointer=checkpointer)
+        context_schema=Context, middleware=[RunBudgetMiddleware(), ModelLog("researcher")], checkpointer=checkpointer)
 
 
 def decomposer(policy, checkpointer, worker_url):

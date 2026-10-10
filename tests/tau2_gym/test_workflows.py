@@ -323,7 +323,8 @@ def test_preset_subagent_graph_is_the_models_py_client(monkeypatch: pytest.Monke
     assert "system_prompt" not in seen
 
 
-def test_subagent_system_prompt_carries_the_domain_policy() -> None:
+@pytest.mark.parametrize("budget", [None, 60])
+def test_subagent_system_prompt_carries_the_domain_policy(budget) -> None:
     import asyncio
     import sys
 
@@ -349,15 +350,97 @@ def test_subagent_system_prompt_carries_the_domain_policy() -> None:
     def run(gym_input: list[dict]) -> None:
         context = {"body": {"input": gym_input}, "resource_server_url": "http://resources", "resource_server_cookies": {}}
         subagent = graph._create_subagent(RecordingModel(responses=[AIMessage(content="done")]))
-        asyncio.run(subagent.ainvoke({"messages": [HumanMessage(content="Cancel slot S-1.")]}, context=context))
+        asyncio.run(subagent.ainvoke(
+            {"messages": [HumanMessage(content="Cancel slot S-1.")]},
+            {"configurable": {"agent_run_budget_seconds": budget, "agent_shutdown_grace_seconds": 60}},
+            context=context,
+        ))
 
     run([{"role": "system", "content": "# Policy\nRefunds need approval."}, {"role": "user", "content": "User request."}])
     system, prompt = seen[0]
     assert isinstance(system, SystemMessage)
     # tau2's template with the agent prompt as the instructions; the user's request stays with the manager.
-    assert system.content == (
+    expected = (
         f"<instructions>\n{AGENT_SYSTEM_PROMPT}\n</instructions>\n<policy>\n# Policy\nRefunds need approval.\n</policy>"
     )
+    if budget is not None:
+        from decomposer.prompts import AGENT_RUN_BUDGET_NOTICE
+
+        expected += "\n\n" + AGENT_RUN_BUDGET_NOTICE.format(agent_run_budget_seconds=budget)
+    assert system.content == expected
     assert prompt.content == "Cancel slot S-1."
     with pytest.raises(ValueError, match="one system message"):
         run([{"role": "user", "content": "User request."}])
+
+
+@pytest.mark.parametrize("slow_tool", [False, True])
+def test_subagent_budget_limits_dynamic_tools(monkeypatch, slow_tool):
+    import asyncio
+    import sys
+    from types import SimpleNamespace
+
+    sys.path.insert(0, str(REPO_ROOT / "external" / "Gym"))
+    from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
+    from langchain_core.messages import AIMessage, HumanMessage
+
+    import decomposer.run_budget as budget_module
+    from decomposer.prompts import AGENT_GRACEFUL_SHUTDOWN_REQUEST
+    from gyms.tau2_gym.subagents import graph
+    from responses_api_agents.decomposer_agent.subagents import graph as nemo_graph
+
+    clock = SimpleNamespace(now=0.0)
+    if not slow_tool:
+        monkeypatch.setattr(budget_module, "time", SimpleNamespace(monotonic=lambda: clock.now))
+    bindings = []
+    cancelled = []
+
+    class Model(FakeMessagesListChatModel):
+        def bind_tools(self, tools, **kwargs):
+            bindings.append(tools)
+            return self
+
+    async def post(self, *args, **kwargs):
+        if slow_tool:
+            try:
+                await asyncio.sleep(10)
+            finally:
+                cancelled.append(True)
+        clock.now = 61
+        return SimpleNamespace(cookies={}, text="partial result", is_error=False)
+
+    monkeypatch.setattr(nemo_graph.AsyncClient, "post", post)
+    agent = graph._create_subagent(Model(responses=[
+        AIMessage(content="", tool_calls=[{"name": "work", "args": {}, "id": "1"}]),
+        AIMessage(content="Progress report"),
+    ]))
+    context = {
+        "body": {
+            "input": [{"role": "system", "content": "Policy"}],
+            "tools": [{"type": "function", "name": "work", "parameters": {"type": "object", "properties": {}}}],
+            "tool_choice": "required",
+        },
+        "resource_server_url": "http://resources",
+        "resource_server_cookies": {},
+    }
+
+    async def run():
+        async with asyncio.timeout(2):
+            return await agent.ainvoke(
+                {"messages": [HumanMessage(content="Work")]},
+                {"configurable": {
+                    "agent_run_budget_seconds": .05 if slow_tool else 60,
+                    "agent_shutdown_grace_seconds": .3 if slow_tool else 60,
+                }},
+                context=context,
+            )
+
+    if slow_tool:
+        with pytest.raises(TimeoutError):
+            asyncio.run(run())
+        assert cancelled == [True]
+    else:
+        result = asyncio.run(run())
+        assert result["messages"][-2].content == AGENT_GRACEFUL_SHUTDOWN_REQUEST
+        assert result["messages"][-1].content == "Progress report"
+        assert len(bindings) == 1
+        assert bindings[0][0]["function"]["name"] == "work"

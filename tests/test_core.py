@@ -689,7 +689,10 @@ def test_decomposer_delegates(monkeypatch, async_invocation: bool) -> None:
 
     assert client.runs.create.call_count == 2
     assert all(
-        call.kwargs["config"] is None
+        call.kwargs["config"] == {"configurable": {
+            "agent_run_budget_seconds": 60.0,
+            "agent_shutdown_grace_seconds": 60.0,
+        }}
         for call in client.runs.create.call_args_list
     )
     assert result["agents"] == {
