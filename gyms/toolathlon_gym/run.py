@@ -458,6 +458,9 @@ def run_episode(args) -> None:
                     "finished_at": datetime.now(timezone.utc).isoformat(),
                     "decomposer_agent_runs": state.get("decomposer_agent_runs", []),
                     "agent_error": agent_error,
+                    "stop_reason": state.get("stop_reason"),
+                    "sequence_length": state.get("sequence_length"),
+                    "sft_format": state.get("sft_format"),
                     "messages": serialized_messages,
                     "agents": agents,
                     "agent_runs": agent_runs,
@@ -530,7 +533,7 @@ def run_episode(args) -> None:
             evaluation = {
                 "episode_id": episode_id,
                 "task": args.task,
-                "pass": completed.returncode == 0 and agent_exception is None,
+                "pass": completed.returncode == 0 and agent_exception is None and not state.get("stop_reason"),
                 "native_pass": completed.returncode == 0,
                 "agent_error": agent_error,
                 "returncode": completed.returncode,
@@ -538,6 +541,7 @@ def run_episode(args) -> None:
                 "stdout": completed.stdout,
                 "stderr": completed.stderr,
             }
+        evaluation["stop_reason"] = state.get("stop_reason")
         evaluation_path.parent.mkdir(parents=True, exist_ok=True)
         evaluation_path.write_text(
             json.dumps(evaluation, indent=2, ensure_ascii=False),

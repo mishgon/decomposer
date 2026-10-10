@@ -13,7 +13,7 @@ def main(argv=None):
         repo_root=gym.REPO_ROOT,
         toolathlon_root=gym.TOOLATHLON_ROOT,
         default_artifacts_dir=gym.REPO_ROOT / "artifacts/sft/toolathlon_gym",
-        default_image=gym.DEFAULT_IMAGE,
+        default_image="decomposer-toolathlon-sft:latest",
         docker=gym._docker,
     )
 

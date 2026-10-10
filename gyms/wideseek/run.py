@@ -90,7 +90,7 @@ async def cleanup_workers(client, state, path):
     return errors
 
 
-async def episode(task, mode, attempt, root, args):
+async def episode(task, mode, attempt, root, args, *, middleware=()):
     attempt_path = root / mode / task["task_id"] / f"attempt-{attempt:03d}"
     if (attempt_path / "result.json").exists():
         return
@@ -101,9 +101,9 @@ async def episode(task, mode, attempt, root, args):
     client = get_client(url=args.worker_url)
     policy = model(agents.AGENT_MODELS[args.agent])
     if args.agent == "decomposer":
-        agent = agents.decomposer(policy, checkpoint, args.worker_url)
+        agent = agents.decomposer(policy, checkpoint, args.worker_url, middleware=middleware)
     else:
-        agent = agents.react(policy, checkpoint)
+        agent = agents.react(policy, checkpoint, middleware=middleware)
     config = {"recursion_limit": 410, "configurable": {"thread_id": uuid4().hex}}
     result = {"task_id": task["task_id"], "task": task["task_id"],
               "episode_id": path.name, "run_id": root.name,
@@ -115,6 +115,9 @@ async def episode(task, mode, attempt, root, args):
         state = await asyncio.wait_for(agent.ainvoke(agent_input(task), config=config,
                                context={"directory": str(path.resolve())}), args.timeout)
         result["status"] = "finished"
+        if state.get("stop_reason"):
+            result.update(status="skipped", stop_reason=state["stop_reason"],
+                          sequence_length=state.get("sequence_length"))
     except Exception as exc:
         result["status"] = ("timeout" if isinstance(exc, TimeoutError) else
                             "budget_exceeded" if isinstance(exc, BudgetExceeded) else
@@ -125,6 +128,8 @@ async def episode(task, mode, attempt, root, args):
         state = state or dict(snapshot.values)
         if errors := await cleanup_workers(client, state, path):
             result["cleanup_errors"] = errors
+            if result.get("status") == "skipped":
+                result.update(status="error", error="Agent cleanup failed after sequence limit")
         await close_model(policy)
         result["agent_finished_at"] = time.time()
         messages = state.get("messages", [])
@@ -212,7 +217,7 @@ async def prepare_run(args):
     return tasks, root
 
 
-async def run_jobs(tasks, jobs, root, args):
+async def run_jobs(tasks, jobs, root, args, *, middleware=()):
     """Run explicit (task ID, attempt number) pairs at bounded concurrency."""
     by_id = {task["task_id"]: task for task in tasks}
     semaphore = asyncio.Semaphore(args.concurrency)
@@ -223,7 +228,7 @@ async def run_jobs(tasks, jobs, root, args):
 
     async def bounded(task_id, attempt):
         async with semaphore:
-            await episode(by_id[task_id], args.mode, attempt, root, args)
+            await episode(by_id[task_id], args.mode, attempt, root, args, middleware=middleware)
             result_path = root / args.mode / task_id / f"attempt-{attempt:03d}" / "result.json"
             result = json.loads(result_path.read_text())
             episodes = manifest.setdefault("episodes", [])

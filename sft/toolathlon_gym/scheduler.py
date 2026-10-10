@@ -9,7 +9,7 @@ from gyms.toolathlon_gym.scoring import PartialScore, extract_partial_score
 
 
 SCHEDULER_SCHEMA_VERSION = 1
-TERMINAL_EPISODE_STATUSES = frozenset({"completed", "failed"})
+TERMINAL_EPISODE_STATUSES = frozenset({"completed", "failed", "skipped"})
 
 
 @dataclass(frozen=True)
@@ -44,7 +44,7 @@ def load_launch_outcome(task: str, evaluation_path: str | None) -> LaunchOutcome
         task=task,
         strict_pass=evaluation.get("pass") is True,
         partial_score=extract_partial_score(evaluation),
-        agent_finished=not evaluation.get("agent_error"),
+        agent_finished=not evaluation.get("agent_error") and not evaluation.get("stop_reason"),
     )
 
 

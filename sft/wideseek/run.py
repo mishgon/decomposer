@@ -5,6 +5,7 @@ import time
 from gyms.wideseek.run import cli, create_parser, describe_run, run_jobs
 from gyms.wideseek.runtime import save
 from sft.wideseek.scheduler import new_state, plan_next_wave, qualifies, statistics
+from sft.sequence_limit import StudentSequenceLimit
 
 
 def completed_results(root, mode):
@@ -53,6 +54,8 @@ async def prepare_collection(args):
 
 
 async def main(args):
+    from transformers import AutoTokenizer
+    middleware = [StudentSequenceLimit(AutoTokenizer.from_pretrained(args.student_tokenizer, local_files_only=True))]
     if not 0 <= args.success_threshold <= 1 or args.target_successes < 1:
         raise ValueError("Threshold must be in [0, 1] and target successes positive")
     if args.adaptive and args.n != 1:
@@ -61,7 +64,7 @@ async def main(args):
         raise ValueError("Wave limit must be positive")
     tasks, root = await prepare_collection(args)
     if not args.adaptive:
-        await run_jobs(tasks, ((t["task_id"], n) for n in range(1, args.n + 1) for t in tasks), root, args)
+        await run_jobs(tasks, ((t["task_id"], n) for n in range(1, args.n + 1) for t in tasks), root, args, middleware=middleware)
         update_index(root, args.mode, args.success_threshold, tasks, False)
         return
     path = root / "scheduler.json"
@@ -90,7 +93,7 @@ async def main(args):
             save(path, state)
             return
         save(path, state)  # Durable before any launch; completed results are never repeated.
-        await run_jobs(tasks, jobs, root, args)
+        await run_jobs(tasks, jobs, root, args, middleware=middleware)
         waves += 1
 
 
@@ -98,6 +101,7 @@ def create_collection_parser():
     parser = create_parser()
     parser.description = __doc__
     parser.set_defaults(n=1)
+    parser.add_argument("--student-tokenizer", required=True, help="Local student tokenizer used by SFT")
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--success-threshold", type=float, default=.9)
     parser.add_argument("--adaptive", action="store_true", help="Prioritize coverage, then balance successful traces")

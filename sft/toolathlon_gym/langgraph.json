@@ -1,0 +1,9 @@
+{
+  "dependencies": ["."],
+  "graphs": {
+    "qwen_3_5_4b_thinking": "./agents.py:qwen_3_5_4b_thinking",
+    "decomposer": "./sft_agents.py:decomposer"
+  },
+  "http": {"app": "tools:app"},
+  "python_version": "3.12"
+}

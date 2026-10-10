@@ -20,6 +20,7 @@ then run a bounded smoke:
 ```bash
 source gyms/wideseek/env.sh
 gyms/wideseek/.venv/bin/python -m sft.wideseek.run --agent decomposer \
+  --student-tokenizer /path/to/student-tokenizer \
   --output artifacts/sft/wideseek/runs/smoke --limit 4 -n 1 --concurrency 2
 ```
 
@@ -48,12 +49,19 @@ For the full 20,000-task width split, the prepared command is:
 ```bash
 source gyms/wideseek/env.sh
 gyms/wideseek/.venv/bin/python -m sft.wideseek.run --agent decomposer --adaptive \
+  --student-tokenizer /path/to/student-tokenizer \
   --output artifacts/sft/wideseek/runs/width-coverage \
   --limit 20000 -n 1 --concurrency 2
 ```
 
 This command is not scheduled automatically. Models, reasoning preservation and
 context limits are unchanged from the smoke. Choose concurrency before launch.
+
+The required student tokenizer enables shared `sft/sequence_limit.py` middleware
+on every collection run. Above 32,768 student tokens, the teacher stops after its
+current response. The attempt is `skipped`, not an error or success; all raw
+messages and diagnostic scores remain saved. Batch filtering uses the same
+`sft/filtering.py` implementation as Toolathlon collection.
 
 `scheduler.json` saves policy, per-task counts, culling and waves before launches.
 Resume the same command with `--resume`: saved results count toward both budgets
