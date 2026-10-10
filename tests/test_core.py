@@ -245,19 +245,21 @@ def test_run_records_run_and_passes_context(monkeypatch, async_invocation: bool,
         command = tool.func("thread_1", "do the task", runtime)
 
     expected_config = {"recursion_limit": 1}
+    expected_context = dict(context)
     if run_budget is not None:
-        expected_config["configurable"] = {
+        expected_context.update({
             "agent_run_budget_seconds": run_budget,
             "agent_shutdown_grace_seconds": 15.0,
-        }
+        })
     client.runs.create.assert_called_once_with(
         thread_id="thread_1",
         assistant_id="test_assistant",
         input={"messages": [{"role": "user", "content": "do the task"}]},
         config=expected_config,
-        context=context,
+        context=expected_context,
         multitask_strategy="reject",
     )
+    assert context == {"value": 42}
     assert "agents" not in command.update
     assert command.update["agent_runs"] == {
         "run_1": {

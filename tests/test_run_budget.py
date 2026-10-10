@@ -23,7 +23,8 @@ class FakeModel(FakeMessagesListChatModel):
 
 
 @pytest.mark.parametrize("asynchronous", [False, True])
-def test_report_follows_all_tool_results_and_next_run_has_fresh_budget(monkeypatch, asynchronous):
+@pytest.mark.parametrize("use_context", [False, True])
+def test_report_follows_all_tool_results_and_next_run_has_fresh_budget(monkeypatch, asynchronous, use_context):
     clock = SimpleNamespace(now=0.0)
     monkeypatch.setattr(budget_module, "time", SimpleNamespace(monotonic=lambda: clock.now))
     requests = []
@@ -59,10 +60,14 @@ def test_report_follows_all_tool_results_and_next_run_has_fresh_budget(monkeypat
         "thread_id": "test", "agent_run_budget_seconds": 10,
         "agent_shutdown_grace_seconds": 30,
     }}
+    context = None
+    if use_context:
+        context = dict(config["configurable"])
+        config = {"configurable": {"thread_id": "test"}}
 
     async def run():
         inputs = {"messages": [HumanMessage(content="Do work")]}
-        first = await agent.ainvoke(inputs, config) if asynchronous else agent.invoke(inputs, config)
+        first = await agent.ainvoke(inputs, config, context=context) if asynchronous else agent.invoke(inputs, config, context=context)
         assert first["messages"][-1].content == "Partial result"
         assert first["messages"][-2].content == AGENT_GRACEFUL_SHUTDOWN_REQUEST
         assert all(isinstance(m, ToolMessage) for m in first["messages"][2:4])
@@ -70,7 +75,7 @@ def test_report_follows_all_tool_results_and_next_run_has_fresh_budget(monkeypat
         assert requests[1].tools == []
         assert requests[1].response_format is None
         inputs = {"messages": [HumanMessage(content="Continue")]}
-        second = await agent.ainvoke(inputs, config) if asynchronous else agent.invoke(inputs, config)
+        second = await agent.ainvoke(inputs, config, context=context) if asynchronous else agent.invoke(inputs, config, context=context)
         assert second["messages"][-1].content == "Completed"
         assert requests[2].tools
         assert sum(m.content == AGENT_GRACEFUL_SHUTDOWN_REQUEST for m in second["messages"]) == 1

@@ -35,7 +35,7 @@ class RunBudgetMiddleware(AgentMiddleware):
     state_schema = RunBudgetState
 
     def before_agent(self, state, runtime):
-        config = get_config().get("configurable", {})
+        config = {**get_config().get("configurable", {}), **(runtime.context or {})}
         agent_run_budget_seconds = config.get("agent_run_budget_seconds")
         agent_shutdown_grace_seconds = config.get("agent_shutdown_grace_seconds")
         shutdown_at = None
@@ -67,7 +67,8 @@ class RunBudgetMiddleware(AgentMiddleware):
         return None
 
     def _prepare_model_request(self, request):
-        agent_run_budget_seconds = get_config().get("configurable", {}).get("agent_run_budget_seconds")
+        config = {**get_config().get("configurable", {}), **(request.runtime.context or {})}
+        agent_run_budget_seconds = config.get("agent_run_budget_seconds")
         if agent_run_budget_seconds is not None:
             notice = AGENT_RUN_BUDGET_NOTICE.format(
                 agent_run_budget_seconds=agent_run_budget_seconds,
