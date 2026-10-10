@@ -16,7 +16,7 @@ from pathlib import Path
 
 from langchain_core.messages import message_to_dict
 
-from decomposer.agent_server import invoke_and_capture
+from gyms.agent_server import invoke_and_capture
 from decomposer.visualization import write_trace_html
 
 try:

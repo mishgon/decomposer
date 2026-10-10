@@ -43,7 +43,7 @@ With `LLM_PROXY_MASTER_KEY` set, run the example. It starts a local LangGraph
 server hosting Decomposer and its agents, then stops it when the run finishes:
 
 ```bash
-uv run python examples/minimal/run.py
+uv run python -m examples.minimal.run
 ```
 
 The final answer is printed, the raw state is saved to `examples/minimal/trace.json`,

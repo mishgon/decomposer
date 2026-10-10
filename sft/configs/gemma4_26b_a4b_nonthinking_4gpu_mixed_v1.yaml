@@ -10,7 +10,6 @@ data:
   validation_file: /home/sukhorukov/decomposer_artifacts/datasets/sft/decomposer-mixed-deepseek-gemma4-nonthinking/v3-wp-effort-max-pooled-1152-tool-b97bced8-newest-pass-or-qge90-32k/validation.jsonl
   manifest_file: /home/sukhorukov/decomposer_artifacts/datasets/sft/decomposer-mixed-deepseek-gemma4-nonthinking/v3-wp-effort-max-pooled-1152-tool-b97bced8-newest-pass-or-qge90-32k/manifest.json
   include_reasoning: false
-  expected_system_prompt_profile: teacher
   error_on_truncation: true
   # Drop any trace beyond the 32K envelope rather than truncating it.
   exclude_overlength: true

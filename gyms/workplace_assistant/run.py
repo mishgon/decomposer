@@ -30,10 +30,7 @@ import yaml
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from decomposer.prompt_profiles import (  # noqa: E402
-    DECOMPOSER_PROMPT_PROFILES,
-    resolve_decomposer_system_prompt,
-)
+from decomposer.prompts import DECOMPOSER_SYSTEM_PROMPT
 
 from gyms.qwen_sampling import (  # noqa: E402
     SUBAGENT_MAX_COMPLETION_TOKENS_ENV,
@@ -60,7 +57,6 @@ from gyms.workplace_assistant.experiments import (  # noqa: E402
     SimpleExperiment,
     component_venv_root,
     decomposer_dataset,
-    decomposer_prompt_profile,
     get_experiment,
     gym_venv,
     models_for_experiment,
@@ -209,13 +205,11 @@ def local_run_name(
     experiment: Experiment,
     num_repeats: int,
     *,
-    prompt_profile: str | None,
     ports: WorkplacePortLayout,
 ) -> str:
     identity = run_name(
         experiment,
         num_repeats,
-        prompt_profile=prompt_profile,
     )
     if ports.offset:
         identity += f"-port-offset-{ports.offset}"
@@ -274,7 +268,6 @@ def runtime_configuration(experiment: Experiment) -> dict[str, Any]:
     configuration: dict[str, Any] = {
         "max_model_len": experiment.max_model_len,
         "max_output_tokens": experiment.max_output_tokens,
-        "evaluation_prompt_profile": experiment.evaluation_prompt_profile,
         "structured_reasoning_policy": structured_reasoning_policy,
         "manager": {
             "backend": experiment.manager_backend,
@@ -717,7 +710,6 @@ def gym_start_command(
     gym_bin: Path,
     component_root: Path,
     logs: Path,
-    prompt_profile: str | None = None,
     ports: WorkplacePortLayout = DEFAULT_PORT_LAYOUT,
     config_path: Path | None = None,
 ) -> list[str]:
@@ -734,15 +726,6 @@ def gym_start_command(
     ]
     if isinstance(experiment, DecomposerExperiment):
         config = config_path or _decomposer_config_source(local_repo, experiment)
-        prompt_profile = decomposer_prompt_profile(
-            purpose,
-            prompt_profile,
-            experiment.evaluation_prompt_profile,
-        )
-        prompt_override = (
-            "++decomposer.responses_api_agents.decomposer_agent."
-            f"decomposer_system_prompt_profile={prompt_profile}"
-        )
         manager_call_limit_override = (
             "++decomposer.responses_api_agents.decomposer_agent."
             f"manager_max_model_calls={experiment.manager_max_model_calls}"
@@ -757,7 +740,6 @@ def gym_start_command(
             "start",
             "--config",
             str(config),
-            prompt_override,
             manager_call_limit_override,
             subagent_recursion_limit_override,
             *common,
@@ -1197,7 +1179,6 @@ def validate_existing_attempt_identity(
     num_repeats: int,
     limit: int | None,
     force: bool,
-    prompt_profile: str | None = None,
     ports: WorkplacePortLayout = DEFAULT_PORT_LAYOUT,
     runtime_gym_config_sha256: str | None = None,
 ) -> None:
@@ -1232,6 +1213,9 @@ def validate_existing_attempt_identity(
     else:
         expected.update(
             {
+                "decomposer_system_prompt_sha256": hashlib.sha256(
+                    DECOMPOSER_SYSTEM_PROMPT.encode("utf-8")
+                ).hexdigest(),
                 "decomposer_manager_max_model_calls": (
                     experiment.manager_max_model_calls
                 ),
@@ -1268,6 +1252,7 @@ def validate_existing_attempt_identity(
         if field not in observed:
             if field in {
                 "simple_agent_max_steps",
+                "decomposer_system_prompt_sha256",
                 "decomposer_manager_max_model_calls",
                 "decomposer_subagent_max_model_calls",
                 "decomposer_subagent_recursion_limit",
@@ -1276,22 +1261,6 @@ def validate_existing_attempt_identity(
         elif observed[field] != expected_value:
             mismatches.append(
                 f"{field}={observed[field]!r} (requested {expected_value!r})"
-            )
-
-    if isinstance(experiment, DecomposerExperiment):
-        existing_profile = metadata.get(
-            "decomposer_system_prompt_profile",
-            "teacher" if "purpose" not in metadata else None,
-        )
-        expected_profile = decomposer_prompt_profile(
-            purpose,
-            prompt_profile,
-            experiment.evaluation_prompt_profile,
-        )
-        if existing_profile != expected_profile:
-            mismatches.append(
-                "decomposer_system_prompt_profile="
-                f"{existing_profile!r} (requested {expected_profile!r})"
             )
 
     if mismatches:
@@ -1403,7 +1372,6 @@ def _dry_plan(
     directory: Path,
     visible_devices: tuple[str, ...],
     concurrency: int | None = None,
-    prompt_profile: str | None = None,
     ports: WorkplacePortLayout = DEFAULT_PORT_LAYOUT,
 ) -> dict[str, Any]:
     validate_purpose_for_experiment(experiment, purpose)
@@ -1444,24 +1412,9 @@ def _dry_plan(
         }
     rollout_path = directory / "rollouts.jsonl"
     return {
-        "decomposer_system_prompt_profile": (
-            decomposer_prompt_profile(
-                purpose,
-                prompt_profile,
-                experiment.evaluation_prompt_profile,
-            )
-            if isinstance(experiment, DecomposerExperiment)
-            else None
-        ),
         "decomposer_system_prompt_sha256": (
             hashlib.sha256(
-                resolve_decomposer_system_prompt(
-                    decomposer_prompt_profile(
-                        purpose,
-                        prompt_profile,
-                        experiment.evaluation_prompt_profile,
-                    )
-                ).encode("utf-8")
+                DECOMPOSER_SYSTEM_PROMPT.encode("utf-8")
             ).hexdigest()
             if isinstance(experiment, DecomposerExperiment)
             else None
@@ -1503,7 +1456,6 @@ def _dry_plan(
                 gym_bin=gym_bin,
                 component_root=component_venv_root(local_repo),
                 logs=logs,
-                prompt_profile=prompt_profile,
                 ports=ports,
                 config_path=runtime_config_path,
             )
@@ -1558,7 +1510,6 @@ def selected_output_dir(experiment: Experiment, args: argparse.Namespace) -> Pat
         args.num_repeats,
         None,
         purpose=args.purpose,
-        prompt_profile=getattr(args, "prompt_profile", None),
     )
     if ports.offset:
         directory = directory.with_name(
@@ -1572,20 +1523,6 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
     ports = WorkplacePortLayout(getattr(args, "port_offset", 0))
     validate_num_repeats(args.num_repeats)
     purpose = validate_purpose_for_experiment(experiment, args.purpose)
-    requested_prompt_profile = getattr(args, "prompt_profile", None)
-    if requested_prompt_profile is not None and not isinstance(
-        experiment, DecomposerExperiment
-    ):
-        raise ValueError("--prompt-profile is only valid for Decomposer experiments")
-    resolved_prompt_profile = (
-        decomposer_prompt_profile(
-            purpose,
-            requested_prompt_profile,
-            experiment.evaluation_prompt_profile,
-        )
-        if isinstance(experiment, DecomposerExperiment)
-        else None
-    )
     directory = selected_output_dir(experiment, args)
     visible_devices = selected_cuda_devices(experiment, args.cuda_visible_devices)
     if args.dry:
@@ -1606,7 +1543,6 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
                     directory,
                     visible_devices,
                     args.concurrency,
-                    requested_prompt_profile,
                     ports,
                 ),
                 indent=2,
@@ -1633,7 +1569,6 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
         num_repeats=args.num_repeats,
         limit=args.limit,
         force=args.force,
-        prompt_profile=requested_prompt_profile,
         ports=ports,
         runtime_gym_config_sha256=(
             runtime_config_metadata["sha256"]
@@ -1744,24 +1679,18 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
             if runtime_config_metadata is not None
             else None
         ),
-        "decomposer_system_prompt_profile": (
-            resolved_prompt_profile
-            if isinstance(experiment, DecomposerExperiment)
-            else None
-        ),
         "decomposer_system_prompt_sha256": (
             hashlib.sha256(
-                resolve_decomposer_system_prompt(resolved_prompt_profile).encode(
+                DECOMPOSER_SYSTEM_PROMPT.encode(
                     "utf-8"
                 )
             ).hexdigest()
-            if resolved_prompt_profile is not None
+            if isinstance(experiment, DecomposerExperiment)
             else None
         ),
         "run_name": local_run_name(
             experiment,
             args.num_repeats,
-            prompt_profile=requested_prompt_profile,
             ports=ports,
         ),
         "split": args.split,
@@ -1910,7 +1839,6 @@ def execute(local_repo: Path, args: argparse.Namespace) -> int:
                     gym_bin=gym_bin,
                     component_root=component_root,
                     logs=logs,
-                    prompt_profile=requested_prompt_profile,
                     ports=ports,
                     config_path=runtime_config_path,
                 ),
@@ -2057,7 +1985,6 @@ def build_parser() -> argparse.ArgumentParser:
         default=0,
         help="add this value to every local Workplace service port",
     )
-    parser.add_argument("--prompt-profile", choices=DECOMPOSER_PROMPT_PROFILES)
     parser.add_argument("--limit", type=positive_int)
     parser.add_argument("--dry", "--dry-run", action="store_true")
     parser.add_argument("--force", action="store_true")

@@ -16,7 +16,6 @@ from typing import Any
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from decomposer.prompt_profiles import DECOMPOSER_PROMPT_PROFILES  # noqa: E402
 
 from gyms.workplace_assistant.experiments import (  # noqa: E402
     ARTIFACTS_ROOT,
@@ -32,7 +31,6 @@ from gyms.workplace_assistant.experiments import (  # noqa: E402
     RunPurpose,
     collect_experiments,
     completion_marker,
-    decomposer_prompt_profile,
     gym_venv,
     job_description,
     run_name,
@@ -154,10 +152,9 @@ def build_job_desc(
     author: str,
     *,
     purpose: RunPurpose,
-    prompt_profile: str | None = None,
 ) -> str:
     return (
-        f"{job_description(experiment, split, num_repeats, limit, purpose=purpose, prompt_profile=prompt_profile)} "
+        f"{job_description(experiment, split, num_repeats, limit, purpose=purpose)} "
         f"#{author}"
     )
 
@@ -172,7 +169,6 @@ def build_job_script(
     purpose: RunPurpose,
     force: bool,
     concurrency: int | None = None,
-    prompt_profile: str | None = None,
     entrypoint: Sequence[str] = RUNNER_ENTRYPOINT,
 ) -> str:
     command = [
@@ -191,8 +187,6 @@ def build_job_script(
     ]
     if concurrency is not None:
         command.extend(["--concurrency", str(concurrency)])
-    if prompt_profile is not None:
-        command.extend(["--prompt-profile", prompt_profile])
     if limit is not None:
         command.extend(["--limit", str(limit)])
     if force:
@@ -216,7 +210,6 @@ def build_payload(
     openrouter_key: str,
     llm_proxy_environment: Mapping[str, str] | None = None,
     concurrency: int | None = None,
-    prompt_profile: str | None = None,
     entrypoint: Sequence[str] = RUNNER_ENTRYPOINT,
 ) -> dict[str, Any]:
     env_variables = {
@@ -242,7 +235,6 @@ def build_payload(
             purpose=purpose,
             force=force,
             concurrency=concurrency,
-            prompt_profile=prompt_profile,
             entrypoint=entrypoint,
         ),
         "job_desc": build_job_desc(
@@ -252,7 +244,6 @@ def build_payload(
             limit,
             author,
             purpose=purpose,
-            prompt_profile=prompt_profile,
         ),
         "env_variables": env_variables,
         "instance_type": INSTANCE_TYPES_BY_NUM_GPUS[experiment.num_gpus],
@@ -273,13 +264,12 @@ def print_parameter_table(
     split: str,
     num_repeats: int,
     limit: int | None,
-    prompt_profile: str | None = None,
 ) -> None:
     print("\nSelected jobs:")
     print("| # | Run | Purpose | Agent | Split | GPUs |")
     print("| ---: | --- | --- | --- | --- | ---: |")
     for index, experiment in enumerate(experiments, start=1):
-        identity = run_name(experiment, num_repeats, prompt_profile=prompt_profile)
+        identity = run_name(experiment, num_repeats)
         if limit is not None:
             identity += f"/smoke_{limit}"
         print(
@@ -296,7 +286,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--split", choices=SPLITS, default="train")
     parser.add_argument("--num-repeats", type=positive_int, default=1)
     parser.add_argument("--concurrency", type=positive_int)
-    parser.add_argument("--prompt-profile", choices=DECOMPOSER_PROMPT_PROFILES)
     parser.add_argument("--limit", type=positive_int)
     parser.add_argument("--dry", "--dry-run", action="store_true")
     parser.add_argument("--force", action="store_true")
@@ -334,10 +323,6 @@ def main(
             validate_purpose_for_experiment(experiment, args.purpose)
     except ValueError as error:
         parser.error(str(error))
-    if args.prompt_profile is not None and any(
-        not isinstance(experiment, DecomposerExperiment) for experiment in experiments
-    ):
-        parser.error("--prompt-profile is only valid for Decomposer experiments")
 
     repo_root = Path(git(Path.cwd(), "rev-parse", "--show-toplevel"))
     selected_count = len(experiments)
@@ -350,7 +335,6 @@ def main(
             args.num_repeats,
             args.limit,
             purpose=args.purpose,
-            prompt_profile=args.prompt_profile,
         )
         if marker.is_file() and not args.force:
             runtime_gym_config_sha256 = None
@@ -370,7 +354,6 @@ def main(
                 num_repeats=args.num_repeats,
                 limit=args.limit,
                 force=False,
-                prompt_profile=args.prompt_profile,
                 runtime_gym_config_sha256=runtime_gym_config_sha256,
             )
             skipped_completed += 1
@@ -470,7 +453,6 @@ def main(
             openrouter_key=openrouter_key or "<not-set>",
             llm_proxy_environment=llm_proxy_environment,
             concurrency=args.concurrency,
-            prompt_profile=args.prompt_profile,
             entrypoint=entrypoint,
         )
         payload["region"] = options["region"]
@@ -487,7 +469,6 @@ def main(
             args.split,
             args.num_repeats,
             args.limit,
-            args.prompt_profile,
         )
 
     launched: list[dict[str, Any]] = []
@@ -506,19 +487,9 @@ def main(
                     "experiment": experiment.name,
                     "kind": experiment.kind,
                     "purpose": args.purpose,
-                    "decomposer_system_prompt_profile": (
-                        decomposer_prompt_profile(
-                            args.purpose,
-                            args.prompt_profile,
-                            experiment.evaluation_prompt_profile,
-                        )
-                        if experiment.kind == "decomposer"
-                        else None
-                    ),
                     "run_name": run_name(
                         experiment,
                         args.num_repeats,
-                        prompt_profile=args.prompt_profile,
                     ),
                     "split": args.split,
                 }
@@ -532,7 +503,6 @@ def main(
         "split": args.split,
         "num_repeats": args.num_repeats,
         "concurrency": args.concurrency,
-        "prompt_profile": args.prompt_profile,
         "limit": args.limit,
         "skipped_completed": skipped_completed,
         "skipped_in_progress": skipped_in_progress,

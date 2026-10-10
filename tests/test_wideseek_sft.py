@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from decomposer.prompt_profiles import resolve_decomposer_system_prompt
+from decomposer.prompts import DECOMPOSER_SYSTEM_PROMPT
 from decomposer.prompts import DECOMPOSER_SYSTEM_PROMPT
 from sft.chat_tools import build_decomposer_chat_tools
 from sft.schema import SelectionSpec, SourceSpec
@@ -51,7 +51,7 @@ def _model_call(role: str, started_at: float, task: str, **overrides: object) ->
         "messages": [{"type": "human", "content": task}],
         "system_message": {
             "type": "system",
-            "content": resolve_decomposer_system_prompt("teacher"),
+            "content": DECOMPOSER_SYSTEM_PROMPT,
         },
         **overrides,
     }
