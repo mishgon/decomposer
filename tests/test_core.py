@@ -162,8 +162,9 @@ def test_new_records_creation_time(monkeypatch, async_invocation: bool) -> None:
 
 @pytest.mark.parametrize("async_invocation", [False, True])
 @pytest.mark.parametrize("forked_from", [None, "original_thread"])
+@pytest.mark.parametrize("has_checkpoint", [False, True])
 def test_fork_copies_thread_and_preserves_agent_type(
-    monkeypatch, async_invocation: bool, forked_from: str | None,
+    monkeypatch, async_invocation: bool, forked_from: str | None, has_checkpoint: bool,
 ) -> None:
     clock = SimpleNamespace(now=100.0)
     monkeypatch.setattr(core.time, "time", lambda: clock.now)
@@ -173,7 +174,11 @@ def test_fork_copies_thread_and_preserves_agent_type(
         clock.now = 200.0
         return {"thread_id": "copied_thread"}
 
+    client.threads.get_state.return_value = {
+        "checkpoint": {"checkpoint_id": "checkpoint"} if has_checkpoint else None,
+    }
     client.threads.copy.side_effect = copy_thread
+    client.threads.create.side_effect = lambda: copy_thread(None)
     source = _agent("source_thread")
     if forked_from is not None:
         source["forked_from"] = forked_from
@@ -189,7 +194,13 @@ def test_fork_copies_thread_and_preserves_agent_type(
     else:
         command = tool.func("source_thread", runtime)
 
-    client.threads.copy.assert_called_once_with("source_thread")
+    client.threads.get_state.assert_called_once_with("source_thread")
+    if has_checkpoint:
+        client.threads.copy.assert_called_once_with("source_thread")
+        client.threads.create.assert_not_called()
+    else:
+        client.threads.create.assert_called_once_with()
+        client.threads.copy.assert_not_called()
     assert command.update["agents"] == {
         "copied_thread": {
             **source,
@@ -206,7 +217,8 @@ def test_fork_copies_thread_and_preserves_agent_type(
 
 
 @pytest.mark.parametrize("async_invocation", [False, True])
-def test_run_records_run_and_passes_context(monkeypatch, async_invocation: bool) -> None:
+@pytest.mark.parametrize("run_budget", [None, 60.0])
+def test_run_records_run_and_passes_context(monkeypatch, async_invocation: bool, run_budget) -> None:
     clock = SimpleNamespace(now=100.0)
     monkeypatch.setattr(core.time, "time", lambda: clock.now)
     client = AsyncMock() if async_invocation else MagicMock()
@@ -216,7 +228,10 @@ def test_run_records_run_and_passes_context(monkeypatch, async_invocation: bool)
         return {"run_id": "run_1", "status": "pending"}
 
     client.runs.create.side_effect = create_run
-    tool = _build_run_tool(_client_cache(client), 1)
+    tool = _build_run_tool(
+        _client_cache(client), 1,
+        agent_run_budget_seconds=run_budget, agent_shutdown_grace_seconds=15.0,
+    )
     context = {"value": 42}
     runtime = SimpleNamespace(
         state={"agents": {"thread_1": _agent("thread_1")}, "agent_runs": {}},
@@ -229,11 +244,17 @@ def test_run_records_run_and_passes_context(monkeypatch, async_invocation: bool)
     else:
         command = tool.func("thread_1", "do the task", runtime)
 
+    expected_config = {"recursion_limit": 1}
+    if run_budget is not None:
+        expected_config["configurable"] = {
+            "agent_run_budget_seconds": run_budget,
+            "agent_shutdown_grace_seconds": 15.0,
+        }
     client.runs.create.assert_called_once_with(
         thread_id="thread_1",
         assistant_id="test_assistant",
         input={"messages": [{"role": "user", "content": "do the task"}]},
-        config={"recursion_limit": 1},
+        config=expected_config,
         context=context,
         multitask_strategy="reject",
     )
@@ -356,6 +377,7 @@ def test_wait_stores_tool_calls_in_returned_response_order(
             "status": "responded",
             "response": f"response from {run_id}",
             "error": None,
+            "tool_calls_count": 1,
         }
         for run_id in ("run_b", "run_a")
     ]
@@ -385,21 +407,41 @@ def test_wait_rejects_responded_run_without_final_response(last_message) -> None
         tool.func(runtime)
 
 
-def test_wait_accepts_empty_final_response() -> None:
-    client = _completed_client()
+@pytest.mark.parametrize("async_invocation", [False, True])
+@pytest.mark.parametrize("response", ["", " \t\n", "no-history", "no-messages"])
+def test_wait_reports_empty_response_as_error(async_invocation, response) -> None:
+    client = _completed_client(async_invocation)
     history = _run_history("run_a")
-    history[0]["values"]["messages"][-1]["content"] = ""
+    if response == "no-history":
+        history = []
+    elif response == "no-messages":
+        history[0]["values"]["messages"] = history[-1]["values"]["messages"]
+    else:
+        history[0]["values"]["messages"][-1]["content"] = response
     client.threads.get_history.side_effect = None
     client.threads.get_history.return_value = history
     tool = _build_wait_tool(_client_cache(client))
     runtime = _wait_runtime()
 
-    command = tool.func(runtime)
+    command = asyncio.run(tool.coroutine(runtime)) if async_invocation else tool.func(runtime)
 
     run = command.update["agent_runs"]["run_a"]
-    assert run["status"] == "responded"
-    assert run["response"] == ""
-    assert json.loads(command.update["messages"][0].content)[0]["response"] == ""
+    assert run["status"] == "error"
+    assert run["response"] is None
+    assert run["error"] == "Agent returned an empty response."
+    assert json.loads(command.update["messages"][0].content) == [{
+        "agent_id": "run_a_thread",
+        "agent_run_id": "run_a",
+        "status": "error",
+        "response": None,
+        "error": "Agent returned an empty response.",
+        "tool_calls_count": 0 if response in {"no-history", "no-messages"} else 1,
+    }]
+    client.threads.get.assert_not_called()
+    client.runs.create.assert_not_called()
+    runtime.state["agent_runs"].update(command.update["agent_runs"])
+    result = asyncio.run(tool.coroutine(runtime)) if async_invocation else tool.func(runtime)
+    assert result == NO_ACTIVE_RUNS_ERROR
 
 
 @pytest.mark.parametrize("async_invocation", [False, True])
@@ -424,6 +466,7 @@ def test_wait_stores_tool_calls_from_failed_run(
         {"id": "run_a_call", "name": "resource_tool", "args": {"run": "run_a"}},
     ]
     assert agent_run["response"] is None
+    assert json.loads(command.update["messages"][0].content)[0]["tool_calls_count"] == 1
     if status == "error":
         assert json.loads(agent_run["error"]) == {
             "error": "RuntimeError", "message": "agent failed",
@@ -448,6 +491,39 @@ def test_wait_timeout_leaves_run_uncollected(monkeypatch, async_invocation: bool
     assert command.update["agent_runs"]["run_a"] == _agent_run("run_a")
     assert command.update["messages"][0].content == WAIT_TIMEOUT_ERROR
     client.threads.get_history.assert_not_called()
+
+
+@pytest.mark.parametrize("async_invocation", [False, True])
+def test_context_overflow_retires_worker_and_allows_replacement(async_invocation) -> None:
+    client = _completed_client(async_invocation, status="error")
+    context_error = {"error": "OpenAIContextOverflowError", "message": "128k context exceeded"}
+    client.threads.get.return_value = {"error": context_error}
+    cache = _client_cache(client)
+    runtime = _wait_runtime()
+    runtime.context = None
+    tool = _build_wait_tool(cache)
+    command = asyncio.run(tool.coroutine(runtime)) if async_invocation else tool.func(runtime)
+    runtime.state["agent_runs"].update(command.update["agent_runs"])
+    report = json.loads(command.update["messages"][0].content)[0]
+    assert report["status"] == "error"
+    assert json.loads(report["error"]) == context_error
+
+    for tool, args in (
+        (_build_run_tool(cache, 410), {"agent_id": "run_a_thread", "prompt": "try again"}),
+        (_build_fork_tool(cache), {"agent_id": "run_a_thread"}),
+    ):
+        result = (asyncio.run(tool.coroutine(**args, runtime=runtime)) if async_invocation
+                  else tool.func(**args, runtime=runtime))
+        assert "status `\"error\"`" in result
+    client.runs.create.assert_not_called()
+    client.threads.copy.assert_not_called()
+
+    client.threads.create.return_value = {"thread_id": "fresh_worker"}
+    tool = _build_new_tool({AGENT_TYPE["agent_type_id"]: AGENT_TYPE}, cache)
+    args = {"agent_type_id": AGENT_TYPE["agent_type_id"], "runtime": runtime}
+    replacement = asyncio.run(tool.coroutine(**args)) if async_invocation else tool.func(**args)
+    assert "fresh_worker" in replacement.update["agents"]
+    client.threads.create.assert_called_once()
 
 
 @pytest.mark.parametrize(
@@ -482,6 +558,7 @@ def test_wait_formats_thread_error(empty_history, thread, expected_error) -> Non
     assert json.loads(command.update["messages"][0].content) == [{
         "agent_id": "run_a_thread", "agent_run_id": "run_a",
         "status": "error", "response": None, "error": expected_error,
+        "tool_calls_count": 0 if empty_history else 1,
     }]
     runtime.state["agent_runs"].update(command.update["agent_runs"])
     assert core._get_current_agent_runs(runtime.state["agent_runs"]) == {}
@@ -591,7 +668,7 @@ def test_decomposer_delegates(monkeypatch, async_invocation: bool) -> None:
                     tool_calls=[
                         _call(
                             "run", f"prompt-call-{i}",
-                            agent_id=f"thread_{i}", prompt="Say hello.",
+                            agent_id=f"thread_{i}", prompt=f"Say hello to person {i}.",
                         )
                         for i in range(2)
                     ],
@@ -629,7 +706,7 @@ def test_decomposer_delegates(monkeypatch, async_invocation: bool) -> None:
     for i in range(2):
         run = result["agent_runs"][f"thread_{i}_run"]
         assert run["agent_id"] == f"thread_{i}"
-        assert run["prompt"] == "Say hello."
+        assert run["prompt"] == f"Say hello to person {i}."
         assert run["started_at"] == 100.0
         assert run["collected_at"] == 100.0
         assert run["status"] == "responded"
@@ -858,3 +935,126 @@ def test_decomposer_rejects_parallel_fork_and_run(monkeypatch) -> None:
     assert [m.content for m in result["messages"] if isinstance(m, ToolMessage)] == [
         PARALLEL_FORK_RUN_CALL_ERROR, PARALLEL_FORK_RUN_CALL_ERROR,
     ]
+
+
+@pytest.mark.parametrize("async_invocation", [False, True])
+@pytest.mark.parametrize("other_agent", [False, True])
+@pytest.mark.parametrize("prompt, previous_start, rejected", [
+    ("do the task", 100.0, True),
+    ("do the task", 99.0, False),
+    ("do another task", 100.0, False),
+    ("do the task ", 100.0, False),
+])
+def test_run_rejects_exact_prompt_in_current_request(
+    async_invocation, other_agent, prompt, previous_start, rejected,
+) -> None:
+    client = AsyncMock() if async_invocation else MagicMock()
+    client.runs.create.return_value = {"run_id": "new_run", "status": "pending"}
+    tool = _build_run_tool(_client_cache(client), 1)
+    runtime = SimpleNamespace(
+        state={
+            "agents": {"thread_1": _agent("thread_1")},
+            "decomposer_agent_runs": [{"started_at": 100.0}],
+            "agent_runs": {"previous": {
+                "agent_id": "thread_2" if other_agent else "thread_1",
+                "prompt": "do the task",
+                "started_at": previous_start,
+                "status": "responded",
+                "response_sequence_number": 0,
+            }},
+        },
+        context=None,
+        tool_call_id="call",
+    )
+    if async_invocation:
+        result = asyncio.run(tool.coroutine("thread_1", prompt, runtime))
+    else:
+        result = tool.func("thread_1", prompt, runtime)
+    if rejected:
+        assert result == core.DUPLICATE_PROMPT_ERROR
+        client.runs.create.assert_not_called()
+    else:
+        assert isinstance(result, core.Command)
+        client.runs.create.assert_called_once()
+
+
+def test_decomposer_rejects_same_prompt_for_parallel_agents() -> None:
+    middleware = DecomposerAgentMiddleware([AGENT_TYPE], 1)
+    message = AIMessage(content="", tool_calls=[
+        {"name": "run", "id": "first", "args": {"agent_id": "a", "prompt": "same task"}},
+        {"name": "run", "id": "second", "args": {"agent_id": "b", "prompt": "same task"}},
+    ])
+    result = middleware.after_model({"messages": [message]}, SimpleNamespace())
+    assert [m.tool_call_id for m in result["messages"]] == ["first", "second"]
+    assert all(m.content == core.DUPLICATE_PROMPT_ERROR for m in result["messages"])
+
+
+@pytest.mark.parametrize("async_invocation", [False, True])
+@pytest.mark.parametrize("active_run", [False, True])
+def test_third_prompt_attempt_forces_final_response(monkeypatch, async_invocation, active_run):
+    client = _mock_client(monkeypatch, async_invocation)
+    client.runs.create.return_value = {"run_id": "run_a", "status": "pending"}
+    client.runs.get.return_value = {
+        "run_id": "run_a", "thread_id": "run_a_thread", "status": "success",
+    }
+    client.threads.get_history.return_value = _run_history("run_a")
+    requests = []
+
+    class Capture(core.AgentMiddleware):
+        def wrap_model_call(self, request, handler):
+            requests.append(request)
+            return handler(request)
+
+        async def awrap_model_call(self, request, handler):
+            requests.append(request)
+            return await handler(request)
+
+    calls = [AIMessage(content="", tool_calls=[
+        _call("run", "first", agent_id="run_a_thread", prompt="same task"),
+    ])]
+    wait = AIMessage(content="", tool_calls=[_call("wait", "collect")])
+    if not active_run:
+        calls.append(wait)
+    calls.extend([
+        AIMessage(content="", tool_calls=[
+            _call("run", "second", agent_id="run_a_thread", prompt="same task"),
+        ]),
+        AIMessage(content="", tool_calls=[
+            _call("run", "third", agent_id="other_thread", prompt="same task"),
+            _call("new", "cancelled_new", agent_type_id="test"),
+        ]),
+    ])
+    if active_run:
+        calls.append(wait)
+    calls.extend([AIMessage(content="Partial results."), AIMessage(content="Next request.")])
+    agent = create_decomposer_agent(
+        decomposer_model=ToolCallingFakeModel(responses=calls),
+        agent_types=[AGENT_TYPE], middleware=[Capture()], checkpointer=InMemorySaver(),
+    )
+    config = {"configurable": {"thread_id": "test"}}
+    inputs = {
+        "messages": [HumanMessage(content="Do the work")],
+        "agents": {"run_a_thread": _agent("run_a_thread")},
+    }
+    result = asyncio.run(agent.ainvoke(inputs, config)) if async_invocation else agent.invoke(inputs, config)
+    assert result["messages"][-1].content == "Partial results."
+    assert result["run_prompt_counts"] == {"same task": 3}
+    assert result["shutdown_requested"] is True
+    assert result["agent_runs"]["run_a"]["response"] == "response from run_a"
+    client.runs.create.assert_called_once()
+    client.threads.create.assert_not_called()
+    responses = {m.tool_call_id: m.content for m in result["messages"] if isinstance(m, ToolMessage)}
+    assert responses["second"] == core.DUPLICATE_PROMPT_ERROR
+    assert responses["third"] == core.DECOMPOSER_GRACEFUL_SHUTDOWN_REQUEST
+    assert responses["cancelled_new"] == core.DECOMPOSER_GRACEFUL_SHUTDOWN_REQUEST
+    assert requests[-1].tools == []
+    assert requests[-1].tool_choice is None
+    assert requests[-1].response_format is None
+    if active_run:
+        assert [t.name for t in requests[-2].tools] == ["wait"]
+        assert requests[-2].tool_choice == "wait"
+    second = {"messages": [HumanMessage(content="A new user request")]}
+    result = asyncio.run(agent.ainvoke(second, config)) if async_invocation else agent.invoke(second, config)
+    assert result["run_prompt_counts"] == {}
+    assert result["shutdown_requested"] is False
+    assert len(requests[-1].tools) == 4

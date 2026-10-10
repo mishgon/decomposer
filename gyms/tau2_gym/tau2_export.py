@@ -94,8 +94,7 @@ def build_rows(tasks: list[TaskKey], language: str) -> tuple[list[dict], dict[st
 def read_tasks_file(path: Path, pool_tasks: list[TaskKey]) -> list[TaskKey]:
     """An explicit task subset (JSON list of [domain, task_id]) in pool order.
 
-    Used by the OPD loop, which samples each round's tasks from a pool. Every task
-    must belong to the pool, so a subset can never reach outside the pool's
+    Every task must belong to the pool, so a subset can never reach outside the pool's
     held-out hygiene.
     """
     wanted = {(str(domain), str(task_id)) for domain, task_id in json.loads(path.read_text(encoding="utf-8"))}

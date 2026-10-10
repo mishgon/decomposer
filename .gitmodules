@@ -10,3 +10,9 @@
 [submodule "external/tau2_gym"]
 	path = external/tau2_gym
 	url = https://gitlab.2a2i.org/Sukhorukov/tau2-gym.git
+[submodule "external/toolathlon"]
+	path = external/toolathlon
+	url = https://github.com/hkust-nlp/Toolathlon.git
+[submodule "external/RLinf"]
+	path = external/RLinf
+	url = https://github.com/RLinf/RLinf.git

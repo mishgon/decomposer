@@ -100,7 +100,7 @@ RECIPES: dict[str, PoolRecipe] = {
         PoolRecipe(
             name="decomposer_train_v2",
             role="train",
-            purpose="Canon tasks on every canon domain: teacher traces for SFT and OPD rollouts.",
+            purpose="Canon tasks on every canon domain: teacher traces for SFT.",
             sources=_CANON,
             exclude=_HELD_OUT,
             exclude_reserved_domains=("HELDOUT_v2.json",),

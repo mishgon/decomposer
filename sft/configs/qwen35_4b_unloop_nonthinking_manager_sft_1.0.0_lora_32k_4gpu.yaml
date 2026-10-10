@@ -16,7 +16,6 @@ data:
   validation_file: /mnt/share14T-2/sukhorukov/decomposer_artifacts/datasets/sft/decomposer-manager-sft/1.0.0/validation.jsonl
   manifest_file: /mnt/share14T-2/sukhorukov/decomposer_artifacts/datasets/sft/decomposer-manager-sft/1.0.0/manifest.json
   expected_fingerprint: fb6d86f62061f540947636fb5706832542e4ce73577e26f0e6b87df1c0a25556
-  expected_system_prompt_profile: teacher
   include_reasoning: false
   num_proc: 8
   max_train_samples: null

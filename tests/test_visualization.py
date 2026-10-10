@@ -240,7 +240,7 @@ def test_invocation_without_agents():
     trace = _trace()
     trace.update(agents={}, agent_runs={})
     svg = _svg(render_trace(trace))
-    assert "Decomposer" in "".join(svg.itertext())
+    assert "Моська" in "".join(svg.itertext())
     assert len(svg.findall("{*}g[@class='invocation ']/{*}g[@class='event']")) == 2
     assert not svg.findall("{*}g[@class='agent']")
 

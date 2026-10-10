@@ -17,6 +17,7 @@ from typing import Any, NotRequired, TypedDict
 
 import uvicorn
 from fastapi import FastAPI, HTTPException
+from langchain.agents.middleware import dynamic_prompt
 from langchain_core.messages import AIMessage, message_to_dict
 from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.memory import InMemorySaver
@@ -24,7 +25,6 @@ from pydantic import BaseModel, Field
 
 from decomposer.core import TERMINAL_STATUSES, create_decomposer_agent
 from decomposer.models import ChatVLLM
-from decomposer.prompt_profiles import system_prompt_middleware
 from gyms.gaia2.model_overflow import (
     ExactModelCallLimitMiddleware,
     Gaia2ModelOverflowError,
@@ -147,9 +147,8 @@ def _visible_message_text(message: AIMessage) -> str:
 
 
 def _decomposer_system_prompt(config: dict[str, Any]) -> str:
-    profile = config.get("decomposer_system_prompt_profile", "student")
     addendum_profile = config.get("decomposer_system_prompt_addendum_profile")
-    return compose_decomposer_system_prompt(profile, addendum_profile)
+    return compose_decomposer_system_prompt(addendum_profile)
 
 
 def _public_context(context: EpisodeContext) -> dict[str, Any]:
@@ -256,7 +255,7 @@ def create_app(config: dict[str, Any]) -> FastAPI:
     if not subagent_types:
         raise ValueError("At least one subagent_types entry must be configured")
     middleware = [
-        system_prompt_middleware(_decomposer_system_prompt(config)),
+        dynamic_prompt(lambda request: _decomposer_system_prompt(config)),
         Gaia2ModelOverflowMiddleware(
             "manager",
             max_completion_tokens=config["manager"].get("max_completion_tokens"),

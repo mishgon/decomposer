@@ -348,7 +348,6 @@ def test_qwen35_unloop_v3_lora_configs_differ_only_in_length() -> None:
         assert config["data"]["expected_fingerprint"] == (
             "50a733439db998f83c559946eb5f57fc77c811916142b787bdf2245d1fdb8df4"
         )
-        assert config["data"]["expected_system_prompt_profile"] == "teacher"
         assert config["lora"] == {"r": 32, "alpha": 64, "dropout": 0.05}
         assert config["training"]["fsdp"] is False
         assert _build_early_stopping_callback(config["run"], config["training"]) is not None

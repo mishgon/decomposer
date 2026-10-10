@@ -15,7 +15,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from decomposer.prompt_profiles import resolve_decomposer_system_prompt
+from decomposer.prompts import DECOMPOSER_SYSTEM_PROMPT
 
 from ..adapters.base import (
     AdapterReadResult,
@@ -116,7 +116,7 @@ def read_wideseek_source(
     """
     threshold = selection.success_threshold
     assert threshold is not None
-    teacher_prompt = resolve_decomposer_system_prompt("teacher")
+    teacher_prompt = DECOMPOSER_SYSTEM_PROMPT
     source_dir = source_dir.resolve()
     result_paths = sorted(source_dir.glob("decomposer/*/attempt-*/result.json"))
     native_rollouts = len(result_paths)

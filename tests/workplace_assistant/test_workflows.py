@@ -38,7 +38,6 @@ from gyms.workplace_assistant.experiments import (
     SimpleExperiment,
     collect_experiments,
     completion_marker,
-    decomposer_prompt_profile,
     get_experiment,
     job_description,
     models_for_experiment,
@@ -229,7 +228,6 @@ def test_qwen36_teacher_uses_internal_proxy_and_concurrency_override() -> None:
         ("0",),
         16,
     )
-    assert plan["decomposer_system_prompt_profile"] == "teacher"
     assert "gyms.remote_model_proxy" in plan["services"][0]
     assert "--concurrency 16" in plan["gym_eval"]
 
@@ -275,7 +273,6 @@ def test_qwen36_text_defaults_force_proxy_sampling_and_teacher_prompt(tmp_path) 
         "chat_template_kwargs": {"enable_thinking": False},
     }
     assert experiment.manager_reasoning_mode == "non_thinking"
-    assert experiment.evaluation_prompt_profile == "teacher"
     assert experiment.max_model_len == 131072
     assert experiment.max_output_tokens is None
     assert experiment.manager_max_model_calls == 100
@@ -300,7 +297,6 @@ def test_qwen36_text_defaults_force_proxy_sampling_and_teacher_prompt(tmp_path) 
         tmp_path,
         ("0",),
     )
-    assert plan["decomposer_system_prompt_profile"] == "teacher"
     assert plan["runtime_configuration"]["max_output_tokens"] is None
     assert "max_output_tokens" not in plan["gym_start"]
     assert [model.model_id for model in models_for_experiment(experiment)] == [
@@ -335,7 +331,6 @@ def test_qwen36_thinking_text_defaults_preserve_reasoning(tmp_path) -> None:
     assert experiment.manager_backend == "llm_proxy"
     assert experiment.manager_model_id == "Qwen/Qwen3.6-35B-A3B-FP8"
     assert experiment.manager_reasoning_mode == "thinking"
-    assert experiment.evaluation_prompt_profile == "teacher"
     assert experiment.max_model_len == 131072
     assert experiment.max_output_tokens is None
     assert experiment.manager_max_model_calls == 100
@@ -401,7 +396,6 @@ def test_qwen36_thinking_text_defaults_preserve_reasoning(tmp_path) -> None:
         16,
         ports=ports,
     )
-    assert plan["decomposer_system_prompt_profile"] == "teacher"
     assert plan["gpu_assignments"] == {"subagent_vllm_20025": "0"}
     assert "gyms.remote_model_proxy" in plan["services"][0]
     assert "--concurrency 16" in plan["gym_eval"]
@@ -495,7 +489,6 @@ def test_shared_gemma26_teacher_manager_and_worker_use_one_server(tmp_path) -> N
     )
     assert isinstance(experiment, DecomposerExperiment)
     assert experiment.manager_backend == "local_vllm"
-    assert experiment.evaluation_prompt_profile == "teacher"
     assert experiment.num_gpus == 1
     assert experiment.max_model_len == 131072
     models = models_for_experiment(experiment)
@@ -523,7 +516,6 @@ def test_shared_gemma26_teacher_manager_and_worker_use_one_server(tmp_path) -> N
         "preserve_thinking": True,
     }
     subagent = config["decomposer"]["responses_api_agents"]["decomposer_agent"]
-    assert subagent["decomposer_system_prompt_profile"] == "teacher"
     assert subagent["subagent_types"][0]["assistant_id"] == (
         "gemma_4_26b_a4b_non_thinking"
     )
@@ -535,7 +527,6 @@ def test_deepseek_gemma26_teacher_profile_is_matched_and_single_gpu() -> None:
     )
     assert isinstance(experiment, DecomposerExperiment)
     assert experiment.requires_openrouter is True
-    assert experiment.evaluation_prompt_profile == "teacher"
     assert experiment.num_gpus == 1
     assert experiment.max_model_len == 131072
     models = models_for_experiment(experiment)
@@ -553,7 +544,6 @@ def test_deepseek_gemma26_teacher_profile_is_matched_and_single_gpu() -> None:
         ).read_text()
     )
     agent = config["decomposer"]["responses_api_agents"]["decomposer_agent"]
-    assert agent["decomposer_system_prompt_profile"] == "teacher"
     assert agent["subagent_types"][0]["assistant_id"] == (
         "gemma_4_26b_a4b_non_thinking"
     )
@@ -659,39 +649,6 @@ def test_all_simple_profiles_use_provider_output_length_by_default() -> None:
     assert command[command.index("--max-output-tokens") + 1] == "4096"
     with pytest.raises(ValueError, match="max_output_tokens"):
         replace(SIMPLE_EXPERIMENTS[0], max_output_tokens=0)
-
-
-def test_workplace_prompt_override_is_propagated_and_output_isolated() -> None:
-    repo_root = Path(__file__).resolve().parents[2]
-    experiment = get_experiment(
-        "qwen35-4b-sft-mixed-v2-493c24c4-gaia2-110-n3-filtered-p2-"
-        "non-thinking-qwen35-4b-non-thinking"
-    )
-    payload = run_eval.build_payload(
-        experiment,
-        repo_root,
-        purpose="evaluation",
-        split="validation",
-        num_repeats=3,
-        limit=None,
-        author="alice",
-        base_image=experiments.BASE_IMAGE,
-        priority="high",
-        force=False,
-        proxy_env={},
-        openrouter_key="unused",
-        prompt_profile="teacher",
-    )
-    assert "--prompt-profile teacher" in payload["script"]
-    assert "prompt-teacher" in payload["job_desc"]
-    path = output_dir(
-        experiment,
-        "validation",
-        3,
-        purpose="evaluation",
-        prompt_profile="teacher",
-    )
-    assert path.name.endswith("-prompt-teacher")
 
 
 def test_all_qwen_simple_profiles_use_official_mode_specific_sampling() -> None:
@@ -876,7 +833,6 @@ def test_port_offset_isolates_default_output_and_resume_identity(
     identity = run_module.local_run_name(
         experiment,
         3,
-        prompt_profile=None,
         ports=run_module.WorkplacePortLayout(12000),
     )
     monkeypatch.setattr(run_module, "ARTIFACTS_ROOT", tmp_path / "artifacts")
@@ -1100,9 +1056,6 @@ def test_decomposer_base_profiles_use_student_prompt() -> None:
             ).read_text()
         )
         agent = config["decomposer"]["responses_api_agents"]["decomposer_agent"]
-        assert agent["decomposer_system_prompt_profile"] == (
-            experiment.evaluation_prompt_profile
-        )
 
 
 def test_decomposer_call_limits_reach_runtime_and_identity() -> None:
@@ -1191,8 +1144,6 @@ def test_split_repeat_and_smoke_paths_are_isolated() -> None:
 def test_run_purpose_controls_prompt_and_preserves_teacher_job_identity() -> None:
     decomposer = get_experiment("glm-5-2-gemma4-26b-a4b-non-thinking")
     simple = get_experiment("gemma4-e2b-it-non-thinking")
-    assert decomposer_prompt_profile("trace-generation") == "teacher"
-    assert decomposer_prompt_profile("evaluation") == "student"
     assert job_description(
         decomposer,
         "train",
@@ -1420,7 +1371,6 @@ def test_sft_qwen_manager_and_base_worker_use_dedicated_gpus(
         "include_reasoning": False,
     }
     agent = config["decomposer"]["responses_api_agents"]["decomposer_agent"]
-    assert agent["decomposer_system_prompt_profile"] == "student"
     assert [item["assistant_id"] for item in agent["subagent_types"]] == [
         "qwen35_4b_non_thinking"
     ]
@@ -1531,7 +1481,6 @@ def test_untuned_qwen_manager_matches_tuned_two_gpu_topology() -> None:
         "include_reasoning": False,
     }
     agent = config["decomposer"]["responses_api_agents"]["decomposer_agent"]
-    assert agent["decomposer_system_prompt_profile"] == "student"
     assert [item["assistant_id"] for item in agent["subagent_types"]] == [
         "qwen35_4b_non_thinking"
     ]
@@ -1550,7 +1499,6 @@ def test_untuned_qwen_manager_matches_tuned_two_gpu_topology() -> None:
         "subagent_vllm_8026": "0",
         "subagent_vllm_8025": "1",
     }
-    assert plan["decomposer_system_prompt_profile"] == "student"
     assert "--num-repeats 3" in plan["gym_eval"]
     assert "validation.decomposer.jsonl" in plan["gym_eval"]
 
@@ -1612,7 +1560,6 @@ def test_local_e4b_manager_shares_thinking_subagent_server() -> None:
         "preserve_thinking": False,
     }
     agent = config["decomposer"]["responses_api_agents"]["decomposer_agent"]
-    assert agent["decomposer_system_prompt_profile"] == "student"
     assert len(agent["subagent_types"]) == 1
     assert agent["subagent_types"][0]["assistant_id"] == "gemma_4_4b_thinking"
 
@@ -1702,7 +1649,6 @@ def test_sft_e4b_manager_and_vanilla_subagent_use_dedicated_gpus() -> None:
         "preserve_thinking": False,
     }
     agent = config["decomposer"]["responses_api_agents"]["decomposer_agent"]
-    assert agent["decomposer_system_prompt_profile"] == "student"
     assert [item["assistant_id"] for item in agent["subagent_types"]] == [
         "gemma_4_4b_thinking"
     ]
@@ -1784,14 +1730,6 @@ def test_decomposer_gym_start_overrides_prompt_for_run_purpose() -> None:
         )
         for purpose in ("trace-generation", "evaluation")
     }
-    assert any(
-        argument.endswith("decomposer_system_prompt_profile=teacher")
-        for argument in commands["trace-generation"]
-    )
-    assert any(
-        argument.endswith("decomposer_system_prompt_profile=student")
-        for argument in commands["evaluation"]
-    )
 
 
 def test_agent_profiles_share_one_gym_eval_builder() -> None:
@@ -1886,7 +1824,6 @@ def test_local_dry_plan_routes_every_output_and_reports_gpu(
     )
     assert plan["output_dir"] == str(tmp_path)
     assert plan["purpose"] == "trace-generation"
-    assert plan["decomposer_system_prompt_profile"] == "teacher"
     assert plan["gpu_assignments"] == {"subagent_vllm_8021": "2"}
     assert str(tmp_path / "rollouts.jsonl") in plan["gym_eval"]
     assert str(tmp_path / "logs" / "gym_components") in plan["gym_start"]
@@ -2423,7 +2360,6 @@ def test_qwen38_unlooped_teacher_needs_no_gpu_and_reaches_both_models_by_proxy()
         repo_root / "unused",
         (),
         None,
-        None,
         ports,
     )
     assert plan["gpu_assignments"] == {}
@@ -2546,7 +2482,6 @@ def test_preset_teacher_takes_both_roles_from_models_py() -> None:
         None,
         repo_root / "unused",
         (),
-        None,
         None,
         ports,
     )

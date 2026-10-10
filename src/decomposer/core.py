@@ -24,6 +24,7 @@ from langgraph.runtime import Runtime
 from langgraph.types import Checkpointer, Command
 from langgraph_sdk import get_client, get_sync_client
 from langgraph_sdk.client import LangGraphClient, SyncLangGraphClient
+from langsmith import trace
 from pydantic import BaseModel, Field
 from typing_extensions import TypedDict
 
@@ -32,8 +33,13 @@ from .prompts import (
     FORK_TOOL_DESCRIPTION,
     PARALLEL_FORK_RUN_CALL_ERROR,
     DECOMPOSER_SYSTEM_PROMPT,
+    RUN_BUDGET_CONVENTION,
     PARALLEL_RUN_CALL_ERROR,
     EARLY_RESPONSE_ERROR,
+    EMPTY_PROMPT_ERROR,
+    DUPLICATE_PROMPT_ERROR,
+    DECOMPOSER_GRACEFUL_SHUTDOWN_REQUEST,
+    EMPTY_AGENT_RESPONSE_ERROR,
     EMPTY_RESPONSE_ERROR,
     FAILED_RUN_ERROR,
     WAIT_TIMEOUT_ERROR,
@@ -55,7 +61,7 @@ logger = logging.getLogger(__name__)
 # AGENT_PROMPT_MAX_TOKENS = 1024
 # AGENT_RESPONSE_MAX_TOKENS = 1024
 WAIT_TIMEOUT_SECONDS = 60.0
-WAIT_POLL_SECONDS = 5.0
+WAIT_POLL_SECONDS = 1.0
 TERMINAL_STATUSES = frozenset({"responded", "error", "timeout", "interrupted"})
 HISTORY_LIMIT = 1000
 
@@ -152,7 +158,7 @@ def _build_new_schema(
     agent_types: dict[str, AgentType],
 ) -> type[BaseModel]:
     available_agent_types = "\n".join(
-        f"| {json.dumps(agent_type_id, ensure_ascii=False)} | {agent_type['description']} |"
+        f"| {agent_type_id} | {agent_type['description']} |"
         for agent_type_id, agent_type in agent_types.items()
     )
     description = AGENT_TYPE_ID_PARAMETER_DESCRIPTION.format(
@@ -175,6 +181,8 @@ class RunSchema(BaseModel):
 
 
 class DecomposerAgentState(AgentState[ResponseT]):
+    run_prompt_counts: NotRequired[dict[str, int]]
+    shutdown_requested: NotRequired[bool]
     decomposer_agent_runs: NotRequired[list[AgentRun]]
     agents: Annotated[
         NotRequired[dict[str, Agent]], _agents_reducer
@@ -287,8 +295,13 @@ def _build_new_tool(
 
         agent_type = agent_types[agent_type_id]
         client = clients.get_sync(agent_type_id)
-        thread = client.threads.create()
+        with trace("threads.create", metadata={"agent_type_id": agent_type_id}):
+            thread = client.threads.create()
         agent_id = thread["thread_id"]
+        logger.debug(
+            "Created agent: tool_call_id=%s agent_id=%s type=%s",
+            runtime.tool_call_id, agent_id, agent_type_id,
+        )
         agent: Agent = {
             "agent_id": agent_id,
             "agent_type_id": agent_type_id,
@@ -323,8 +336,13 @@ def _build_new_tool(
 
         agent_type = agent_types[agent_type_id]
         client = clients.get_async(agent_type_id)
-        thread = await client.threads.create()
+        with trace("threads.create", metadata={"agent_type_id": agent_type_id}):
+            thread = await client.threads.create()
         agent_id = thread["thread_id"]
+        logger.debug(
+            "Created agent: tool_call_id=%s agent_id=%s type=%s",
+            runtime.tool_call_id, agent_id, agent_type_id,
+        )
         agent: Agent = {
             "agent_id": agent_id,
             "agent_type_id": agent_type_id,
@@ -389,8 +407,20 @@ def _build_fork_tool(clients: _ClientCache) -> StructuredTool:
 
         source = runtime.state["agents"][agent_id]
         client = clients.get_sync(source["agent_type_id"])
-        thread = client.threads.copy(source["thread_id"])
+        with trace("threads.get_state", metadata={"thread_id": source["thread_id"]}):
+            state = client.threads.get_state(source["thread_id"])
+        # Copying a thread without checkpoints breaks the in-memory runtime.
+        if state["checkpoint"] is None:
+            with trace("threads.create"):
+                thread = client.threads.create()
+        else:
+            with trace("threads.copy", metadata={"thread_id": source["thread_id"]}):
+                thread = client.threads.copy(source["thread_id"])
         agent_id = thread["thread_id"]
+        logger.debug(
+            "Forked agent: tool_call_id=%s source=%s agent_id=%s",
+            runtime.tool_call_id, source["agent_id"], agent_id,
+        )
         agent: Agent = {
             **source,
             "agent_id": agent_id,
@@ -417,8 +447,20 @@ def _build_fork_tool(clients: _ClientCache) -> StructuredTool:
 
         source = runtime.state["agents"][agent_id]
         client = clients.get_async(source["agent_type_id"])
-        thread = await client.threads.copy(source["thread_id"])
+        with trace("threads.get_state", metadata={"thread_id": source["thread_id"]}):
+            state = await client.threads.get_state(source["thread_id"])
+        # Copying a thread without checkpoints breaks the in-memory runtime.
+        if state["checkpoint"] is None:
+            with trace("threads.create"):
+                thread = await client.threads.create()
+        else:
+            with trace("threads.copy", metadata={"thread_id": source["thread_id"]}):
+                thread = await client.threads.copy(source["thread_id"])
         agent_id = thread["thread_id"]
+        logger.debug(
+            "Forked agent: tool_call_id=%s source=%s agent_id=%s",
+            runtime.tool_call_id, source["agent_id"], agent_id,
+        )
         agent: Agent = {
             **source,
             "agent_id": agent_id,
@@ -448,16 +490,42 @@ def _build_fork_tool(clients: _ClientCache) -> StructuredTool:
     )
 
 
+def _get_run_prompt_error(prompt: str, state: DecomposerAgentState) -> str | None:
+    if not prompt.strip():
+        return EMPTY_PROMPT_ERROR
+    if any(
+        run["prompt"] == prompt
+        and run["started_at"] >= state["decomposer_agent_runs"][-1]["started_at"]
+        for run in state["agent_runs"].values()
+    ):
+        return DUPLICATE_PROMPT_ERROR
+    return None
+
+
 def _build_run_tool(
     clients: _ClientCache,
     recursion_limit: int | None,
+    agent_run_budget_seconds: float | None = None,
+    agent_shutdown_grace_seconds: float = 60.0,
 ) -> StructuredTool:
+    run_config = {}
+    if recursion_limit is not None:
+        run_config["recursion_limit"] = recursion_limit
+    if agent_run_budget_seconds is not None:
+        run_config["configurable"] = {
+            "agent_run_budget_seconds": agent_run_budget_seconds,
+            "agent_shutdown_grace_seconds": agent_shutdown_grace_seconds,
+        }
 
     def run(
         agent_id: str,
         prompt: str,
         runtime: ToolRuntime,
     ) -> str | Command:
+        error = _get_run_prompt_error(prompt, runtime.state)
+        if error is not None:
+            return error
+
         error = _get_agent_error(agent_id, runtime.state)
         if error is not None:
             return error
@@ -469,16 +537,21 @@ def _build_run_tool(
         agent = runtime.state["agents"][agent_id]
         client = clients.get_sync(agent["agent_type_id"])
         started_at = time.time()
-        run = client.runs.create(
-            thread_id=agent["thread_id"],
-            assistant_id=agent["assistant_id"],
-            input={"messages": [{"role": "user", "content": prompt}]},
-            config={"recursion_limit": recursion_limit} if recursion_limit is not None else None,
-            context=runtime.context,
-            multitask_strategy="reject",
-        )
+        with trace("runs.create", metadata={"agent_id": agent_id, "thread_id": agent["thread_id"]}):
+            run = client.runs.create(
+                thread_id=agent["thread_id"],
+                assistant_id=agent["assistant_id"],
+                input={"messages": [{"role": "user", "content": prompt}]},
+                config=run_config or None,
+                context=runtime.context,
+                multitask_strategy="reject",
+            )
 
         agent_run_id = run["run_id"]
+        logger.info(
+            "Started run: tool_call_id=%s agent_id=%s run_id=%s status=%s",
+            runtime.tool_call_id, agent_id, agent_run_id, run["status"],
+        )
         status = _normalize_run_status(run["status"])
         if status in TERMINAL_STATUSES:
             raise ValueError(
@@ -512,6 +585,10 @@ def _build_run_tool(
         prompt: str,
         runtime: ToolRuntime,
     ) -> str | Command:
+        error = _get_run_prompt_error(prompt, runtime.state)
+        if error is not None:
+            return error
+
         error = _get_agent_error(agent_id, runtime.state)
         if error is not None:
             return error
@@ -523,16 +600,21 @@ def _build_run_tool(
         agent = runtime.state["agents"][agent_id]
         client = clients.get_async(agent["agent_type_id"])
         started_at = time.time()
-        run = await client.runs.create(
-            thread_id=agent["thread_id"],
-            assistant_id=agent["assistant_id"],
-            input={"messages": [{"role": "user", "content": prompt}]},
-            config={"recursion_limit": recursion_limit} if recursion_limit is not None else None,
-            context=runtime.context,
-            multitask_strategy="reject",
-        )
+        with trace("runs.create", metadata={"agent_id": agent_id, "thread_id": agent["thread_id"]}):
+            run = await client.runs.create(
+                thread_id=agent["thread_id"],
+                assistant_id=agent["assistant_id"],
+                input={"messages": [{"role": "user", "content": prompt}]},
+                config=run_config or None,
+                context=runtime.context,
+                multitask_strategy="reject",
+            )
 
         agent_run_id = run["run_id"]
+        logger.info(
+            "Started run: tool_call_id=%s agent_id=%s run_id=%s status=%s",
+            runtime.tool_call_id, agent_id, agent_run_id, run["status"],
+        )
         status = _normalize_run_status(run["status"])
         if status in TERMINAL_STATUSES:
             raise ValueError(
@@ -580,23 +662,33 @@ def _build_wait_tool(
         agent_runs: dict[str, AgentRun] = runtime.state["agent_runs"]
         current_runs = _get_current_agent_runs(agent_runs)
         if not current_runs:
+            logger.info("wait: tool_call_id=%s no active runs", runtime.tool_call_id)
             return NO_ACTIVE_RUNS_ERROR
         next_response_sequence_number = len(agent_runs) - len(current_runs)
 
         deadline = time.monotonic() + WAIT_TIMEOUT_SECONDS
+        polls = 0
         while True:
+            polls += 1
             tool_output: list[dict[str, Any]] = []
             updated_runs: dict[str, AgentRun] = {}
 
             for agent_run_id, agent_run in current_runs.items():
                 agent = agents[agent_run["agent_id"]]
                 client = clients.get_sync(agent["agent_type_id"])
-                run = client.runs.get(
-                    thread_id=agent["thread_id"],
-                    run_id=agent_run["run_id"],
-                )
+                with trace("runs.get", metadata={
+                    "agent_id": agent_run["agent_id"], "agent_run_id": agent_run["run_id"],
+                }):
+                    run = client.runs.get(
+                        thread_id=agent["thread_id"],
+                        run_id=agent_run["run_id"],
+                    )
 
                 status = _normalize_run_status(run["status"])
+                logger.debug(
+                    "wait: tool_call_id=%s run_id=%s poll=%d status=%s",
+                    runtime.tool_call_id, agent_run_id, polls, status,
+                )
                 if status not in TERMINAL_STATUSES:
                     if status != agent_run["status"]:
                         updated_runs[agent_run_id] = {
@@ -605,88 +697,110 @@ def _build_wait_tool(
                         }
                     continue
 
-                history = client.threads.get_history(
-                    thread_id=run["thread_id"],
-                    limit=HISTORY_LIMIT,
-                    metadata={"run_id": run["run_id"]},
-                )
-                if history:
-                    if history[-1]["metadata"]["source"] != "input":
-                        raise ValueError(
-                            "History is truncated; increase `HISTORY_LIMIT`."
-                        )
-
-                    before_messages = history[-1]["values"]["messages"]
-                    after_messages = history[0]["values"]["messages"]
-                    messages = after_messages[len(before_messages) :]
-                else:
-                    messages = []
-
-                if status == "responded" and not messages:
-                    raise ValueError(
-                        f"No messages found for run `{run['run_id']}`."
+                with trace("threads.get_history", metadata={
+                    "agent_run_id": run["run_id"], "thread_id": run["thread_id"],
+                }):
+                    history = client.threads.get_history(
+                        thread_id=run["thread_id"],
+                        limit=HISTORY_LIMIT,
+                        metadata={"run_id": run["run_id"]},
                     )
+                with trace("wait.process_result", metadata={"agent_run_id": run["run_id"]}):
+                    if history:
+                        if history[-1]["metadata"]["source"] != "input":
+                            raise ValueError(
+                                "History is truncated; increase `HISTORY_LIMIT`."
+                            )
 
-                tool_calls = _extract_agent_tool_calls(messages)
+                        before_messages = history[-1]["values"]["messages"]
+                        after_messages = history[0]["values"]["messages"]
+                        messages = after_messages[len(before_messages) :]
+                    else:
+                        messages = []
 
-                response = None
-                error = None
-                if status == "responded":
-                    last_message = messages[-1]
-                    if (
-                        last_message["type"] != "ai"
-                        or last_message["tool_calls"]
-                        or last_message["content"] is None
-                    ):
-                        raise ValueError(
-                            "Expected a final AI message without tool calls and with non-null content "
-                            f"for responded run `{run['run_id']}`."
-                        )
-                    response = last_message["content"]
-                    if not isinstance(response, str):
-                        response = json.dumps(response, ensure_ascii=False)
-                elif status == "error":
-                    thread = client.threads.get(thread_id=run["thread_id"])
-                    error = thread.get("error")
-                    error = json.dumps(error, ensure_ascii=False) if error else None
-                # response, _ = _truncate_text(response, AGENT_RESPONSE_MAX_TOKENS)
+                    tool_calls = _extract_agent_tool_calls(messages)
 
-                response_sequence_number = next_response_sequence_number + len(tool_output)
-                tool_output.append({
-                    "agent_id": agent_run["agent_id"],
-                    "agent_run_id": agent_run_id,
-                    "status": status,
-                    "response": response,
-                    "error": error,
-                })
-                updated_runs[agent_run_id] = {
-                    **agent_run,
-                    "status": status,
-                    "tool_calls": tool_calls,
-                    "messages": messages,
-                    "response": response,
-                    "error": error,
-                    "response_sequence_number": response_sequence_number,
-                }
+                    response = None
+                    error = None
+                    if status == "responded" and messages:
+                        last_message = messages[-1]
+                        if (
+                            last_message["type"] != "ai"
+                            or last_message["tool_calls"]
+                            or last_message["content"] is None
+                        ):
+                            raise ValueError(
+                                "Expected a final AI message without tool calls and with non-null content "
+                                f"for responded run `{run['run_id']}`."
+                            )
+                        response = last_message["content"]
+                        if not isinstance(response, str):
+                            response = json.dumps(response, ensure_ascii=False)
+                    elif status == "error":
+                        with trace("threads.get", metadata={
+                            "agent_run_id": run["run_id"], "thread_id": run["thread_id"],
+                        }):
+                            thread = client.threads.get(thread_id=run["thread_id"])
+                        error = thread.get("error")
+                        error = json.dumps(error, ensure_ascii=False) if error else None
+                    if status == "responded" and (response is None or not response.strip()):
+                        status = "error"
+                        response = None
+                        error = EMPTY_AGENT_RESPONSE_ERROR
+                    # response, _ = _truncate_text(response, AGENT_RESPONSE_MAX_TOKENS)
+
+                    logger.info(
+                        "Collected run: tool_call_id=%s agent_id=%s run_id=%s status=%s "
+                        "history_entries=%d messages=%d tool_calls=%d",
+                        runtime.tool_call_id, agent_run["agent_id"], agent_run_id, status,
+                        len(history), len(messages), len(tool_calls),
+                    )
+                    response_sequence_number = next_response_sequence_number + len(tool_output)
+                    tool_output.append({
+                        "agent_id": agent_run["agent_id"],
+                        "agent_run_id": agent_run_id,
+                        "status": status,
+                        "response": response,
+                        "error": error,
+                        "tool_calls_count": len(tool_calls),
+                    })
+                    updated_runs[agent_run_id] = {
+                        **agent_run,
+                        "status": status,
+                        "tool_calls": tool_calls,
+                        "messages": messages,
+                        "response": response,
+                        "error": error,
+                        "response_sequence_number": response_sequence_number,
+                    }
 
             if tool_output:
+                logger.info(
+                    "wait: tool_call_id=%s polls=%d active=%d collected=%d",
+                    runtime.tool_call_id, polls, len(current_runs), len(tool_output),
+                )
                 collected_at = time.time()
                 for result in tool_output:
                     updated_runs[result["agent_run_id"]]["collected_at"] = collected_at
-                return Command(
-                    update={
-                        "messages": [
-                            ToolMessage(
-                                json.dumps(tool_output, ensure_ascii=False),
-                                tool_call_id=runtime.tool_call_id,
-                            )
-                        ],
-                        "agent_runs": updated_runs,
-                    }
-                )
+                with trace("wait.build_response"):
+                    return Command(
+                        update={
+                            "messages": [
+                                ToolMessage(
+                                    json.dumps(tool_output, ensure_ascii=False),
+                                    tool_call_id=runtime.tool_call_id,
+                                )
+                            ],
+                            "agent_runs": updated_runs,
+                        }
+                    )
 
             remaining = deadline - time.monotonic()
             if remaining <= 0:
+                logger.info(
+                    "wait: tool_call_id=%s polls=%d active=%d timeout",
+                    runtime.tool_call_id, polls, len(current_runs),
+                )
                 return Command(
                     update={
                         "messages": [
@@ -699,42 +813,56 @@ def _build_wait_tool(
                     }
                 )
 
-            time.sleep(min(WAIT_POLL_SECONDS, remaining))
+            with trace("wait.sleep"):
+                time.sleep(min(WAIT_POLL_SECONDS, remaining))
+
+    async def get_run(agent: Agent, agent_run: AgentRun) -> dict[str, Any]:
+        client = clients.get_async(agent["agent_type_id"])
+        with trace("runs.get", metadata={
+            "agent_id": agent["agent_id"], "agent_run_id": agent_run["run_id"],
+        }):
+            return await client.runs.get(
+                thread_id=agent["thread_id"], run_id=agent_run["run_id"],
+            )
 
     async def await_(runtime: ToolRuntime) -> str | Command:
         agents: dict[str, Agent] = runtime.state["agents"]
         agent_runs: dict[str, AgentRun] = runtime.state["agent_runs"]
         current_runs = _get_current_agent_runs(agent_runs)
         if not current_runs:
+            logger.info("wait: tool_call_id=%s no active runs", runtime.tool_call_id)
             return NO_ACTIVE_RUNS_ERROR
         next_response_sequence_number = len(agent_runs) - len(current_runs)
 
         deadline = asyncio.get_running_loop().time() + WAIT_TIMEOUT_SECONDS
+        polls = 0
         while True:
+            polls += 1
             tool_output: list[dict[str, Any]] = []
             updated_runs: dict[str, AgentRun] = {}
 
-            runs = await asyncio.gather(
-                *(
-                    clients.get_async(
-                        agents[agent_run["agent_id"]]["agent_type_id"]
-                    ).runs.get(
-                        thread_id=agents[agent_run["agent_id"]]["thread_id"],
-                        run_id=agent_run["run_id"],
-                    )
-                    for agent_run in current_runs.values()
-                ),
-                return_exceptions=True,
-            )
+            with trace("wait.poll", metadata={"poll": polls, "run_count": len(current_runs)}):
+                runs = await asyncio.gather(
+                    *(get_run(agents[run["agent_id"]], run) for run in current_runs.values()),
+                    return_exceptions=True,
+                )
             for (agent_run_id, agent_run), run in zip(
                 current_runs.items(), runs, strict=True
             ):
                 if isinstance(run, (ReadError, RemoteProtocolError)):
+                    logger.warning(
+                        "wait: tool_call_id=%s run_id=%s poll=%d retrying after %s",
+                        runtime.tool_call_id, agent_run_id, polls, type(run).__name__,
+                    )
                     continue
                 if isinstance(run, BaseException):
                     raise run
 
                 status = _normalize_run_status(run["status"])
+                logger.debug(
+                    "wait: tool_call_id=%s run_id=%s poll=%d status=%s",
+                    runtime.tool_call_id, agent_run_id, polls, status,
+                )
                 if status not in TERMINAL_STATUSES:
                     if status != agent_run["status"]:
                         updated_runs[agent_run_id] = {
@@ -745,86 +873,110 @@ def _build_wait_tool(
 
                 agent = agents[agent_run["agent_id"]]
                 client = clients.get_async(agent["agent_type_id"])
-                history = await client.threads.get_history(
-                    thread_id=run["thread_id"],
-                    limit=HISTORY_LIMIT,
-                    metadata={"run_id": run["run_id"]},
-                )
-                if history:
-                    if history[-1]["metadata"]["source"] != "input":
-                        raise ValueError(
-                            "History is truncated; increase `HISTORY_LIMIT`."
-                        )
+                with trace("threads.get_history", metadata={
+                    "agent_run_id": run["run_id"], "thread_id": run["thread_id"],
+                }):
+                    history = await client.threads.get_history(
+                        thread_id=run["thread_id"],
+                        limit=HISTORY_LIMIT,
+                        metadata={"run_id": run["run_id"]},
+                    )
+                with trace("wait.process_result", metadata={"agent_run_id": run["run_id"]}):
+                    if history:
+                        if history[-1]["metadata"]["source"] != "input":
+                            raise ValueError(
+                                "History is truncated; increase `HISTORY_LIMIT`."
+                            )
 
-                    before_messages = history[-1]["values"]["messages"]
-                    after_messages = history[0]["values"]["messages"]
-                    messages = after_messages[len(before_messages) :]
-                else:
-                    messages = []
+                        before_messages = history[-1]["values"]["messages"]
+                        after_messages = history[0]["values"]["messages"]
+                        messages = after_messages[len(before_messages) :]
+                    else:
+                        messages = []
 
-                if status == "responded" and not messages:
-                    raise ValueError(f"No messages found for run `{run['run_id']}`.")
+                    tool_calls = _extract_agent_tool_calls(messages)
 
-                tool_calls = _extract_agent_tool_calls(messages)
+                    response = None
+                    error = None
+                    if status == "responded" and messages:
+                        last_message = messages[-1]
+                        if (
+                            last_message["type"] != "ai"
+                            or last_message["tool_calls"]
+                            or last_message["content"] is None
+                        ):
+                            raise ValueError(
+                                "Expected a final AI message without tool calls and with non-null content "
+                                f"for responded run `{run['run_id']}`."
+                            )
+                        response = last_message["content"]
+                        if not isinstance(response, str):
+                            response = json.dumps(response, ensure_ascii=False)
+                    elif status == "error":
+                        with trace("threads.get", metadata={
+                            "agent_run_id": run["run_id"], "thread_id": run["thread_id"],
+                        }):
+                            thread = await client.threads.get(thread_id=run["thread_id"])
+                        error = thread.get("error")
+                        error = json.dumps(error, ensure_ascii=False) if error else None
+                    if status == "responded" and (response is None or not response.strip()):
+                        status = "error"
+                        response = None
+                        error = EMPTY_AGENT_RESPONSE_ERROR
+                    # response, _ = _truncate_text(response, AGENT_RESPONSE_MAX_TOKENS)
 
-                response = None
-                error = None
-                if status == "responded":
-                    last_message = messages[-1]
-                    if (
-                        last_message["type"] != "ai"
-                        or last_message["tool_calls"]
-                        or last_message["content"] is None
-                    ):
-                        raise ValueError(
-                            "Expected a final AI message without tool calls and with non-null content "
-                            f"for responded run `{run['run_id']}`."
-                        )
-                    response = last_message["content"]
-                    if not isinstance(response, str):
-                        response = json.dumps(response, ensure_ascii=False)
-                elif status == "error":
-                    thread = await client.threads.get(thread_id=run["thread_id"])
-                    error = thread.get("error")
-                    error = json.dumps(error, ensure_ascii=False) if error else None
-                # response, _ = _truncate_text(response, AGENT_RESPONSE_MAX_TOKENS)
-
-                response_sequence_number = next_response_sequence_number + len(tool_output)
-                tool_output.append({
-                    "agent_id": agent_run["agent_id"],
-                    "agent_run_id": agent_run_id,
-                    "status": status,
-                    "response": response,
-                    "error": error,
-                })
-                updated_runs[agent_run_id] = {
-                    **agent_run,
-                    "status": status,
-                    "tool_calls": tool_calls,
-                    "messages": messages,
-                    "response": response,
-                    "error": error,
-                    "response_sequence_number": response_sequence_number,
-                }
+                    logger.info(
+                        "Collected run: tool_call_id=%s agent_id=%s run_id=%s status=%s "
+                        "history_entries=%d messages=%d tool_calls=%d",
+                        runtime.tool_call_id, agent_run["agent_id"], agent_run_id, status,
+                        len(history), len(messages), len(tool_calls),
+                    )
+                    response_sequence_number = next_response_sequence_number + len(tool_output)
+                    tool_output.append({
+                        "agent_id": agent_run["agent_id"],
+                        "agent_run_id": agent_run_id,
+                        "status": status,
+                        "response": response,
+                        "error": error,
+                        "tool_calls_count": len(tool_calls),
+                    })
+                    updated_runs[agent_run_id] = {
+                        **agent_run,
+                        "status": status,
+                        "tool_calls": tool_calls,
+                        "messages": messages,
+                        "response": response,
+                        "error": error,
+                        "response_sequence_number": response_sequence_number,
+                    }
 
             if tool_output:
+                logger.info(
+                    "wait: tool_call_id=%s polls=%d active=%d collected=%d",
+                    runtime.tool_call_id, polls, len(current_runs), len(tool_output),
+                )
                 collected_at = time.time()
                 for result in tool_output:
                     updated_runs[result["agent_run_id"]]["collected_at"] = collected_at
-                return Command(
-                    update={
-                        "messages": [
-                            ToolMessage(
-                                json.dumps(tool_output, ensure_ascii=False),
-                                tool_call_id=runtime.tool_call_id,
-                            )
-                        ],
-                        "agent_runs": updated_runs,
-                    }
-                )
+                with trace("wait.build_response"):
+                    return Command(
+                        update={
+                            "messages": [
+                                ToolMessage(
+                                    json.dumps(tool_output, ensure_ascii=False),
+                                    tool_call_id=runtime.tool_call_id,
+                                )
+                            ],
+                            "agent_runs": updated_runs,
+                        }
+                    )
 
             remaining = deadline - asyncio.get_running_loop().time()
             if remaining <= 0:
+                logger.info(
+                    "wait: tool_call_id=%s polls=%d active=%d timeout",
+                    runtime.tool_call_id, polls, len(current_runs),
+                )
                 return Command(
                     update={
                         "messages": [
@@ -837,7 +989,8 @@ def _build_wait_tool(
                     }
                 )
 
-            await asyncio.sleep(min(WAIT_POLL_SECONDS, remaining))
+            with trace("wait.sleep"):
+                await asyncio.sleep(min(WAIT_POLL_SECONDS, remaining))
 
     return StructuredTool.from_function(
         func=wait,
@@ -855,12 +1008,17 @@ def _build_wait_tool(
 def _build_decomposer_agent_tools(
     agent_types: dict[str, AgentType],
     agent_recursion_limit: int | None,
+    agent_run_budget_seconds: float | None = None,
+    agent_shutdown_grace_seconds: float = 60.0,
 ) -> list[StructuredTool]:
     clients = _ClientCache(agent_types)
     return [
         _build_new_tool(agent_types, clients),
         _build_fork_tool(clients),
-        _build_run_tool(clients, agent_recursion_limit),
+        _build_run_tool(
+            clients, agent_recursion_limit,
+            agent_run_budget_seconds, agent_shutdown_grace_seconds,
+        ),
         _build_wait_tool(clients),
     ]
 
@@ -872,6 +1030,8 @@ class DecomposerAgentMiddleware(AgentMiddleware[DecomposerAgentState, ContextT, 
         self,
         agent_types: Sequence[AgentType],
         agent_recursion_limit: int | None,
+        agent_run_budget_seconds: float | None = None,
+        agent_shutdown_grace_seconds: float = 60.0,
     ) -> None:
         super().__init__()
 
@@ -887,7 +1047,8 @@ class DecomposerAgentMiddleware(AgentMiddleware[DecomposerAgentState, ContextT, 
             raise ValueError(f"Duplicate agent type IDs: {dupes}")
 
         self.tools = _build_decomposer_agent_tools(
-            agent_types, agent_recursion_limit
+            agent_types, agent_recursion_limit,
+            agent_run_budget_seconds, agent_shutdown_grace_seconds,
         )
 
     def before_agent(
@@ -908,7 +1069,11 @@ class DecomposerAgentMiddleware(AgentMiddleware[DecomposerAgentState, ContextT, 
             "prompt": prompt,
             "started_at": time.time(),
         }
-        return {"decomposer_agent_runs": [*state.get("decomposer_agent_runs", []), run]}
+        return {
+            "decomposer_agent_runs": [*state.get("decomposer_agent_runs", []), run],
+            "run_prompt_counts": {},
+            "shutdown_requested": False,
+        }
 
     def after_agent(
         self,
@@ -925,6 +1090,25 @@ class DecomposerAgentMiddleware(AgentMiddleware[DecomposerAgentState, ContextT, 
                 "collected_at": time.time(),
             },
         ]}
+
+    def _prepare_model_request(self, request):
+        if not request.state.get("shutdown_requested", False):
+            return request
+        if any(
+            "response_sequence_number" not in run
+            for run in request.state["agent_runs"].values()
+        ):
+            return request.override(
+                tools=[tool for tool in self.tools if tool.name == "wait"],
+                tool_choice="wait", response_format=None,
+            )
+        return request.override(tools=[], tool_choice=None, response_format=None)
+
+    def wrap_model_call(self, request, handler):
+        return handler(self._prepare_model_request(request))
+
+    async def awrap_model_call(self, request, handler):
+        return await handler(self._prepare_model_request(request))
 
     def after_model(
         self,
@@ -943,12 +1127,42 @@ class DecomposerAgentMiddleware(AgentMiddleware[DecomposerAgentState, ContextT, 
             raise RuntimeError("Expected the state to contain an AIMessage.")
 
         tool_calls = ai_message.tool_calls
+        if state.get("shutdown_requested", False) and tool_calls:
+            active_runs = any(
+                "response_sequence_number" not in run
+                for run in state["agent_runs"].values()
+            )
+            if not active_runs or any(call["name"] != "wait" for call in tool_calls):
+                raise ValueError("Decomposer requested tools instead of completing graceful shutdown")
         agent_run_counts = Counter(
             tool_call["args"]["agent_id"]
             for tool_call in tool_calls
             if tool_call["name"] == "run"
             and isinstance(tool_call["args"].get("agent_id"), str)
         )
+        prompt_counts = Counter(
+            tool_call["args"]["prompt"]
+            for tool_call in tool_calls
+            if tool_call["name"] == "run"
+            and isinstance(tool_call["args"].get("prompt"), str)
+        )
+        run_prompt_counts = Counter(state.get("run_prompt_counts", {}))
+        run_prompt_counts.update(prompt_counts)
+        if not state.get("shutdown_requested", False) and any(
+            prompt.strip() and run_prompt_counts[prompt] >= 3 for prompt in prompt_counts
+        ):
+            return {
+                "run_prompt_counts": dict(run_prompt_counts),
+                "shutdown_requested": True,
+                "messages": [
+                    ToolMessage(
+                        content=DECOMPOSER_GRACEFUL_SHUTDOWN_REQUEST,
+                        tool_call_id=call["id"], name=call["name"],
+                    )
+                    for call in tool_calls
+                ] + [HumanMessage(content=DECOMPOSER_GRACEFUL_SHUTDOWN_REQUEST)],
+                "jump_to": "model",
+            }
         forked_agent_ids = {
             tool_call["args"]["agent_id"]
             for tool_call in tool_calls
@@ -972,6 +1186,12 @@ class DecomposerAgentMiddleware(AgentMiddleware[DecomposerAgentState, ContextT, 
                 and agent_run_counts[tool_call["args"]["agent_id"]] > 1
             ):
                 error = PARALLEL_RUN_CALL_ERROR
+            elif (
+                tool_call["name"] == "run"
+                and isinstance(tool_call["args"].get("prompt"), str)
+                and prompt_counts[tool_call["args"]["prompt"]] > 1
+            ):
+                error = DUPLICATE_PROMPT_ERROR
             else:
                 continue
             rejected_calls.append(
@@ -982,10 +1202,10 @@ class DecomposerAgentMiddleware(AgentMiddleware[DecomposerAgentState, ContextT, 
                 )
             )
         if rejected_calls:
-            return {"messages": rejected_calls}
+            return {"messages": rejected_calls, "run_prompt_counts": dict(run_prompt_counts)}
 
         if tool_calls:
-            return None
+            return {"run_prompt_counts": dict(run_prompt_counts)}
 
         agent_runs = state["agent_runs"]
         if any("response_sequence_number" not in run for run in agent_runs.values()):
@@ -1010,15 +1230,32 @@ def create_decomposer_agent(
     checkpointer: Checkpointer | None = None,
     decomposer_recursion_limit: int | None = None,
     agent_recursion_limit: int | None = None,
+    agent_run_budget_seconds: float | None = None,
+    agent_shutdown_grace_seconds: float = 60.0,
 ) -> CompiledStateGraph:
+    if agent_run_budget_seconds is not None and agent_run_budget_seconds <= 0:
+        raise ValueError("agent_run_budget_seconds must be positive")
+    if agent_shutdown_grace_seconds <= 0:
+        raise ValueError("agent_shutdown_grace_seconds must be positive")
     decomposer_middelware = DecomposerAgentMiddleware(
-        agent_types, agent_recursion_limit
+        agent_types, agent_recursion_limit,
+        agent_run_budget_seconds, agent_shutdown_grace_seconds,
+    )
+
+    run_budget_convention = ""
+    if agent_run_budget_seconds is not None:
+        run_budget_convention = RUN_BUDGET_CONVENTION.format(
+            agent_run_budget_seconds=agent_run_budget_seconds,
+            agent_shutdown_grace_seconds=agent_shutdown_grace_seconds,
+        ) + "\n\n"
+    system_prompt = DECOMPOSER_SYSTEM_PROMPT.replace(
+        "{run_budget_convention}\n\n", run_budget_convention,
     )
 
     agent = create_agent(
         model=decomposer_model,
         tools=[],
-        system_prompt=DECOMPOSER_SYSTEM_PROMPT,
+        system_prompt=system_prompt,
         middleware=[
             decomposer_middelware,
             *(middleware or []),

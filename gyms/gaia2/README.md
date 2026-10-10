@@ -449,10 +449,7 @@ The option applies to execution, search, and ambiguity evaluations and to
 execution trace generation. MLSpace jobs continue to use offset zero because
 each job has an isolated network namespace.
 
-Each Decomposer experiment declares its student or teacher prompt profile.
-`--prompt-profile teacher|student` can override it for local and MLSpace runs;
-explicit overrides use a distinct output/job identity and record the resolved
-prompt hash.
+All Decomposer experiments use `decomposer.prompts.DECOMPOSER_SYSTEM_PROMPT`.
 Workers see strict JSON schemas generated from the original scenario-bound ARE
 tools through an authenticated loopback broker; defaulted parameters are
 optional and variadic Python parameters are not exposed. The final

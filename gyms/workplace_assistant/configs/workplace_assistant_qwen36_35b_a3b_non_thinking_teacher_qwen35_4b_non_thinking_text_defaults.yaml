@@ -38,7 +38,6 @@ decomposer:
         type: responses_api_models
         name: policy_model
       join_gym_system_and_user_prompts: true
-      decomposer_system_prompt_profile: teacher
       response_for_verifier_factory: responses_api_agents.decomposer_agent.app:_subagent_tool_calls_and_final_message
       subagent_types:
         - agent_type_id: qwen35_4b_non_thinking

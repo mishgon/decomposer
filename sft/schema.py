@@ -108,7 +108,6 @@ class SubagentInterfaceSpec(StrictModel):
 
 class PolicySpec(StrictModel):
     id: str
-    system_prompt_profile: Literal["student", "teacher"] | None = None
 
     @field_validator("id")
     @classmethod
@@ -117,10 +116,6 @@ class PolicySpec(StrictModel):
             raise ValueError("policy.id must be a lowercase identifier")
         return value
 
-    @property
-    def resolved_system_prompt_profile(self) -> Literal["student", "teacher"]:
-        # A spec that names no prompt trains with the teacher's own prompt.
-        return self.system_prompt_profile or "teacher"
 
 
 class SourceSelectionSpec(StrictModel):

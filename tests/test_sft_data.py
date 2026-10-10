@@ -28,17 +28,13 @@ from sft.schema import (
     validate_chat_tools,
     validate_decomposer_messages,
 )
-from decomposer.prompt_profiles import (
-    DECOMPOSER_STUDENT_SYSTEM_PROMPT,
-    resolve_decomposer_system_prompt,
-)
 from decomposer.prompts import (
     DECOMPOSER_SYSTEM_PROMPT,
     EARLY_RESPONSE_ERROR,
     PARALLEL_WAIT_CALL_ERROR,
 )
 from sft.train import (
-    _validate_dataset_system_prompt_profile,
+    _validate_dataset_system_prompt,
     _validate_manifest,
 )
 
@@ -204,7 +200,7 @@ def _legacy_rollout(task_index: int) -> dict:
                 _call(
                     "spawn_subagent",
                     spawn_id,
-                    subagent_type_id="small",
+                    agent_type_id="small",
                     prompt=f"Do task {task_index}.",
                 )
             ],
@@ -290,7 +286,6 @@ def _prepare_fixture_dataset(
     invalid_policy: str = "exclude",
     max_traces_per_prompt_per_teacher: int | None = None,
     version: str = "v3",
-    system_prompt_profile: str | None = None,
 ):
     """Test helper that exercises the new canonical builder without Git state."""
     snapshot_root = output_dir.parent / "snapshots"
@@ -299,7 +294,6 @@ def _prepare_fixture_dataset(
         dataset=DatasetIdentity(id=output_dir.name, version=version),
         policy=PolicySpec(
             id="decomposer-default",
-            system_prompt_profile=system_prompt_profile,
         ),
         sources=tuple(_nemo_source(source, snapshot_root) for source in source_dirs),
         selection=SelectionSpec(
@@ -355,7 +349,6 @@ def test_prepare_groups_teacher_variants_and_writes_manifest_v3(tmp_path: Path) 
     example = train[0]
     assert example["messages"][0]["role"] == "system"
     assert example["messages"][0]["content"] == DECOMPOSER_SYSTEM_PROMPT
-    assert example["messages"][0]["content"] != DECOMPOSER_STUDENT_SYSTEM_PROMPT
     assert example["messages"][1]["role"] == "user"
     assert example["messages"][-1]["teacher_reasoning"] == "Report success."
     assert [
@@ -379,53 +372,47 @@ def test_prepare_groups_teacher_variants_and_writes_manifest_v3(tmp_path: Path) 
         assert metadata["bytes"] > 0
 
 
-def test_teacher_prompt_profile_is_materialized_and_training_validated(
-    tmp_path: Path,
-) -> None:
+def test_shared_prompt_is_materialized_and_training_validated(tmp_path: Path) -> None:
     prepared = _prepare_fixture_dataset(
-        [_source(tmp_path, "teacher")],
-        tmp_path / "prepared-teacher-prompt",
-        system_prompt_profile="teacher",
+        [_source(tmp_path, "teacher")], tmp_path / "prepared-shared-prompt"
     )
-    train = _read_jsonl(prepared.train_path)
-    validation = _read_jsonl(prepared.validation_path)
-    assert prepared.manifest["policy"]["system_prompt_profile"] == "teacher"
-    assert prepared.manifest["policy"]["system_prompt_sha256"] == sha256_text(
-        DECOMPOSER_SYSTEM_PROMPT
+    train = Dataset.from_list(_read_jsonl(prepared.train_path))
+    validation = Dataset.from_list(_read_jsonl(prepared.validation_path))
+    runtime = _validate_dataset_system_prompt(
+        prepared.manifest, train_dataset=train, validation_dataset=validation
     )
+    assert runtime == {"sha256": sha256_text(DECOMPOSER_SYSTEM_PROMPT)}
     assert all(
-        record["messages"][0]["content"] == DECOMPOSER_SYSTEM_PROMPT
-        for record in [*train, *validation]
+        messages[0]["content"] == DECOMPOSER_SYSTEM_PROMPT
+        for dataset in (train, validation) for messages in dataset["messages"]
     )
-    runtime = _validate_dataset_system_prompt_profile(
-        prepared.manifest,
-        train_dataset=Dataset.from_list(train),
-        validation_dataset=Dataset.from_list(validation),
-        expected_profile="teacher",
-    )
-    assert runtime == {
-        "profile": "teacher",
-        "sha256": sha256_text(DECOMPOSER_SYSTEM_PROMPT),
-    }
-    with pytest.raises(ValueError, match="does not match"):
-        _validate_dataset_system_prompt_profile(
+    manifest = {**prepared.manifest, "policy": {"system_prompt_sha256": "stale"}}
+    with pytest.raises(ValueError, match="system prompt hash"):
+        _validate_dataset_system_prompt(
+            manifest, train_dataset=train, validation_dataset=validation
+        )
+    records = train.to_list()
+    records[0]["messages"][0]["content"] = "stale prompt"
+    with pytest.raises(ValueError, match="does not start"):
+        _validate_dataset_system_prompt(
             prepared.manifest,
-            train_dataset=Dataset.from_list(train),
-            validation_dataset=Dataset.from_list(validation),
-            expected_profile="student",
+            train_dataset=Dataset.from_list(records),
+            validation_dataset=validation,
         )
 
 
-def test_prompt_profile_resolver_is_strict() -> None:
-    assert (
-        resolve_decomposer_system_prompt("student") == DECOMPOSER_STUDENT_SYSTEM_PROMPT
-    )
-    assert resolve_decomposer_system_prompt("teacher") == DECOMPOSER_SYSTEM_PROMPT
-    assert PolicySpec(id="default").resolved_system_prompt_profile == "teacher"
-    student = PolicySpec(id="student", system_prompt_profile="student")
-    assert student.resolved_system_prompt_profile == "student"
-    with pytest.raises(ValueError, match="Unknown Decomposer prompt profile"):
-        resolve_decomposer_system_prompt("unknown")
+class _LengthFixtureTokenizer:
+    init_kwargs = {"_commit_hash": "fixture-revision"}
+
+    def apply_chat_template(self, messages, **kwargs):
+        prompt = next(
+            message["content"] for message in messages if message["role"] == "user"
+        )
+        token_length = 12 if prompt.endswith("Task 0.") else 6
+        return {
+            "input_ids": list(range(token_length)),
+            "assistant_masks": [1] * token_length,
+        }
 
 
 def test_prepare_keeps_parallel_calls_as_emitted(tmp_path: Path) -> None:
@@ -865,7 +852,7 @@ def test_schema_rejects_legacy_spawn_subagent_traces() -> None:
         "id": "spawn-1",
         "function": {
             "name": "spawn_subagent",
-            "arguments": {"subagent_type_id": "small", "prompt": "Do it."},
+            "arguments": {"agent_type_id": "small", "prompt": "Do it."},
         },
     }
     legacy_messages = [
@@ -1094,7 +1081,9 @@ def test_each_source_keeps_its_native_tool_schema(
             record["source"]["source_id"]
         ]
         assert record["messages"][0]["content"] == DECOMPOSER_SYSTEM_PROMPT
-    assert prepared.manifest["policy"]["system_prompt_profile"] == "teacher"
+    assert prepared.manifest["policy"]["system_prompt_sha256"] == sha256_text(
+        DECOMPOSER_SYSTEM_PROMPT
+    )
 
 
 def test_each_source_must_use_one_tool_schema(tmp_path: Path) -> None:

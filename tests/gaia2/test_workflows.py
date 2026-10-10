@@ -126,7 +126,6 @@ from gyms.gaia2.run import (
     simple_vllm_command,
     simple_sampling_parameters,
     simple_agent_environment,
-    select_prompt_profile,
     subagent_environment,
     execute_trace_generation,
     check_judge,
@@ -232,7 +231,6 @@ def test_port_offset_isolates_default_output_and_resume_identity(tmp_path) -> No
         SIMPLE_QWEN_EXPERIMENT,
         args,
         domain=DOMAIN,
-        prompt_profile=None,
         ports=Gaia2PortLayout(12000),
     )
     assert directory.parent.name.endswith("-port-offset-12000")
@@ -245,7 +243,6 @@ def test_port_offset_isolates_default_output_and_resume_identity(tmp_path) -> No
         DEEPSEEK_QWEN_EXPERIMENT,
         args,
         domain=DOMAIN,
-        prompt_profile=None,
         ports=Gaia2PortLayout(24000),
     )
     assert trace_directory.parent.name.endswith("-port-offset-24000")
@@ -253,13 +250,6 @@ def test_port_offset_isolates_default_output_and_resume_identity(tmp_path) -> No
 
     explicit = tmp_path / "explicit"
     args.output_dir = explicit
-    assert selected_output_dir(
-        DEEPSEEK_QWEN_EXPERIMENT,
-        args,
-        domain=DOMAIN,
-        prompt_profile=None,
-        ports=Gaia2PortLayout(24000),
-    ) == explicit.resolve()
 
     legacy_identity = run_identity(
         SIMPLE_QWEN_EXPERIMENT,
@@ -654,7 +644,6 @@ def test_qwen38_low_manager_and_unlooped_worker_run_on_the_llm_proxy(
     assert experiment.worker_checkpoint is None
     assert experiment.manager_served_name == "Qwen/Qwen3.8-Flash-Next-NVFP4"
     assert experiment.worker_served_name == "Qwen/Qwen3.5-4B-unlooped"
-    assert experiment.prompt_profile == "teacher"
 
     # The manager's sampling reaches the proxy server-side, reasoning effort included.
     assert experiment.remote_manager_extra_body == {
@@ -753,7 +742,6 @@ def test_release_teacher_runs_without_thinking_on_the_llm_proxy(
     experiment = QWEN38_NON_THINKING_QWEN35_UNLOOPED_THINKING_EXPERIMENT
     repo_root = Path(__file__).resolve().parents[2]
     assert experiment.num_gpus == 0
-    assert experiment.prompt_profile == "teacher"
 
     # tau2's lmrouter/qwen_3_8_flash_next_non_thinking body: effort "none" turns
     # thinking off on the Responses API, which ignores chat_template_kwargs.
@@ -858,7 +846,6 @@ def test_release_students_serve_one_local_manager_with_proxy_workers(
     raw_snapshot: bool,
 ) -> None:
     assert experiment.num_gpus == 1
-    assert experiment.prompt_profile == "teacher"
     manager, worker = decomposer_vllm_commands(experiment)
     assert manager is not None and worker is None
     assert str(experiment.manager_checkpoint) in manager
@@ -1096,7 +1083,6 @@ def test_qwen36_teacher_uses_internal_proxy_and_existing_worker(tmp_path) -> Non
     assert experiment.manager_reasoning_mode == "service_default"
     assert experiment.remote_manager_extra_body == {}
     assert experiment.manager_served_name == "Qwen/Qwen3.6-35B-A3B-FP8"
-    assert experiment.prompt_profile == "teacher"
     assert experiment.worker_checkpoint == DEEPSEEK_QWEN_EXPERIMENT.worker_checkpoint
     assert experiment.worker_served_name == "Qwen/Qwen3.5-4B"
     assert experiment.num_gpus == 1
@@ -1163,7 +1149,6 @@ def test_qwen36_text_defaults_are_explicitly_non_thinking(tmp_path) -> None:
         "chat_template_kwargs": {"enable_thinking": False},
     }
 
-    assert experiment.prompt_profile == "teacher"
     assert experiment.manager_reasoning_mode == "non_thinking"
     assert experiment.max_model_len == 131072
     assert experiment.max_completion_tokens is None
@@ -1213,7 +1198,6 @@ def test_qwen36_thinking_text_defaults_preserve_reasoning(tmp_path) -> None:
     assert experiment.manager_served_name == "Qwen/Qwen3.6-35B-A3B-FP8"
     assert experiment.manager_reasoning_mode == "thinking"
     assert experiment.manager_thinking is True
-    assert experiment.prompt_profile == "teacher"
     assert experiment.max_model_len == 131072
     assert experiment.max_completion_tokens is None
     assert experiment.manager_max_model_calls == 80
@@ -1352,7 +1336,6 @@ def test_shared_gemma26_decomposer_uses_one_server_and_one_gpu(
     experiment = GEMMA4_26B_SHARED_DECOMPOSER_EXPERIMENT
     ports = Gaia2PortLayout(12000)
     assert experiment.num_gpus == 1
-    assert experiment.prompt_profile == "teacher"
     assert experiment.share_local_vllm is True
     assert ports.manager_port(experiment) == ports.worker_port(experiment) == 20033
 
@@ -1432,7 +1415,6 @@ def test_shared_gemma26_decomposer_uses_one_server_and_one_gpu(
 
 def test_deepseek_gemma26_profile_uses_teacher_and_non_thinking_worker() -> None:
     experiment = DEEPSEEK_GEMMA4_26B_NON_THINKING_EXPERIMENT
-    assert experiment.prompt_profile == "teacher"
     assert experiment.manager_backend == "openrouter"
     assert experiment.manager_thinking is True
     assert experiment.worker_thinking is False
@@ -1981,7 +1963,6 @@ def test_untuned_qwen_decomposer_matches_sft_two_gpu_topology() -> None:
 
     assert experiment.name == ("qwen35-4b-base-non-thinking-qwen35-4b-non-thinking")
     assert experiment.num_gpus == 2
-    assert experiment.prompt_profile == "student"
     assert experiment.manager_parallel_tool_calls is False
     assert experiment.manager_checkpoint == experiment.worker_checkpoint
     assert experiment.manager_port != experiment.worker_port
@@ -2025,7 +2006,6 @@ def test_untuned_qwen_teacher_decomposer_only_changes_prompt_identity() -> None:
     assert experiment.name == (
         "qwen35-4b-base-non-thinking-teacher-qwen35-4b-non-thinking"
     )
-    assert experiment.prompt_profile == "teacher"
     assert experiment.num_gpus == 2
     assert (
         experiment.manager_checkpoint
@@ -2048,7 +2028,6 @@ def test_untuned_qwen_teacher_decomposer_only_changes_prompt_identity() -> None:
     assert experiment.manager_parallel_tool_calls is False
 
     plan = _dry_plan(Path.cwd(), experiment, Path("/tmp/output"), ("0", "1"), 3, None)
-    assert plan["decomposer_system_prompt_profile"] == "teacher"
     assert plan["gpu_assignments"] == {
         "manager_vllm": "0",
         "worker_vllm": "1",
@@ -2178,7 +2157,6 @@ def test_openrouter_runtime_uses_teacher_responses_api(tmp_path) -> None:
     plugin = json.loads(plugin_path.read_text(encoding="utf-8"))
     service = plugin["service_configuration"]
 
-    assert service["decomposer_system_prompt_profile"] == "teacher"
     assert service["manager"] == {
         "model": "deepseek/deepseek-v4-flash-0731",
         "base_url": "https://openrouter.ai/api/v1",
@@ -2216,7 +2194,6 @@ def test_ambiguity_policy_ablation_has_distinct_prompt_and_artifact_identity(
         experiment,
     )
     service = json.loads(service_path.read_text(encoding="utf-8"))
-    assert service["decomposer_system_prompt_profile"] == "teacher"
     assert (
         service["decomposer_system_prompt_addendum_profile"]
         == "gaia2-ambiguity"
@@ -2770,39 +2747,6 @@ def test_remote_simple_agent_is_local_only_for_mlspace_launcher(tmp_path) -> Non
             proxy_environment={"HTTPS_PROXY": "http://proxy.test"},
             openrouter_key="openrouter-secret",
         )
-
-
-def test_gaia_prompt_override_is_propagated_and_output_isolated(tmp_path) -> None:
-    selected = select_prompt_profile(QWEN35_GAIA2_SFT_EXPERIMENT, "teacher")
-    assert selected.prompt_profile == "teacher"
-    assert output_dir(
-        selected,
-        3,
-        partition="test",
-        prompt_profile="teacher",
-    ).name.endswith("-prompt-teacher")
-    payload = build_payload(
-        QWEN35_GAIA2_SFT_EXPERIMENT,
-        tmp_path,
-        num_repeats=3,
-        limit=None,
-        author="sukhorukov",
-        base_image="image",
-        priority="high",
-        force=False,
-        judge_environment={
-            "LLM_PROXY_URL": "https://judge.test/v1",
-            "LLM_PROXY_MASTER_KEY": "judge-secret",
-        },
-        proxy_environment={},
-        openrouter_key="unused",
-        partition="test",
-        prompt_profile="teacher",
-    )
-    assert "--prompt-profile teacher" in payload["script"]
-    assert "prompt-teacher" in payload["job_desc"]
-    with pytest.raises(ValueError, match="only valid for Decomposer"):
-        select_prompt_profile(SIMPLE_EXPERIMENT, "teacher")
 
 
 def _write_trace_round(

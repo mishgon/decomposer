@@ -76,7 +76,9 @@ RUN uv python install "${PYTHON_VERSION}" \
         --requirements /tmp/agent-requirements.txt \
         /tmp/decomposer
 
+COPY gyms/__init__.py gyms/model_logging.py /opt/decomposer/gyms/
 COPY gyms/toolathlon_gym /opt/decomposer/gyms/toolathlon_gym
+ENV PYTHONPATH=/opt/decomposer
 
 WORKDIR /workspace
 ENTRYPOINT ["/opt/venv/bin/python3", "/opt/decomposer/gyms/toolathlon_gym/task.py"]

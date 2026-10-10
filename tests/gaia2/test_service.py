@@ -3,6 +3,8 @@ from __future__ import annotations
 import ast
 import re
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -177,6 +179,72 @@ def test_episode_persists_thread_and_forwards_runtime_context(monkeypatch):
     }
 
 
+def test_episode_uses_current_core_factory(monkeypatch):
+    from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
+
+    class FakeModel(FakeMessagesListChatModel):
+        def bind_tools(self, tools, **kwargs):
+            return self
+
+    model = FakeModel(responses=[AIMessage(content="answer"), AIMessage(content="answer")])
+    monkeypatch.setattr(service, "_model_from_config", lambda value: model)
+    app = service.create_app({
+        "manager": {"model": "fake"},
+        "subagent_types": [{
+            "agent_type_id": "worker",
+            "description": "worker",
+            "assistant_id": "worker",
+        }],
+    })
+    with TestClient(app) as client:
+        episode_id = client.post(
+            "/v1/episodes", json={"context": _context()}
+        ).json()["episode_id"]
+        for _ in range(2):
+            response = client.post(f"/v1/episodes/{episode_id}/turn", json=_turn())
+            assert response.status_code == 200, response.text
+            assert response.json()["final_text"] == "answer"
+            assert response.json()["outstanding_subagents"] == []
+        assert client.delete(f"/v1/episodes/{episode_id}").json() == {"deleted": True}
+
+
+def test_episode_cleanup_reads_current_worker_state(monkeypatch):
+    class WorkerGraph(FakeGraph):
+        async def aget_state(self, config):
+            return SimpleNamespace(values={
+                "agents": {
+                    "worker": {"agent_type_id": "worker", "thread_id": "thread"},
+                },
+                "agent_runs": {
+                    "active": {
+                        "agent_id": "worker", "run_id": "active", "status": "running",
+                    },
+                    "finished": {
+                        "agent_id": "worker", "run_id": "finished", "status": "responded",
+                    },
+                },
+            })
+
+    sdk = SimpleNamespace(
+        runs=SimpleNamespace(cancel=AsyncMock()),
+        threads=SimpleNamespace(delete=AsyncMock()),
+    )
+    monkeypatch.setattr("langgraph_sdk.get_client", lambda **kwargs: sdk)
+    monkeypatch.setattr(service, "_model_from_config", lambda value: object())
+    monkeypatch.setattr(service, "create_decomposer_agent", lambda **kwargs: WorkerGraph())
+    app = service.create_app({
+        "manager": {"model": "fake"},
+        "subagent_types": [{"agent_type_id": "worker", "url": "http://worker"}],
+    })
+    with TestClient(app) as client:
+        episode_id = client.post(
+            "/v1/episodes", json={"context": _context()}
+        ).json()["episode_id"]
+        assert client.delete(f"/v1/episodes/{episode_id}").json() == {"deleted": True}
+    sdk.runs.cancel.assert_awaited_once_with(thread_id="thread", run_id="active", wait=False)
+    sdk.threads.delete.assert_awaited_once_with(thread_id="thread")
+
+
 def test_uncollected_subagent_is_reported_as_outstanding():
     summaries, outstanding = service._subagent_summary(
         {
@@ -241,7 +309,6 @@ def test_openrouter_content_blocks_return_only_visible_text(monkeypatch):
     app = service.create_app(
         {
             "manager": {"model": "fake"},
-            "decomposer_system_prompt_profile": "teacher",
             "subagent_types": [{"agent_type_id": "worker"}],
         }
     )
@@ -281,33 +348,11 @@ def test_reasoning_only_response_is_not_a_final_answer(monkeypatch):
     assert response.json()["detail"] == "Decomposer produced no visible final text"
 
 
-def test_prompt_profile_is_forwarded_to_decomposer(monkeypatch):
-    captured = {}
-    monkeypatch.setattr(service, "_model_from_config", lambda value: object())
-    monkeypatch.setattr(service, "system_prompt_middleware", lambda prompt: ("prompt", prompt))
-
-    def fake_create_decomposer_agent(**kwargs):
-        captured.update(kwargs)
-        return FakeGraph()
-
-    monkeypatch.setattr(service, "create_decomposer_agent", fake_create_decomposer_agent)
-    service.create_app(
-        {
-            "manager": {"model": "fake"},
-            "decomposer_system_prompt_profile": "teacher",
-            "subagent_types": [{"agent_type_id": "worker"}],
-        }
-    )
-
-    # The core takes no prompt argument; the profile reaches it as the first middleware.
-    assert "decomposer_system_prompt" not in captured
-    assert captured["middleware"][0] == ("prompt", DECOMPOSER_SYSTEM_PROMPT)
-
 
 def test_prompt_addendum_is_appended_only_when_configured(monkeypatch):
     captured = {}
     monkeypatch.setattr(service, "_model_from_config", lambda value: object())
-    monkeypatch.setattr(service, "system_prompt_middleware", lambda prompt: ("prompt", prompt))
+    monkeypatch.setattr(service, "dynamic_prompt", lambda factory: ("prompt", factory(None)))
 
     def fake_create_decomposer_agent(**kwargs):
         captured.update(kwargs)
@@ -317,7 +362,6 @@ def test_prompt_addendum_is_appended_only_when_configured(monkeypatch):
     service.create_app(
         {
             "manager": {"model": "fake"},
-            "decomposer_system_prompt_profile": "teacher",
             "decomposer_system_prompt_addendum_profile": "gaia2-ambiguity",
             "subagent_types": [{"agent_type_id": "worker"}],
         }
@@ -543,7 +587,6 @@ def test_environment_only_turn_keeps_ares_empty_task():
 
     assert messages[0] == {"role": "user", "content": "[TASK]: \n\n"}
     assert messages[1]["content"].startswith("Environment notifications updates:\n***\n[2026-01-01 09:00:00]")
-
 
 
 def test_public_context_records_only_a_hash_of_the_worker_prompt():

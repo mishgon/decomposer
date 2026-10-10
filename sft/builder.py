@@ -17,7 +17,7 @@ from typing import Any
 
 import yaml
 
-from decomposer.prompt_profiles import resolve_decomposer_system_prompt
+from decomposer.prompts import DECOMPOSER_SYSTEM_PROMPT
 
 from .adapters.base import empty_counts
 from .adapters.registry import ADAPTER_VERSIONS, ADAPTERS
@@ -360,8 +360,7 @@ def prepare_dataset(
             f"Dataset release already exists and is immutable: {release_dir}"
         )
 
-    system_prompt_profile = spec.policy.resolved_system_prompt_profile
-    system_prompt = resolve_decomposer_system_prompt(system_prompt_profile)
+    system_prompt = DECOMPOSER_SYSTEM_PROMPT
     records: list[CanonicalRollout] = []
     source_manifests: list[JsonObject] = []
     counts_by_source: dict[str, Counter[str]] = {}
@@ -471,7 +470,6 @@ def prepare_dataset(
         },
         "policy": {
             "id": spec.policy.id,
-            "system_prompt_profile": system_prompt_profile,
             "system_prompt_sha256": sha256_text(system_prompt),
         },
         "sources": source_manifests,

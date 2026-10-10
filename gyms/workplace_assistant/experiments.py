@@ -53,7 +53,6 @@ RUN_PURPOSES = ("trace-generation", "evaluation")
 WORKPLACE_MODEL_CALL_LIMIT = 100
 WORKPLACE_SUBAGENT_RECURSION_LIMIT = 1000
 RunPurpose = Literal["trace-generation", "evaluation"]
-DecomposerPromptProfile = Literal["teacher", "student"]
 DecomposerManagerBackend = Literal["openrouter", "llm_proxy", "local_vllm"]
 # preset: the models.py subagent preset, a create_model() graph that reaches the
 # shared proxy itself; no local subagent process.
@@ -158,7 +157,6 @@ class DecomposerExperiment:
     # subagent_backend="preset" and the config's assistant_id set to its graph.
     manager_preset: str | None = None
     subagent_preset: str | None = None
-    evaluation_prompt_profile: DecomposerPromptProfile = "student"
     concurrency: int = 8
     max_model_len: int = 32768
     max_num_seqs: int = 64
@@ -477,17 +475,6 @@ def validate_purpose_for_experiment(experiment: Experiment, purpose: str) -> Run
     return validated
 
 
-def decomposer_prompt_profile(
-    purpose: str,
-    requested: DecomposerPromptProfile | None = None,
-    evaluation_default: DecomposerPromptProfile = "student",
-) -> DecomposerPromptProfile:
-    validated = validate_run_purpose(purpose)
-    if requested is not None:
-        return requested
-    return "teacher" if validated == "trace-generation" else evaluation_default
-
-
 MODELS = (
     ModelServer(
         "google/gemma-4-E2B-it",
@@ -742,7 +729,6 @@ DECOMPOSER_EXPERIMENTS = (
             "gemma4_31b_non_thinking_text_defaults.yaml"
         ),
         manager_backend="local_vllm",
-        evaluation_prompt_profile="teacher",
         concurrency=16,
         num_gpus=1,
         max_model_len=131072,
@@ -760,7 +746,6 @@ DECOMPOSER_EXPERIMENTS = (
             "gemma4_26b_a4b_non_thinking_text_defaults.yaml"
         ),
         manager_backend="local_vllm",
-        evaluation_prompt_profile="teacher",
         num_gpus=1,
         max_model_len=131072,
         # max_num_seqs=16,
@@ -787,7 +772,6 @@ DECOMPOSER_EXPERIMENTS = (
         manager_reasoning_mode="non_thinking",
         manager_verify_tls=False,
         manager_sampling=_QWEN36_NON_THINKING_SAMPLING,
-        evaluation_prompt_profile="teacher",
         concurrency=16,
         num_gpus=1,
         max_model_len=131072,
@@ -828,7 +812,6 @@ DECOMPOSER_EXPERIMENTS = (
         manager_reasoning_mode="thinking",
         manager_verify_tls=False,
         manager_sampling=_QWEN36_THINKING_SAMPLING,
-        evaluation_prompt_profile="teacher",
         concurrency=16,
         num_gpus=1,
         max_model_len=131072,
@@ -877,7 +860,6 @@ DECOMPOSER_EXPERIMENTS = (
         subagent_api_key_env="LLM_PROXY_MASTER_KEY",
         subagent_verify_tls=False,
         subagent_sampling=QWEN35_UNLOOPED_NON_THINKING,
-        evaluation_prompt_profile="teacher",
         concurrency=16,
         num_gpus=0,
         max_model_len=131072,
@@ -904,7 +886,6 @@ DECOMPOSER_EXPERIMENTS = (
         manager_preset=QWEN38_FLASH_NON_THINKING_PRESET,
         subagent_backend="preset",
         subagent_preset=QWEN35_UNLOOPED_THINKING_PRESET,
-        evaluation_prompt_profile="teacher",
         concurrency=16,
         num_gpus=0,
         max_model_len=131072,
@@ -1338,7 +1319,6 @@ DECOMPOSER_EXPERIMENTS = (
         manager_backend="local_vllm",
         # The checkpoint was trained on the teacher prompt, so it must be
         # evaluated under the same one.
-        evaluation_prompt_profile="teacher",
         num_gpus=2,
         subagent_graph="repository",
         model_servers=(
@@ -1370,7 +1350,6 @@ DECOMPOSER_EXPERIMENTS = (
             "non_thinking_gemma4_26b_a4b_non_thinking.yaml"
         ),
         manager_backend="local_vllm",
-        evaluation_prompt_profile="teacher",
         num_gpus=2,
         subagent_graph="repository",
         model_servers=(
@@ -1402,7 +1381,6 @@ DECOMPOSER_EXPERIMENTS = (
         ),
         manager_backend="local_vllm",
         # The checkpoint was trained on the teacher prompt, so evaluate under it.
-        evaluation_prompt_profile="teacher",
         num_gpus=2,
         subagent_graph="repository",
         model_servers=(
@@ -1438,7 +1416,6 @@ DECOMPOSER_EXPERIMENTS = (
         ),
         manager_backend="local_vllm",
         # The checkpoint was trained on the teacher prompt, so evaluate under it.
-        evaluation_prompt_profile="teacher",
         # Sixty-four saturated the single-worker langgraph event loop: every
         # waiting manager polls threads.get_history every five seconds, and the
         # polls started exceeding the httpx read timeout. Sixteen matches the
@@ -1483,7 +1460,6 @@ DECOMPOSER_EXPERIMENTS = (
         ),
         manager_backend="local_vllm",
         # The checkpoint was trained on the student prompt, so evaluate under it.
-        evaluation_prompt_profile="student",
         # Sixty-four saturated the single-worker langgraph event loop; sixteen is
         # what every comparable pairing uses.
         concurrency=16,
@@ -1522,7 +1498,6 @@ DECOMPOSER_EXPERIMENTS = (
         ),
         manager_backend="local_vllm",
         # The checkpoint was trained on the student prompt, so evaluate under it.
-        evaluation_prompt_profile="student",
         # Sixty-four saturated the single-worker langgraph event loop; sixteen is
         # what every comparable pairing uses.
         concurrency=16,
@@ -1563,7 +1538,6 @@ DECOMPOSER_EXPERIMENTS = (
         ),
         manager_backend="local_vllm",
         # The checkpoint was trained on the student prompt, so evaluate under it.
-        evaluation_prompt_profile="student",
         # Sixty-four saturated the single-worker langgraph event loop; sixteen is
         # what every comparable pairing uses.
         concurrency=16,
@@ -1603,7 +1577,6 @@ DECOMPOSER_EXPERIMENTS = (
             "workplace_assistant_qwen35_4b_base_non_thinking_gemma4_e2b_non_thinking.yaml"
         ),
         manager_backend="local_vllm",
-        evaluation_prompt_profile="student",
         concurrency=16,
         num_gpus=2,
         max_model_len=131072,
@@ -1637,7 +1610,6 @@ DECOMPOSER_EXPERIMENTS = (
             "workplace_assistant_qwen35_4b_base_non_thinking_teacher_gemma4_e2b_non_thinking.yaml"
         ),
         manager_backend="local_vllm",
-        evaluation_prompt_profile="teacher",
         concurrency=16,
         num_gpus=2,
         max_model_len=131072,
@@ -1671,7 +1643,6 @@ DECOMPOSER_EXPERIMENTS = (
             "workplace_assistant_qwen35_4b_base_non_thinking_gemma4_e4b_non_thinking.yaml"
         ),
         manager_backend="local_vllm",
-        evaluation_prompt_profile="student",
         concurrency=16,
         num_gpus=2,
         max_model_len=131072,
@@ -1705,7 +1676,6 @@ DECOMPOSER_EXPERIMENTS = (
             "workplace_assistant_qwen35_4b_base_non_thinking_teacher_gemma4_e4b_non_thinking.yaml"
         ),
         manager_backend="local_vllm",
-        evaluation_prompt_profile="teacher",
         concurrency=16,
         num_gpus=2,
         max_model_len=131072,
@@ -1739,7 +1709,6 @@ DECOMPOSER_EXPERIMENTS = (
             "workplace_assistant_qwen35_4b_base_non_thinking_gemma4_26b_a4b_non_thinking.yaml"
         ),
         manager_backend="local_vllm",
-        evaluation_prompt_profile="student",
         concurrency=16,
         num_gpus=2,
         max_model_len=131072,
@@ -1773,7 +1742,6 @@ DECOMPOSER_EXPERIMENTS = (
             "workplace_assistant_qwen35_4b_base_non_thinking_teacher_gemma4_26b_a4b_non_thinking.yaml"
         ),
         manager_backend="local_vllm",
-        evaluation_prompt_profile="teacher",
         concurrency=16,
         num_gpus=2,
         max_model_len=131072,
@@ -1833,7 +1801,6 @@ DECOMPOSER_EXPERIMENTS = (
             "workplace_assistant_deepseek_v4_flash_0731_teacher_"
             "gemma4_e2b_non_thinking.yaml"
         ),
-        evaluation_prompt_profile="teacher",
         num_gpus=1,
         max_model_len=131072,
         max_num_seqs=64,
@@ -1846,7 +1813,6 @@ DECOMPOSER_EXPERIMENTS = (
             "workplace_assistant_deepseek_v4_flash_0731_teacher_"
             "gemma4_e4b_non_thinking.yaml"
         ),
-        evaluation_prompt_profile="teacher",
         num_gpus=1,
         max_model_len=131072,
         max_num_seqs=64,
@@ -1859,7 +1825,6 @@ DECOMPOSER_EXPERIMENTS = (
             "workplace_assistant_deepseek_v4_flash_0731_teacher_"
             "gemma4_26b_a4b_non_thinking.yaml"
         ),
-        evaluation_prompt_profile="teacher",
         num_gpus=1,
         max_model_len=131072,
         # max_num_seqs=16,
@@ -2129,9 +2094,7 @@ def validate_num_repeats(value: int) -> int:
 def run_name(
     experiment: Experiment,
     num_repeats: int = 1,
-    *,
-    prompt_profile: DecomposerPromptProfile | None = None,
-) -> str:
+    ) -> str:
     validate_num_repeats(num_repeats)
     if isinstance(experiment, SimpleExperiment):
         call_identity = f"calls{experiment.max_steps}"
@@ -2143,7 +2106,7 @@ def run_name(
     name = f"{experiment.name}-{call_identity}"
     if num_repeats != 1:
         name = f"{name}-n{num_repeats}"
-    return name if prompt_profile is None else f"{name}-prompt-{prompt_profile}"
+    return name
 
 
 def output_dir(
@@ -2153,14 +2116,13 @@ def output_dir(
     limit: int | None = None,
     *,
     purpose: RunPurpose,
-    prompt_profile: DecomposerPromptProfile | None = None,
 ) -> Path:
     validate_split(split)
     validate_purpose_for_experiment(experiment, purpose)
     base = RESULTS_ROOT / split
     if purpose == "evaluation" and isinstance(experiment, DecomposerExperiment):
         base /= "evaluation"
-    base /= run_name(experiment, num_repeats, prompt_profile=prompt_profile)
+    base /= run_name(experiment, num_repeats)
     return base if limit is None else base / f"smoke_{limit}"
 
 
@@ -2171,7 +2133,6 @@ def completion_marker(
     limit: int | None = None,
     *,
     purpose: RunPurpose,
-    prompt_profile: DecomposerPromptProfile | None = None,
 ) -> Path:
     return (
         output_dir(
@@ -2180,7 +2141,6 @@ def completion_marker(
             num_repeats,
             limit,
             purpose=purpose,
-            prompt_profile=prompt_profile,
         )
         / ".eval_done.json"
     )
@@ -2193,10 +2153,9 @@ def job_description(
     limit: int | None = None,
     *,
     purpose: RunPurpose,
-    prompt_profile: DecomposerPromptProfile | None = None,
 ) -> str:
     validate_purpose_for_experiment(experiment, purpose)
-    identity = run_name(experiment, num_repeats, prompt_profile=prompt_profile)
+    identity = run_name(experiment, num_repeats)
     if limit is not None:
         identity = f"{identity}-smoke-{limit}"
     prefix = f"workplace-assistant-{split}"

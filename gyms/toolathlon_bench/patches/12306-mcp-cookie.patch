@@ -1,0 +1,19 @@
+--- index.js
++++ index.js
+@@ -228,8 +228,14 @@
+ async function getCookie() {
+     const url = `${API_BASE}/otn/leftTicket/init`;
+     try {
+-        const response = await fetch(url);
+-        const setCookieHeader = response.headers.getSetCookie();
++        // Node fetch bypasses Toolathlon's configured proxy and direct IPv6
++        // access to 12306 times out. Reuse this package's axios/IPv4 setup.
++        const response = await axios.get(url, {
++            timeout: 30000,
++            httpsAgent: new https.Agent({ rejectUnauthorized: false, family: 4,
++                keepAlive: false }),
++        });
++        const setCookieHeader = response.headers['set-cookie'];
+         if (setCookieHeader) {
+             return parseCookies(setCookieHeader);
+         }

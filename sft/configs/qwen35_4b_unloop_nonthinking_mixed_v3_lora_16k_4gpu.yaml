@@ -14,7 +14,6 @@ data:
   validation_file: /mnt/share14T-2/sukhorukov/decomposer_artifacts/datasets/sft/decomposer-mixed-qwen38-qwen35-4b-unloop-nonthinking/v3-tau2-workplace-toolathlon-wideseek-20261008/validation.jsonl
   manifest_file: /mnt/share14T-2/sukhorukov/decomposer_artifacts/datasets/sft/decomposer-mixed-qwen38-qwen35-4b-unloop-nonthinking/v3-tau2-workplace-toolathlon-wideseek-20261008/manifest.json
   expected_fingerprint: 50a733439db998f83c559946eb5f57fc77c811916142b787bdf2245d1fdb8df4
-  expected_system_prompt_profile: teacher
   include_reasoning: false
   num_proc: 8
   max_train_samples: null

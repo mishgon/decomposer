@@ -34,9 +34,8 @@ that predates the `new`/`fork`/`run`/`wait` core targets the retired
 `spawn_subagent`/`wait` core. Their
 datasets and checkpoints were built at `gaia2-eval` commit `2b1bda8`; rebuild
 or validate them only from that commit. The current pipeline rejects their
-source traces, and the `teacher` prompt profile now resolves to a different
-prompt, so their manifests no longer validate against
-`data.expected_system_prompt_profile: teacher`. The files stay in place as
+source traces. Their historical system prompts also differ from the current
+Decomposer prompt. The files stay in place as
 experiment records, and the release walkthroughs below describe those
 historical builds.
 
@@ -74,16 +73,10 @@ split by prompt with validation fraction `0.1` and seed `42`. All rollouts of
 one prompt are assigned to the same split. The builder requires a clean Git
 worktree and refuses to replace an existing `<dataset-id>/<version>` directory.
 
-Build specifications choose `policy.system_prompt_profile: student` or
-`teacher`; a specification without a profile uses `teacher`. `teacher` is the
-core's orchestration prompt (`decomposer.prompts.DECOMPOSER_SYSTEM_PROMPT`),
-and `student` is the legacy one-line manager prompt
-(`decomposer.prompt_profiles.DECOMPOSER_STUDENT_SYSTEM_PROMPT`). The builder
-inserts that exact prompt before tokenization and records its profile and
-SHA-256 in the immutable manifest. Training configs may set
-`data.expected_system_prompt_profile` to fail if the selected release uses a
-different prompt. Hidden teacher reasoning remains controlled separately by
-`data.include_reasoning`.
+All builds use `decomposer.prompts.DECOMPOSER_SYSTEM_PROMPT`. The builder inserts
+it before tokenization and records its SHA-256 in the manifest. Training checks
+the hash and the system message in every prepared record. Hidden teacher
+reasoning remains controlled separately by `data.include_reasoning`.
 
 Releases do not depend on a model: they hold messages and tool schemas, with no
 token counts and no length limit. Training tokenizes every record with the
