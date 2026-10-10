@@ -28,7 +28,7 @@ def test_collection_resume_allows_only_concurrency_change(tmp_path, monkeypatch)
     from types import SimpleNamespace
     from sft.wideseek import run
     settings = {"concurrency": 2, "agent": "decomposer",
-                "collection_sequence_length": 16384}
+                "collection_sequence_length": 32768}
     path = tmp_path / "manifest.json"
     path.write_text(json.dumps({"settings": settings, "started_at": 123}))
     async def describe(args):

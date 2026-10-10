@@ -56,7 +56,7 @@ the base image ID and the resulting image ID when using it.
 
 After each teacher response, shared `sft/sequence_limit.py` counts the student
 sequence using `sft/filtering.py`: system prompt, tools, messages and observations,
-without teacher reasoning or a generation prompt. Above 16,384 tokens it stops
+without teacher reasoning or a generation prompt. Above 32,768 tokens it stops
 before executing further tools. Raw reasoning and traces are retained. The result
 is `skipped` with `stop_reason=sequence_limit`: it consumes an attempt slot but
 counts as neither an error nor a success. Native scores remain diagnostic.

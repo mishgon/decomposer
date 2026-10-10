@@ -14,4 +14,4 @@ COPY student-tokenizer/ /opt/sft-tokenizer/
 ENV PYTHONPATH=/opt/decomposer
 # Validate offline tokenizer loading during the build, before scheduling tasks.
 RUN "${AGENT_VENV}/bin/python" -c "from transformers import AutoTokenizer; AutoTokenizer.from_pretrained('/opt/sft-tokenizer', local_files_only=True)"
-LABEL org.decomposer.sft.sequence-limit="16384"
+LABEL org.decomposer.sft.sequence-limit="32768"

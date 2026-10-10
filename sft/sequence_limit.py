@@ -8,7 +8,7 @@ from langchain_core.messages import AIMessage
 
 from sft.filtering import StudentSequenceFilter
 
-COLLECTION_SEQUENCE_LENGTH = 16384
+COLLECTION_SEQUENCE_LENGTH = 32768
 
 
 class SequenceState(AgentState):
