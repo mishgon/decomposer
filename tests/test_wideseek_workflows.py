@@ -23,6 +23,27 @@ def test_named_agent_cli_rejects_model_overrides_and_legacy_flags():
         "--student-tokenizer", "/tmp/tokenizer"]).resume
 
 
+def test_collection_resume_allows_only_concurrency_change(tmp_path, monkeypatch):
+    import asyncio
+    from types import SimpleNamespace
+    from sft.wideseek import run
+    settings = {"concurrency": 2, "agent": "decomposer",
+                "collection_sequence_length": 16384}
+    path = tmp_path / "manifest.json"
+    path.write_text(json.dumps({"settings": settings, "started_at": 123}))
+    async def describe(args):
+        return [], tmp_path, {"settings": {**settings, "concurrency": 6}}
+    monkeypatch.setattr(run, "describe_run", describe)
+    args = SimpleNamespace(resume=True, concurrency=6)
+    asyncio.run(run.prepare_collection(args))
+    saved = json.loads(path.read_text())
+    assert saved["settings"]["concurrency"] == 6
+    assert saved["started_at"] == 123
+    settings["agent"] = "react"
+    with pytest.raises(ValueError, match="Resume settings"):
+        asyncio.run(run.prepare_collection(args))
+
+
 def test_researcher_id_is_explicit_and_matches_server(monkeypatch):
     from gyms.wideseek import agents
     root = Path(__file__).resolve().parents[1]
