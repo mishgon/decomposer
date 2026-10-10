@@ -1,0 +1,20 @@
+# Marker file -- deliberately minimal, and load-bearing.
+#
+# NeMo-Gym decides how to build a component venv with
+#     is_editable_install = (server_dir / "../../pyproject.toml").exists()
+# (external/Gym/nemo_gym/cli/setup_command.py:126).
+#
+# For Gym's built-in servers that resolves to external/Gym/pyproject.toml. For a
+# server hosted out-of-tree under NEMO_GYM_EXTRA_ROOTS it resolves to *this* path.
+# Without this file Gym takes the PyPI branch: it installs an unpublished
+# nemo-gym==0.5.0rc0 and strips every line containing "../.." from
+# requirements.txt (setup_command.py:154-166) -- which silently drops the
+# editable tau2 dependency.
+#
+# With it, Gym runs `cd <server dir> && uv pip install -r requirements.txt`, so the
+# relative editable paths in resources_servers/tau2_gym/requirements.txt resolve.
+[project]
+name = "tau2-gym-components"
+version = "0.0.0"
+description = "Marker so NeMo-Gym treats out-of-tree servers here as an editable install."
+requires-python = ">=3.12"

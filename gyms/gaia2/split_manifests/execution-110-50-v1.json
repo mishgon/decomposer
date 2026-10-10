@@ -1,0 +1,1195 @@
+{
+  "dataset": {
+    "aggregate_sha256": "600818deac34268a261cd846ef3019c6a4c87b068dccfea5e006cd72fe112518",
+    "domain": "execution",
+    "id": "meta-agents-research-environments/gaia2",
+    "revision": "78ea3bdbdeec2bdcd6afa5420915d8a22f23ed99",
+    "rows": 160,
+    "source_split": "validation"
+  },
+  "name": "execution-110-50-v1",
+  "partitions": {
+    "full": {
+      "aggregate_sha256": "e56bb272c48b9a2518b79a6f20f8767dc8ae8e5070755dd2bc04f9ad29adeb15",
+      "rows": 160,
+      "universes": [
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30
+      ]
+    },
+    "test": {
+      "aggregate_sha256": "6230a9611c76d0dd4f7029739f9de27568917b7d6d3ff0913153e8ae2c586e5e",
+      "rows": 50,
+      "universes": [
+        25,
+        26,
+        28
+      ]
+    },
+    "train": {
+      "aggregate_sha256": "0db232fa3d399748f1867c6339e0602790e013a9cc311600a6156bba61eb9582",
+      "rows": 110,
+      "universes": [
+        21,
+        22,
+        23,
+        24,
+        27,
+        29,
+        30
+      ]
+    }
+  },
+  "scenarios": [
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_21_2m6akl",
+      "sha256": "e2b8ffb3dc4b43c2857c965c7143e97e87f8b94d51fe49fac1ca1bc9449c5d56",
+      "size": 2443712,
+      "universe": 21
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_21_3c1x8i",
+      "sha256": "2b2d17e974838009c714a25f644b52c2b05ac7a0188aa01cbc887da56f87a23c",
+      "size": 2445337,
+      "universe": 21
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_21_4r8xq0",
+      "sha256": "ad56f2ac6802a2406fafe4b5e0e2eb3ce4586c6a2e918928baa573febc5f2b4b",
+      "size": 2444124,
+      "universe": 21
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_21_7fvkoi",
+      "sha256": "e97d9efa629f7959285547e30d70c0ac44b8050c82158e1e8631864891ae5e9b",
+      "size": 2443472,
+      "universe": 21
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_21_8aeqbz",
+      "sha256": "a08d98773b9bc7470493a620e26c232795d81658cfda848bf62ae0e09d4a00ef",
+      "size": 2444667,
+      "universe": 21
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_21_9s0qxq",
+      "sha256": "8219a109759ae1d4cd8d0d0942118ee140a6e71ee04cc1ccc4207c8e86f4b408",
+      "size": 2443217,
+      "universe": 21
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_21_axgfp0",
+      "sha256": "9021a46957544c7ed00223464a7c01830f9e1df14da634b304d708fc283ae31b",
+      "size": 2444826,
+      "universe": 21
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_21_d1ip53",
+      "sha256": "3a4f3c58532783c189a934e8a314d347ea757e1648e522f5087ebf77aa2255c9",
+      "size": 2452371,
+      "universe": 21
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_21_gp0nd0",
+      "sha256": "799801e4bf8e7c45f99e7d356c29b239314b1a984dc7508aa1665aa17b6a0098",
+      "size": 2444911,
+      "universe": 21
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_21_jywgsj",
+      "sha256": "8e871bcc2ddb27aa53a0109b373858ca7742156176deecc4708e0feef5e644f5",
+      "size": 2442683,
+      "universe": 21
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_21_nlq0de",
+      "sha256": "935616b2039dbe0b2b2661401dc10579b616795addc6583ec57cfa473d7b6ee7",
+      "size": 2450553,
+      "universe": 21
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_21_pocluh",
+      "sha256": "1831a0a8328c444942ba45dc8ce9307c86240ed89aba160fc610183c25615cd8",
+      "size": 2446387,
+      "universe": 21
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_21_uig9ac",
+      "sha256": "50005c3f6c1f9e7124b8de1ea8b020469e524a257910686d21fd4dbb0930d1b6",
+      "size": 2444690,
+      "universe": 21
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_21_vqsr28",
+      "sha256": "e7f02441f085b753b885860269201155efa93aa7c98222abff5a1ff2e1e61eef",
+      "size": 2446131,
+      "universe": 21
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_21_ztxch4",
+      "sha256": "a9ae00f47d7845d41379cab064b6a8677658a990f3024b3661996240d8b7d72d",
+      "size": 2443924,
+      "universe": 21
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_22_0byq1g",
+      "sha256": "e8316d5434900b11d1b83ab9a94b11b52d366b90d0659ea4a6bb35bc9192ccf2",
+      "size": 2483598,
+      "universe": 22
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_22_2oh10h",
+      "sha256": "679a0442995133d5983d07b4891e3cf9107d512676b4e09c35f8628ab7ca42e0",
+      "size": 2485988,
+      "universe": 22
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_22_2tof7f",
+      "sha256": "e928e8b5044453e71f814e9e11374c12a1c7e6e0630716f56b8a5d2c7101f94e",
+      "size": 2483999,
+      "universe": 22
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_22_3m9r7l",
+      "sha256": "94612d1a69b16803b0ab5b84f1c06503b5c335763c5cd3283fb05b4e43e73d4f",
+      "size": 2487638,
+      "universe": 22
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_22_3sml2v",
+      "sha256": "d9c7ae265cb42e5644151867ade653bc143a05c1ab9b343e63deb197b8dcf11b",
+      "size": 2483146,
+      "universe": 22
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_22_4ye6nx",
+      "sha256": "0dd7af80242cd8fa3a95760d8357848781ce70f5b91ea1c3bd9c3bddfd2feb2e",
+      "size": 2484660,
+      "universe": 22
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_22_8gf4y6",
+      "sha256": "ddd35a7ff62618802a8fbb13fcccda82843b549bf93209623774ef8b15f26649",
+      "size": 2488251,
+      "universe": 22
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_22_9l1fgy",
+      "sha256": "a596ced7c06f777b5455f34890096bfe54f388bea00d310633a18741e863410d",
+      "size": 2486233,
+      "universe": 22
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_22_c6r2er",
+      "sha256": "87c5a4377a4df1ba5571338e0ce3c15874555fa097715dbf4e14616419929317",
+      "size": 2485390,
+      "universe": 22
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_22_evx14u",
+      "sha256": "751ec48e2cf3ffcf8cf97f89b575c6deed4a0680ec336f95abd7e7418b748c5e",
+      "size": 2489731,
+      "universe": 22
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_22_ge3drh",
+      "sha256": "b8df913aada43580b772090ae31c1432d1926dbddbceb23cab59e98ef3c1e9ff",
+      "size": 2487888,
+      "universe": 22
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_22_kb5ah9",
+      "sha256": "40b69ce555faade1dc40d4684e5f8a4ed25bfdd8b5b485eebf45354560613d39",
+      "size": 2504304,
+      "universe": 22
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_22_kj0h75",
+      "sha256": "dec581a3a787e3abb895b1f1ab2163ef58bc5999b1b308e3f835854ebd6748f6",
+      "size": 2488171,
+      "universe": 22
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_22_lz5pnt",
+      "sha256": "e29e9b77573ed95daa7880f634abc26d2e2228233f7423b8f232dc5471384698",
+      "size": 2484966,
+      "universe": 22
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_22_m0ahbo",
+      "sha256": "7bf92a77c481afd0dc27d15a5e0fb40448be15acccfe99959ab0d75029dea4b8",
+      "size": 2483212,
+      "universe": 22
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_22_ottdy5",
+      "sha256": "bbd1142bac560954c169176ef3f4e6d676fddb28555dee658046492391165ce9",
+      "size": 2484852,
+      "universe": 22
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_22_rxs5sd",
+      "sha256": "086e4bdc8243d80157b6816424e326f166e192e1c9c8a1690d4576de87c017e2",
+      "size": 2487233,
+      "universe": 22
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_22_slbnzx",
+      "sha256": "70df73fde7b20720fe204f447e99fbbe7520e23d4cc7faff4bd518cb7a92c022",
+      "size": 2486500,
+      "universe": 22
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_22_tiuesu",
+      "sha256": "9b8820b121ffcd35371ccf87d9d63d276b2eb9a920ff00b4a546434f56ae4a7f",
+      "size": 2485013,
+      "universe": 22
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_22_tltscm",
+      "sha256": "0c4b377962ac3f7337c62e0246585f71608fa3586f8c5cb4d5429a972fb41501",
+      "size": 2484904,
+      "universe": 22
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_22_udb9rc",
+      "sha256": "63a4274f3bcade6cec494f0e4afabec7e5c05f52f23e15e65ba30b27bc01cf01",
+      "size": 2485498,
+      "universe": 22
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_22_vlccem",
+      "sha256": "51ea6e28bb83b335a7e8253d167e29e28c9f0498b4662364e9ce09e9c814db94",
+      "size": 2484278,
+      "universe": 22
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_22_wout7h",
+      "sha256": "8646eec2272cf0ba396ff7cd9bd52677813af2da3cceca83666c8003e72cad92",
+      "size": 2483591,
+      "universe": 22
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_22_zrrtff",
+      "sha256": "e45b24c0b05ab44a78d07e9792761e93755177b11a0a22ea8179200d03e8d59d",
+      "size": 2485545,
+      "universe": 22
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_23_0vl58w",
+      "sha256": "8954c93e603cbe8228df29f26ef1698d9a06037a69934fd69942396aa5037f37",
+      "size": 2642710,
+      "universe": 23
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_23_1hu54e",
+      "sha256": "a3adeebed7acfa14df7944cdb29105ae25f259e8c3e70f516d71aab31e059a50",
+      "size": 2641207,
+      "universe": 23
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_23_2gyolt",
+      "sha256": "fa626318c42f187dc3b797d9438e4a179f77a24986fa73177f85f771026bd7f4",
+      "size": 2641317,
+      "universe": 23
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_23_5r4w6u",
+      "sha256": "624bfbb7081ae45bb0eb7f2de25a57649cef14c7f51c2f27790fe0dc4c112a08",
+      "size": 2640987,
+      "universe": 23
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_23_7eczna",
+      "sha256": "6235fc8d1b041207e51c12175fd44b3393ef4cd1ff764e4c5285ba0802307574",
+      "size": 2647669,
+      "universe": 23
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_23_aw8qv9",
+      "sha256": "769398e4acc5f2ea96221a8d22b40bb2aa27aef142efd67df02f98b1595205a3",
+      "size": 2642909,
+      "universe": 23
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_23_cu9xct",
+      "sha256": "d003cadebab3ad033ecbae82537a801ce2d23a046cb617a4a79e76faf579bbdb",
+      "size": 2645943,
+      "universe": 23
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_23_jd9bhl",
+      "sha256": "c06b3fa862d752dc2bf40b5f00d4233e6d674e2a6d319d9351154b64d58da3f6",
+      "size": 2644132,
+      "universe": 23
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_23_mt9sh6",
+      "sha256": "519e9dc7111d77e58925840314bc3975f98b3883da8c2cfa297af4d4480f6390",
+      "size": 2642593,
+      "universe": 23
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_23_otrfvy",
+      "sha256": "bdacb9d10eb1109b270092aa74b6b18b3fdd675004806235709d3c9290c55e25",
+      "size": 2639961,
+      "universe": 23
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_23_wuh0b7",
+      "sha256": "e0018ca6d6dd54cff3c9c75fa59ec19d98ef083b184a42d6ffd693cbc2539d0a",
+      "size": 2641084,
+      "universe": 23
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_23_xscbpx",
+      "sha256": "273ecc962a1542af30fc930cb611297867044518888cdab537dce04e833d7110",
+      "size": 2641361,
+      "universe": 23
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_23_znjy4f",
+      "sha256": "27f0bb1c6b3a0a6934a81d8b2342176f2260be5b3739265f27c15764647f6218",
+      "size": 2643148,
+      "universe": 23
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_24_1jo24x",
+      "sha256": "f333ffe0add0b080864d9f85a2afd076d404679d79b3daf5d9ee01b00b72d0ea",
+      "size": 2474259,
+      "universe": 24
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_24_1njo23",
+      "sha256": "77164056cbf14e923515df8ffd8aedeced071e95e5132251db29d00cf201f33e",
+      "size": 2473604,
+      "universe": 24
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_24_3rlqyh",
+      "sha256": "1b4575d2a74b4ec7e1599d623378bd3a1a90c29ea9472093fb044ea66ea97e5c",
+      "size": 2474227,
+      "universe": 24
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_24_4fa0vq",
+      "sha256": "1da23879ea55b152d9d5864c78881e9754a95884660eb7821092bce4b4e0e8c0",
+      "size": 2475868,
+      "universe": 24
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_24_6b5qhi",
+      "sha256": "b192cdf4b995af5e752a8b3966f3c0797fbb8eb1e0b06e0e5f77a1d2c2e14722",
+      "size": 2476754,
+      "universe": 24
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_24_6bgddr",
+      "sha256": "24f269866be789de8d21d62ffe147fbdd02ab01a4cd8eb3a784dea3637687c4b",
+      "size": 2473500,
+      "universe": 24
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_24_bfizso",
+      "sha256": "c858dc51c5f6b5831bd067cb185dc6975e42f5347e3a299582d083c063d19365",
+      "size": 2472082,
+      "universe": 24
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_24_f47frx",
+      "sha256": "87a23e344ef28bef3e4d9f38a536474b8dfe70845e52aca280275b3267de50b9",
+      "size": 2473825,
+      "universe": 24
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_24_hv40ld",
+      "sha256": "daa16ad403af4afd17ca02a9e36f897ead7273adb80494307d34c2d0b02735f5",
+      "size": 2477173,
+      "universe": 24
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_24_lr8en2",
+      "sha256": "215dad316d2dcf91df6767cbcbdcf5e9815dc284797ae108ba9c70aabd58ee52",
+      "size": 2474836,
+      "universe": 24
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_24_pj0xfi",
+      "sha256": "ede43b446038cb01c680b9b58e1155601f7cf569be2d426fa5debd977c94da2c",
+      "size": 2474900,
+      "universe": 24
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_24_revn06",
+      "sha256": "10f110bce0cff138716549a3d3f77d1f2fb78df3a9ed379c965859fdbf1ea2d8",
+      "size": 2472197,
+      "universe": 24
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_24_tg3h3h",
+      "sha256": "8f8e40280aab18d11ef619db7162eb82d54ea215ad8d36afb12626b74cd16bbf",
+      "size": 2474433,
+      "universe": 24
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_24_tpfpk7",
+      "sha256": "be05910f109bb6b63f5631e633d6ae2157a4dbfbc7d662cca73cc6b66f4eea3c",
+      "size": 2473490,
+      "universe": 24
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_24_tvu4d3",
+      "sha256": "49d9cf83cd64ff1cb5b5a8cf516dc430637804b3f23c68bbd0a9f303d0220563",
+      "size": 2475249,
+      "universe": 24
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_24_yhq1o9",
+      "sha256": "be5ca9546f5b199000bd3c2daa7e01ed1954b1d62806ab860e10ef6b5ea43358",
+      "size": 2473432,
+      "universe": 24
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_24_yq2vhz",
+      "sha256": "358f053baf9a29fe84da0ffa41d16f5b4603862be046a3b87fcea3dd39abd2f2",
+      "size": 2474148,
+      "universe": 24
+    },
+    {
+      "partition": "test",
+      "scenario_id": "scenario_universe_25_09ckli",
+      "sha256": "75b462dbf4c67d1bcf974c6ee9523d8c73e0daca7f1f070c7ca64de8cc586266",
+      "size": 2590602,
+      "universe": 25
+    },
+    {
+      "partition": "test",
+      "scenario_id": "scenario_universe_25_27a695",
+      "sha256": "d60eda8bc87b0e62ce366c41d035a5c96a6b693c372c3e39d9bf8ae55261596a",
+      "size": 2598967,
+      "universe": 25
+    },
+    {
+      "partition": "test",
+      "scenario_id": "scenario_universe_25_3pe9jj",
+      "sha256": "77034832a5d3e22763b987c5c319eb9be21a48ee13ad26b469fde293ba6c1c00",
+      "size": 2594708,
+      "universe": 25
+    },
+    {
+      "partition": "test",
+      "scenario_id": "scenario_universe_25_4d7lcj",
+      "sha256": "11735cdc4b178f409afa9c16c2f435a05358f035a7f398ee9df74829ffc489ef",
+      "size": 2594262,
+      "universe": 25
+    },
+    {
+      "partition": "test",
+      "scenario_id": "scenario_universe_25_4ht1zl",
+      "sha256": "b57bfccbf53976e05d3e770e6495e64901b80b791717aab265b731e0fd2b1542",
+      "size": 2590788,
+      "universe": 25
+    },
+    {
+      "partition": "test",
+      "scenario_id": "scenario_universe_25_4l3y7p",
+      "sha256": "a485cb32a5638ad5590ce1918fc2ff779c5dab8a44167d25e3d22f7e0ca73862",
+      "size": 2590763,
+      "universe": 25
+    },
+    {
+      "partition": "test",
+      "scenario_id": "scenario_universe_25_5bxgm1",
+      "sha256": "2ca13c2b413f377bdadc93628be64bbb1b71c8f89b73bd49deffedf0f86ee30f",
+      "size": 2594014,
+      "universe": 25
+    },
+    {
+      "partition": "test",
+      "scenario_id": "scenario_universe_25_642cr1",
+      "sha256": "e124f77f4282310ac2519dee9c6984afb72fbda2944e412047daf74e83842dd3",
+      "size": 2597379,
+      "universe": 25
+    },
+    {
+      "partition": "test",
+      "scenario_id": "scenario_universe_25_8nhsrv",
+      "sha256": "2509228af401144fc880a50e57990a2f7ff3f3bd355b0084eededcf289c49b06",
+      "size": 2592392,
+      "universe": 25
+    },
+    {
+      "partition": "test",
+      "scenario_id": "scenario_universe_25_ar01vc",
+      "sha256": "f9f1d3ef3a775becf551692731c0071550fd4d336ec3e4385d787615a5bca1bb",
+      "size": 2593890,
+      "universe": 25
+    },
+    {
+      "partition": "test",
+      "scenario_id": "scenario_universe_25_g9rry6",
+      "sha256": "0e5043b42bcda157fcec704a8da4c9bbc3c5ce07e060870f5b3965f8c7539e76",
+      "size": 2593891,
+      "universe": 25
+    },
+    {
+      "partition": "test",
+      "scenario_id": "scenario_universe_25_lbl7ya",
+      "sha256": "361d67f6a8acefade2dae2cafe67cdcd9505bf9d246f25fc0d1ebf1fe434172f",
+      "size": 2592477,
+      "universe": 25
+    },
+    {
+      "partition": "test",
+      "scenario_id": "scenario_universe_25_p44znw",
+      "sha256": "7cb0cfa9cbc6de83ee139f77b76d3c8a088ce01b15d01b48a8d8ec252ae1ee46",
+      "size": 2593152,
+      "universe": 25
+    },
+    {
+      "partition": "test",
+      "scenario_id": "scenario_universe_25_qlrsjj",
+      "sha256": "035572add8271caf4ea2ffc49d46cbc3be23b27c1f29afd17538524c019e4365",
+      "size": 2593459,
+      "universe": 25
+    },
+    {
+      "partition": "test",
+      "scenario_id": "scenario_universe_25_tsrahx",
+      "sha256": "4d10c8a18f94167cfc263f876992c9d94863907ef91fd1cea447a52715b94787",
+      "size": 2590969,
+      "universe": 25
+    },
+    {
+      "partition": "test",
+      "scenario_id": "scenario_universe_25_vetd7u",
+      "sha256": "2ae1020d2fba1f3df84d5afe45af3aada6368ae9f0aa105721d20bcb8e5ca155",
+      "size": 2594741,
+      "universe": 25
+    },
+    {
+      "partition": "test",
+      "scenario_id": "scenario_universe_25_vu49cu",
+      "sha256": "09f056200ba8df088c5003be65fce48502529496d3490e9be45e39554c24d1fd",
+      "size": 2594784,
+      "universe": 25
+    },
+    {
+      "partition": "test",
+      "scenario_id": "scenario_universe_25_w02po4",
+      "sha256": "764451f86793221a8c6394eddcdc2344f208b7e1989ff1485d70a6d5aa37e206",
+      "size": 2592176,
+      "universe": 25
+    },
+    {
+      "partition": "test",
+      "scenario_id": "scenario_universe_25_wdqp0w",
+      "sha256": "f5647b6fc2c2b5e56b94ffd1e10e0880ca9d6d2a3e854bbdfbf6ff9b7d5ce367",
+      "size": 2596537,
+      "universe": 25
+    },
+    {
+      "partition": "test",
+      "scenario_id": "scenario_universe_25_wua7gw",
+      "sha256": "8c8644b63c087329c3d6819941e87dac499336b6d14e603e4244a8faf0c2caf1",
+      "size": 2594245,
+      "universe": 25
+    },
+    {
+      "partition": "test",
+      "scenario_id": "scenario_universe_25_xrkc29",
+      "sha256": "1061ac62d721a26ef27847237058f8203ad09edf84cf133c7259591c346fad3b",
+      "size": 2593216,
+      "universe": 25
+    },
+    {
+      "partition": "test",
+      "scenario_id": "scenario_universe_25_y5qodc",
+      "sha256": "bc91a986794253978d3249451d6bd9929acea9bff37d706379033dfe6636c8a6",
+      "size": 2596778,
+      "universe": 25
+    },
+    {
+      "partition": "test",
+      "scenario_id": "scenario_universe_25_ys3x1t",
+      "sha256": "e86763eb228e158d87a2aad0aab90ef9b9585e514d28bc73b5fcd9d9dff1624b",
+      "size": 2592347,
+      "universe": 25
+    },
+    {
+      "partition": "test",
+      "scenario_id": "scenario_universe_25_zp7eup",
+      "sha256": "b46c244bdf342fada704540ef20678b23d11688fa7390c2687883ff580145a88",
+      "size": 2595512,
+      "universe": 25
+    },
+    {
+      "partition": "test",
+      "scenario_id": "scenario_universe_26_135a24",
+      "sha256": "152db5204a18d7878eb574c324605a874e52bb55963d009ed7e3935adeca48bc",
+      "size": 2481018,
+      "universe": 26
+    },
+    {
+      "partition": "test",
+      "scenario_id": "scenario_universe_26_1ok8eo",
+      "sha256": "a2c91c8fdd16ac86b31b6cc45fd80f88460de586b3a547c04ffde1f7728ba301",
+      "size": 2481448,
+      "universe": 26
+    },
+    {
+      "partition": "test",
+      "scenario_id": "scenario_universe_26_2rfu2o",
+      "sha256": "b419f2ff630f1604e262f3349df4900b4f55a0adcc28906ff356c806d91aa71b",
+      "size": 2481832,
+      "universe": 26
+    },
+    {
+      "partition": "test",
+      "scenario_id": "scenario_universe_26_4cyvjp",
+      "sha256": "baabb14f1cbfcc16b763b9b0c9599217ba0bcd6ed75d4c6fd7f93bdbfd685b74",
+      "size": 2482289,
+      "universe": 26
+    },
+    {
+      "partition": "test",
+      "scenario_id": "scenario_universe_26_4r9exm",
+      "sha256": "3d4a21c9e7966c07d486d52af5adc41c7979827a24c14769e8fa5def26f8d177",
+      "size": 2483289,
+      "universe": 26
+    },
+    {
+      "partition": "test",
+      "scenario_id": "scenario_universe_26_56p876",
+      "sha256": "93621ca360b874efdbd271a111346db61dcb0d2f62fef0a5d832a4c08ddcdfe0",
+      "size": 2482309,
+      "universe": 26
+    },
+    {
+      "partition": "test",
+      "scenario_id": "scenario_universe_26_oqrczt",
+      "sha256": "e555fe67a2ecb0a5205c57e1a079b50efb644197f464e5c51bfc0691790cc505",
+      "size": 2479895,
+      "universe": 26
+    },
+    {
+      "partition": "test",
+      "scenario_id": "scenario_universe_26_t89fwm",
+      "sha256": "3ce94463ff0646335b9e8faf46a6532158be49770527483e9685c59a28fcbd32",
+      "size": 2480897,
+      "universe": 26
+    },
+    {
+      "partition": "test",
+      "scenario_id": "scenario_universe_26_ux3yly",
+      "sha256": "719d38f3da178b6b79e929af6289910f0caff6d4c88562d2692e4f2181ba70bc",
+      "size": 2484033,
+      "universe": 26
+    },
+    {
+      "partition": "test",
+      "scenario_id": "scenario_universe_26_x33451",
+      "sha256": "a429d34e3ec736caf02963b7a63363b6e9511743fa6b563393caf8c4da578cb6",
+      "size": 2483109,
+      "universe": 26
+    },
+    {
+      "partition": "test",
+      "scenario_id": "scenario_universe_26_zefng2",
+      "sha256": "70a8ca6501ce0b2c27d1c1685bc49716b44338caa10072dd0396eab5fc07e5c5",
+      "size": 2480660,
+      "universe": 26
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_27_0zl6k5",
+      "sha256": "5c90b3871a60a6ed50a32d7ba8833c23b2b071835cbc970f3df5b3ce68372fcd",
+      "size": 2593726,
+      "universe": 27
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_27_139jao",
+      "sha256": "d3daf93f3179812fa8cd048412d06ee6dc7b925ece5141fc9f5734feb667f3a2",
+      "size": 2595903,
+      "universe": 27
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_27_2ip065",
+      "sha256": "a0413990948dea46a8fba63422a8356215b0b1e0d8d10d6a14af49c8b6fc89bf",
+      "size": 2595831,
+      "universe": 27
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_27_5qtvsl",
+      "sha256": "5707efb8bf87f39332a1b585aaa8341ab60510c6474efa37b0f00680fa296ca2",
+      "size": 2596156,
+      "universe": 27
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_27_9aqrhh",
+      "sha256": "3d50990fee194b632091a9fe06913b37fe07339bf8f9bdd68b5764c4d2cbe317",
+      "size": 2593611,
+      "universe": 27
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_27_az0f22",
+      "sha256": "dd181dccd33b1ae21864d13a3e34e726d907d5d2021456e3c17a9807ddb95207",
+      "size": 2593246,
+      "universe": 27
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_27_blwok9",
+      "sha256": "59d79c187c36ad29956984016747200d3572881e524f3f69aae32bdb30730253",
+      "size": 2595819,
+      "universe": 27
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_27_de3nqp",
+      "sha256": "b921ed3b26f4260363bedf8c35173fc58b6c8dbdc4464f67debbf3695900bc72",
+      "size": 2593378,
+      "universe": 27
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_27_fcvhoh",
+      "sha256": "3bf0d2afcb7b0549b8d22c6199985b90ed241829ba56178239dfbefe812938ea",
+      "size": 2599389,
+      "universe": 27
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_27_kbbx9o",
+      "sha256": "d5a7d0d3d340f644facd49b90275a068fb772cb54319860ae2f1a341a88c5372",
+      "size": 2594051,
+      "universe": 27
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_27_kmkli4",
+      "sha256": "50ead7ad95d744b89068b93c0115f425c52181e7e37619826f18223777f29e6a",
+      "size": 2594384,
+      "universe": 27
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_27_sqvrhj",
+      "sha256": "9482a97bab6f1ed1646ac62e17229460ad490f300725448d2a9a14b02c50d0b2",
+      "size": 2593740,
+      "universe": 27
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_27_t914u5",
+      "sha256": "c25a7bd93327ace97bb1d2618d10a6a79e9d2d2b65d4ce3ee6a119713763784b",
+      "size": 2595638,
+      "universe": 27
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_27_tlhhru",
+      "sha256": "e60cd52e0e6a527db110c3ab44178c8bdf1959d89af84e0c6c0544d757eaf543",
+      "size": 2594777,
+      "universe": 27
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_27_v5fnct",
+      "sha256": "f70eff54b325902bf47df3c2ad7cd54bc3af7fd17fa7bb971ffed990772e4e39",
+      "size": 2593263,
+      "universe": 27
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_27_veaotp",
+      "sha256": "aa09efd52d644ff2f1576834c4a5a75e82f2f61d4d17cab5d5f29a52eb4f2823",
+      "size": 2593571,
+      "universe": 27
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_27_w4an52",
+      "sha256": "163aee4cf9e1b5d1ac7d2c3947632e4cf6a1e9b4fcc3e2ae32f16ec75d58382f",
+      "size": 2593772,
+      "universe": 27
+    },
+    {
+      "partition": "test",
+      "scenario_id": "scenario_universe_28_238kfx",
+      "sha256": "c44a2710f74c0fc1e71cfd00c9d7594359b61f08cfebfc2524b389ed4b5d5f41",
+      "size": 2587927,
+      "universe": 28
+    },
+    {
+      "partition": "test",
+      "scenario_id": "scenario_universe_28_5sca8a",
+      "sha256": "fab1951fedada0fb1935ab3142a6b731ce23e53eab31c61e30e224b69b464955",
+      "size": 2587591,
+      "universe": 28
+    },
+    {
+      "partition": "test",
+      "scenario_id": "scenario_universe_28_74pys2",
+      "sha256": "ade186b6d0de5120b20db9fff27250762929eec18134d455ee21288937a0346b",
+      "size": 2586870,
+      "universe": 28
+    },
+    {
+      "partition": "test",
+      "scenario_id": "scenario_universe_28_crpekc",
+      "sha256": "fdd711f6da3dc9a31caffc8a30956e9f84d550a94f8a7414a7acb31fcaf63e6c",
+      "size": 2588623,
+      "universe": 28
+    },
+    {
+      "partition": "test",
+      "scenario_id": "scenario_universe_28_e3yyyp",
+      "sha256": "476ce9d34770fac4f16dcd35e942c56d517004e936ec2be902ba40875c28e7c1",
+      "size": 2589252,
+      "universe": 28
+    },
+    {
+      "partition": "test",
+      "scenario_id": "scenario_universe_28_gusgfk",
+      "sha256": "23e86e774fe76b8ee77cc9fb826615d47b6abdf17414768611a952cbe0b5161b",
+      "size": 2589258,
+      "universe": 28
+    },
+    {
+      "partition": "test",
+      "scenario_id": "scenario_universe_28_hrwrtm",
+      "sha256": "0ecf4d66bc57c0311d8451a05847d10e928db81b726b61dd5cc6381a9a33f8f0",
+      "size": 2589375,
+      "universe": 28
+    },
+    {
+      "partition": "test",
+      "scenario_id": "scenario_universe_28_le3b68",
+      "sha256": "753bd9dfcd67a51d84961e76140ea4474cc37bf45336cd3b24cf7934130a9f6b",
+      "size": 2596832,
+      "universe": 28
+    },
+    {
+      "partition": "test",
+      "scenario_id": "scenario_universe_28_mzxuku",
+      "sha256": "c6ed4105a11a92f979618c69516d2d6cdab2adf4780b0d2ef6cc5735ecb978e3",
+      "size": 2593050,
+      "universe": 28
+    },
+    {
+      "partition": "test",
+      "scenario_id": "scenario_universe_28_nfnpyk",
+      "sha256": "86a339c0d46a4c546ac7345d76ccba6abfee39e9866df41e41d6aabb226191d1",
+      "size": 2586403,
+      "universe": 28
+    },
+    {
+      "partition": "test",
+      "scenario_id": "scenario_universe_28_qhgn40",
+      "sha256": "0a2ec2f3f3869b04e891883f6a22cbe8439d60927f615a6f195d996d0f5a322c",
+      "size": 2590469,
+      "universe": 28
+    },
+    {
+      "partition": "test",
+      "scenario_id": "scenario_universe_28_rls8wx",
+      "sha256": "58f4dff3929914c7962697d4435304dce7e7e85513b88e54e4868f5b85cadc0e",
+      "size": 2586871,
+      "universe": 28
+    },
+    {
+      "partition": "test",
+      "scenario_id": "scenario_universe_28_rn3lup",
+      "sha256": "cc3a791a718690cb57802ee6122664ccd9666e728a8351660c15b741cf26b964",
+      "size": 2588202,
+      "universe": 28
+    },
+    {
+      "partition": "test",
+      "scenario_id": "scenario_universe_28_rvxaph",
+      "sha256": "efd936b93dc7d2a98874b9e954a1e1caeec85e683a69a26a654d7ae043aaebe0",
+      "size": 2589512,
+      "universe": 28
+    },
+    {
+      "partition": "test",
+      "scenario_id": "scenario_universe_28_s6t6dm",
+      "sha256": "c3d6700cce80e0ffc0f4af9f4ec39e84acd8415759951637f8d088fb01ee7f76",
+      "size": 2587462,
+      "universe": 28
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_29_3gny21",
+      "sha256": "ef78c85c9a167f830e17a7c1503b7ac42ef893912baf9ba6c5553a73e6e8d580",
+      "size": 2548520,
+      "universe": 29
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_29_50r62a",
+      "sha256": "07ce1fda0b21846ff734e400a41d4d497d85587cf716742155d80cd3e3fdf509",
+      "size": 2546984,
+      "universe": 29
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_29_88gncs",
+      "sha256": "7fe0b5d03b17e4fda351dd73f312ceb064235e14c1a8c835e5dd27a48b07a9fe",
+      "size": 2549845,
+      "universe": 29
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_29_8hgfug",
+      "sha256": "afe282e04f0986f8836035206fe735aca4e7fb3fe8fd477c5f8d68954891d457",
+      "size": 2550968,
+      "universe": 29
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_29_d52ytz",
+      "sha256": "2097bf8df138f76215b4bee56928f7f4729504af7e760b1e444b78da7040f4d7",
+      "size": 2553550,
+      "universe": 29
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_29_ejfhdw",
+      "sha256": "503f13baef79f5f628df6f3d69465605994d117bdb8794353387d1116451646d",
+      "size": 2547180,
+      "universe": 29
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_29_hurfiq",
+      "sha256": "c423ca2f608053de57e7e2d82c3ec17b9f375893f95e1cba76fcf42999bc8963",
+      "size": 2551301,
+      "universe": 29
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_29_jvohtk",
+      "sha256": "808829229a0115aa4182f8be7156cb1304aefc109eebf2816369b551b5111714",
+      "size": 2550148,
+      "universe": 29
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_29_m0zl89",
+      "sha256": "fa281d1ee1b4f45de873da5b64b95c6140e2694098a535996a7dfc5a49a6b7bc",
+      "size": 2548450,
+      "universe": 29
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_29_o8vxs3",
+      "sha256": "504b446b8b3a5b02aa9cbcc4284c9e46b452994fbb3091b605b06b3c575b14eb",
+      "size": 2548849,
+      "universe": 29
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_29_or41pw",
+      "sha256": "2f4d6c2aecb4b6194db73b3abf4696ecd5892e8818e7723a34c7c778859517f8",
+      "size": 2549760,
+      "universe": 29
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_29_qodb8j",
+      "sha256": "614cd316dbb676fb5bdb9e41caceff37f1f5880273b4a13286bd6ca0b8b9dc7a",
+      "size": 2547583,
+      "universe": 29
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_29_y8x3mf",
+      "sha256": "2e8c241439bde10c8ada0df7d6036a1fee372c6abbc901a7e800e4478bea563c",
+      "size": 2548801,
+      "universe": 29
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_30_5u30vw",
+      "sha256": "e2e6340f9598f47d7cc3284d5f93b3456a0fa04ad1df3c4b23e15c91b6cb559e",
+      "size": 2663601,
+      "universe": 30
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_30_6nfsem",
+      "sha256": "1185aae6e87210e42a2efcc676d566176055f5e4882d05b10338b1af608fc59b",
+      "size": 2667064,
+      "universe": 30
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_30_8oe4dk",
+      "sha256": "90b400cbfd401956a4678bb1abe432bf6c37a4625fc5cb79e2e274c11339092f",
+      "size": 2663695,
+      "universe": 30
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_30_997a5b",
+      "sha256": "4e1f5fce1753eb7429acb410b7e5c6a74510459a6a7fc4919849fc9a5075ed99",
+      "size": 2665123,
+      "universe": 30
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_30_awsceb",
+      "sha256": "be0b6fc03ec77df91d80ac34e5b0aa9592b08604fc7434a99846a51256fbfa73",
+      "size": 2663806,
+      "universe": 30
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_30_eqnre0",
+      "sha256": "04eb3ea6a4e03d70df02bc1ef5c3f0a353b267b33ed488e0abe03c5b5f7ef91a",
+      "size": 2664262,
+      "universe": 30
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_30_j7xcfc",
+      "sha256": "e172f474b5f746ac1a6993139b3dd96f32a27e0f9b2d0c51c11ccf9cad64b3c4",
+      "size": 2664227,
+      "universe": 30
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_30_mx4mzo",
+      "sha256": "7f1e2ce422f6df3c650e4f04c3ac1b0efe083ac3ff6514fad8cc076b4eb1315e",
+      "size": 2663637,
+      "universe": 30
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_30_mxl1u0",
+      "sha256": "8e2d520e53779d4b0b3097e9f8bebca9d7d6e5e374a35ace16d1e29f460e0514",
+      "size": 2666142,
+      "universe": 30
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_30_r2ulni",
+      "sha256": "01331b471ddb8ac32c78c7db55729d22a794c9459b062918ce35868e0b3e62ba",
+      "size": 2664137,
+      "universe": 30
+    },
+    {
+      "partition": "train",
+      "scenario_id": "scenario_universe_30_rfyr4w",
+      "sha256": "c64010e4aa368fce68e98086069561d5b1428aad0490c37a6246493fb96b7bea",
+      "size": 2664247,
+      "universe": 30
+    }
+  ],
+  "schema_version": 1,
+  "seed": 42,
+  "selection": {
+    "strategy": "complete-universe-holdout",
+    "test_universes": [
+      25,
+      26,
+      28
+    ]
+  },
+  "universe_assignments": {
+    "21": "train",
+    "22": "train",
+    "23": "train",
+    "24": "train",
+    "25": "test",
+    "26": "test",
+    "27": "train",
+    "28": "test",
+    "29": "train",
+    "30": "train"
+  }
+}

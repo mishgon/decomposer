@@ -43,7 +43,7 @@ With `LLM_PROXY_MASTER_KEY` set, run the example. It starts a local LangGraph
 server hosting Decomposer and its agents, then stops it when the run finishes:
 
 ```bash
-uv run python examples/minimal/run.py
+uv run python -m examples.minimal.run
 ```
 
 The final answer is printed, the raw state is saved to `examples/minimal/trace.json`,
@@ -54,11 +54,14 @@ See `examples/minimal/README.md` for details.
 
 - `src/decomposer/`: core Decomposer package. This should stay benchmark- and training-agnostic.
 - `examples/`: runnable examples of configuring and using Decomposer.
-- `gyms/<gym_name>/`: reusable environment code for loading tasks, exposing tools, running a ReAct agent or Decomposer on one task or several tasks in parallel, and native result checking.
-- `evals/<gym_name>/`: scripts for evaluating agents on all tasks in an environment, aggregating metrics, and saving traces for error analysis.
-- `sft/<gym_name>/`: code for SFT traces collection on a gym. Shared SFT training code lives alongside these directories in `sft/`.
-- `opd/<gym_name>/`: code for on-policy distillation (OPD) on a gym.
-- `rl/<gym_name>/`: code for reinforcement learning (RL) on a gym.
+- `gyms/<gym_name>/`: environment code for loading tasks, exposing tools, running Decomposer or another agent on all or some tasks, trace generation, and saving raw results.
+- `evals/<gym_name>/`: one-command evaluation on top of `gyms/<gym_name>` (run, then compute metrics), plus comparisons and trace statistics.
+- `sft/`: shared SFT code (dataset schema, builder and adapters; trainer, templates and configs). `sft/<gym_name>/` holds gym-specific trace preparation and release specs.
+- `opd/`: shared on-policy distillation code; `opd/<gym_name>/` holds per-gym loop configs.
+- `rl/<gym_name>/`: reinforcement learning on a gym (empty for now).
+- `artifacts/data/`: collected trajectories and episode workspaces ignored by git.
+- `artifacts/evals/`: evaluation results and aggregate metrics ignored by git.
+- `artifacts/training/`: model checkpoints and training logs ignored by git.
 - `external/`: third-party repositories, submodules, or vendored code.
 - `tests/`: lightweight checks for reusable code and harness utilities.
 - `docs/`: design notes, experiment notes, and persistent documentation.
@@ -71,3 +74,14 @@ Evaluation and training workflows reuse `gyms/<gym_name>/`.
 ```bash
 uvx --with . pytest
 ```
+
+## Accelerated Qwen3.5 SFT
+
+The current four-H100 Qwen3.5 recipe uses batch 2 per GPU, length grouping,
+FLA plus causal-conv1d for linear-attention layers, and a pinned HF Hub
+FlashAttention-2 kernel for full-attention layers. Normal training jobs do not
+need NVCC; it is needed only once to build the reusable causal-conv1d bundle.
+
+See [the Qwen3.5 fast-runtime guide](docs/sft_qwen35_fast_runtime.md) for exact
+environment preparation, local smoke, MLSpace dry-run/submission commands,
+artifact paths, and troubleshooting.

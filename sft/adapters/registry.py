@@ -1,0 +1,53 @@
+"""Registry of native rollout adapters, keyed by the name a build spec uses.
+
+Gym-specific adapters (for example `sft/wideseek/adapter.py`) import the shared
+`sft.adapters.base`, so the registry lives here rather than in the package
+`__init__`: importing it there would make every adapter import the registry.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+from pathlib import Path
+from typing import Protocol
+
+from ..schema import SelectionSpec, SourceSpec
+from .base import AdapterReadResult
+from .nemo_gym import ADAPTER_VERSION as NEMO_GYM_ADAPTER_VERSION
+from .nemo_gym import read_nemo_gym_source
+from .nemo_gym import snapshot_files as nemo_gym_snapshot_files
+from .toolathlon_gym import ADAPTER_VERSION as TOOLATHLON_GYM_ADAPTER_VERSION
+from .toolathlon_gym import read_toolathlon_gym_source
+from .toolathlon_gym import snapshot_files as toolathlon_gym_snapshot_files
+from ..wideseek.adapter import ADAPTER_VERSION as WIDESEEK_ADAPTER_VERSION
+from ..wideseek.adapter import read_wideseek_source
+from ..wideseek.adapter import snapshot_files as wideseek_snapshot_files
+
+
+class AdapterReader(Protocol):
+    def __call__(
+        self,
+        source: SourceSpec,
+        selection: SelectionSpec,
+        *,
+        source_dir: Path,
+        system_prompt: str,
+    ) -> AdapterReadResult: ...
+
+
+ADAPTERS: dict[str, AdapterReader] = {
+    "nemo_gym": read_nemo_gym_source,
+    "toolathlon_gym": read_toolathlon_gym_source,
+    "wideseek": read_wideseek_source,
+}
+ADAPTER_VERSIONS = {
+    "nemo_gym": NEMO_GYM_ADAPTER_VERSION,
+    "toolathlon_gym": TOOLATHLON_GYM_ADAPTER_VERSION,
+    "wideseek": WIDESEEK_ADAPTER_VERSION,
+}
+# The native files each adapter reads; a source's snapshot holds exactly these.
+SNAPSHOT_FILES: dict[str, Callable[[Path], list[str]]] = {
+    "nemo_gym": nemo_gym_snapshot_files,
+    "toolathlon_gym": toolathlon_gym_snapshot_files,
+    "wideseek": wideseek_snapshot_files,
+}

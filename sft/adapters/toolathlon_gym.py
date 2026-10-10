@@ -1,0 +1,274 @@
+"""Adapter from Toolathlon-Gym traces to canonical SFT records.
+
+It reads ``toolathlon_langgraph_v1`` collections written by ``sft/toolathlon_gym``.
+"""
+
+from __future__ import annotations
+
+import json
+from collections import Counter
+from collections.abc import Mapping
+from pathlib import Path
+
+from ..chat_tools import build_decomposer_chat_tools
+from ..schema import (
+    CanonicalOutcome,
+    CanonicalRollout,
+    SelectionSpec,
+    SourceSpec,
+    TraceValidationError,
+    validate_chat_tools,
+)
+from ..toolathlon_gym.scheduler import load_launch_outcome
+from .base import (
+    AdapterReadResult,
+    canonical_source,
+    check_native_rollouts,
+    empty_counts,
+    load_json,
+)
+from .langgraph_messages import convert_langgraph_messages
+
+ADAPTER_VERSION = 10
+
+
+def snapshot_files(source_dir: Path) -> list[str]:
+    """The files of every finished episode of a toolathlon_langgraph_v1 collection.
+
+    An episode is finished once its evaluation exists: the collector writes
+    ``result.json`` after the trace, so episodes still running are left out.
+    """
+    files: list[str] = []
+    for result_path in sorted(source_dir.glob("evals/*/*/result.json")):
+        episode = Path("traces") / result_path.parent.relative_to(source_dir / "evals")
+        if not all(
+            (source_dir / episode / name).is_file()
+            for name in ("trace.json", "runtime.json")
+        ):
+            continue
+        files.extend(
+            (
+                (episode / "trace.json").as_posix(),
+                (episode / "runtime.json").as_posix(),
+                result_path.relative_to(source_dir).as_posix(),
+            )
+        )
+    return files
+
+
+def read_toolathlon_gym_source(
+    source: SourceSpec,
+    selection: SelectionSpec,
+    *,
+    source_dir: Path,
+    system_prompt: str,
+) -> AdapterReadResult:
+    """Read the finished episodes of a toolathlon_langgraph_v1 collection.
+
+    A trace qualifies by the collector's own rule
+    (``sft.toolathlon_gym.scheduler.LaunchOutcome.qualifies``). The traces store
+    no tool schemas; the spec's ``native_subagent_types`` rebuild them with the
+    Decomposer core.
+    """
+    threshold = selection.success_threshold
+    assert threshold is not None
+    source_dir = source_dir.resolve()
+    native_type_ids = {subagent.id for subagent in source.native_subagent_types}
+    tools = validate_chat_tools(
+        build_decomposer_chat_tools(
+            [
+                {
+                    "agent_type_id": subagent.id,
+                    "description": subagent.description,
+                    "assistant_id": subagent.id,
+                }
+                for subagent in source.native_subagent_types
+            ]
+        )
+    )
+    result_paths = sorted(source_dir.glob("evals/*/*/result.json"))
+    native_rollouts = len(result_paths)
+    check_native_rollouts(source, native_rollouts)
+
+    records: list[CanonicalRollout] = []
+    counts = empty_counts()
+    run_ids: set[str] = set()
+    for result_path in result_paths:
+        counts["rollouts"] += 1
+        task = result_path.parents[1].name
+        episode_id = result_path.parent.name
+        episode_dir = source_dir / "traces" / task / episode_id
+        try:
+            result = load_json(result_path)
+            if result.get("episode_id") != episode_id or result.get("task") != task:
+                raise TraceValidationError(
+                    "excluded_invalid_metadata",
+                    f"Result identity mismatch for {episode_id}.",
+                )
+            outcome = load_launch_outcome(task, str(result_path))
+            if not outcome.qualifies(threshold):
+                counts["excluded_reward"] += 1
+                continue
+            if not (episode_dir / "trace.json").is_file():
+                raise TraceValidationError(
+                    "excluded_missing_final_state",
+                    f"Missing trace.json for {episode_id}.",
+                )
+            if not (episode_dir / "runtime.json").is_file():
+                raise TraceValidationError(
+                    "excluded_missing_materialized_input",
+                    f"Missing runtime.json for {episode_id}.",
+                )
+            trace = load_json(episode_dir / "trace.json")
+            runtime = load_json(episode_dir / "runtime.json")
+            run_id = trace.get("run_id")
+            if (
+                trace.get("episode_id") != episode_id
+                or trace.get("task") != task
+                or trace.get("purpose") != "trace-generation"
+                or not isinstance(run_id, str)
+                or not run_id
+            ):
+                raise TraceValidationError(
+                    "excluded_invalid_metadata",
+                    f"Trace identity mismatch for {episode_id}.",
+                )
+            agents = trace.get("agents")
+            if not isinstance(agents, Mapping) or not all(
+                isinstance(agent, Mapping) for agent in agents.values()
+            ):
+                raise TraceValidationError(
+                    "excluded_invalid_metadata", f"Invalid agents for {episode_id}."
+                )
+            undeclared = sorted(
+                {str(agent.get("agent_type_id")) for agent in agents.values()}
+                - native_type_ids
+            )
+            if undeclared:
+                # The rebuilt tool schema would differ from the one the teacher saw.
+                raise ValueError(
+                    f"Source {source.id!r} episode {episode_id} uses undeclared "
+                    "subagent types: " + ", ".join(undeclared)
+                )
+            task_config = runtime.get("task_config")
+            if not isinstance(task_config, Mapping) or task_config.get("id") != task:
+                raise TraceValidationError(
+                    "excluded_invalid_metadata",
+                    f"Invalid runtime task metadata for {episode_id}.",
+                )
+
+            messages = convert_langgraph_messages(trace.get("messages"), system_prompt)
+            if messages[1]["content"] != task_config.get("task_str"):
+                raise TraceValidationError(
+                    "excluded_prompt_mismatch",
+                    f"Trace/runtime prompt mismatch for {episode_id}.",
+                )
+            repetition = trace.get("repetition")
+            attempt = trace.get("attempt")
+            if (
+                not isinstance(repetition, int)
+                or isinstance(repetition, bool)
+                or repetition < 1
+                or not isinstance(attempt, int)
+                or isinstance(attempt, bool)
+                or attempt < 1
+            ):
+                raise TraceValidationError(
+                    "excluded_invalid_indices",
+                    f"Invalid repetition/attempt for {episode_id}.",
+                )
+            generation_config = trace.get("decomposer_generation_config")
+            agent_runs = trace.get("agent_runs")
+            subagent_statuses = Counter(
+                str(run.get("status") or "unknown")
+                for run in (
+                    agent_runs.values() if isinstance(agent_runs, Mapping) else ()
+                )
+                if isinstance(run, Mapping)
+            )
+            partial = outcome.partial_score
+            reward = 1.0 if outcome.strict_pass else partial.fraction
+            metrics = {"reward": reward, "binary_pass": float(outcome.strict_pass)}
+            if partial is not None:
+                metrics["check_fraction"] = partial.fraction
+            records.append(
+                CanonicalRollout(
+                    id=f"toolathlon_gym:{source.benchmark}:{source.id}:{episode_id}",
+                    group_id=f"toolathlon_gym:{task}",
+                    messages=messages,
+                    tools=tools,
+                    source=canonical_source(
+                        source,
+                        ADAPTER_VERSION,
+                        task_id=task,
+                        rollout_id=f"{run_id}:r{repetition:03d}:a{attempt:03d}",
+                    ),
+                    outcome=CanonicalOutcome(
+                        success=True, reward=reward, metrics=metrics
+                    ),
+                    attributes={
+                        "category": "toolathlon_gym",
+                        "run_id": run_id,
+                        "episode_id": episode_id,
+                        "repetition": repetition,
+                        "attempt": attempt,
+                        # The served model: the collection moved from NVFP4 to FP8.
+                        "decomposer_model": (
+                            generation_config.get("model_name")
+                            if isinstance(generation_config, Mapping)
+                            else None
+                        ),
+                        "subagent_model": trace.get("agent_api_model"),
+                        "needed_mcp_servers": task_config.get("needed_mcp_servers"),
+                        "subagent_statuses": dict(sorted(subagent_statuses.items())),
+                        **(
+                            {"partial_score_source": partial.source}
+                            if partial is not None
+                            else {}
+                        ),
+                    },
+                )
+            )
+            run_ids.add(run_id)
+            counts["eligible"] += 1
+        except (json.JSONDecodeError, TypeError) as error:
+            trace_error = TraceValidationError("excluded_invalid_json", str(error))
+            if selection.invalid_policy == "error":
+                raise ValueError(f"{episode_dir}: {trace_error}") from error
+            counts[trace_error.reason] += 1
+        except TraceValidationError as error:
+            if selection.invalid_policy == "error":
+                raise ValueError(f"{episode_dir}: {error}") from error
+            counts[error.reason] += 1
+
+    strict_passes = sum(
+        int(record.outcome.metrics["binary_pass"]) for record in records
+    )
+    return AdapterReadResult(
+        records=tuple(records),
+        source_manifest={
+            "id": source.id,
+            "adapter": source.adapter,
+            "adapter_version": ADAPTER_VERSION,
+            "benchmark": source.benchmark,
+            "environment": source.environment,
+            "partition": source.partition,
+            "teacher": source.teacher,
+            "trace_format": source.trace_format,
+            "locator": str(source_dir),
+            "run_ids": sorted(run_ids),
+            "native_rollouts": native_rollouts,
+            "candidate_rollouts": native_rollouts,
+            "sidecar_failure_records": 0,
+            "tool_schema_origin": "native_subagent_types",
+            "selection": selection.model_dump(
+                mode="json",
+                exclude={"invalid_policy", "max_traces_per_prompt_per_teacher"},
+            ),
+            "qualifying": {
+                "strict_pass": strict_passes,
+                "score_above_threshold": len(records) - strict_passes,
+            },
+        },
+        counts=counts,
+    )

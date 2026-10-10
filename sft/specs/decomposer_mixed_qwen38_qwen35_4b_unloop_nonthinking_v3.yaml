@@ -1,0 +1,83 @@
+spec_version: 4
+
+dataset:
+  id: decomposer-mixed-qwen38-qwen35-4b-unloop-nonthinking
+  version: v3-tau2-workplace-toolathlon-wideseek-20261008
+
+# No subagent_types: each record keeps its gym's own tool schemas and agent
+# types. No prompt profile: the student trains with the teacher prompt. The
+# release holds no token counts; training decides about long records.
+policy:
+  id: decomposer-default
+
+# Every source has the Qwen3.8-Flash non-thinking manager (FP8 for tau2, NVFP4
+# for Workplace, NVFP4 then FP8 from 2026-10-08 on Toolathlon and WideSeek) with
+# Qwen3.5-4B-unlooped thinking subagents.
+sources:
+  # tau2 broad_v1 pool, rerun 2026-10-07/08 on the FP8 teacher after the
+  # decision that only subagents get the domain policy; the manager gets only
+  # the user's request. One rollout per task.
+  - id: tau2-qwen38-flash-fp8-nonthinking-broad-v1-n1
+    adapter: nemo_gym
+    snapshot: sha256:170d2e3dcaf52c9cc904e597a105af10edf5db58fa6da80380464ca900d674d8
+    benchmark: tau2_gym
+    environment: tau2_gym
+    partition: train
+    teacher: qwen38-flash-non-thinking
+    expected_native_rollouts: 4843
+    expected_candidates: 4843
+  # Workplace train split (2026-10-06), one rollout per task.
+  - id: workplace-qwen38-flash-nonthinking-train-n1
+    adapter: nemo_gym
+    snapshot: sha256:c36c909e403ebcbf931817242a2a979078ec1d496f2b4bdc015471c91099ba27
+    benchmark: workplace_assistant
+    environment: workplace_assistant
+    partition: train
+    teacher: qwen38-flash-non-thinking
+    expected_native_rollouts: 1255
+    expected_candidates: 1255
+  # Toolathlon coverage collection (Matrosov, prompt 8d5b07cb), the episodes
+  # finished by 2026-10-08 19:41 UTC, copied byte for byte. Its traces contain
+  # the proxy key that the task containers exposed; do not publish this snapshot.
+  - id: toolathlon-qwen38-flash-nonthinking-coverage
+    adapter: toolathlon_gym
+    snapshot: sha256:c9ea4cfe500a498d06c4fc3ccd2d00de5d95f2679102c28303dca493da741300
+    benchmark: toolathlon_gym
+    environment: toolathlon_gym
+    partition: train
+    teacher: qwen38-flash-non-thinking
+    trace_format: toolathlon_langgraph_v1
+    native_subagent_types:
+      - id: qwen_3_5_4b_thinking
+        description: Qwen3.5-4B thinking agent equipped with all the available tools.
+    selection:
+      policy: collector_qualifies
+      success_threshold: 0.9
+    expected_native_rollouts: 1095
+    expected_candidates: 1095
+  # WideSeek coverage collection (Matrosov, prompt 8d5b07cb), the attempts
+  # finished by 2026-10-08 19:44 UTC.
+  - id: wideseek-qwen38-flash-nonthinking-coverage
+    adapter: wideseek
+    snapshot: sha256:c160625c59167e003e247cc36b7b1e553c17e800779b605e4070affe094717d4
+    benchmark: wideseek
+    environment: wideseek
+    partition: train
+    teacher: qwen38-flash-non-thinking
+    trace_format: wideseek_langgraph_v1
+    selection:
+      policy: collector_qualifies
+      success_threshold: 0.9
+    expected_native_rollouts: 253
+    expected_candidates: 253
+
+selection:
+  policy: exact_reward
+  success_reward: 1.0
+  invalid_policy: exclude
+  max_traces_per_prompt_per_teacher: null
+
+split:
+  strategy: prompt_fixed
+  validation_fraction: 0.1
+  seed: 42

@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 
 from langchain.agents.middleware import wrap_model_call
 from langchain_core.messages import message_to_dict
-from decomposer.model_logging import append_record, request_delta as _request_delta
+from gyms.model_logging import append_record, request_delta as _request_delta
 
 
 LOG_PATH_ENV = "TOOLATHLON_AGENT_CALL_LOG"

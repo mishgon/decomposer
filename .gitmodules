@@ -4,6 +4,12 @@
 [submodule "external/toolathlon_gym"]
 	path = external/toolathlon_gym
 	url = https://github.com/eigent-ai/toolathlon_gym
+[submodule "external/gaia2"]
+	path = external/gaia2
+	url = https://gitlab.2a2i.org/Ionov/gaia2.git
+[submodule "external/tau2_gym"]
+	path = external/tau2_gym
+	url = https://gitlab.2a2i.org/Sukhorukov/tau2-gym.git
 [submodule "external/toolathlon"]
 	path = external/toolathlon
 	url = https://github.com/hkust-nlp/Toolathlon.git

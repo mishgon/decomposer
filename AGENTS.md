@@ -4,16 +4,18 @@
 
 - `src/decomposer/`: core Decomposer package. This should stay benchmark- and training-agnostic.
 - `examples/`: runnable examples of configuring and using Decomposer.
-- `gyms/<gym_name>/`: reusable environment code for loading tasks, exposing tools, running a ReAct agent or Decomposer on one task or several tasks in parallel, and native result checking.
-- `evals/<gym_name>/`: scripts for evaluating agents on all tasks in an environment, aggregating metrics, and saving traces for error analysis.
-- `sft/<gym_name>/`: code for SFT traces collection on a gym. Shared SFT training code lives alongside these directories in `sft/`.
-- `opd/<gym_name>/`: code for on-policy distillation (OPD) on a gym.
-- `rl/<gym_name>/`: code for reinforcement learning (RL) on a gym.
+- `gyms/<gym_name>/`: code for running Decomposer or another agent on one or many tasks from a specific gym and saving *the rawest* logs, traces and evaluation results.
+- `evals/<gym_name>/`: code for collecting, saving and visualizing evaluation results for Decomposer or another agent on a specific gym. Reuses code from `gyms/<gym_name>`.
+- `sft/<gym_name>/`: code for generating traces for SFT on a specific gym. Reuses code from `gyms/<gym_name>`.
+- `sft/`: shared SFT code (full dataset, trainer, templates and configs).
+- `opd/`: shared on-policy distillation code. Reuses code from `gyms/<gym_name>`.
+- `rl/<gym_name>/`: reinforcement learning on a specific gym. Reuses code from `gyms/<gym_name>`.
+- `artifacts/data/`: collected trajectories and episode workspaces ignored by git.
+- `artifacts/evals/`: evaluation results and aggregate metrics ignored by git.
+- `artifacts/training/`: model checkpoints and training logs ignored by git.
 - `external/`: third-party repositories, submodules, or vendored code.
 - `tests/`: lightweight checks for reusable code and harness utilities.
 - `docs/`: design notes, experiment notes, and persistent documentation.
-
-Evaluation and training workflows reuse `gyms/<gym_name>/`.
 
 ## Coding
 
@@ -28,9 +30,31 @@ Use this workflow by default:
 
 ### Code style
 
-Simplicity first. Always write the minimum code that meets current needs. No speculative features, configuration, or abstractions. No unrequested "flexibility" or "configurability". No error handling for cases the surrounding code already rules out. Extract helpers only when multiple places need the same logic and extraction improves clarity.
+The best code is no code at all. This principle applies to custom code we write and maintain; code provided by external libraries does not count.
 
-Make surgical changes. Don't "improve" adjacent code, comments, or formatting. Don't perform unrequested refactoring. Match existing style, even if you'd do it differently. Remove imports, variables, and functions that *your* changes made unused. Mention pre-existing dead code; don't delete it unless asked.
+Use reputable libraries and frameworks (for example, LangGraph) when they solve the current task. Consult their documentation to find existing solutions, using documentation MCP servers where available (for example, LangChain Docs MCP).
+
+When custom code is necessary, write the minimum needed to meet current requirements. No speculative features, configuration, or abstractions. No unrequested flexibility or configurability. No error handling for cases the surrounding code already rules out. Extract helpers only when multiple places need the same logic and extraction improves clarity.
+
+Keep changes limited to the task. Do not improve adjacent code, comments, or formatting, or perform unrequested refactoring. Match existing style. Remove imports, variables, and functions that your changes made unused. Mention pre-existing dead code; do not delete it unless asked.
+
+## LangChain Docs MCP
+
+Connect both LangChain documentation MCP servers to my coding agent so it can look up current LangChain, LangGraph, and LangSmith docs and API reference.
+
+Servers to add:
+
+* `docs-langchain`: [https://docs.langchain.com/mcp](https://docs.langchain.com/mcp)
+* `reference-langchain`: [https://reference.langchain.com/mcp](https://reference.langchain.com/mcp)
+
+Detect which agent or editor I am using (Claude Code, Cursor, Codex CLI, Claude Desktop, Deep Agents Code, VS Code, Antigravity, or another MCP-compatible client). Use the matching setup from [https://docs.langchain.com/use-these-docs.md](https://docs.langchain.com/use-these-docs.md):
+
+* Claude Code: `claude mcp add --transport http` for each server (project scope by default; use `--scope user` only if I ask for global access).
+* Codex CLI: `codex mcp add` with each server URL.
+* Cursor, Deep Agents Code, VS Code, or Antigravity: merge both entries into the MCP settings JSON using the field names shown on that page for my client.
+* Claude Desktop: add both URLs under Settings > Connectors.
+
+Do not invent alternate MCP URLs. After configuring, confirm both servers are listed and reachable.
 
 <!-- BEGIN agent-style v0.4.2 -->
 <!-- SPDX-License-Identifier: CC-BY-4.0 -->

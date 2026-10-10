@@ -12,7 +12,7 @@ from langchain.agents.middleware import AgentMiddleware
 from langchain_core.utils.function_calling import convert_to_openai_tool
 from langchain_core.messages import message_to_dict
 from langgraph.config import get_config
-from decomposer.model_logging import append_record, request_delta
+from gyms.model_logging import append_record, request_delta
 from decomposer.models import create_model as model
 
 

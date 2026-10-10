@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-from decomposer.model_logging import append_record
+from gyms.model_logging import append_record
 from gyms.wideseek.run import run_jobs, usage
 from gyms.wideseek.runtime import ModelLog, init_budget
 
