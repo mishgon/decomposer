@@ -905,7 +905,10 @@ def test_agents_use_task_prompt_tools_and_server_url(monkeypatch, container_modu
     kwargs = create_agent.call_args.kwargs
     assert kwargs["model"].model_name == "Qwen/Qwen3.5-4B-unlooped"
     assert kwargs["tools"] == [gateway_tool] and kwargs["system_prompt"] == "Task prompt"
-    assert len(kwargs["middleware"]) == 2
+    assert len(kwargs["middleware"]) == 3
+    from decomposer.run_budget import RunBudgetMiddleware
+
+    assert isinstance(kwargs["middleware"][0], RunBudgetMiddleware)
 
     assert agents.decomposer() == "decomposer"
     kwargs = create_decomposer.call_args.kwargs

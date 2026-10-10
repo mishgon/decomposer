@@ -1,0 +1,6 @@
+# The Gym component venv for this server. Mirrors
+# resources_servers/workplace_assistant/requirements.txt, plus tau2 itself.
+-e nemo-gym[dev] @ ../../../../../external/Gym
+# tau2 ships its task/policy/db data OUTSIDE the package (tau2/utils/utils.py:17-27),
+# so it must be installed editable and TAU2_DATA_DIR pointed at the checkout.
+-e ../../../../../external/tau2_gym

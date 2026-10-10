@@ -1,0 +1,9 @@
+tau2_gym:
+  resources_servers:
+    tau2_gym:
+      entrypoint: app.py
+      domain: agent
+      verified: false
+      description: tau2 GAIA2-hard domains as a multi-step tool-using environment
+      value: Improve multi-step tool use and task decomposition
+      language: en

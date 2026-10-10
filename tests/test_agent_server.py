@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-import decomposer.agent_server as server
+import gyms.agent_server as server
 
 
 @pytest.fixture

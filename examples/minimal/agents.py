@@ -1,4 +1,5 @@
 from decomposer.core import create_decomposer_agent
+from decomposer.run_budget import RunBudgetMiddleware
 from decomposer.models import create_model
 from decomposer.prompts import AGENT_SYSTEM_PROMPT
 from langchain.agents import create_agent
@@ -9,6 +10,7 @@ def qwen_3_5_4b_thinking() -> CompiledStateGraph:
     return create_agent(
         model=create_model("lmrouter/qwen_3_5_4b_unlooped_thinking"),
         tools=[],
+        middleware=[RunBudgetMiddleware()],
         system_prompt=AGENT_SYSTEM_PROMPT,
     )
 

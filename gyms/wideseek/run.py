@@ -17,7 +17,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph_sdk import get_client
 from langchain_core.messages import message_to_dict
 from decomposer.visualization import write_trace_html
-from decomposer.usage import build_usage_summary
+from gyms.usage import build_usage_summary
 
 from gyms.wideseek import REPO_ROOT, agents
 from gyms.wideseek.evaluate import evaluate

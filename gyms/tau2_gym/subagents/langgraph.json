@@ -1,0 +1,10 @@
+{
+  "dependencies": [
+    "."
+  ],
+  "graphs": {
+    "qwen35_4b_non_thinking": "./graph.py:qwen35_4b_non_thinking",
+    "qwen35_4b_unlooped_thinking": "./graph.py:qwen35_4b_unlooped_thinking"
+  },
+  "python_version": "3.12"
+}
