@@ -58,7 +58,7 @@ This command is not scheduled automatically. Models, reasoning preservation and
 context limits are unchanged from the smoke. Choose concurrency before launch.
 
 The required student tokenizer enables shared `sft/sequence_limit.py` middleware
-on every collection run. Above 32,768 student tokens, the teacher stops after its
+on every collection run. Above 16,384 student tokens, the teacher stops after its
 current response. The attempt is `skipped`, not an error or success; all raw
 messages and diagnostic scores remain saved. Batch filtering uses the same
 `sft/filtering.py` implementation as Toolathlon collection.
