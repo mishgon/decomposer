@@ -55,7 +55,9 @@ async def score(token_ids, *, tokenizer, output):
         return values
     except Exception as error:
         record['error'] = {'type': type(error).__name__, 'http_status': getattr(error, 'status_code', None)}
-        raise
+        # OpenAI exceptions need HTTP response objects and cannot cross Ray workers.
+        raise RuntimeError(f"Teacher scoring failed: {type(error).__name__}; "
+                           f"HTTP {getattr(error, 'status_code', None)}; see {output}") from None
     finally:
         record['elapsed_seconds'] = time.time() - started
         try:

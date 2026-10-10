@@ -61,8 +61,11 @@ class TeacherClientTests(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as directory, patch(
                 'opd.teacher.create_model', return_value=model):
             output = Path(directory) / 'score.json'
-            with self.assertRaises(RuntimeError):
+            with self.assertRaisesRegex(RuntimeError, 'Teacher scoring failed') as caught:
                 await score([1, 2], tokenizer=None, output=output)
+            import pickle
+            self.assertEqual(str(pickle.loads(pickle.dumps(caught.exception))), str(caught.exception))
+            self.assertNotIn('secret', str(caught.exception))
             saved = output.read_text()
             self.assertNotIn('secret', saved)
             self.assertEqual(json.loads(saved)['error']['type'], 'RuntimeError')
