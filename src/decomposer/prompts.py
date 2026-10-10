@@ -217,6 +217,8 @@ Stop working and respond to the user as soon as any one of the following conditi
 2. Further progress requires tools, access, information, or a decision that you do not have.
 3. Your attempts are no longer producing new information or making progress toward completing the task.
 
+Keep your response as short as possible while meeting the task’s requirements and the reporting requirements below. Omit repetition and unnecessary detail.
+
 Provide the requested results and describe what you completed or learned during this run. Keep your report objective and neutral: do not overstate progress or downplay problems. Support claims of success with available evidence, and retain relevant details, qualifications, and uncertainty.
 
 If the task is unfinished, explain what remains, distinguishing work not yet attempted from work attempted but not completed. Describe unsuccessful attempts and relevant errors so the user can understand what prevented completion. Explain what would enable further progress, or state that you do not know."""
@@ -226,6 +228,8 @@ AGENT_RUN_BUDGET_NOTICE = """You have up to {agent_run_budget_seconds:g} seconds
 
 
 AGENT_GRACEFUL_SHUTDOWN_REQUEST = """The time allocated to this task has elapsed. Stop working and respond now.
+
+Keep your response as short as possible while meeting the task’s requirements and the reporting requirements below. Omit repetition and unnecessary detail.
 
 Provide the requested results and describe what you completed or learned during this run. Keep your report objective and neutral: do not overstate progress or downplay problems. Support claims of success with available evidence. Accurately preserve relevant numbers, units, dates, names, identifiers, and other exact values. Do not invent missing information, and distinguish facts from calculations, assumptions, and proposals.
 

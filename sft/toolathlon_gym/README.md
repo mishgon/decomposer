@@ -107,6 +107,59 @@ prepared-row function accepts the trainer's explicit template.
 
 ## Coverage Policy
 
+For uniform collection, omit `--adaptive`. For example, run 64 passes over the
+whole dataset with two local GPU replicas:
+
+```bash
+PYTHONPATH=src:. .venv/bin/python -m sft.toolathlon_gym.run \
+  --all -n 64 --concurrency 32 --container-slots 8 \
+  --episode-timeout 1800
+```
+
+Start the local worker replicas with
+`CUDA_VISIBLE_DEVICES=1,7 ./scripts/vllm/serve_qwen_3_5_4b.sh`.
+Decomposer uses `vllm/qwen_3_8_flash_next_non_thinking` (FP8) on port 8025;
+workers use local Qwen3.5-4B on port 8024. OpenRouter credentials are not required
+for these model profiles.
+
+On `hertz-2`, run `scripts/vllm/serve_qwen_3_8_flash_next.sh`. From the collection
+host, forward port 8025 to both loopback and the Docker bridge address (172.17.0.1
+on this machine):
+
+```bash
+ssh -NT -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 \
+  -o ServerAliveCountMax=3 \
+  -L 127.0.0.1:8025:127.0.0.1:8025 \
+  -L 172.17.0.1:8025:127.0.0.1:8025 hertz-2
+```
+
+Keep the tunnel running during collection. The runner forwards HTTP/HTTPS proxy
+variables while excluding local model endpoints from proxying.
+Each episode uses an isolated `/24` subnet from `10.240.0.0/16`; reserve this range
+for the Gym and ensure it does not overlap host or VPN routes on other machines.
+Docker rejects occupied subnets, and cleanup releases them for later episodes.
+
+The queue submits every task once before submitting the next pass, regardless
+of scores. Passes may overlap while earlier episodes finish. `--concurrency`
+limits active episodes; `--container-slots` limits concurrent container setup
+and cleanup. The values above are starting points for measuring throughput.
+Sequence-length early stopping is enabled by the SFT image. The 30-minute episode
+timeout remains a safety bound and includes setup and lock waits; shutdown and
+cleanup can take additional time. Failed attempts remain in the raw artifacts
+and must be excluded from training. On resume, the collector retries failed attempts.
+
+Each finished episode logs its task, attempt, duration, and outcome: `SOLVED`,
+`UNSOLVED`, `UNSCORED`, `ERRORS`, or `LENGTH_LIMIT`. Errors include the final runner
+error and a log path. The progress summary separates those outcomes and shows
+active/queued counts, elapsed time, episodes/hour, and estimated remaining time
+in days/hours/minutes/seconds. It refreshes on completions and every 30 seconds
+while waiting. If episodes fail, remaining time is marked unreliable. Completed,
+failed, and length-skipped episodes all count as finished. Resume resets the
+measurement and estimates only the remaining work; adaptive mode reports the
+current wave. The first estimates include startup and can fluctuate substantially.
+
+### Adaptive Collection
+
 Each wave launches one attempt per task with no qualifying trace. A native pass
 or partial score strictly above 0.90 qualifies, provided the agent finished.
 Scores from agent errors/timeouts are diagnostic only. Check-marker logs without

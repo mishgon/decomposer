@@ -113,6 +113,7 @@ def create_model(
         "lmrouter/qwen_3_8_flash_next_medium_thinking",
         "temp/qwen_3_5_4b_unlooped_thinking",
         "temp/qwen_3_8_flash_next_non_thinking",
+        "openrouter/qwen_3_8_flash_next_non_thinking",
         "openrouter/qwen_3_8_flash_next_low_thinking",
         "openrouter/qwen_3_8_flash_next_medium_thinking",
     ],
@@ -154,7 +155,7 @@ def create_model(
             )
         case "vllm/qwen_3_8_flash_next_non_thinking":
             return ChatVLLM(
-                model="Qwen/Qwen3.8-Flash-Next-NVFP4",
+                model="Qwen/Qwen3.8-Flash-Next-FP8",
                 base_url=f"http://{os.environ.get('VLLM_HOST', '127.0.0.1')}:{_QWEN_3_8_FLASH_NEXT_PORT}/v1",
                 api_key="EMPTY",
                 temperature=0.7,
@@ -298,19 +299,20 @@ def create_model(
                 disable_streaming=True,
                 use_responses_api=False,
             )
-        case "openrouter/qwen_3_8_flash_next_low_thinking" | "openrouter/qwen_3_8_flash_next_medium_thinking":
+        case "openrouter/qwen_3_8_flash_next_non_thinking" | "openrouter/qwen_3_8_flash_next_low_thinking" | "openrouter/qwen_3_8_flash_next_medium_thinking":
+            thinking = model_id != "openrouter/qwen_3_8_flash_next_non_thinking"
             return ChatOpenRouter(
-                model="qwen/qwen3.8-flash",
+                model="qwen/qwen3.8-flash:nitro",
                 base_url="https://openrouter.ai/api/v1",
                 api_key=os.environ["OPENROUTER_API_KEY"],
                 # https://huggingface.co/Qwen/Qwen3.8-Flash-Next#best-practices
-                temperature=1.0,
-                top_p=0.95,
-                presence_penalty=0.0,
+                temperature=1.0 if thinking else 0.7,
+                top_p=0.95 if thinking else 0.8,
+                presence_penalty=0.0 if thinking else 1.5,
                 model_kwargs={"top_k": 20},
                 reasoning={
                     "effort": "low" if model_id == "openrouter/qwen_3_8_flash_next_low_thinking" else "medium",
-                },
+                } if thinking else {"enabled": False},
                 timeout=600_000,
                 max_retries=2,
                 disable_streaming=True,

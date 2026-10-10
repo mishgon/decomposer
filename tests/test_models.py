@@ -105,7 +105,7 @@ def test_local_flash_next_transport(monkeypatch, host):
     monkeypatch.setattr(models.asyncio, "create_subprocess_exec", launch)
     model = create_model("vllm/qwen_3_8_flash_next_non_thinking")
     assert model.openai_api_base == f"http://{host or '127.0.0.1'}:8025/v1"
-    assert model.model_name == "Qwen/Qwen3.8-Flash-Next-NVFP4"
+    assert model.model_name == "Qwen/Qwen3.8-Flash-Next-FP8"
     assert model.openai_api_key.get_secret_value() == "EMPTY"
     assert model.request_timeout == 600
     assert model.max_retries == 2
@@ -335,7 +335,7 @@ def test_vllm_server_rejects_occupied_port(mock_vllm):
     mock_vllm.launch.assert_not_called()
 
 
-@pytest.mark.parametrize("effort", ["low", "medium"])
+@pytest.mark.parametrize("effort", ["non", "low", "medium"])
 def test_openrouter_flash_next_request(monkeypatch, effort):
     from unittest.mock import Mock
 
@@ -349,12 +349,12 @@ def test_openrouter_flash_next_request(monkeypatch, effort):
     model.client.chat.send.return_value = _response()
     assert model.invoke("test").content == "answer"
     payload = model.client.chat.send.call_args.kwargs
-    assert payload["model"] == "qwen/qwen3.8-flash"
-    assert payload["temperature"] == 1.0
-    assert payload["top_p"] == .95
-    assert payload["presence_penalty"] == 0.0
+    assert payload["model"] == "qwen/qwen3.8-flash:nitro"
+    assert payload["temperature"] == (0.7 if effort == "non" else 1.0)
+    assert payload["top_p"] == (0.8 if effort == "non" else .95)
+    assert payload["presence_penalty"] == (1.5 if effort == "non" else 0.0)
     assert payload["top_k"] == 20
-    assert payload["reasoning"] == {"effort": effort}
+    assert payload["reasoning"] == ({"enabled": False} if effort == "non" else {"effort": effort})
     assert model.request_timeout == 600_000
 
 

@@ -60,6 +60,14 @@ def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def format_duration(seconds: float) -> str:
+    minutes, seconds = divmod(round(seconds), 60)
+    hours, minutes = divmod(minutes, 60)
+    days, hours = divmod(hours, 24)
+    parts = [(days, "d"), (hours, "h"), (minutes, "m"), (seconds, "s")]
+    return " ".join(f"{value}{unit}" for value, unit in parts if value) or "0s"
+
+
 def new_run_id() -> str:
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ-")
     return stamp + uuid.uuid4().hex[:8]
@@ -330,8 +338,8 @@ def create_manifest(
             "error": None,
             "attempts": [],
         }
-        for task in tasks
         for repetition in range(1, repetitions + 1)
+        for task in tasks
     ]
     config = {name: getattr(args, name) for name in RESUME_CONFIG_FIELDS}
     config.update(tasks=list(tasks), repetitions=repetitions, purpose=args.purpose)
@@ -753,6 +761,27 @@ def _run_collection(args, run_dir, *, repo_root, toolathlon_root, docker):
                 tuple[int, dict[str, Any], int, int],
             ] = {}
             remaining = iter(work)
+            progress_started = time.monotonic()
+            finished = 0
+            outcomes = dict(solved=0, unsolved=0, unscored=0, errors=0, length_limit=0)
+
+            def print_progress() -> None:
+                elapsed = time.monotonic() - progress_started
+                rate = finished * 3600 / elapsed if finished else 0
+                remaining_count = len(work) - finished
+                eta = format_duration(remaining_count * 3600 / rate) if rate else "waiting for results"
+                if outcomes["errors"] and remaining_count:
+                    eta = "unreliable (episode errors)"
+                scope = "current wave" if args.adaptive else "this invocation"
+                print(
+                    f"Progress ({scope}): {finished}/{len(work)} finished | "
+                    f"solved={outcomes['solved']} unsolved={outcomes['unsolved']} "
+                    f"unscored={outcomes['unscored']} errors={outcomes['errors']} "
+                    f"length_limit={outcomes['length_limit']} | "
+                    f"active={len(active)} queued={remaining_count - len(active)} | "
+                    f"elapsed {format_duration(elapsed)} | {rate:.1f} episodes/hour | remaining ~{eta}",
+                    flush=True,
+                )
 
             def record_result(
                 episode: dict[str, Any],
@@ -782,11 +811,6 @@ def _run_collection(args, run_dir, *, repo_root, toolathlon_root, docker):
                 except StopIteration:
                     return False
                 provider_generation = provider_backoff.wait(stop_event)
-                print(
-                    f"[{index}/{manifest['counts']['total']}] {episode['key']} "
-                    f"attempt {attempt}",
-                    flush=True,
-                )
                 episode.update(
                     status="running",
                     started_at=utc_now(),
@@ -843,9 +867,11 @@ def _run_collection(args, run_dir, *, repo_root, toolathlon_root, docker):
             try:
                 for _ in range(min(args.concurrency, len(work))):
                     submit_next()
+                print_progress()
                 while active:
                     done, _ = concurrent.futures.wait(
                         active,
+                        timeout=30,
                         return_when=concurrent.futures.FIRST_COMPLETED,
                     )
                     for future in done:
@@ -859,8 +885,33 @@ def _run_collection(args, run_dir, *, repo_root, toolathlon_root, docker):
                             record_result(episode, result, interrupted_run=True)
                             raise
                         record_result(episode, result)
+                        finished += 1
+                        if result["status"] == "skipped":
+                            outcome = "length_limit"
+                        elif result["status"] == "failed":
+                            outcome = "errors"
+                        elif result.get("score") is True:
+                            outcome = "solved"
+                        elif result.get("score") is False:
+                            outcome = "unsolved"
+                        else:
+                            outcome = "unscored"
+                        outcomes[outcome] += 1
+                        duration = result.get("duration_seconds")
+                        duration_text = format_duration(duration) if duration is not None else "unknown duration"
+                        detail = ""
+                        if outcome == "errors":
+                            error = result.get("error") or {}
+                            lines = (error.get("stderr_tail") or error.get("message") or "Unknown error").strip().splitlines()
+                            detail = f" | {lines[-1][:300]} | logs: {result.get('attempt_log_path', run_dir)}"
+                        print(
+                            f"[{utc_now()}] {outcome.upper()} {episode['key']} "
+                            f"attempt={attempt} duration={duration_text}{detail}",
+                            flush=True,
+                        )
                         update_provider_backoff(result, provider_generation)
                         submit_next()
+                    print_progress()
             except BaseException:
                 stop_event.set()
                 for future, (

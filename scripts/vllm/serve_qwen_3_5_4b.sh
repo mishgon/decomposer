@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}" \
+export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}"
+IFS=',' read -r -a gpu_devices <<< "$CUDA_VISIBLE_DEVICES"
+
 uv run --group dev \
   vllm serve Qwen/Qwen3.5-4B \
   --host 0.0.0.0 \
   --port "${PORT:-8024}" \
   --tensor-parallel-size 1 \
-  --data-parallel-size 1 \
+  --data-parallel-size "${#gpu_devices[@]}" \
   --max-model-len 131072 \
   --gpu-memory-utilization "${GPU_MEMORY_UTILIZATION:-0.90}" \
   --max-num-batched-tokens 16384 \

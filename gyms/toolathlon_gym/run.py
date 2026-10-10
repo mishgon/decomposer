@@ -227,7 +227,16 @@ def run_episode(args) -> None:
         _acquire_container_lock(container_lock)
         container_lock_held = container_lock is not None
         print("Starting PostgreSQL...", flush=True)
-        _docker("network", "create", network)
+        # Start at a per-episode offset so parallel launches rarely collide.
+        for offset in range(256):
+            subnet = f"10.240.{(int(network[-2:], 16) + offset) % 256}.0/24"
+            result = _docker("network", "create", "--subnet", subnet, network, check=False)
+            if result.returncode == 0:
+                break
+            if "Pool overlaps" not in result.stderr:
+                raise RuntimeError(f"Docker network creation failed: {result.stderr.strip()}")
+        else:
+            raise RuntimeError("Toolathlon network pool 10.240.0.0/16 is exhausted")
         dump = (TOOLATHLON_ROOT / "db" / "init.sql.gz").resolve()
         _docker(
             "run",
@@ -324,6 +333,18 @@ def run_episode(args) -> None:
         )
 
         print("Starting task environment...", flush=True)
+        proxy_env = [
+            item
+            for name in ("http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY")
+            if name in os.environ
+            for item in ("--env", name)
+        ]
+        # Notion is served by the gym; local requests must bypass the host proxy.
+        no_proxy = ",".join(filter(None, (
+            os.environ.get("no_proxy"), os.environ.get("NO_PROXY"),
+            "localhost,127.0.0.1,host.docker.internal,postgres,api.notion.com",
+        )))
+        proxy_env.extend(("--env", f"no_proxy={no_proxy}", "--env", f"NO_PROXY={no_proxy}"))
         postgres_env = [
             item
             for pair in _postgres_environment(pg_container).items()
@@ -353,6 +374,7 @@ def run_episode(args) -> None:
             "--env",
             "OPENROUTER_API_KEY",
             *proxy_mount,
+            *proxy_env,
             *postgres_env,
             "--volume",
             f"{episode_dir.resolve()}:/artifacts/data",
