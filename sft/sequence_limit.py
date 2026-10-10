@@ -8,6 +8,8 @@ from langchain_core.messages import AIMessage
 
 from sft.filtering import StudentSequenceFilter
 
+COLLECTION_SEQUENCE_LENGTH = 16384
+
 
 class SequenceState(AgentState):
     sft_format: NotRequired[dict]
@@ -19,7 +21,7 @@ class StudentSequenceLimit(AgentMiddleware):
     state_schema = SequenceState
 
     def __init__(self, tokenizer):
-        self.filter = StudentSequenceFilter(tokenizer)
+        self.filter = StudentSequenceFilter(tokenizer, limit=COLLECTION_SEQUENCE_LENGTH)
 
     def measure(self, request, response):
         format = request.state.get('sft_format') or self.filter.format(request.system_message, request.tools)

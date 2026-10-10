@@ -5,7 +5,7 @@ import time
 from gyms.wideseek.run import cli, create_parser, describe_run, run_jobs
 from gyms.wideseek.runtime import save
 from sft.wideseek.scheduler import new_state, plan_next_wave, qualifies, statistics
-from sft.sequence_limit import StudentSequenceLimit
+from sft.sequence_limit import COLLECTION_SEQUENCE_LENGTH, StudentSequenceLimit
 
 
 def completed_results(root, mode):
@@ -42,6 +42,7 @@ def update_index(root, mode, threshold, tasks, adaptive):
 
 async def prepare_collection(args):
     tasks, root, manifest = await describe_run(args)
+    manifest['settings']['collection_sequence_length'] = COLLECTION_SEQUENCE_LENGTH
     path = root / "manifest.json"
     if args.resume:
         previous = json.loads(path.read_text())

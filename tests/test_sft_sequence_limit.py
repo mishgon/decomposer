@@ -156,11 +156,15 @@ def test_batch_and_live_agree_and_preserve_raw():
 
 
 def test_boundary_is_strictly_greater():
-    tokenizer = Tokenizer(32768)
+    tokenizer = Tokenizer(16384)
     middleware = StudentSequenceLimit(tokenizer)
     request = ModelRequest(model=Policy(), messages=[HumanMessage('task')], state={}, tools=[])
     response = middleware.measure(request, ModelResponse(result=[AIMessage('answer')]))
     assert 'jump_to' not in middleware.after_model({'messages': response.result}, None)
+    tokenizer.count = 16385
+    response = middleware.measure(request, ModelResponse(result=[AIMessage('answer')]))
+    assert middleware.after_model({'messages': response.result}, None)['stop_reason'] == 'sequence_limit'
+    assert StudentSequenceFilter(tokenizer).limit == 32768
 
 
 @pytest.mark.skipif(not os.environ.get('SFT_TOKENIZER'), reason='Requires local student tokenizer')

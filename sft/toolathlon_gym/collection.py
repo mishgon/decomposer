@@ -20,7 +20,7 @@ from typing import Any, Callable, Sequence
 
 from . import scheduler as adaptive_scheduler
 from gyms.toolathlon_gym.parallel import execute
-from sft.filtering import MAX_SEQUENCE_LENGTH
+from sft.sequence_limit import COLLECTION_SEQUENCE_LENGTH
 
 
 SCHEMA_VERSION = 1
@@ -689,12 +689,13 @@ def _run_collection(args, run_dir, *, repo_root, toolathlon_root, docker):
 
     image = json.loads(docker("image", "inspect", args.image).stdout)[0]
     labels = image["Config"].get("Labels") or {}
-    if labels.get("org.decomposer.sft.sequence-limit") != str(MAX_SEQUENCE_LENGTH):
+    if labels.get("org.decomposer.sft.sequence-limit") != str(COLLECTION_SEQUENCE_LENGTH):
         raise ValueError(
             "SFT collection requires the sequence-limited image. Build it with "
             "sft/toolathlon_gym/inference/Dockerfile.refresh; a plain gym image has no SFT guard."
         )
     manifest.update(status="running", finished_at=None)
+    manifest['config']['collection_sequence_length'] = COLLECTION_SEQUENCE_LENGTH
     manifest.setdefault("invocations", []).append(
         {
             "timestamp": utc_now(),

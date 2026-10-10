@@ -6,6 +6,7 @@ ENV RAYON_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 POLARS_MAX_THRE
 ENV UV_OFFLINE=1 UV_NO_SYNC=1 UV_CONCURRENT_BUILDS=1 UV_CONCURRENT_DOWNLOADS=1
 COPY src/decomposer ${AGENT_VENV}/lib/python3.12/site-packages/decomposer
 COPY gyms/toolathlon_gym /opt/decomposer/gyms/toolathlon_gym
+COPY gyms/model_logging.py gyms/usage.py /opt/decomposer/gyms/
 COPY sft/filtering.py sft/sequence_limit.py /opt/decomposer/sft/
 COPY sft/toolathlon_gym/agents.py /opt/decomposer/gyms/toolathlon_gym/sft_agents.py
 COPY sft/toolathlon_gym/langgraph.json /opt/decomposer/gyms/toolathlon_gym/langgraph.json
@@ -13,4 +14,4 @@ COPY student-tokenizer/ /opt/sft-tokenizer/
 ENV PYTHONPATH=/opt/decomposer
 # Validate offline tokenizer loading during the build, before scheduling tasks.
 RUN "${AGENT_VENV}/bin/python" -c "from transformers import AutoTokenizer; AutoTokenizer.from_pretrained('/opt/sft-tokenizer', local_files_only=True)"
-LABEL org.decomposer.sft.sequence-limit="32768"
+LABEL org.decomposer.sft.sequence-limit="16384"
