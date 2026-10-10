@@ -542,8 +542,8 @@ def _build_run_tool(
                 thread_id=agent["thread_id"],
                 assistant_id=agent["assistant_id"],
                 input={"messages": [{"role": "user", "content": prompt}]},
-                config=run_config or None,
-                context=runtime.context,
+                config=({k: v for k, v in run_config.items() if k != "configurable"} or None) if runtime.context is not None else run_config or None,
+                context={**runtime.context, **run_config.get("configurable", {})} if runtime.context is not None else None,
                 multitask_strategy="reject",
             )
 
@@ -605,8 +605,8 @@ def _build_run_tool(
                 thread_id=agent["thread_id"],
                 assistant_id=agent["assistant_id"],
                 input={"messages": [{"role": "user", "content": prompt}]},
-                config=run_config or None,
-                context=runtime.context,
+                config=({k: v for k, v in run_config.items() if k != "configurable"} or None) if runtime.context is not None else run_config or None,
+                context={**runtime.context, **run_config.get("configurable", {})} if runtime.context is not None else None,
                 multitask_strategy="reject",
             )
 
