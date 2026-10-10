@@ -271,7 +271,8 @@ def gym_config(experiment: Tau2Experiment, ports: PortLayout) -> dict[str, Any]:
                     "entrypoint": "app.py",
                     "resources_server": {"type": "resources_servers", "name": "tau2_gym"},
                     "model_server": {"type": "responses_api_models", "name": "policy_model"},
-                    "join_gym_system_and_user_prompts": True,
+                    # policy.md is for the subagents, which hold the tools (subagents/graph.py).
+                    "drop_gym_system_prompt": True,
                     "manager_max_model_calls": experiment.manager_max_model_calls,
                     "subagent_recursion_limit": experiment.subagent_recursion_limit,
                     "response_for_verifier_factory": VERIFIER_FACTORY,

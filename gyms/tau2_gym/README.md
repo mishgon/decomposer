@@ -105,12 +105,19 @@ config from it and writes it to `<run>/configuration/tau2_gym.yaml`.
 Every experiment exposes one subagent type, `subagent_non_thinking`, with the SFT
 releases' canonical description, so teacher traces, SFT data and student evals all see the same `new`/`fork`/`run`/`wait` schema.
 
-Subagents get the domain policy in their system prompt, because they hold the
-environment tools and the manager does not. `subagents/graph.py` takes it from the
-row's system message (`policy.md`, which the manager also receives at the top of its
-first message) and wraps it as tau2's own agent does: `<instructions>` with the
-Decomposer agent prompt, then `<policy>`. The subagent type's description says so,
-so the manager need not restate the rules in its prompts.
+The domain policy goes to the subagents, which hold the environment tools, and not to
+the manager, which gets only the user's request. The row keeps `policy.md` as its
+system message; `run.py` sets Gym's `drop_gym_system_prompt`, so the manager never
+sees it, while `subagents/graph.py` reads it from the request body and wraps it as
+tau2's own agent does: `<instructions>` with the Decomposer agent prompt, then
+`<policy>`. The subagent type's description tells the manager that subagents have
+the policy.
+
+tau2 is the only gym that sets `drop_gym_system_prompt`; Workplace keeps
+`join_gym_system_and_user_prompts`, so its manager still gets the date line. Traces
+from before 2026-10-07, such as
+`qwen38_flash_non_thinking_teacher_qwen35_4b_unlooped_thinking-decomposer_broad_v1-n1-manager-policy`,
+have the policy at the top of the manager's first message.
 
 Subagent sampling is Qwen3.5's general non-thinking preset (0.7/0.8/20, presence 1.5,
 no length cap) unless the experiment sets `subagent_sampling`. `run.py` passes it to

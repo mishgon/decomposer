@@ -91,6 +91,11 @@ spawned subagent has its own 100-model-call limit. The runner omits
 `max_output_tokens` unless an experiment explicitly requests a bounded-output
 ablation.
 
+The Decomposer manager gets the row's system message, the date line, in front of the
+user's request (`join_gym_system_and_user_prompts: true` in every config); subagents
+get the Decomposer agent prompt and the manager's prompt. Workplace does not set
+Gym's `drop_gym_system_prompt`, which only tau2 uses.
+
 The simple-agent registry also contains matched thinking and non-thinking
 Gemma-4 pairs for E2B, E4B, dense 31B, and 26B-A4B:
 `gemma4-{e2b,e4b,31b,26b-a4b}-it-{non-thinking,thinking}`. They use the same

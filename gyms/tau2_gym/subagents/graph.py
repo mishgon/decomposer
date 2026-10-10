@@ -5,11 +5,11 @@ dataset row and are injected per run by ``NeMoGymSubagentMiddleware``, which als
 routes each call to ``POST {resource_server_url}/{tool_name}``
 (``decomposer_agent/subagents/graph.py:37-42,83-90``).
 
-The subagents also get the domain policy: they hold the environment tools, while
-the manager that receives the policy has none. It comes from the row's system
-message, the same text the manager gets, and the system prompt wraps it the way
-tau2's own agent does (``tau2/agent/llm_agent.py`` ``SYSTEM_PROMPT``), with the
-Decomposer's agent prompt as the instructions.
+The subagents also get the domain policy, because they hold the environment tools;
+the manager never sees it (``run.py`` sets Gym's ``drop_gym_system_prompt``). It
+comes from the row's system message in the request body, and the system prompt
+wraps it the way tau2's own agent does (``tau2/agent/llm_agent.py``
+``SYSTEM_PROMPT``), with the Decomposer's agent prompt as the instructions.
 
 Only Qwen3.5-4B is registered: manager and subagents share one architecture, but
 they must be served from *separate* vLLM instances, with the subagent pinned to a
