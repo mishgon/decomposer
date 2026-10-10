@@ -9,6 +9,7 @@ from typing import Literal
 
 from gyms.gaia2.prompts import Gaia2ManagerPromptAddendumProfile
 from gyms.qwen_sampling import (
+    QWEN35_UNLOOPED_NON_THINKING,
     qwen35_general_sampling,
     qwen36_non_thinking_sampling,
     qwen36_thinking_sampling,
@@ -569,14 +570,21 @@ class DecomposerExperiment:
             raise ValueError(
                 f"{self.name}: remote manager fields require manager_backend=llm_proxy"
             )
-        if self.manager_reasoning_effort is not None and (
-            self.manager_backend != "llm_proxy"
-            or self.manager_reasoning_mode != "thinking"
-        ):
-            raise ValueError(
-                f"{self.name}: manager_reasoning_effort requires a thinking "
-                "llm_proxy manager"
+        if self.manager_reasoning_effort is not None:
+            # "none" is how a non-thinking manager stops thinking on the Responses
+            # API, which ignores chat_template_kwargs; the other efforts need thinking.
+            mode = (
+                "non_thinking" if self.manager_reasoning_effort == "none" else "thinking"
             )
+            if (
+                self.manager_backend != "llm_proxy"
+                or self.manager_reasoning_mode != mode
+            ):
+                raise ValueError(
+                    f"{self.name}: manager_reasoning_effort="
+                    f"{self.manager_reasoning_effort!r} requires a {mode} "
+                    "llm_proxy manager"
+                )
 
     @property
     def requires_local_manager(self) -> bool:
@@ -1712,6 +1720,106 @@ SIMPLE_QWEN35_UNLOOPED_EXPERIMENT = SimpleExperiment(
     language_model_only=False,
     max_model_calls=80,
 )
+# Release 1.0.0 of decomposer-manager-sft (sft/specs/decomposer_manager_sft_1.0.0.yaml):
+# its teacher, the unloop student trained on it and that student before training,
+# all with the release's subagents and the teacher prompt the release was built
+# with. Managers may emit parallel tool calls, as the teacher did; a local vLLM with
+# parallel_tool_calls=false keeps only the first call.
+QWEN35_4B_UNLOOP_BASE = Path(
+    "/mnt/share14T-2/sukhorukov/decomposer_artifacts/models/qwen35_4b_original_unloop"
+    "/checkpoint-0"
+)
+QWEN35_4B_UNLOOP_SFT_1_0_0_FULL = Path(
+    "/mnt/share14T-2/sukhorukov/decomposer_artifacts/training/sft/checkpoints"
+    "/qwen35-4b-unloop-nonthinking-manager-sft-1.0.0-full-32k/final"
+)
+QWEN35_4B_UNLOOP_SFT_1_0_0_LORA = Path(
+    "/mnt/share14T-2/sukhorukov/decomposer_artifacts/training/sft/checkpoints"
+    "/qwen35-4b-unloop-nonthinking-manager-sft-1.0.0-lora-32k/final"
+)
+# tau2's lmrouter/qwen_3_5_4b_unlooped_thinking preset, the release's subagents.
+QWEN35_4B_UNLOOPED_THINKING_SAMPLING = WorkerSampling(
+    temperature=0.6, top_p=0.95, top_k=20
+)
+# tau2's lmrouter/qwen_3_8_flash_next_non_thinking preset, the release's teacher.
+QWEN38_NON_THINKING_QWEN35_UNLOOPED_THINKING_EXPERIMENT = replace(
+    QWEN38_LOW_QWEN35_UNLOOPED_EXPERIMENT,
+    name="qwen38-flash-non-thinking-teacher-qwen35-4b-unlooped-thinking",
+    manager_reasoning_mode="non_thinking",
+    manager_reasoning_effort="none",
+    manager_port=8079,
+    worker_port=8080,
+    service_port=8156,
+    subagent_port=2054,
+    temperature=0.7,
+    top_p=0.8,
+    presence_penalty=1.5,
+    worker_sampling=QWEN35_4B_UNLOOPED_THINKING_SAMPLING,
+    manager_parallel_tool_calls=True,
+    manager_thinking=False,
+    worker_thinking=True,
+)
+# The unloop student samples with the unlooped model's non-thinking values, which
+# send no penalty (gyms/qwen_sampling.py), and keeps the manager uncapped.
+QWEN35_UNLOOP_SFT_1_0_0_FULL_DECOMPOSER_EXPERIMENT = DecomposerExperiment(
+    name="qwen35-4b-unloop-sft-1.0.0-full-32k-non-thinking-qwen35-4b-unlooped-thinking",
+    worker_checkpoint=None,
+    manager_checkpoint=QWEN35_4B_UNLOOP_SFT_1_0_0_FULL,
+    worker_backend="llm_proxy",
+    worker_upstream_url_env="LLM_PROXY_URL",
+    worker_api_key_env="LLM_PROXY_MASTER_KEY",
+    worker_verify_tls=False,
+    prompt_profile="teacher",
+    num_gpus=1,
+    manager_served_name="decomposer/qwen35-4b-unloop-sft-1.0.0-full-32k",
+    worker_served_name=QWEN35_4B_UNLOOPED_MODEL_ID,
+    manager_port=8081,
+    worker_port=8082,
+    service_port=8157,
+    subagent_port=2055,
+    max_model_len=131072,
+    temperature=QWEN35_UNLOOPED_NON_THINKING.temperature,
+    top_p=QWEN35_UNLOOPED_NON_THINKING.top_p,
+    top_k=QWEN35_UNLOOPED_NON_THINKING.top_k,
+    worker_sampling=QWEN35_4B_UNLOOPED_THINKING_SAMPLING,
+    concurrency=16,
+    manager_parallel_tool_calls=True,
+    manager_thinking=False,
+    manager_tool_call_parser="qwen3_xml",
+    manager_reasoning_parser=None,
+    manager_gdn_prefill_backend="triton",
+    worker_thinking=True,
+    worker_tool_call_parser="qwen3_xml",
+    worker_reasoning_parser=None,
+    worker_language_model_only=False,
+    manager_max_model_calls=80,
+    subagent_max_model_calls=80,
+    manager_recursion_limit=1000,
+    subagent_recursion_limit=1000,
+)
+QWEN35_UNLOOP_SFT_1_0_0_LORA_DECOMPOSER_EXPERIMENT = replace(
+    QWEN35_UNLOOP_SFT_1_0_0_FULL_DECOMPOSER_EXPERIMENT,
+    name="qwen35-4b-unloop-sft-1.0.0-lora-32k-non-thinking-qwen35-4b-unlooped-thinking",
+    manager_checkpoint=QWEN35_4B_UNLOOP_SFT_1_0_0_LORA,
+    manager_served_name="decomposer/qwen35-4b-unloop-sft-1.0.0-lora-32k",
+    manager_port=8083,
+    worker_port=8084,
+    service_port=8158,
+    subagent_port=2056,
+)
+# checkpoint-0 has the raw Qwen3.5-4B snapshot's layout, so it is served the same way.
+QWEN35_UNLOOP_BASE_TEACHER_DECOMPOSER_EXPERIMENT = replace(
+    QWEN35_UNLOOP_SFT_1_0_0_FULL_DECOMPOSER_EXPERIMENT,
+    name="qwen35-4b-unloop-base-non-thinking-teacher-qwen35-4b-unlooped-thinking",
+    manager_checkpoint=QWEN35_4B_UNLOOP_BASE,
+    manager_served_name="decomposer/qwen35-4b-unloop-base-manager",
+    manager_language_model_only=False,
+    manager_trust_remote_code=True,
+    manager_port=8085,
+    worker_port=8086,
+    service_port=8159,
+    subagent_port=2057,
+)
 ALL_EXPERIMENTS: tuple[Experiment, ...] = (
     DECOMPOSER_EXPERIMENT,
     DEEPSEEK_GEMMA_EXPERIMENT,
@@ -1764,6 +1872,10 @@ ALL_EXPERIMENTS: tuple[Experiment, ...] = (
     QWEN35_BASE_TEACHER_26B_A4B_DECOMPOSER_EXPERIMENT,
     QWEN38_LOW_QWEN35_UNLOOPED_EXPERIMENT,
     SIMPLE_QWEN35_UNLOOPED_EXPERIMENT,
+    QWEN38_NON_THINKING_QWEN35_UNLOOPED_THINKING_EXPERIMENT,
+    QWEN35_UNLOOP_SFT_1_0_0_FULL_DECOMPOSER_EXPERIMENT,
+    QWEN35_UNLOOP_SFT_1_0_0_LORA_DECOMPOSER_EXPERIMENT,
+    QWEN35_UNLOOP_BASE_TEACHER_DECOMPOSER_EXPERIMENT,
 )
 EXPERIMENTS = {experiment.name: experiment for experiment in ALL_EXPERIMENTS}
 if len(EXPERIMENTS) != len(ALL_EXPERIMENTS):

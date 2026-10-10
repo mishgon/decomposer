@@ -263,6 +263,21 @@ The registered experiments are:
 - `qwen35-4b-unlooped-non-thinking-simple`: ARE's native agent on the unlooped
   Qwen3.5-4B worker above, with the same sampling and cap, through a loopback
   proxy to the LLM proxy and without a GPU.
+- The managers of release 1.0.0 of decomposer-manager-sft, all with the
+  release's subagents (the proxy's `Qwen/Qwen3.5-4B-unlooped`, thinking, at
+  temperature 0.6, top_p 0.95, top_k 20 and no cap), the teacher prompt the
+  release was built with, and parallel manager tool calls:
+  - `qwen38-flash-non-thinking-teacher-qwen35-4b-unlooped-thinking`: the
+    release's teacher on the proxy without a GPU, non-thinking through
+    `reasoning.effort=none`, with temperature 0.7, top_p 0.8, top_k 20, min_p 0,
+    presence penalty 1.5 and repetition penalty 1.
+  - `qwen35-4b-unloop-sft-1.0.0-full-32k-non-thinking-qwen35-4b-unlooped-thinking`
+    and `…-lora-32k-…`: the full and LoRA students on one local GPU each, with
+    the unlooped model's non-thinking temperature 0.7, top_p 0.8 and top_k 20
+    and no penalty.
+  - `qwen35-4b-unloop-base-non-thinking-teacher-qwen35-4b-unlooped-thinking`:
+    the untuned unloop checkpoint the students were trained from, served the
+    same way.
 
 Runs that use the LLM proxy for a manager, worker or simple agent first check
 that the proxy serves every model they need, the judge included.
@@ -344,6 +359,13 @@ for a finished run.
   --experiment qwen38-flash-thinking-low-teacher-qwen35-4b-unlooped-non-thinking \
   --domain search \
   --num-repeats 1
+
+# A release 1.0.0 student: a local manager on one GPU, workers on the LLM proxy.
+.venv/bin/python -m evals.gaia2.run \
+  --experiment qwen35-4b-unloop-sft-1.0.0-full-32k-non-thinking-qwen35-4b-unlooped-thinking \
+  --domain execution \
+  --num-repeats 3 \
+  --cuda-visible-devices 4
 
 # Simple-agent one-scenario smoke.
 .venv/bin/python -m gyms.gaia2.run \
