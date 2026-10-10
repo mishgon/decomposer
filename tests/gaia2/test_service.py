@@ -3,6 +3,8 @@ from __future__ import annotations
 import ast
 import re
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -175,6 +177,72 @@ def test_episode_persists_thread_and_forwards_runtime_context(monkeypatch):
     assert graph.calls[1][0] == {
         "messages": [{"role": "user", "content": "[TASK]: \nmessage-2\n"}]
     }
+
+
+def test_episode_uses_current_core_factory(monkeypatch):
+    from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
+
+    class FakeModel(FakeMessagesListChatModel):
+        def bind_tools(self, tools, **kwargs):
+            return self
+
+    model = FakeModel(responses=[AIMessage(content="answer"), AIMessage(content="answer")])
+    monkeypatch.setattr(service, "_model_from_config", lambda value: model)
+    app = service.create_app({
+        "manager": {"model": "fake"},
+        "subagent_types": [{
+            "agent_type_id": "worker",
+            "description": "worker",
+            "assistant_id": "worker",
+        }],
+    })
+    with TestClient(app) as client:
+        episode_id = client.post(
+            "/v1/episodes", json={"context": _context()}
+        ).json()["episode_id"]
+        for _ in range(2):
+            response = client.post(f"/v1/episodes/{episode_id}/turn", json=_turn())
+            assert response.status_code == 200, response.text
+            assert response.json()["final_text"] == "answer"
+            assert response.json()["outstanding_subagents"] == []
+        assert client.delete(f"/v1/episodes/{episode_id}").json() == {"deleted": True}
+
+
+def test_episode_cleanup_reads_current_worker_state(monkeypatch):
+    class WorkerGraph(FakeGraph):
+        async def aget_state(self, config):
+            return SimpleNamespace(values={
+                "agents": {
+                    "worker": {"agent_type_id": "worker", "thread_id": "thread"},
+                },
+                "agent_runs": {
+                    "active": {
+                        "agent_id": "worker", "run_id": "active", "status": "running",
+                    },
+                    "finished": {
+                        "agent_id": "worker", "run_id": "finished", "status": "responded",
+                    },
+                },
+            })
+
+    sdk = SimpleNamespace(
+        runs=SimpleNamespace(cancel=AsyncMock()),
+        threads=SimpleNamespace(delete=AsyncMock()),
+    )
+    monkeypatch.setattr("langgraph_sdk.get_client", lambda **kwargs: sdk)
+    monkeypatch.setattr(service, "_model_from_config", lambda value: object())
+    monkeypatch.setattr(service, "create_decomposer_agent", lambda **kwargs: WorkerGraph())
+    app = service.create_app({
+        "manager": {"model": "fake"},
+        "subagent_types": [{"agent_type_id": "worker", "url": "http://worker"}],
+    })
+    with TestClient(app) as client:
+        episode_id = client.post(
+            "/v1/episodes", json={"context": _context()}
+        ).json()["episode_id"]
+        assert client.delete(f"/v1/episodes/{episode_id}").json() == {"deleted": True}
+    sdk.runs.cancel.assert_awaited_once_with(thread_id="thread", run_id="active", wait=False)
+    sdk.threads.delete.assert_awaited_once_with(thread_id="thread")
 
 
 def test_uncollected_subagent_is_reported_as_outstanding():

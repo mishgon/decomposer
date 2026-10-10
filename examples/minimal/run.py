@@ -3,8 +3,9 @@ import json
 import logging
 from pathlib import Path
 
-from decomposer.agent_server import agent_server, invoke_and_capture
+from decomposer.agent_server import agent_server
 from decomposer.visualization import write_trace_html
+from gyms.agent_server import invoke_and_capture
 
 logging.basicConfig(level=logging.INFO)
 
