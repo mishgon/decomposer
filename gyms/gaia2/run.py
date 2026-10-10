@@ -237,6 +237,9 @@ def runtime_configuration(experiment: Experiment) -> dict[str, Any]:
                     "max_completion_tokens": experiment.worker_max_completion_tokens,
                 }
             )
+        # Recorded only when set, so existing run identities stay valid.
+        if experiment.worker_timeout_seconds is not None:
+            subagent["timeout_seconds"] = experiment.worker_timeout_seconds
         configuration.update({"manager": manager, "subagent": subagent})
     return configuration
 
@@ -940,6 +943,8 @@ def subagent_environment(
         environment["GAIA2_SUBAGENT_MAX_MODEL_CALLS"] = str(
             experiment.subagent_max_model_calls
         )
+    if experiment.worker_timeout_seconds is not None:
+        environment["GAIA2_SUBAGENT_TIMEOUT"] = str(experiment.worker_timeout_seconds)
     return environment
 
 

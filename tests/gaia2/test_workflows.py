@@ -793,6 +793,7 @@ def test_release_teacher_runs_without_thinking_on_the_llm_proxy(
         environment["GAIA2_SUBAGENT_TOP_P"],
         environment["GAIA2_SUBAGENT_TOP_K"],
     ) == ("0.6", "0.95", "20")
+    assert environment["GAIA2_SUBAGENT_TIMEOUT"] == "600"
     for unset in (
         "MAX_COMPLETION_TOKENS",
         "MIN_P",
@@ -806,6 +807,7 @@ def test_release_teacher_runs_without_thinking_on_the_llm_proxy(
     assert configuration["manager"]["reasoning_effort"] == "none"
     assert configuration["subagent"]["thinking"] is True
     assert configuration["subagent"]["max_completion_tokens"] is None
+    assert configuration["subagent"]["timeout_seconds"] == 600
 
     plan = _dry_plan(
         repo_root,
@@ -898,6 +900,7 @@ def test_release_students_serve_one_local_manager_with_proxy_workers(
         "GAIA2_SUBAGENT_MAX_MODEL_LEN": "131072",
         "GAIA2_SUBAGENT_MAX_MODEL_CALLS": "80",
         "GAIA2_SUBAGENT_THINKING": "1",
+        "GAIA2_SUBAGENT_TIMEOUT": "600",
     }
     plan = _dry_plan(Path.cwd(), experiment, Path("/tmp/output"), ("0",), 3, None)
     assert plan["gpu_assignments"] == {"manager_vllm": "0"}
@@ -983,6 +986,8 @@ def test_local_experiments_keep_their_identity_and_gpu_rules() -> None:
             QWEN38_LOW_QWEN35_UNLOOPED_EXPERIMENT,
             worker_sampling=WorkerSampling(0.6, 0.95, 20, max_completion_tokens=0),
         )
+    with pytest.raises(ValueError, match="worker_timeout_seconds must be at least 1"):
+        replace(QWEN38_LOW_QWEN35_UNLOOPED_EXPERIMENT, worker_timeout_seconds=0)
     with pytest.raises(ValueError, match="upstream_url_env"):
         replace(SIMPLE_QWEN35_UNLOOPED_EXPERIMENT, upstream_url_env=None)
 

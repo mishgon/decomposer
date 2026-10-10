@@ -438,6 +438,8 @@ class DecomposerExperiment:
     worker_language_model_only: bool = True
     worker_trust_remote_code: bool = False
     worker_gdn_prefill_backend: str | None = None
+    # A worker request's timeout; None keeps the worker graph's 300 s.
+    worker_timeout_seconds: int | None = None
     share_local_vllm: bool = False
     manager_max_model_calls: int | None = 80
     subagent_max_model_calls: int | None = 80
@@ -453,6 +455,7 @@ class DecomposerExperiment:
         for field_name in (
             "manager_max_model_calls",
             "subagent_max_model_calls",
+            "worker_timeout_seconds",
         ):
             value = getattr(self, field_name)
             if value is not None and value < 1:
@@ -1737,7 +1740,8 @@ QWEN35_4B_UNLOOP_SFT_1_0_0_LORA = Path(
     "/mnt/share14T-2/sukhorukov/decomposer_artifacts/training/sft/checkpoints"
     "/qwen35-4b-unloop-nonthinking-manager-sft-1.0.0-lora-32k/final"
 )
-# tau2's lmrouter/qwen_3_5_4b_unlooped_thinking preset, the release's subagents.
+# tau2's lmrouter/qwen_3_5_4b_unlooped_thinking preset, the release's subagents;
+# the entries below also give them its 600 s request timeout.
 QWEN35_4B_UNLOOPED_THINKING_SAMPLING = WorkerSampling(
     temperature=0.6, top_p=0.95, top_k=20
 )
@@ -1758,6 +1762,7 @@ QWEN38_NON_THINKING_QWEN35_UNLOOPED_THINKING_EXPERIMENT = replace(
     manager_parallel_tool_calls=True,
     manager_thinking=False,
     worker_thinking=True,
+    worker_timeout_seconds=600,
 )
 # The unloop student samples with the unlooped model's non-thinking values, which
 # send no penalty (gyms/qwen_sampling.py), and keeps the manager uncapped.
@@ -1792,6 +1797,7 @@ QWEN35_UNLOOP_SFT_1_0_0_FULL_DECOMPOSER_EXPERIMENT = DecomposerExperiment(
     worker_tool_call_parser="qwen3_xml",
     worker_reasoning_parser=None,
     worker_language_model_only=False,
+    worker_timeout_seconds=600,
     manager_max_model_calls=80,
     subagent_max_model_calls=80,
     manager_recursion_limit=1000,

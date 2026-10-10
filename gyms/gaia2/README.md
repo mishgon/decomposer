@@ -265,8 +265,9 @@ The registered experiments are:
   proxy to the LLM proxy and without a GPU.
 - The managers of release 1.0.0 of decomposer-manager-sft, all with the
   release's subagents (the proxy's `Qwen/Qwen3.5-4B-unlooped`, thinking, at
-  temperature 0.6, top_p 0.95, top_k 20 and no cap), the teacher prompt the
-  release was built with, and parallel manager tool calls:
+  temperature 0.6, top_p 0.95, top_k 20, no cap and a 600 s request timeout),
+  the teacher prompt the release was built with, and parallel manager tool
+  calls:
   - `qwen38-flash-non-thinking-teacher-qwen35-4b-unlooped-thinking`: the
     release's teacher on the proxy without a GPU, non-thinking through
     `reasoning.effort=none`, with temperature 0.7, top_p 0.8, top_k 20, min_p 0,
