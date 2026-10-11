@@ -20,14 +20,14 @@ then run a bounded smoke:
 ```bash
 source gyms/wideseek/env.sh
 gyms/wideseek/.venv/bin/python -m sft.wideseek.run --agent decomposer \
-  --student-tokenizer /path/to/student-tokenizer \
   --output artifacts/sft/wideseek/runs/smoke --limit 4 -n 1 --concurrency 2
 ```
 
 Repeat the same command with `--resume` to skip saved results and retry interrupted
 executions in fresh directories. Completed results are never rerun. Task data
-and model settings must match the saved manifest. Each attempt records its Git
-revision; use a new run directory when comparing harness versions.
+and model settings, Git revision, source hashes, prompts and run budgets must
+match the saved manifest. This includes uncommitted source changes. Older manifests
+without the harness fingerprint cannot be resumed; their saved traces remain intact.
 
 ## Coverage-First Collection
 
@@ -49,7 +49,6 @@ For the full 20,000-task width split, the prepared command is:
 ```bash
 source gyms/wideseek/env.sh
 gyms/wideseek/.venv/bin/python -m sft.wideseek.run --agent decomposer --adaptive \
-  --student-tokenizer /path/to/student-tokenizer \
   --output artifacts/sft/wideseek/runs/width-coverage \
   --limit 20000 -n 1 --concurrency 2
 ```
@@ -57,11 +56,10 @@ gyms/wideseek/.venv/bin/python -m sft.wideseek.run --agent decomposer --adaptive
 This command is not scheduled automatically. Models, reasoning preservation and
 context limits are unchanged from the smoke. Choose concurrency before launch.
 
-The required student tokenizer enables shared `sft/sequence_limit.py` middleware
-on every collection run. Above 32,768 student tokens, the teacher stops after its
-current response. The attempt is `skipped`, not an error or success; all raw
-messages and diagnostic scores remain saved. Batch filtering uses the same
-`sft/filtering.py` implementation as Toolathlon collection.
+Collection has no trace-length cutoff and requires no student tokenizer.
+`--episode-timeout` covers execution, worker cleanup and evaluation (default:
+2,700 seconds). Emergency cleanup may take up to 60 additional seconds after
+the deadline. Model context limits and agent run budgets still apply.
 
 `scheduler.json` saves policy, per-task counts, culling and waves before launches.
 Resume the same command with `--resume`: saved results count toward both budgets
@@ -72,7 +70,7 @@ and coverage; only unfinished attempts in the saved wave launch again.
 
 The fixed schedule runs each selected task `-n` times. Increase `--limit` to select
 more tasks; the prepared width dataset has 20,000 tasks. The collector imposes no
-extra sampling or generation limits. Agent timeout is 45 minutes and recursion
+extra sampling or generation limits. Episode timeout is 45 minutes and recursion
 limits are 410; the hosted deployment enforces its own context/output limits.
 
 `successful-traces.jsonl` contains normally finished, scored traces with native

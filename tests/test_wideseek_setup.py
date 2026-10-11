@@ -35,14 +35,14 @@ def test_collection_resume_and_paths_outside_repository(tmp_path, monkeypatch):
         before = json.loads((tmp_path / "run/manifest.json").read_text())
         assert before["revision"]
         assert before["settings"]["data_sha256"]
-        assert "source_sha256" not in before
+        assert before["settings"]["harness"]["source_sha256"]
         with pytest.raises(FileExistsError):
             asyncio.run(prepare_run(args))
         monkeypatch.chdir(REPO_ROOT)
         args.output = tmp_path / "run"
         args.resume = True
         asyncio.run(prepare_collection(args))
-        args.timeout += 1
+        args.episode_timeout += 1
         with pytest.raises(ValueError, match="settings or task data differ"):
             asyncio.run(prepare_collection(args))
     assert before == json.loads((tmp_path / "run/manifest.json").read_text())
@@ -90,3 +90,59 @@ def test_setup_installs_only_into_gym_environment(tmp_path):
     assert calls[0] == ["venv", "--python", "3.12", "gyms/wideseek/.venv"]
     assert all(call[3] == "gyms/wideseek/.venv/bin/python" for call in calls[1:])
     assert list(root_venv.iterdir()) == [root_venv / "keep"]
+
+
+@pytest.mark.parametrize('change', ['source', 'prompt', 'budget', 'revision', 'legacy'])
+def test_resume_rejects_changed_harness_without_writing(tmp_path, monkeypatch, change):
+    from copy import deepcopy
+    from sft.wideseek import run as collector
+
+    previous = {'revision': 'old', 'settings': {'harness': {
+        'source_sha256': 'original', 'agent_system_prompt': 'original',
+        'agent_run_budget_seconds': 60, 'agent_shutdown_grace_seconds': 60,
+    }}}
+    current = deepcopy(previous)
+    if change == 'revision':
+        current['revision'] = 'new'
+    elif change == 'legacy':
+        previous['settings'].pop('harness')
+    else:
+        field = {'source': 'source_sha256', 'prompt': 'agent_system_prompt',
+                 'budget': 'agent_run_budget_seconds'}[change]
+        current['settings']['harness'][field] = 'changed'
+    path = tmp_path / 'manifest.json'
+    path.write_text(json.dumps(previous))
+    before = path.read_bytes()
+    monkeypatch.setattr(collector, 'describe_run', AsyncMock(return_value=([], tmp_path, current)))
+    with pytest.raises(ValueError, match='harness revision'):
+        asyncio.run(collector.prepare_collection(SimpleNamespace(resume=True)))
+    assert path.read_bytes() == before
+
+
+def test_harness_fingerprint_includes_uncommitted_prompt_changes(tmp_path, monkeypatch):
+    from gyms.wideseek import run
+
+    for relative in ('gyms/model_logging.py', 'gyms/usage.py', 'gyms/wideseek/langgraph.json',
+                     'gyms/wideseek/prompts.py'):
+        path = tmp_path / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text('original')
+    data = tmp_path / 'tasks.jsonl'
+    data.write_text(json.dumps({'task_id': 'task', 'question': 'Q'}) + '\n')
+    args = run.create_parser().parse_args(['--agent', 'react', '--output', str(tmp_path / 'run'),
+                                         '--data', str(data)])
+    args.mode = 'simple'
+    monkeypatch.setattr(run, 'REPO_ROOT', tmp_path)
+    monkeypatch.setattr(run.subprocess, 'check_output', lambda *a, **kw: 'same-commit')
+    monkeypatch.setattr(run, 'model', lambda _: SimpleNamespace(model_name='test'))
+    http = MagicMock()
+    response = MagicMock()
+    response.json.return_value = {'status': 'ready'}
+    http.__aenter__ = AsyncMock(return_value=SimpleNamespace(get=AsyncMock(return_value=response)))
+    http.__aexit__ = AsyncMock()
+    monkeypatch.setattr(run.httpx, 'AsyncClient', lambda **kwargs: http)
+    original = asyncio.run(run.describe_run(args))[2]
+    (tmp_path / 'gyms/wideseek/prompts.py').write_text('changed without a commit')
+    changed = asyncio.run(run.describe_run(args))[2]
+    assert original['revision'] == changed['revision']
+    assert original['settings']['harness']['source_sha256'] != changed['settings']['harness']['source_sha256']

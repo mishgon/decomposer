@@ -70,7 +70,7 @@ class ScoreTests(unittest.IsolatedAsyncioTestCase):
         graph.aget_state = AsyncMock(return_value=SimpleNamespace(values={}))
         policy = MagicMock()
         policy.http_async_client.aclose = AsyncMock()
-        args = SimpleNamespace(agent="react", model_calls=2, output_tokens=100, worker_url="http://unused", timeout=1)
+        args = SimpleNamespace(agent="react", model_calls=2, output_tokens=100, worker_url="http://unused", episode_timeout=1)
         task = {"task_id": "test", "question": "Question", "answer": "Answer", "unique_columns": []}
         with tempfile.TemporaryDirectory() as folder, patch("gyms.wideseek.run.model", return_value=policy), \
                 patch("gyms.wideseek.run.agents.react", return_value=graph), \
@@ -101,7 +101,7 @@ class ScoreTests(unittest.IsolatedAsyncioTestCase):
             values={"messages": [HumanMessage(content="unfinished task")]}))
         policy = MagicMock()
         policy.http_async_client.aclose = AsyncMock()
-        args = SimpleNamespace(agent="react", model_calls=None, output_tokens=None, worker_url="http://unused", timeout=1)
+        args = SimpleNamespace(agent="react", model_calls=None, output_tokens=None, worker_url="http://unused", episode_timeout=1)
         tasks = [{"task_id": name, "question": "Question", "answer": "Answer", "unique_columns": []}
                  for name in ("limited", "healthy")]
         judge = AsyncMock(return_value={"score": 0.})
@@ -219,3 +219,17 @@ class ScoreTests(unittest.IsolatedAsyncioTestCase):
 
 
 if __name__ == "__main__": unittest.main()
+
+
+def test_researcher_prompt_keeps_common_and_environment_instructions(monkeypatch):
+    from gyms.wideseek import agents
+    from gyms.wideseek.prompts import AGENT_SYSTEM_PROMPT
+
+    captured = {}
+    monkeypatch.setattr(agents, 'model', lambda _: object())
+    monkeypatch.setattr(agents, 'create_agent', lambda *args, **kwargs: captured.update(kwargs))
+    agents.researcher()
+    assert captured['system_prompt'] == AGENT_SYSTEM_PROMPT
+    agents.react(object(), None)
+    assert captured['system_prompt'] == AGENT_SYSTEM_PROMPT
+    assert agents.REACT_MODEL == agents.RESEARCHER_MODEL

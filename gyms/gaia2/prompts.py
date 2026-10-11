@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Literal, cast
 
-from decomposer.prompts import DECOMPOSER_SYSTEM_PROMPT
+from decomposer.prompts import DECOMPOSER_SYSTEM_PROMPT, RUN_BUDGET_CONVENTION
 
 Gaia2ManagerPromptAddendumProfile = Literal["gaia2-ambiguity"]
 
@@ -25,7 +25,12 @@ def compose_decomposer_system_prompt(
 ) -> str:
     """Resolve the base Decomposer prompt and an optional GAIA2 addendum."""
 
-    prompt = DECOMPOSER_SYSTEM_PROMPT
+    prompt = DECOMPOSER_SYSTEM_PROMPT.replace(
+        "{run_budget_convention}\n\n",
+        RUN_BUDGET_CONVENTION.format(
+            agent_run_budget_seconds=60.0, agent_shutdown_grace_seconds=60.0,
+        ) + "\n\n",
+    )
     if addendum_profile is None:
         return prompt
     try:

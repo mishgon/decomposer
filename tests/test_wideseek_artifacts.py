@@ -60,7 +60,7 @@ def test_episode_manifest_and_html(tmp_path):
                                    "prompt": "question", "response": "answer"}]})
     graph.aget_state = AsyncMock(return_value=SimpleNamespace(values={}))
     args = SimpleNamespace(agent="decomposer", mode="decomposer", concurrency=2,
-                           model_calls=None, output_tokens=None, worker_url="http://unused", timeout=1)
+                           model_calls=None, output_tokens=None, worker_url="http://unused", episode_timeout=1)
     task = {"task_id": "task", "question": "question", "answer": "answer", "unique_columns": []}
     (tmp_path / "manifest.json").write_text(json.dumps({"episodes": []}))
     with patch("gyms.wideseek.run.model", return_value=SimpleNamespace()), \
@@ -98,3 +98,30 @@ def test_logging_inside_agent_graph(tmp_path):
     records = [json.loads(line) for line in (path / "model_calls.jsonl").read_text().splitlines()]
     assert records[0]["thread_id"] == "real-graph"
     assert records[1]["status"] == "success"
+
+
+def test_episode_setup_failure_does_not_interrupt_batch(tmp_path):
+    from gyms.wideseek import run
+    from gyms.wideseek.runtime import save
+
+    save(tmp_path / 'manifest.json', {'episodes': []})
+    tasks = [{'task_id': name} for name in ('broken', 'healthy')]
+    args = SimpleNamespace(mode='decomposer', concurrency=1)
+
+    async def execute(task, mode, attempt, root, args, **kwargs):
+        if task['task_id'] == 'broken':
+            raise ValueError('setup failed')
+        save(root / mode / task['task_id'] / 'attempt-001/result.json', {
+            'episode_id': 'healthy', 'task_id': 'healthy', 'task': 'healthy',
+            'attempt': 1, 'repetition': 1, 'status': 'finished', 'started_at': 0,
+            'finished_at': 1, 'trace_path': 'trace.json', 'evaluation': {'score': 1.},
+        })
+
+    with patch.object(run, 'episode', side_effect=execute):
+        asyncio.run(run_jobs(tasks, [(task['task_id'], 1) for task in tasks], tmp_path, args))
+    manifest = json.loads((tmp_path / 'manifest.json').read_text())
+    assert manifest['status'] == 'completed'
+    assert [row['status'] for row in manifest['episodes']] == ['error', 'finished']
+    failed = json.loads((tmp_path / 'decomposer/broken/attempt-001/result.json').read_text())
+    assert failed['error'] == 'ValueError: setup failed'
+    assert failed['evaluation']['score'] is None

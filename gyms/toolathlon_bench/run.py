@@ -335,7 +335,6 @@ def create_parser() -> argparse.ArgumentParser:
     parser.add_argument("--evals-dir", type=Path, default=DEFAULT_EVALS_DIR)
     parser.add_argument("--startup-timeout", type=float, default=180)
     parser.add_argument("--n-jobs-per-worker", type=int, default=1000)
-    parser.add_argument("--agent-timeout", type=float, default=2700)
     parser.add_argument("--container-lock-file", type=Path, help=argparse.SUPPRESS)
     return parser
 
@@ -345,8 +344,8 @@ def run_episode(args) -> None:
     args.harness = "decomposer" if args.agent == "decomposer" else "react"
     if args.n_jobs_per_worker < 1:
         parser.error("--n-jobs-per-worker must be at least 1")
-    if args.agent_timeout <= 0:
-        parser.error("--agent-timeout must be positive")
+    if args.episode_timeout <= 0:
+        parser.error("--episode-timeout must be positive")
     tasks_dir = (TOOLATHLON_ROOT / "tasks" / "finalpool").resolve()
     task_dir = (tasks_dir / args.task).resolve()
     if task_dir.parent != tasks_dir or not task_dir.is_dir():
@@ -507,7 +506,6 @@ def run_episode(args) -> None:
             args.agent,
             {"messages": [{"role": "user", "content": bundle["task_str"]}]},
             thread_id=thread_id,
-            timeout=args.agent_timeout,
             config={"recursion_limit": 410},
         ))
         agent_error = repr(agent_exception) if agent_exception is not None else None

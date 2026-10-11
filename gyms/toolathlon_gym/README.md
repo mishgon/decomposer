@@ -31,7 +31,7 @@ Choose models in [agents.py](agents.py); their sampling settings are defined in
 [models.py](../../src/decomposer/models.py). The container records its model IDs
 and settings in `runtime.json`, which the runner copies into `trace.json`.
 
-Defaults: 45-minute agent timeout, 55-minute total episode timeout, recursion
+Defaults: 55-minute total episode timeout, recursion
 limit 410. Decomposer uses upstream's `new / fork / run / wait` interface.
 
 ## Raw Outputs
@@ -49,7 +49,7 @@ After saving the native evaluation, Decomposer episodes generate `trace.html`
 next to `trace.json` using `decomposer.visualization.write_trace_html`.
 A visualization error produces a warning and preserves the episode's result.
 
-An agent timeout/model failure retains partial messages, cancels active remote
+An episode timeout or model failure retains partial messages, cancels active remote
 runs and waits for them to stop before native evaluation. This also covers ReAct
 runs and runs launched just before a checkpoint was interrupted. If shutdown
 cannot be confirmed within 60 seconds, the evaluator is skipped and the attempt

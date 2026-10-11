@@ -188,11 +188,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                     "toolathlon_mcp": True,
                 }
             tools.extend(mcp_tools)
+        app.state.workspace = task_config["agent_workspace"]
         app.state.tools = tools
         try:
             yield
         finally:
             del app.state.tools
+            del app.state.workspace
 
 
 app = FastAPI(lifespan=lifespan)
@@ -202,4 +204,8 @@ def get_tools() -> list[BaseTool]:
     tools = getattr(app.state, "tools", None)
     if tools is None:
         raise RuntimeError("Agent tools have not started")
-    return tools.copy()
+    return [tool for tool in tools if tool.name not in {"claim_done", "local-claim_done"}]
+
+
+def get_workspace() -> str:
+    return app.state.workspace

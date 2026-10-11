@@ -26,7 +26,7 @@ Both roles use `create_model(model_id)` from [models.py](../../src/decomposer/mo
 Choose models in [agents.py](agents.py). The runner passes the key into the task
 container by its environment variable name, without storing it in artifacts.
 
-Defaults: 45-minute agent timeout, 100-minute total episode timeout (Toolathlon
+Defaults: 100-minute total episode timeout (Toolathlon
 preprocess and native evaluation can each take tens of minutes), recursion limit 410.
 Decomposer uses upstream's `new / fork / run / wait` interface.
 

@@ -101,7 +101,7 @@ def get_tools() -> list[BaseTool]:
     tools = getattr(app.state, "tools", None)
     if tools is None:
         raise RuntimeError("Agent tools have not started")
-    return tools.copy()
+    return [tool for tool in tools if tool.name not in {"claim_done", "local-claim_done"}]
 
 
 def get_runtime() -> dict[str, Any]:

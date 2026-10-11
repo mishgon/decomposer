@@ -50,7 +50,6 @@ RESUME_CONFIG_FIELDS = (
     "n_jobs_per_worker",
     "container_slots",
     "concurrency",
-    "agent_timeout",
     "episode_timeout",
 )
 
@@ -232,12 +231,6 @@ def parse_args(argv: Sequence[str], defaults: dict[str, Any]) -> argparse.Namesp
         help="Balanced qualifying traces requested per retained task (default: 4).",
     )
     parser.add_argument(
-        "--agent-timeout",
-        type=float,
-        default=2700,
-        help="Maximum seconds spent in the Decomposer loop (default: 2700).",
-    )
-    parser.add_argument(
         "--episode-timeout",
         type=float,
         default=3300,
@@ -273,8 +266,8 @@ def parse_args(argv: Sequence[str], defaults: dict[str, Any]) -> argparse.Namesp
         parser.error("--concurrency must be at least 1")
     if args.container_slots < 1:
         parser.error("--container-slots must be at least 1")
-    if args.agent_timeout <= 0 or args.episode_timeout <= 0:
-        parser.error("--agent-timeout and --episode-timeout must be positive")
+    if args.episode_timeout <= 0:
+        parser.error("--episode-timeout must be positive")
     return args
 
 
@@ -438,7 +431,6 @@ def episode_command(
         "--evals-dir", str(root / "evals"),
         "--startup-timeout", str(args.startup_timeout),
         "--n-jobs-per-worker", str(args.n_jobs_per_worker),
-        "--agent-timeout", str(getattr(args, "agent_timeout", 2700)),
         "--container-lock-file",
         str(
             root
@@ -661,8 +653,6 @@ def _run_collection(args, run_dir, *, repo_root, toolathlon_root, docker):
         for name in RESUME_CONFIG_FIELDS:
             if name == "container_slots" and name not in manifest["config"]:
                 setattr(args, name, 1)
-            elif name == "agent_timeout" and name not in manifest["config"]:
-                setattr(args, name, 1800)
             elif name == "episode_timeout" and name not in manifest["config"]:
                 setattr(args, name, 2400)
             elif (
