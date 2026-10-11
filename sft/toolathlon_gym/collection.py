@@ -20,7 +20,6 @@ from typing import Any, Callable, Sequence
 
 from . import scheduler as adaptive_scheduler
 from gyms.toolathlon_gym.parallel import execute
-from sft.filtering import MAX_SEQUENCE_LENGTH
 
 
 SCHEMA_VERSION = 1
@@ -695,13 +694,7 @@ def _run_collection(args, run_dir, *, repo_root, toolathlon_root, docker):
             target_successes=state["target_successes"],
         )
 
-    image = json.loads(docker("image", "inspect", args.image).stdout)[0]
-    labels = image["Config"].get("Labels") or {}
-    if labels.get("org.decomposer.sft.sequence-limit") != str(MAX_SEQUENCE_LENGTH):
-        raise ValueError(
-            "SFT collection requires the sequence-limited image. Build it with "
-            "sft/toolathlon_gym/inference/Dockerfile.refresh; a plain gym image has no SFT guard."
-        )
+    docker("image", "inspect", args.image)
     manifest.update(status="running", finished_at=None)
     manifest.setdefault("invocations", []).append(
         {
@@ -763,6 +756,9 @@ def _run_collection(args, run_dir, *, repo_root, toolathlon_root, docker):
             remaining = iter(work)
             progress_started = time.monotonic()
             finished = 0
+            score_sum = 0.0
+            scored = 0
+            pass_or_score_ge90 = 0
             outcomes = dict(solved=0, unsolved=0, unscored=0, errors=0, length_limit=0)
 
             def print_progress() -> None:
@@ -772,12 +768,15 @@ def _run_collection(args, run_dir, *, repo_root, toolathlon_root, docker):
                 eta = format_duration(remaining_count * 3600 / rate) if rate else "waiting for results"
                 if outcomes["errors"] and remaining_count:
                     eta = "unreliable (episode errors)"
+                mean_score = f"{score_sum / scored:.2%}" if scored else "n/a"
                 scope = "current wave" if args.adaptive else "this invocation"
                 print(
                     f"Progress ({scope}): {finished}/{len(work)} finished | "
                     f"solved={outcomes['solved']} unsolved={outcomes['unsolved']} "
                     f"unscored={outcomes['unscored']} errors={outcomes['errors']} "
                     f"length_limit={outcomes['length_limit']} | "
+                    f"mean_score={mean_score} scored={scored} | "
+                    f"pass_or_score_ge90={pass_or_score_ge90} | "
                     f"active={len(active)} queued={remaining_count - len(active)} | "
                     f"elapsed {format_duration(elapsed)} | {rate:.1f} episodes/hour | remaining ~{eta}",
                     flush=True,
@@ -886,6 +885,15 @@ def _run_collection(args, run_dir, *, repo_root, toolathlon_root, docker):
                             raise
                         record_result(episode, result)
                         finished += 1
+                        partial_score = result.get("partial_score")
+                        if result["status"] == "completed" and (
+                            result.get("score") is True
+                            or (partial_score is not None and partial_score["fraction"] >= 0.9)
+                        ):
+                            pass_or_score_ge90 += 1
+                        if result["status"] == "completed" and partial_score is not None:
+                            score_sum += partial_score["fraction"]
+                            scored += 1
                         if result["status"] == "skipped":
                             outcome = "length_limit"
                         elif result["status"] == "failed":

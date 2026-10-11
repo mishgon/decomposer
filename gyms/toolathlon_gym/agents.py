@@ -5,8 +5,8 @@ from decomposer.prompts import AGENT_SYSTEM_PROMPT
 from langchain.agents import create_agent
 
 
-QWEN_3_5_4B_THINKING_MODEL_ID = "lmrouter/qwen_3_5_4b_unlooped_thinking"
-DECOMPOSER_MODEL_ID = "lmrouter/qwen_3_8_flash_next_non_thinking"
+QWEN_3_5_4B_THINKING_MODEL_ID = "vllm/qwen_3_5_4b_thinking"
+DECOMPOSER_MODEL_ID = "vllm/qwen_3_8_flash_next_non_thinking"
 
 
 def qwen_3_5_4b_thinking():

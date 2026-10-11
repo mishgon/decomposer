@@ -13,28 +13,23 @@ from sft.filtering import StudentSequenceFilter, student_messages, tokenize_stud
 from sft.sequence_limit import StudentSequenceLimit
 
 
-def test_collection_tokenizer_loads_outside_event_loop(monkeypatch):
+def test_collection_uses_gym_agent_without_sequence_limit(monkeypatch):
     import importlib.util
     from pathlib import Path
     import sys
-    import threading
     from types import SimpleNamespace
 
-    main_thread = threading.get_ident()
-    def load(path, *, local_files_only):
-        assert threading.get_ident() != main_thread
-        assert path == '/opt/sft-tokenizer' and local_files_only
-        return Tokenizer(1)
-
-    monkeypatch.setitem(sys.modules, 'transformers', SimpleNamespace(
-        AutoTokenizer=SimpleNamespace(from_pretrained=load)))
-    monkeypatch.setitem(sys.modules, 'agents', SimpleNamespace(decomposer=lambda **kw: kw))
+    factory = lambda **kwargs: kwargs
+    monkeypatch.setitem(sys.modules, 'agents', SimpleNamespace(decomposer=factory))
     path = Path(__file__).resolve().parents[1] / 'sft/toolathlon_gym/agents.py'
     spec = importlib.util.spec_from_file_location('collection_agents_test', path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    graph = asyncio.run(module.decomposer())
-    assert isinstance(graph['middleware'][0], StudentSequenceLimit)
+    import inspect
+
+    assert not inspect.signature(module.decomposer).parameters
+    assert asyncio.run(module.decomposer()) == {}
+
 
 class Tokenizer:
     name_or_path = 'test-tokenizer'
@@ -107,7 +102,7 @@ def test_collection_entrypoint_defaults_to_guarded_image(monkeypatch):
     assert calls[0][1]['default_image'] == 'decomposer-toolathlon-sft:latest'
 
 
-def test_collection_rejects_plain_gym_image(tmp_path):
+def test_collection_accepts_image_without_sequence_limit(tmp_path, monkeypatch):
     import json
     from subprocess import CompletedProcess
     from sft.toolathlon_gym import collection
@@ -116,9 +111,13 @@ def test_collection_rejects_plain_gym_image(tmp_path):
     def docker(*args):
         assert args == ('image', 'inspect', 'plain-gym')
         return CompletedProcess(args, 0, stdout=json.dumps([{'Config': {'Labels': {}}}]))
-    with pytest.raises(ValueError, match='plain gym image has no SFT guard'):
-        collection.main(['--tasks', 'task'], repo_root=tmp_path, toolathlon_root=tmp_path,
-                        default_artifacts_dir=tmp_path/'artifacts', default_image='plain-gym', docker=docker)
+    monkeypatch.setattr(collection, 'execute_episode', lambda args, **kwargs: {
+        'attempt': kwargs['attempt'], 'status': 'completed', 'score': True,
+    })
+    manifest = collection.main(['--tasks', 'task'], repo_root=tmp_path, toolathlon_root=tmp_path,
+                               default_artifacts_dir=tmp_path/'artifacts', default_image='plain-gym', docker=docker)
+    assert manifest['status'] == 'completed'
+    assert manifest['episodes'][0]['score'] is True
 
 
 class Policy(BaseChatModel):

@@ -9,8 +9,7 @@ It invokes the shared Gym episode runner and process supervisor.
 Load router credentials into the environment without placing keys in commands.
 Confirm exact deployment IDs and perform a one-task smoke before a full run.
 
-Build the collection image using the student tokenizer snapshot (tokenizer files
-only, no model weights). The base Gym image must include the current
+Build the collection image. The base Gym image must include the current
 `gyms/toolathlon_gym/requirements.txt` dependencies.
 
 ```bash
@@ -19,9 +18,7 @@ docker build -f sft/toolathlon_gym/inference/Dockerfile.refresh \
   -t decomposer-toolathlon-sft:latest .
 ```
 
-Place that snapshot in `student-tokenizer/` in the build context. The build checks
-that it loads offline. The collector defaults to this SFT image and rejects plain
-Gym images, including on resume, so it cannot silently omit early stopping.
+Collection uses the Gym agent directly and does not require a student tokenizer.
 
 ```bash
 PYTHONPATH=src:. python -m sft.toolathlon_gym.run \
@@ -54,23 +51,13 @@ previously validated Python 3.12 runtime image without downloading dependencies.
 It preserves that image's system packages and task-service patches. Record both
 the base image ID and the resulting image ID when using it.
 
-After each teacher response, shared `sft/sequence_limit.py` counts the student
-sequence using `sft/filtering.py`: system prompt, tools, messages and observations,
-without teacher reasoning or a generation prompt. Above 32,768 tokens it stops
-before executing further tools. Raw reasoning and traces are retained. The result
-is `skipped` with `stop_reason=sequence_limit`: it consumes an attempt slot but
-counts as neither an error nor a success. Native scores remain diagnostic.
+Collection has no trace-length cutoff. `--episode-timeout` limits episode duration;
+the model server still enforces its context window. Qwen3.8 is served with a
+65,536-token context. Agent run budgets remain separate from the episode timeout.
 
-The same filter checks individual traces or batches before SFT:
-
-```bash
-PYTHONPATH=src:. python -m sft.filtering --tokenizer student-tokenizer trace1.json trace2.json
-```
-
-Use the same tokenizer snapshot as training. New traces save the prompt and tool
-schemas as `sft_format`; historical traces without them need those inputs supplied
-explicitly through the Python API. This branch does not change the training code
-maintained on the separate `sft` branch.
+`sft/filtering.py` remains available for filtering saved traces before training.
+Tokenization requires the student tokenizer and the system prompt and tool schemas
+used for the trace; collection no longer records `sft_format` automatically.
 
 ### Integration Into SFT Training
 
@@ -143,8 +130,7 @@ The queue submits every task once before submitting the next pass, regardless
 of scores. Passes may overlap while earlier episodes finish. `--concurrency`
 limits active episodes; `--container-slots` limits concurrent container setup
 and cleanup. The values above are starting points for measuring throughput.
-Sequence-length early stopping is enabled by the SFT image. The 30-minute episode
-timeout remains a safety bound and includes setup and lock waits; shutdown and
+The 30-minute episode timeout includes setup and lock waits; shutdown and
 cleanup can take additional time. Failed attempts remain in the raw artifacts
 and must be excluded from training. On resume, the collector retries failed attempts.
 
@@ -153,7 +139,12 @@ Each finished episode logs its task, attempt, duration, and outcome: `SOLVED`,
 error and a log path. The progress summary separates those outcomes and shows
 active/queued counts, elapsed time, episodes/hour, and estimated remaining time
 in days/hours/minutes/seconds. It refreshes on completions and every 30 seconds
-while waiting. If episodes fail, remaining time is marked unreliable. Completed,
+while waiting. `mean_score` averages numeric check fractions from completed
+episodes in the current invocation or adaptive wave; `scored` shows their count.
+Episodes without a numeric score, errors, and length-limit stops are excluded.
+`pass_or_score_ge90` counts completed episodes with a full pass or a numeric
+score of at least 90%, counting each episode once.
+If episodes fail, remaining time is marked unreliable. Completed,
 failed, and length-skipped episodes all count as finished. Resume resets the
 measurement and estimates only the remaining work; adaptive mode reports the
 current wave. The first estimates include startup and can fluctuate substantially.

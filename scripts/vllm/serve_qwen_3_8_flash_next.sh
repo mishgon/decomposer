@@ -18,7 +18,7 @@ docker run --rm --name goncharov-qwen38-flash-next \
   --tensor-parallel-size 4 \
   --moe-backend triton \
   --gpu-memory-utilization 0.85 \
-  --max-model-len 32768 \
+  --max-model-len 65536 \
   --max-num-seqs 64 \
   --enable-prefix-caching \
   --no-enable-flashinfer-autotune \

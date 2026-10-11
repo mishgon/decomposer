@@ -16,6 +16,9 @@ from gyms.toolathlon_gym.task import model_metadata
 def test_render_failure_preserves_evaluation_and_container_metadata(tmp_path, monkeypatch, caplog, agent_failed, skipped):
     monkeypatch.delenv("LLM_PROXY_MASTER_KEY", raising=False)
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-openrouter-secret")
+    monkeypatch.setenv("https_proxy", "http://user:test-proxy-secret@proxy:8080")
+    monkeypatch.setenv("no_proxy", "lower.example")
+    monkeypatch.setenv("NO_PROXY", "upper.example")
     monkeypatch.delenv("LLM_PROXY_UNIX_SOCKET", raising=False)
     monkeypatch.setattr(gym, "TOOLATHLON_ROOT", tmp_path / "toolathlon")
     (gym.TOOLATHLON_ROOT / "tasks/finalpool/task").mkdir(parents=True)
@@ -46,6 +49,14 @@ def test_render_failure_preserves_evaluation_and_container_metadata(tmp_path, mo
         elif args[0] == "run" and args[-1] == gym.DEFAULT_IMAGE:
             assert ("--env", "OPENROUTER_API_KEY") in list(zip(args, args[1:]))
             assert "test-openrouter-secret" not in " ".join(args)
+            assert ("--env", "https_proxy") in list(zip(args, args[1:]))
+            assert "test-proxy-secret" not in " ".join(args)
+            for name in ("no_proxy", "NO_PROXY"):
+                value = next(arg.split("=", 1)[1] for arg in args if arg.startswith(name + "="))
+                assert set(value.split(",")) >= {
+                    "lower.example", "upper.example", "localhost", "127.0.0.1",
+                    "host.docker.internal", "postgres", "api.notion.com",
+                }
             (episode / "runtime.json").write_text(json.dumps(runtime))
         elif args[0] == "exec" and "cat" in args:
             output = '{"pass": true}'
@@ -172,3 +183,103 @@ def test_sft_collection_does_not_require_router_credentials(tmp_path, monkeypatc
             docker=docker,
         )
     docker.assert_called_once_with("image", "inspect", "test-image")
+
+
+def test_sft_collection_orders_episodes_by_dataset_pass(tmp_path):
+    from sft.toolathlon_gym import collection
+
+    args = collection.parse_args(
+        ["--all", "-n", "2", "--episode-timeout", "900"],
+        {"image": "test-image", "artifacts_dir": tmp_path},
+    )
+    manifest = collection.create_manifest("test-run", ["task-a", "task-b"], 2, args)
+    assert [episode["key"] for episode in manifest["episodes"]] == [
+        "task-a::rep-001", "task-b::rep-001",
+        "task-a::rep-002", "task-b::rep-002",
+    ]
+    assert manifest["config"]["episode_timeout"] == 900
+
+
+@pytest.mark.parametrize("network_error", ["Pool overlaps with other one on this address space", "permission denied"])
+def test_episode_network_allocation_retries_only_overlaps(tmp_path, monkeypatch, network_error):
+    monkeypatch.delenv("LLM_PROXY_UNIX_SOCKET", raising=False)
+    monkeypatch.setattr(gym, "TOOLATHLON_ROOT", tmp_path / "toolathlon")
+    (gym.TOOLATHLON_ROOT / "tasks/finalpool/task").mkdir(parents=True)
+    subnets = []
+
+    def docker(*args, check=True):
+        if args[:2] == ("network", "create"):
+            subnets.append(args[args.index("--subnet") + 1])
+            if len(subnets) == 1:
+                return CompletedProcess(args, 1, stdout="", stderr=network_error)
+        if args[0] == "run":
+            raise RuntimeError("reached PostgreSQL startup")
+        return CompletedProcess(args, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(gym, "_docker", docker)
+    cleanup = MagicMock()
+    monkeypatch.setattr(gym, "_cleanup_episode", cleanup)
+    args = gym.create_parser().parse_args([
+        "task", "--episode-id", "episode", "--artifacts-dir", str(tmp_path / "traces"),
+        "--evals-dir", str(tmp_path / "evals"),
+    ])
+    overlap = network_error.startswith("Pool overlaps")
+    with pytest.raises(RuntimeError, match="reached PostgreSQL startup" if overlap else "permission denied"):
+        gym.run_episode(args)
+    assert len(subnets) == (2 if overlap else 1)
+    assert len(set(subnets)) == len(subnets)
+    assert all(subnet.startswith("10.240.") and subnet.endswith(".0/24") for subnet in subnets)
+    cleanup.assert_called_once()
+
+
+def test_collection_eta_counts_all_outcomes_and_resets_on_resume(tmp_path, monkeypatch, capsys):
+    from types import SimpleNamespace
+    from sft.toolathlon_gym import collection
+
+    (tmp_path / "tasks/finalpool/task").mkdir(parents=True)
+    clock = [0.0]
+    monkeypatch.setattr(collection, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    outcomes = iter([
+        ("completed", True), ("completed", False), ("skipped", None),
+        ("failed", False), ("completed", None), ("completed", True),
+    ])
+
+    def execute(args, *, attempt, **kwargs):
+        assert args.episode_timeout == 1800
+        clock[0] += 60
+        status, score = next(outcomes)
+        error = {"message": "runner failed", "stderr_tail": "Traceback...\nRuntimeError: backend unavailable\n"} if status == "failed" else None
+        return {"attempt": attempt, "status": status, "error": error,
+                "score": score, "duration_seconds": 60}
+
+    monkeypatch.setattr(collection, "execute_episode", execute)
+    image = [{"Config": {"Labels": {"org.decomposer.sft.sequence-limit": "16384"}}}]
+    kwargs = dict(repo_root=tmp_path, toolathlon_root=tmp_path,
+                  default_artifacts_dir=tmp_path / "artifacts", default_image="test-image",
+                  docker=lambda *args: CompletedProcess(args, 0, stdout=json.dumps(image)))
+    manifest = collection.main(
+        ["--tasks", "task", "-n", "5", "--concurrency", "1", "--episode-timeout", "1800"],
+        **kwargs,
+    )
+    output = capsys.readouterr().out
+    assert "1/5 finished | solved=1 unsolved=0 unscored=0 errors=0 length_limit=0" in output
+    assert "60.0 episodes/hour | remaining ~4m" in output
+    assert "solved=1 unsolved=1 unscored=1 errors=1 length_limit=1" in output
+    assert "remaining ~unreliable (episode errors)" in output
+    assert "ERRORS task::rep-004 attempt=1 duration=1m | RuntimeError: backend unavailable | logs:" in output
+    assert "LENGTH_LIMIT task::rep-003" in output
+    assert "UNSOLVED task::rep-002" in output
+    assert "UNSCORED task::rep-005" in output
+    assert "active=0 queued=0 | elapsed 5m | 60.0 episodes/hour | remaining ~0s" in output
+    clock[0] += 3600
+    collection.main(["--resume", manifest["run_id"]], **kwargs)
+    output = capsys.readouterr().out
+    assert "1/1 finished | solved=1 unsolved=0 unscored=0 errors=0 length_limit=0" in output
+    assert "elapsed 1m | 60.0 episodes/hour | remaining ~0s" in output
+
+
+def test_progress_duration_includes_days():
+    from sft.toolathlon_gym.collection import format_duration
+
+    assert format_duration(90061) == "1d 1h 1m 1s"
+    assert format_duration(0) == "0s"
