@@ -7,9 +7,10 @@ execution, raw trajectory capture and native judging. Workflows live in
 
 ## Setup
 
-Configure the shared [lmrouter access](../../README.md) once. Models use the named
-registry in `src/decomposer/models.py`, including its optional Unix-socket tunnel,
-provider settings and retries. No local model GPU or OpenRouter is needed.
+This collection configuration uses the shared vLLM registry: thinking Qwen3.5-4B
+on loopback port 8024 and non-thinking Flash Next on port 8025 (also the judge).
+Forward remote inference services to these ports with SSH when needed. Sampling
+and reasoning settings remain in `src/decomposer/models.py`. No OpenRouter is used.
 
 On Linux, allow about 160 GB for the corpus/index and enough RAM to load the 27 GB
 page file. Retrieval uses CPU FP32 E5; upstream uses GPU FP16, so retrieval is not
@@ -60,9 +61,9 @@ and refuses to overwrite an existing directory. Agents receive only the question
 and output-format instructions. Split future held-out sets by question hash.
 
 `--agent react|decomposer` selects a named configuration from `agents.py`.
-ReAct and delegated researchers use thinking Qwen3.5-4B unlooped and the same
+ReAct and delegated researchers use thinking Qwen3.5-4B and the same
 system prompt. Decomposer uses non-thinking
-Qwen3.8 Flash Next with thinking Qwen3.5-4B unlooped researchers. The judge is
+Qwen3.8 Flash Next with thinking Qwen3.5-4B researchers. The judge is
 Flash Next. Model profiles are constants in `agents.py`; sampling settings come
 from the shared model registry. There are no model-override CLI flags.
 

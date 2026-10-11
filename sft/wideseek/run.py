@@ -44,9 +44,13 @@ async def prepare_collection(args):
     path = root / "manifest.json"
     if args.resume:
         previous = json.loads(path.read_text())
-        if (previous["settings"] != manifest["settings"]
+        previous_settings = dict(previous["settings"])
+        previous_settings["concurrency"] = args.concurrency
+        if (previous_settings != manifest["settings"]
                 or previous["revision"] != manifest["revision"]):
             raise ValueError("Resume settings or task data differ (including harness revision); use a new run directory")
+        previous["settings"] = previous_settings
+        save(path, previous)
     else:
         root.mkdir(parents=True, exist_ok=False)
         save(path, manifest)
