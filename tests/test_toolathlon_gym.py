@@ -283,3 +283,26 @@ def test_progress_duration_includes_days():
 
     assert format_duration(90061) == "1d 1h 1m 1s"
     assert format_duration(0) == "0s"
+
+
+def test_worker_prompt_uses_workspace_and_excludes_completion_tools(monkeypatch):
+    import sys
+    from types import SimpleNamespace
+    from gyms.toolathlon_gym import agents, tools
+
+    available = [SimpleNamespace(name=name) for name in
+                 ("python_execute", "claim_done", "local-claim_done")]
+    monkeypatch.setattr(tools.app.state, "tools", available, raising=False)
+    monkeypatch.setattr(tools.app.state, "workspace", "/workspace/agent", raising=False)
+    monkeypatch.setitem(sys.modules, "tools", tools)
+    monkeypatch.setitem(sys.modules, "model_logging", SimpleNamespace(durable_model_call_log=object()))
+    monkeypatch.setattr(agents, "create_model", lambda _: object())
+    factory = MagicMock()
+    monkeypatch.setattr(agents, "create_agent", factory)
+    agents.qwen_3_5_4b_thinking()
+    kwargs = factory.call_args.kwargs
+    assert kwargs["tools"] == [available[0]]
+    assert tools.app.state.tools == available
+    assert "`/workspace/agent`" in kwargs["system_prompt"]
+    assert "claim_done" not in kwargs["system_prompt"]
+    assert "Further progress requires tools, access, information, or a decision" in kwargs["system_prompt"]

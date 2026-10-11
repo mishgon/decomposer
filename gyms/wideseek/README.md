@@ -60,7 +60,8 @@ and refuses to overwrite an existing directory. Agents receive only the question
 and output-format instructions. Split future held-out sets by question hash.
 
 `--agent react|decomposer` selects a named configuration from `agents.py`.
-ReAct uses non-thinking Qwen3.5-4B unlooped. Decomposer uses non-thinking
+ReAct and delegated researchers use thinking Qwen3.5-4B unlooped and the same
+system prompt. Decomposer uses non-thinking
 Qwen3.8 Flash Next with thinking Qwen3.5-4B unlooped researchers. The judge is
 Flash Next. Model profiles are constants in `agents.py`; sampling settings come
 from the shared model registry. There are no model-override CLI flags.
@@ -73,7 +74,9 @@ recorded in that episode's state, never other episodes on the shared server.
 `serve.sh workers` provides four shared run slots, not four slots per episode;
 concurrent episodes can queue behind each other. Wikipedia retrieval stays shared.
 
-Each agent has recursion limit 410; task execution timeout is 45 minutes.
+Each agent has recursion limit 410. `--episode-timeout` defaults to 2,700 seconds
+and covers agent execution, worker cleanup and evaluation. On expiry, emergency
+cleanup gets up to 60 additional seconds; available traces and results are then saved.
 Optional `--model-calls` and `--output-tokens` provide shared smoke budgets.
 The Gym adds no default completion cap; hosted context/output limits still apply.
 Raw and evaluation runs require a new output directory. Only the SFT collector

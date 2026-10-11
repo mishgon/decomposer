@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
+import pytest
 from langchain_core.messages import HumanMessage
 
 from gyms.wideseek.run import cleanup_workers, episode
@@ -55,7 +56,7 @@ def test_lost_launch_response_is_cleaned_before_evaluation(tmp_path):
         client.threads.delete.assert_awaited_once_with('known-thread')
         return {'status': 'scored', 'score': 0.}
 
-    args = SimpleNamespace(agent='decomposer', model_calls=None, output_tokens=None, worker_url='http://unused', timeout=1)
+    args = SimpleNamespace(agent='decomposer', model_calls=None, output_tokens=None, worker_url='http://unused', episode_timeout=1)
     task = {'task_id': 'task', 'question': 'Question', 'answer': 'Answer', 'unique_columns': []}
     with patch('gyms.wideseek.run.model', return_value=SimpleNamespace()), \
             patch('gyms.wideseek.run.agents.decomposer', return_value=graph), \
@@ -118,3 +119,105 @@ def test_shared_server_cleanup_does_not_touch_another_episode(tmp_path):
     client.threads.get_state.assert_awaited_once_with('episode-a')
     client.threads.delete.assert_awaited_once_with('episode-a')
     assert not (tmp_path / 'subagents/episode-b.json').exists()
+
+
+def test_html_failure_preserves_result_and_resume_does_not_repeat(tmp_path):
+    from langchain_core.messages import AIMessage
+    from gyms.wideseek import run
+
+    graph = MagicMock()
+    graph.ainvoke = AsyncMock(return_value={'messages': [AIMessage(content='Answer')]})
+    graph.aget_state = AsyncMock(return_value=SimpleNamespace(values={}))
+    args = SimpleNamespace(agent='decomposer', model_calls=None, output_tokens=None,
+                           worker_url='http://unused', episode_timeout=1)
+    task = {'task_id': 'task', 'question': 'Question', 'unique_columns': []}
+    result_path = tmp_path / 'decomposer/task/attempt-001/result.json'
+
+    def render(*args):
+        assert json.loads(result_path.read_text())['evaluation']['score'] == 1.
+        raise OSError('HTML failed')
+
+    with patch.object(run, 'model', return_value=SimpleNamespace()), \
+            patch.object(run.agents, 'decomposer', return_value=graph), \
+            patch.object(run, 'get_client', return_value=client_with_runs({})), \
+            patch.object(run, 'evaluate', new=AsyncMock(return_value={'status': 'scored', 'score': 1.})), \
+            patch.object(run, 'write_trace_html', side_effect=render):
+        asyncio.run(episode(task, 'decomposer', 1, tmp_path, args))
+        asyncio.run(episode(task, 'decomposer', 1, tmp_path, args))
+    result = json.loads(result_path.read_text())
+    assert result['status'] == 'finished'
+    assert result['html_error'] == 'OSError: HTML failed'
+    assert (tmp_path / result['trace_path']).is_file()
+    graph.ainvoke.assert_awaited_once()
+
+
+def test_snapshot_and_model_close_failures_still_archive_and_save(tmp_path):
+    from langchain_core.messages import AIMessage
+    from gyms.wideseek import run
+
+    graph = MagicMock()
+    graph.ainvoke = AsyncMock(return_value={**state_for('thread'), 'messages': [AIMessage(content='Answer')]})
+    graph.aget_state = AsyncMock(side_effect=RuntimeError('snapshot failed'))
+    client = client_with_runs({'thread': []})
+    args = SimpleNamespace(agent='decomposer', model_calls=None, output_tokens=None,
+                           worker_url='http://unused', episode_timeout=1)
+    with patch.object(run, 'model', return_value=SimpleNamespace()), \
+            patch.object(run.agents, 'decomposer', return_value=graph), \
+            patch.object(run, 'get_client', return_value=client), \
+            patch.object(run, 'close_model', new=AsyncMock(side_effect=OSError('close failed'))), \
+            patch.object(run, 'evaluate', new=AsyncMock(return_value={'status': 'scored', 'score': 1.})):
+        asyncio.run(episode({'task_id': 'task', 'question': 'Question', 'unique_columns': []}, 'decomposer', 1, tmp_path, args))
+    result = json.loads((tmp_path / 'decomposer/task/attempt-001/result.json').read_text())
+    assert result['status'] == 'error'
+    assert result['capture_error'] == 'RuntimeError: snapshot failed'
+    assert result['cleanup_errors'] == ['Model cleanup: OSError: close failed']
+    assert (tmp_path / result['trace_path']).is_file()
+    client.threads.delete.assert_awaited_once_with('thread')
+
+
+@pytest.mark.parametrize('stage', ['agent', 'cleanup', 'evaluation'])
+def test_episode_deadline_cancels_each_stage_and_preserves_trace(tmp_path, stage):
+    from langchain_core.messages import AIMessage
+    from gyms.wideseek import run
+
+    state = {'messages': [AIMessage(content='Partial answer')]}
+    graph = MagicMock()
+    graph.ainvoke = AsyncMock(return_value=state)
+    graph.aget_state = AsyncMock(return_value=SimpleNamespace(values=state))
+    stopped = []
+
+    async def block(*args, **kwargs):
+        try:
+            await asyncio.Event().wait()
+        finally:
+            stopped.append(stage)
+
+    cleanup = AsyncMock(return_value=[])
+    evaluate = AsyncMock(return_value={'status': 'scored', 'score': 1.})
+    if stage == 'agent':
+        graph.ainvoke.side_effect = block
+    elif stage == 'evaluation':
+        evaluate.side_effect = block
+    else:
+        async def cleanup_then_retry(*args, **kwargs):
+            if not stopped:
+                await block()
+            return []
+        cleanup.side_effect = cleanup_then_retry
+    args = SimpleNamespace(agent='decomposer', model_calls=None, output_tokens=None,
+                           worker_url='http://unused', episode_timeout=.05)
+    with patch.object(run, 'model', return_value=SimpleNamespace()), \
+            patch.object(run.agents, 'decomposer', return_value=graph), \
+            patch.object(run, 'get_client', return_value=client_with_runs({})), \
+            patch.object(run, 'cleanup_workers', cleanup), \
+            patch.object(run, 'evaluate', evaluate):
+        asyncio.run(episode({'task_id': 'task', 'question': 'Q', 'unique_columns': []},
+                            'decomposer', 1, tmp_path, args))
+    result = json.loads((tmp_path / 'decomposer/task/attempt-001/result.json').read_text())
+    assert result['status'] == 'timeout'
+    assert result['evaluation'] == {'status': 'timeout', 'score': None}
+    assert json.loads((tmp_path / result['trace_path']).read_text())['messages'][0]['data']['content'] == 'Partial answer'
+    assert stopped == [stage]
+    assert cleanup.await_count == (2 if stage == 'cleanup' else 1)
+    if stage != 'evaluation':
+        evaluate.assert_not_awaited()

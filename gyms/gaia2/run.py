@@ -1563,10 +1563,9 @@ def _runtime_configs(
         ),
         "subagent_types": [
             {
-                "agent_type_id": "gaia2_worker",
+                "agent_type_id": "qwen_3_5_4b_thinking",
                 "description": (
-                    f"{experiment.worker_served_name} worker with authenticated access to "
-                    "the current Gaia2 scenario tools."
+                    "Qwen3.5-4B thinking agent equipped with all the required tools."
                 ),
                 "assistant_id": "gaia2_worker",
                 "url": f"http://127.0.0.1:{ports.langgraph_port(experiment)}",

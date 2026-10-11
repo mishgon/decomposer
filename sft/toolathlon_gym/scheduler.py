@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
@@ -72,10 +72,15 @@ def task_launches(manifest: dict[str, Any], task: str) -> list[dict[str, Any]]:
 
 
 def task_outcomes(manifest: dict[str, Any], task: str) -> list[LaunchOutcome]:
-    return [
-        load_launch_outcome(task, attempt.get("evaluation_path"))
-        for attempt in task_launches(manifest, task)
-    ]
+    outcomes = []
+    for attempt in task_launches(manifest, task):
+        outcome = load_launch_outcome(task, attempt.get("evaluation_path"))
+        artifact_path = attempt.get("artifact_path")
+        outcomes.append(replace(outcome, agent_finished=(
+            outcome.agent_finished and attempt["status"] == "completed"
+            and bool(artifact_path) and (Path(artifact_path) / "trace.json").is_file()
+        )))
+    return outcomes
 
 
 def has_unscored_evaluation(manifest: dict[str, Any], task: str) -> bool:

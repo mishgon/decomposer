@@ -19,8 +19,7 @@ def test_named_agent_cli_rejects_model_overrides_and_legacy_flags():
             parser.parse_args(["--agent", "react", "--output", "/tmp/raw", flag])
     from sft.wideseek.run import create_collection_parser
     assert create_collection_parser().parse_args([
-        "--agent", "react", "--output", "/tmp/raw", "--resume",
-        "--student-tokenizer", "/tmp/tokenizer"]).resume
+        "--agent", "react", "--output", "/tmp/raw", "--resume"]).resume
 
 
 def test_researcher_id_is_explicit_and_matches_server(monkeypatch):
@@ -31,7 +30,8 @@ def test_researcher_id_is_explicit_and_matches_server(monkeypatch):
     monkeypatch.setattr(agents, "create_decomposer_agent", lambda **kw: captured.update(kw))
     agents.decomposer("policy", "checkpoint", "http://worker")
     worker = captured["agent_types"][0]
-    assert worker["assistant_id"] == worker["agent_type_id"] == "researcher"
+    assert worker["assistant_id"] == "researcher"
+    assert worker["agent_type_id"] == "qwen_3_5_4b_thinking"
     assert graphs[worker["assistant_id"]] == "gyms.wideseek.agents:researcher"
     assert worker["url"] == "http://worker"
 
@@ -107,3 +107,28 @@ def test_models_use_shared_registry_without_sampling_environment(monkeypatch):
     import asyncio
     from gyms.wideseek.runtime import close_model
     asyncio.run(close_model(policy))
+
+
+@pytest.mark.parametrize("adaptive", [False, True])
+def test_sft_collection_runs_without_tokenizer_or_length_guard(tmp_path, monkeypatch, adaptive):
+    import asyncio
+    from unittest.mock import AsyncMock
+    from sft.wideseek import run
+
+    args = run.create_collection_parser().parse_args([
+        "--agent", "decomposer", "--output", str(tmp_path), "--max-waves", "1",
+    ] + (["--adaptive"] if adaptive else []))
+    args.mode = "decomposer"
+    tasks = [{"task_id": "task"}]
+    monkeypatch.setattr(run, "prepare_collection", AsyncMock(return_value=(tasks, tmp_path)))
+    launches = []
+
+    async def run_jobs(tasks, jobs, root, args, *, middleware=()):
+        launches.extend(tuple(job) for job in jobs)
+        assert not middleware
+        assert args.episode_timeout == 2700
+
+    monkeypatch.setattr(run, "run_jobs", run_jobs)
+    asyncio.run(run.main(args))
+    assert launches == [("task", 1)]
+    assert (tmp_path / "collection.json").is_file()

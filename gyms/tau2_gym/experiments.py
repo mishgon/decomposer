@@ -52,8 +52,8 @@ LLM_PROXY_API_KEY_ENV = "LLM_PROXY_MASTER_KEY"
 
 # The `new` tool's type-table entry. Subagents have the domain policy;
 # legacy SFT specs override this description with their original text.
-SUBAGENT_TYPE_ID = "subagent_non_thinking"
-SUBAGENT_DESCRIPTION = "General-purpose tool-calling agent with access to the environment tools and the domain policy."
+SUBAGENT_TYPE_ID = "qwen_3_5_4b_thinking"
+SUBAGENT_DESCRIPTION = "Qwen3.5-4B thinking agent equipped with all the required tools."
 SUBAGENT_ASSISTANT_ID = "qwen35_4b_non_thinking"
 
 # The model the subagents request, passed from run.py to the LangGraph server through
@@ -275,7 +275,6 @@ EXPERIMENTS: tuple[Tau2Experiment, ...] = (
         manager_reasoning_mode="non_thinking",
         manager_preset=QWEN38_FLASH_NON_THINKING_PRESET,
         subagent_preset=QWEN35_UNLOOPED_THINKING_PRESET,
-        subagent_type_id="subagent_thinking",
         subagent_assistant_id=SUBAGENT_PRESET_GRAPHS[QWEN35_UNLOOPED_THINKING_PRESET],
     ),
     Tau2Experiment(

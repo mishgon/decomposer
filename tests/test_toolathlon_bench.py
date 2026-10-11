@@ -424,7 +424,7 @@ def test_agent_server_startup_timeout_kills_server(episode, monkeypatch):
 
 
 def test_parser_rejects_invalid_limits(episode):
-    for flag in ("--n-jobs-per-worker", "--agent-timeout"):
+    for flag in ("--n-jobs-per-worker", "--episode-timeout"):
         with pytest.raises(SystemExit):
             episode.run_episode("task", flag, "0")
 
@@ -843,13 +843,13 @@ def test_tools_start_from_runtime_and_gateway(tmp_path, monkeypatch, container_m
 
     monkeypatch.setattr(tools, "sse_client", sse_client)
     monkeypatch.setattr(tools, "ClientSession", Session)
-    monkeypatch.setattr(tools, "load_mcp_tools", AsyncMock(return_value=["gateway-tool"]))
+    monkeypatch.setattr(tools, "load_mcp_tools", AsyncMock(return_value=[SimpleNamespace(name=name) for name in ("gateway-tool", "claim_done", "local-claim_done")]))
 
     async def check():
         with pytest.raises(RuntimeError):
             tools.get_tools()
         async with tools.lifespan(tools.app):
-            assert tools.get_tools() == ["gateway-tool"]
+            assert [tool.name for tool in tools.get_tools()] == ["gateway-tool"]
             assert tools.get_runtime() == runtime
         with pytest.raises(RuntimeError):
             tools.get_runtime()
@@ -894,7 +894,7 @@ def test_agents_use_task_prompt_tools_and_server_url(monkeypatch, container_modu
 
     monkeypatch.setattr(tools.app.state, "tools", [gateway_tool], raising=False)
     monkeypatch.setattr(tools.app.state, "runtime", {
-        "agent_system_prompt": "Task prompt", "agent_server_url": "http://127.0.0.1:4002",
+        "agent_workspace": "/workspace", "agent_system_prompt": "Task prompt", "agent_server_url": "http://127.0.0.1:4002",
     }, raising=False)
     create_agent = MagicMock(return_value="agent")
     create_decomposer = MagicMock(return_value="decomposer")
@@ -904,7 +904,8 @@ def test_agents_use_task_prompt_tools_and_server_url(monkeypatch, container_modu
     assert agents.qwen_3_5_4b_thinking() == "agent"
     kwargs = create_agent.call_args.kwargs
     assert kwargs["model"].model_name == "Qwen/Qwen3.5-4B-unlooped"
-    assert kwargs["tools"] == [gateway_tool] and kwargs["system_prompt"] == "Task prompt"
+    assert kwargs["tools"] == [gateway_tool]
+    assert kwargs["system_prompt"] == agents.AGENT_SYSTEM_PROMPT.format(workspace_dir="/workspace")
     assert len(kwargs["middleware"]) == 3
     from decomposer.run_budget import RunBudgetMiddleware
 

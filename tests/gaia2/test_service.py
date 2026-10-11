@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 from langchain.agents.middleware import ModelCallLimitMiddleware
 from langchain_core.messages import AIMessage
 
-from decomposer.prompts import DECOMPOSER_SYSTEM_PROMPT
+from decomposer.prompts import DECOMPOSER_SYSTEM_PROMPT, RUN_BUDGET_CONVENTION
 from gyms.gaia2 import service
 from gyms.gaia2.model_overflow import (
     ExactModelCallLimitMiddleware,
@@ -369,7 +369,12 @@ def test_prompt_addendum_is_appended_only_when_configured(monkeypatch):
 
     assert captured["middleware"][0] == (
         "prompt",
-        f"{DECOMPOSER_SYSTEM_PROMPT}\n\n{GAIA2_AMBIGUITY_MANAGER_ADDENDUM}",
+        DECOMPOSER_SYSTEM_PROMPT.replace(
+            "{run_budget_convention}\n\n",
+            RUN_BUDGET_CONVENTION.format(
+                agent_run_budget_seconds=60, agent_shutdown_grace_seconds=60,
+            ) + "\n\n",
+        ) + f"\n\n{GAIA2_AMBIGUITY_MANAGER_ADDENDUM}",
     )
 
 
@@ -599,3 +604,29 @@ def test_public_context_records_only_a_hash_of_the_worker_prompt():
         __import__("hashlib").sha256(b"ARE native prompt").hexdigest()
     )
     assert "worker_system_prompt_sha256" not in service._public_context(_context())
+
+
+@pytest.mark.parametrize('profile', [None, 'gaia2-ambiguity'])
+def test_manager_prompt_preserves_default_run_budget(profile):
+    from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
+    from decomposer.core import create_decomposer_agent
+
+    seen = []
+
+    class Model(FakeMessagesListChatModel):
+        def bind_tools(self, tools, **kwargs):
+            return self
+
+        def _generate(self, messages, *args, **kwargs):
+            seen.append(messages[0].content)
+            return super()._generate(messages, *args, **kwargs)
+
+    agent = create_decomposer_agent(
+        decomposer_model=Model(responses=[AIMessage(content='Done')]),
+        agent_types=[{'agent_type_id': 'worker', 'assistant_id': 'worker',
+                      'description': 'worker', 'url': 'http://127.0.0.1:1'}],
+    )
+    agent.invoke({'messages': [('user', 'Hello')]})
+    prompt = service._decomposer_system_prompt({'decomposer_system_prompt_addendum_profile': profile})
+    assert '{run_budget_convention}' not in prompt
+    assert prompt == seen[0] + (f'\n\n{GAIA2_AMBIGUITY_MANAGER_ADDENDUM}' if profile else '')

@@ -48,9 +48,3 @@ async def access(url: str, runtime: ToolRuntime[Context],
         raise ValueError("access_token must be between 1 and 20000")
     page = await request_tool("/access", {"urls": [url]}, runtime)
     return page["contents"][:access_token] if page else "No More Information is Found for this URL."
-
-
-SYSTEM_PROMPT = (
-    "Answer the user's research task using the provided offline search and access tools. "
-    "The corpus is Wikipedia from 2018. Follow the requested output format. "
-    "Do not invent facts or claim to have checked sources you did not read.")

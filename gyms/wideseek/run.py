@@ -94,6 +94,7 @@ async def episode(task, mode, attempt, root, args, *, middleware=()):
     attempt_path = root / mode / task["task_id"] / f"attempt-{attempt:03d}"
     if (attempt_path / "result.json").exists():
         return
+    episode_deadline = asyncio.get_running_loop().time() + args.episode_timeout
     # Never reuse a crashed execution's path: surviving workers retain that context.
     path = attempt_path / f"execution-{uuid4().hex}"
     init_budget(path, args.model_calls, args.output_tokens)
@@ -111,57 +112,104 @@ async def episode(task, mode, attempt, root, args, *, middleware=()):
               "execution_directory": path.name, "started_at": time.time(),
               "revision": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=REPO_ROOT, text=True).strip()}
     state = {}
-    try:
-        state = await asyncio.wait_for(agent.ainvoke(agent_input(task), config=config,
-                               context={"directory": str(path.resolve())}), args.timeout)
-        result["status"] = "finished"
-        if state.get("stop_reason"):
-            result.update(status="skipped", stop_reason=state["stop_reason"],
-                          sequence_length=state.get("sequence_length"))
-    except Exception as exc:
-        result["status"] = ("timeout" if isinstance(exc, TimeoutError) else
-                            "budget_exceeded" if isinstance(exc, BudgetExceeded) else
-                            "context_exceeded" if type(exc).__name__ == "OpenAIContextOverflowError" else "error")
-        result["error"] = f"{type(exc).__name__}: {exc}"
-    finally:
-        snapshot = await agent.aget_state(config)
-        state = state or dict(snapshot.values)
-        if errors := await cleanup_workers(client, state, path):
+    cleanup_finished = False
+    cancelled = None
+    result["evaluation"] = {"status": "unscored", "score": None}
+
+    async def finish_agents():
+        nonlocal state, cleanup_finished
+        try:
+            snapshot = await agent.aget_state(config)
+            state = state or dict(snapshot.values)
+        except Exception as exc:
+            result["capture_error"] = f"{type(exc).__name__}: {exc}"
+            result["status"] = "error"
+        try:
+            errors = await cleanup_workers(client, state, path)
+        except Exception as exc:
+            errors = [f"{type(exc).__name__}: {exc}"]
+        try:
+            await close_model(policy)
+        except Exception as exc:
+            errors.append(f"Model cleanup: {type(exc).__name__}: {exc}")
+        if errors:
             result["cleanup_errors"] = errors
-            if result.get("status") == "skipped":
-                result.update(status="error", error="Agent cleanup failed after sequence limit")
-        await close_model(policy)
-        result["agent_finished_at"] = time.time()
-        messages = state.get("messages", [])
-        trace = {**state, "episode_id": result["episode_id"], "run_id": root.name,
-                 "thread_id": config["configurable"]["thread_id"],
-                 "task": task["task_id"], "repetition": attempt, "attempt": attempt,
-                 "harness": args.agent, "assistant_id": args.agent,
-                 "model": agents.AGENT_MODELS[args.agent],
-                 "started_at": datetime.fromtimestamp(result["started_at"], timezone.utc).isoformat(),
-                 "finished_at": datetime.fromtimestamp(result["agent_finished_at"], timezone.utc).isoformat(),
-                 "agent_error": result.get("error"),
-                 "agents": state.get("agents", {}), "agent_runs": state.get("agent_runs", {}),
-                 "decomposer_agent_runs": state.get("decomposer_agent_runs", []),
-                 "messages": [message_to_dict(m) for m in messages]}
-        save(path / "trace.json", trace)
-        write_trace_html(trace, path / "trace.html")
-        result["subagent_statistics"] = subagent_counts(trace["messages"])
-    answer = messages[-1].content if messages and messages[-1].type == "ai" and not messages[-1].tool_calls else ""
-    result["answer"] = answer
+            result["status"] = "error"
+        cleanup_finished = True
+
     try:
-        result["evaluation"] = await asyncio.wait_for(evaluate(task, answer, path,
-            judge_model_id=agents.JUDGE_MODEL), timeout=600)
+        async with asyncio.timeout_at(episode_deadline):
+            try:
+                state = await agent.ainvoke(agent_input(task), config=config,
+                                           context={"directory": str(path.resolve())})
+                result["status"] = "finished"
+                if state.get("stop_reason"):
+                    result.update(status="skipped", stop_reason=state["stop_reason"],
+                                  sequence_length=state.get("sequence_length"))
+            except Exception as exc:
+                result["status"] = ("budget_exceeded" if isinstance(exc, BudgetExceeded) else
+                                    "context_exceeded" if type(exc).__name__ == "OpenAIContextOverflowError" else "error")
+                result["error"] = f"{type(exc).__name__}: {exc}"
+            await finish_agents()
+            result["agent_finished_at"] = time.time()
+            messages = state.get("messages", [])
+            answer = messages[-1].content if messages and messages[-1].type == "ai" and not messages[-1].tool_calls else ""
+            result["answer"] = answer
+            try:
+                result["evaluation"] = await evaluate(task, answer, path, judge_model_id=agents.JUDGE_MODEL)
+            except Exception as exc:
+                result["evaluation"] = {"status": "evaluation_error", "score": None,
+                                        "error": f"{type(exc).__name__}: {exc}"}
+    except TimeoutError:
+        result.update(status="timeout", error=f"Episode exceeded {args.episode_timeout:g}s")
+        result["evaluation"] = {"status": "timeout", "score": None}
+    except asyncio.CancelledError as exc:
+        cancelled = exc
+        result["status"] = "interrupted"
+    finally:
+        if not cleanup_finished:
+            try:
+                async with asyncio.timeout(60):
+                    await finish_agents()
+            except TimeoutError:
+                result.setdefault("cleanup_errors", []).append("Episode cleanup exceeded 60s")
+
+    result.setdefault("agent_finished_at", time.time())
+    messages = state.get("messages", [])
+    trace = {**state, "episode_id": result["episode_id"], "run_id": root.name,
+             "thread_id": config["configurable"]["thread_id"],
+             "task": task["task_id"], "repetition": attempt, "attempt": attempt,
+             "harness": args.agent, "assistant_id": args.agent,
+             "model": agents.AGENT_MODELS[args.agent],
+             "started_at": datetime.fromtimestamp(result["started_at"], timezone.utc).isoformat(),
+             "finished_at": datetime.fromtimestamp(result["agent_finished_at"], timezone.utc).isoformat(),
+             "agent_error": result.get("error"),
+             "agents": state.get("agents", {}), "agent_runs": state.get("agent_runs", {}),
+             "decomposer_agent_runs": state.get("decomposer_agent_runs", []),
+             "messages": [message_to_dict(m) for m in messages]}
+    try:
+        save(path / "trace.json", trace)
     except Exception as exc:
-        result["evaluation"] = {"status": "evaluation_error", "score": None,
-                                "error": f"{type(exc).__name__}: {exc}"}
+        result["trace_error"] = f"{type(exc).__name__}: {exc}"
+        result["status"] = "error"
+    result["subagent_statistics"] = subagent_counts(trace["messages"])
+    if cancelled is not None:
+        raise cancelled
     result["finished_at"] = time.time()
-    result["usage"] = usage(path)
-    trace_usage = build_usage_summary(trace["messages"], trace["agent_runs"], trace["agents"])
-    if args.agent == "react":
-        trace_usage["react"] = trace_usage.pop("decomposer")
-    save(path / "usage.json", trace_usage)
     result["trace_path"] = str((path / "trace.json").relative_to(root))
+    save(attempt_path / "result.json", result)
+    try:
+        result["usage"] = usage(path)
+        trace_usage = build_usage_summary(trace["messages"], trace["agent_runs"], trace["agents"])
+        if args.agent == "react":
+            trace_usage["react"] = trace_usage.pop("decomposer")
+        save(path / "usage.json", trace_usage)
+    except Exception as exc:
+        result["usage_error"] = f"{type(exc).__name__}: {exc}"
+    try:
+        write_trace_html(trace, path / "trace.html")
+    except Exception as exc:
+        result["html_error"] = f"{type(exc).__name__}: {exc}"
     save(attempt_path / "result.json", result)
     print(json.dumps({k: result[k] for k in ("mode", "task_id", "attempt", "status", "evaluation")}), flush=True)
 
@@ -192,13 +240,33 @@ async def describe_run(args):
             profiles[role] = {"profile": profile, **model_metadata(policy)}
         finally:
             await close_model(policy)
+    paths = [
+        *sorted((REPO_ROOT / "src/decomposer").rglob("*.py")),
+        *sorted((REPO_ROOT / "gyms/wideseek").glob("*.py")),
+        *sorted((REPO_ROOT / "sft/wideseek").glob("*.py")),
+        *sorted((REPO_ROOT / "external/wideseek_reward").glob("*.py")),
+        REPO_ROOT / "gyms/model_logging.py", REPO_ROOT / "gyms/usage.py",
+        REPO_ROOT / "gyms/wideseek/langgraph.json",
+    ]
+    digest = hashlib.sha256()
+    for path in paths:
+        digest.update(str(path.relative_to(REPO_ROOT)).encode() + b"\0")
+        digest.update(path.read_bytes() + b"\0")
+    harness = {
+        "source_sha256": digest.hexdigest(),
+        "agent_system_prompt": agents.AGENT_SYSTEM_PROMPT,
+        "agent_run_budget_seconds": agents.AGENT_RUN_BUDGET_SECONDS,
+        "agent_shutdown_grace_seconds": agents.AGENT_SHUTDOWN_GRACE_SECONDS,
+    }
+
     settings = {"tasks": [t["task_id"] for t in tasks], "data_sha256": hashlib.sha256(raw).hexdigest(),
                 "agent": args.agent, "modes": modes, "repetitions": args.n, "concurrency": args.concurrency,
                 "model": profiles["agent"]["model_name"], "model_profiles": profiles,
                 "generation": profiles["agent"], "recursion_limit": 410,
+                "harness": harness,
                 "retrieval": retrieval,
                 "model_calls": args.model_calls, "output_tokens": args.output_tokens,
-                "timeout": args.timeout,
+                "episode_timeout": args.episode_timeout,
                 "judge": {"model": profiles["judge"]["model_name"], "profile": agents.JUDGE_MODEL,
                           "temperature": 0., "thinking": False, "paper_comparable": False}}
     manifest = {"run_id": root.name, "status": "running",
@@ -228,8 +296,24 @@ async def run_jobs(tasks, jobs, root, args, *, middleware=()):
 
     async def bounded(task_id, attempt):
         async with semaphore:
-            await episode(by_id[task_id], args.mode, attempt, root, args, middleware=middleware)
             result_path = root / args.mode / task_id / f"attempt-{attempt:03d}" / "result.json"
+            started_at = time.time()
+            try:
+                await episode(by_id[task_id], args.mode, attempt, root, args, middleware=middleware)
+            except Exception as exc:
+                if not result_path.exists():
+                    save(result_path, {
+                        "task_id": task_id, "task": task_id, "attempt": attempt, "repetition": attempt,
+                        "episode_id": None, "execution_directory": "", "trace_path": None,
+                        "status": "error", "error": f"{type(exc).__name__}: {exc}",
+                        "started_at": started_at, "agent_finished_at": time.time(),
+                        "finished_at": time.time(), "usage": {},
+                        "evaluation": {"status": "evaluation_error", "score": None},
+                    })
+                else:
+                    result = json.loads(result_path.read_text())
+                    result["export_error"] = f"{type(exc).__name__}: {exc}"
+                    save(result_path, result)
             result = json.loads(result_path.read_text())
             episodes = manifest.setdefault("episodes", [])
             episodes[:] = [e for e in episodes if (e["task_id"], e["attempt"]) != (task_id, attempt)]
@@ -264,7 +348,8 @@ def create_parser():
     parser.add_argument("--concurrency", type=int, default=2)
     parser.add_argument("--model-calls", type=int, default=None, help="Optional shared call cap; default uncapped")
     parser.add_argument("--output-tokens", type=int, default=None, help="Optional shared token cap; default uncapped")
-    parser.add_argument("--timeout", type=int, default=2700)
+    parser.add_argument("--episode-timeout", type=float, default=2700,
+                        help="Deadline for agent execution, worker cleanup and evaluation; emergency cleanup gets up to 60s more")
     parser.add_argument("--worker-url", default="http://127.0.0.1:18081")
     return parser
 
@@ -273,7 +358,7 @@ def cli(run=main, argv=None, *, parser=None):
     parser = parser or create_parser()
     args = parser.parse_args(argv)
     args.mode = "simple" if args.agent == "react" else "decomposer"
-    if min(v for v in (args.limit, args.n, args.concurrency, args.model_calls, args.output_tokens, args.timeout) if v is not None) < 1:
+    if min(v for v in (args.limit, args.n, args.concurrency, args.model_calls, args.output_tokens, args.episode_timeout) if v is not None) < 1:
         parser.error("Counts and budgets must be positive")
     # Lock outside the run directory so first-launch mkdir remains exclusive.
     root = args.output.resolve()

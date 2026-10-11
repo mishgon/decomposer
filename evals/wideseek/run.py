@@ -9,7 +9,7 @@ from gyms.wideseek.runtime import save
 def summarize(rows):
     scores = [r["evaluation"]["score"] for r in rows if r["evaluation"]["score"] is not None]
     seconds = [r["agent_finished_at"] - r["started_at"] for r in rows]
-    tokens = {field: sum(role[field] for r in rows for name, role in r["usage"].items() if name != "judge")
+    tokens = {field: sum(role[field] for r in rows for name, role in r.get("usage", {}).items() if name != "judge")
               for field in ("input_tokens", "output_tokens")}
     return {"attempts": len(rows), "scored": len(scores), "unscored": len(rows) - len(scores),
             "mean_native_score": statistics.mean(scores) if scores else None,

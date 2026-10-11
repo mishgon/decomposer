@@ -28,14 +28,14 @@ def test_experiment_names_are_unique_and_pools_exist() -> None:
         load_pool(experiment.pool)
 
 
-def test_subagent_type_matches_the_legacy_sft_releases() -> None:
-    """Legacy releases stamp this type id; the description has since gained the domain policy."""
+def test_subagent_type_preserves_legacy_sft_releases() -> None:
     spec = yaml.safe_load(
         (REPO_ROOT / "sft/specs/decomposer_mixed_deepseek_qwen35_4b_nonthinking_v5_32k_student.yaml").read_text()
     )
     (subagent,) = spec["policy"]["subagent_types"]
-    assert subagent["id"] == SUBAGENT_TYPE_ID
-    assert SUBAGENT_DESCRIPTION.endswith("and the domain policy.")
+    assert subagent["id"] == "subagent_non_thinking"
+    assert SUBAGENT_TYPE_ID == "qwen_3_5_4b_thinking"
+    assert SUBAGENT_DESCRIPTION == "Qwen3.5-4B thinking agent equipped with all the required tools."
 
 
 @pytest.mark.parametrize(
@@ -182,6 +182,8 @@ def test_unlooped_teacher_sampling_for_manager_and_subagents() -> None:
         "chat_template_kwargs": {"enable_thinking": True, "preserve_thinking": True},
         "reasoning": {"effort": "low"},
     }
+    assert experiment.subagent_preset is None
+    assert experiment.subagent_assistant_id == "qwen35_4b_non_thinking"
     env = run_module.subagent_environment(experiment)
     assert run_module.subagent_sampling_record(env) == {
         "temperature": 0.7,
@@ -213,6 +215,8 @@ def test_existing_experiments_keep_their_sampling(monkeypatch: pytest.MonkeyPatc
     env.update(run_module.subagent_environment(low))
     assert "DECOMPOSER_SUBAGENT_SAMPLING_JSON" not in env
     assert run_module.subagent_sampling_record(env)["presence_penalty"] == 1.5
+    assert run_module.resolve_subagent_backend(low, "local_vllm") == "local_vllm"
+    assert run_module.resolve_subagent_backend(low, None) == "llm_proxy"
 
 
 def test_subagent_graph_sends_the_experiment_sampling(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -261,13 +265,13 @@ def test_preset_teacher_takes_both_roles_from_models_py(
     config = run_module.gym_config(experiment, run_module.PortLayout())
     assert config["responses_create_params"] == {"temperature": 0.7, "top_p": 0.8}
     (entry,) = config["decomposer"]["responses_api_agents"]["decomposer_agent"]["subagent_types"]
-    assert (entry["agent_type_id"], entry["assistant_id"]) == ("subagent_thinking", "qwen35_4b_unlooped_thinking")
+    assert (entry["agent_type_id"], entry["assistant_id"]) == ("qwen_3_5_4b_thinking", "qwen35_4b_unlooped_thinking")
 
     assert run_module.resolve_subagent_backend(experiment, None) == "preset"
     with pytest.raises(SystemExit, match="preset subagents"):
         run_module.resolve_subagent_backend(experiment, "llm_proxy")
     with pytest.raises(SystemExit, match="no subagent preset"):
-        run_module.resolve_subagent_backend(get_experiment("qwen38_flash_teacher_non_thinking"), "preset")
+        run_module.resolve_subagent_backend(get_experiment("qwen38_flash_thinking_low_teacher_qwen35_4b_unlooped"), "preset")
     model = run_module.resolve_subagent_model_id("preset", None, experiment)
     assert model == "Qwen/Qwen3.5-4B-unlooped"
     assert run_module.upstream_model_ids(experiment, subagent_backend="preset", subagent_model_id=model) == [

@@ -1,5 +1,6 @@
 from decomposer.core import create_decomposer_agent
 from decomposer.run_budget import RunBudgetMiddleware
+from prompts import AGENT_SYSTEM_PROMPT
 from decomposer.models import create_model
 from langchain.agents import create_agent
 
@@ -15,8 +16,7 @@ def qwen_3_5_4b_thinking():
     return create_agent(
         model=create_model(QWEN_3_5_4B_THINKING_MODEL_ID),
         tools=get_tools(),
-        # The task prompt names the workspace directory and the completion tool.
-        system_prompt=get_runtime()["agent_system_prompt"],
+        system_prompt=AGENT_SYSTEM_PROMPT.format(workspace_dir=get_runtime()["agent_workspace"]),
         middleware=[RunBudgetMiddleware(), durable_model_call_log, truncate_mcp_tool_output],
     )
 
@@ -28,7 +28,7 @@ def decomposer():
         decomposer_model=create_model(DECOMPOSER_MODEL_ID),
         agent_types=[{
             "agent_type_id": "qwen_3_5_4b_thinking",
-            "description": "Qwen3.5-4B thinking agent equipped with all the available tools.",
+            "description": "Qwen3.5-4B thinking agent equipped with all the required tools.",
             "assistant_id": "qwen_3_5_4b_thinking",
             "url": get_runtime()["agent_server_url"],
         }],
