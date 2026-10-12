@@ -12,6 +12,7 @@ from pydantic import ValidationError
 
 from sft.adapters.registry import SNAPSHOT_FILES
 from sft.builder import LoadedBuildSpec, load_build_spec, prepare_dataset
+from sft.chat_tools import decomposer_system_prompt
 from sft.snapshots import create_snapshot
 from sft.schema import (
     EXCLUSION_REASONS,
@@ -29,7 +30,6 @@ from sft.schema import (
     validate_decomposer_messages,
 )
 from decomposer.prompts import (
-    DECOMPOSER_SYSTEM_PROMPT,
     EARLY_RESPONSE_ERROR,
     PARALLEL_WAIT_CALL_ERROR,
 )
@@ -348,7 +348,7 @@ def test_prepare_groups_teacher_variants_and_writes_manifest_v3(tmp_path: Path) 
 
     example = train[0]
     assert example["messages"][0]["role"] == "system"
-    assert example["messages"][0]["content"] == DECOMPOSER_SYSTEM_PROMPT
+    assert example["messages"][0]["content"] == decomposer_system_prompt()
     assert example["messages"][1]["role"] == "user"
     assert example["messages"][-1]["teacher_reasoning"] == "Report success."
     assert [
@@ -381,9 +381,10 @@ def test_shared_prompt_is_materialized_and_training_validated(tmp_path: Path) ->
     runtime = _validate_dataset_system_prompt(
         prepared.manifest, train_dataset=train, validation_dataset=validation
     )
-    assert runtime == {"sha256": sha256_text(DECOMPOSER_SYSTEM_PROMPT)}
+    assert runtime == {"sha256": sha256_text(decomposer_system_prompt())}
+    assert "time budget of 60 seconds" in train[0]["messages"][0]["content"]
     assert all(
-        messages[0]["content"] == DECOMPOSER_SYSTEM_PROMPT
+        messages[0]["content"] == decomposer_system_prompt()
         for dataset in (train, validation) for messages in dataset["messages"]
     )
     manifest = {**prepared.manifest, "policy": {"system_prompt_sha256": "stale"}}
@@ -1080,9 +1081,9 @@ def test_each_source_keeps_its_native_tool_schema(
         assert sha256_text(canonical_json(record["tools"])) == hashes[
             record["source"]["source_id"]
         ]
-        assert record["messages"][0]["content"] == DECOMPOSER_SYSTEM_PROMPT
+        assert record["messages"][0]["content"] == decomposer_system_prompt()
     assert prepared.manifest["policy"]["system_prompt_sha256"] == sha256_text(
-        DECOMPOSER_SYSTEM_PROMPT
+        decomposer_system_prompt()
     )
 
 

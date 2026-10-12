@@ -33,12 +33,12 @@ from transformers import (
 from trl import SFTConfig, SFTTrainer
 
 from .builder import compute_dataset_fingerprint
+from .chat_tools import decomposer_system_prompt
 from .schema import (
     CANONICAL_SCHEMA_VERSION,
     MANIFEST_FORMAT_VERSION,
     sha256_text,
 )
-from decomposer.prompts import DECOMPOSER_SYSTEM_PROMPT
 
 from .clearml_logging import (
     SeparatePlotsClearMLCallback,
@@ -725,7 +725,7 @@ def _validate_dataset_system_prompt(
     policy = manifest.get("policy")
     if not isinstance(policy, Mapping):
         raise ValueError("Prepared-data manifest has no policy object.")
-    expected_prompt = DECOMPOSER_SYSTEM_PROMPT
+    expected_prompt = decomposer_system_prompt()
     expected_sha256 = sha256_text(expected_prompt)
     if policy.get("system_prompt_sha256") != expected_sha256:
         raise ValueError(

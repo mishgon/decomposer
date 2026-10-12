@@ -15,8 +15,6 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from decomposer.prompts import DECOMPOSER_SYSTEM_PROMPT
-
 from ..adapters.base import (
     AdapterReadResult,
     canonical_source,
@@ -25,6 +23,7 @@ from ..adapters.base import (
     load_json,
 )
 from ..adapters.langgraph_messages import convert_langgraph_messages
+from ..chat_tools import decomposer_system_prompt
 from ..schema import (
     CanonicalOutcome,
     CanonicalRollout,
@@ -116,7 +115,7 @@ def read_wideseek_source(
     """
     threshold = selection.success_threshold
     assert threshold is not None
-    teacher_prompt = DECOMPOSER_SYSTEM_PROMPT
+    teacher_prompt = decomposer_system_prompt()
     source_dir = source_dir.resolve()
     result_paths = sorted(source_dir.glob("decomposer/*/attempt-*/result.json"))
     native_rollouts = len(result_paths)

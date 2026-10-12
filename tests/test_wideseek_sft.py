@@ -6,8 +6,7 @@ from pathlib import Path
 import pytest
 
 from decomposer.prompts import DECOMPOSER_SYSTEM_PROMPT
-from decomposer.prompts import DECOMPOSER_SYSTEM_PROMPT
-from sft.chat_tools import build_decomposer_chat_tools
+from sft.chat_tools import build_decomposer_chat_tools, decomposer_system_prompt
 from sft.schema import SelectionSpec, SourceSpec
 from sft.snapshots import create_snapshot
 from sft.wideseek.adapter import read_wideseek_source, snapshot_files
@@ -51,7 +50,7 @@ def _model_call(role: str, started_at: float, task: str, **overrides: object) ->
         "messages": [{"type": "human", "content": task}],
         "system_message": {
             "type": "system",
-            "content": DECOMPOSER_SYSTEM_PROMPT,
+            "content": decomposer_system_prompt(),
         },
         **overrides,
     }
@@ -157,7 +156,7 @@ def _read(path: Path):
         _source(path),
         SELECTION,
         source_dir=path,
-        system_prompt=DECOMPOSER_SYSTEM_PROMPT,
+        system_prompt=decomposer_system_prompt(),
     )
 
 
@@ -187,7 +186,7 @@ def test_wideseek_keeps_what_the_collector_counts_as_success(tmp_path: Path) -> 
     assert (first.outcome.reward, second.outcome.reward) == (1.0, 0.95)
     # The tools and prompt come from the manager's first call, not a later one.
     assert first.tools == TOOLS
-    assert first.messages[0]["content"] == DECOMPOSER_SYSTEM_PROMPT
+    assert first.messages[0]["content"] == decomposer_system_prompt()
     assert first.attributes["decomposer_model"] == "Qwen/Qwen3.8-Flash-Next-NVFP4"
     # The quoted agent type the core rejected stays in the parallel batch.
     batch = first.messages[2]["tool_calls"]
@@ -197,8 +196,9 @@ def test_wideseek_keeps_what_the_collector_counts_as_success(tmp_path: Path) -> 
     ]
 
 
-def test_wideseek_requires_the_teacher_prompt(tmp_path: Path) -> None:
-    _attempt(tmp_path, "width-0001", system_prompt="An older prompt.")
+@pytest.mark.parametrize("logged", ["An older prompt.", DECOMPOSER_SYSTEM_PROMPT])
+def test_wideseek_requires_the_teacher_prompt(tmp_path: Path, logged: str) -> None:
+    _attempt(tmp_path, "width-0001", system_prompt=logged)
     with pytest.raises(ValueError, match="not the teacher prompt"):
         _read(tmp_path)
 

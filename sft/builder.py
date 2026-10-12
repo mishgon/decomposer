@@ -17,10 +17,9 @@ from typing import Any
 
 import yaml
 
-from decomposer.prompts import DECOMPOSER_SYSTEM_PROMPT
-
 from .adapters.base import empty_counts
 from .adapters.registry import ADAPTER_VERSIONS, ADAPTERS
+from .chat_tools import decomposer_system_prompt
 from .snapshots import (
     DEFAULT_SNAPSHOT_ROOT,
     load_snapshot,
@@ -360,7 +359,7 @@ def prepare_dataset(
             f"Dataset release already exists and is immutable: {release_dir}"
         )
 
-    system_prompt = DECOMPOSER_SYSTEM_PROMPT
+    system_prompt = decomposer_system_prompt()
     records: list[CanonicalRollout] = []
     source_manifests: list[JsonObject] = []
     counts_by_source: dict[str, Counter[str]] = {}
