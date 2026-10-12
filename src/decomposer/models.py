@@ -16,7 +16,7 @@ from langchain_openrouter import ChatOpenRouter
 from pydantic import BaseModel, Field
 
 
-_QWEN_3_5_4B_PORT = 8024
+_QWEN_3_5_4B_PORT = 8026
 _QWEN_3_8_FLASH_NEXT_PORT = 8025
 
 

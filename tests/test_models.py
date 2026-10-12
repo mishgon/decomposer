@@ -172,7 +172,7 @@ def test_local_qwen_sampling_and_transport(monkeypatch, profile, thinking, tempe
     monkeypatch.setattr(models.asyncio, "create_subprocess_exec", launch)
     model = create_model(profile)
     payload = model._get_request_payload("test")
-    assert model.openai_api_base == "http://127.0.0.1:8024/v1"
+    assert model.openai_api_base == "http://127.0.0.1:8026/v1"
     assert payload["model"] == "Qwen/Qwen3.5-4B"
     assert payload["temperature"] == temperature
     assert payload["top_p"] == top_p
@@ -225,7 +225,7 @@ def test_vllm_server_lifecycle(mock_vllm, body_fails, host):
             command = mock_vllm.launch.call_args.args
             assert command[command.index("--host") + 1] == (host or "127.0.0.1")
             mock_vllm.client.get.assert_awaited_once_with(
-                "http://127.0.0.1:8024/health", timeout=2,
+                "http://127.0.0.1:8026/health", timeout=2,
             )
             if body_fails:
                 raise RuntimeError("body failed")
@@ -374,4 +374,4 @@ def test_local_qwen_uses_container_host(monkeypatch, thinking):
     monkeypatch.setenv("VLLM_HOST", "host.docker.internal")
     profile = "thinking" if thinking else "non_thinking"
     model = create_model(f"vllm/qwen_3_5_4b_{profile}")
-    assert model.openai_api_base == "http://host.docker.internal:8024/v1"
+    assert model.openai_api_base == "http://host.docker.internal:8026/v1"
