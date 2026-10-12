@@ -7,7 +7,7 @@ from gyms.wideseek.prompts import AGENT_SYSTEM_PROMPT
 from gyms.wideseek.runtime import Context, ModelLog, model
 from gyms.wideseek.worker import access, search
 
-REACT_MODEL = "vllm/qwen_3_5_4b_thinking"
+REACT_MODEL = "lmrouter/qwen_3_5_4b_unlooped_thinking"
 DECOMPOSER_MODEL = "vllm/qwen_3_8_flash_next_non_thinking"
 RESEARCHER_MODEL = REACT_MODEL
 JUDGE_MODEL = DECOMPOSER_MODEL
@@ -30,8 +30,8 @@ def react(policy, checkpointer, *, middleware=()):
 
 def decomposer(policy, checkpointer, worker_url, *, middleware=()):
     return create_decomposer_agent(decomposer_model=policy,
-        agent_types=[{"agent_type_id": "qwen_3_5_4b_thinking", "assistant_id": RESEARCHER_ID,
-            "description": "Qwen3.5-4B thinking agent equipped with search and access tools.",
+        agent_types=[{"agent_type_id": "qwen_3_5_4b_unlooped_thinking", "assistant_id": RESEARCHER_ID,
+            "description": "Qwen3.5-4B unlooped thinking agent equipped with search and access tools.",
             "url": worker_url}],
         checkpointer=checkpointer, middleware=[ModelLog("decomposer"), *middleware],
         context_schema=Context, agent_recursion_limit=410,

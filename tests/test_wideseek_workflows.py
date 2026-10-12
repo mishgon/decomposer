@@ -31,7 +31,7 @@ def test_researcher_id_is_explicit_and_matches_server(monkeypatch):
     agents.decomposer("policy", "checkpoint", "http://worker")
     worker = captured["agent_types"][0]
     assert worker["assistant_id"] == "researcher"
-    assert worker["agent_type_id"] == "qwen_3_5_4b_thinking"
+    assert worker["agent_type_id"] == "qwen_3_5_4b_unlooped_thinking"
     assert graphs[worker["assistant_id"]] == "gyms.wideseek.agents:researcher"
     assert worker["url"] == "http://worker"
 
