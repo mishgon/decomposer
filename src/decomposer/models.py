@@ -117,7 +117,11 @@ def create_model(
         "openrouter/qwen_3_8_flash_next_low_thinking",
         "openrouter/qwen_3_8_flash_next_medium_thinking",
     ],
+    *,
+    base_url: str | None = None,
 ) -> BaseChatModel:
+    if base_url is not None and not model_id.startswith("vllm/"):
+        raise ValueError("base_url is supported only for vllm models")
     if not model_id.startswith("openrouter/"):
         socket = os.environ.get("LLM_PROXY_UNIX_SOCKET") if model_id.startswith("lmrouter/") else None
         sync_client = httpx.Client(
@@ -133,7 +137,7 @@ def create_model(
             thinking = model_id == "vllm/qwen_3_5_4b_thinking"
             return ChatVLLM(
                 model="Qwen/Qwen3.5-4B",
-                base_url=f"http://{os.environ.get('VLLM_HOST', '127.0.0.1')}:{_QWEN_3_5_4B_PORT}/v1",
+                base_url=base_url or f"http://{os.environ.get('VLLM_HOST', '127.0.0.1')}:{_QWEN_3_5_4B_PORT}/v1",
                 api_key="EMPTY",
                 # https://huggingface.co/Qwen/Qwen3.5-4B#best-practices
                 temperature=1.0 if thinking else 0.7,
@@ -156,7 +160,7 @@ def create_model(
         case "vllm/qwen_3_8_flash_next_non_thinking":
             return ChatVLLM(
                 model="Qwen/Qwen3.8-Flash-Next-FP8",
-                base_url=f"http://{os.environ.get('VLLM_HOST', '127.0.0.1')}:{_QWEN_3_8_FLASH_NEXT_PORT}/v1",
+                base_url=base_url or f"http://{os.environ.get('VLLM_HOST', '127.0.0.1')}:{_QWEN_3_8_FLASH_NEXT_PORT}/v1",
                 api_key="EMPTY",
                 temperature=0.7,
                 top_p=0.8,

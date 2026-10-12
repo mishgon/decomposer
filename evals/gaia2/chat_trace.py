@@ -102,7 +102,11 @@ def build(run_dir: Path, scenario: str, run: int) -> dict[str, Any]:
     states = manager["subagent_states"]
     env_calls = raw.get("tool_calls") or []
 
-    lifecycles = parse_langgraph_log(run_dir / "logs" / "langgraph_subagent.log")
+    lifecycles = parse_langgraph_log(
+        run_dir / "logs" / "agent_server.log"
+        if (run_dir / "logs" / "agent_server.log").exists()
+        else run_dir / "logs" / "langgraph_subagent.log"
+    )
     known = [lifecycles[s["agent_run_id"]] for s in states if s["agent_run_id"] in lifecycles]
     if len(known) != len(states):
         raise SystemExit(f"run {run}: only {len(known)}/{len(states)} run ids found in the log")

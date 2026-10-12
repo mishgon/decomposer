@@ -28,7 +28,7 @@ below).
 
 ## Legacy specs and configs
 
-Every build specification in `sft/specs/`, `sft/gaia2/specs/` and
+Every build specification in `sft/specs/` and
 `sft/workplace_assistant/specs/`, and every training config in `sft/configs/`,
 that predates the `new`/`fork`/`run`/`wait` core targets the retired
 `spawn_subagent`/`wait` core. Their
@@ -576,38 +576,6 @@ runtime at high priority:
   --filter qwen35-4b-nonthinking-toolathlon-only-v1-493c24c4-teacher-prompt-filtered-32k-hf-fa2-fla-b8-e8-full-4gpu \
   --priority high
 ```
-
-#### Accelerated GAIA2 execution-only ablation
-
-The GAIA2 execution-only release combines ten logical rollouts for each of
-the 110 training scenarios. Of 1,100 attempts, 316 have exact binary reward
-one, strict structural validation retains 306, and the 32K token limit retains
-303. Its pinned task-level split assigns 99 scenarios to train and 11 to
-validation, yielding 273 train and 30 validation records with no task overlap.
-The validation tasks are selected deterministically to land on the exact
-10-percent record target while keeping every task wholly in one partition.
-
-Build the immutable teacher-prompt release from a clean checkout:
-
-```bash
-HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 .venv/bin/python -m sft.prepare \
-  --spec sft/gaia2/specs/decomposer_gaia2_execution_deepseek_qwen35_4b_nonthinking_v1_110_n10_teacher_prompt_r1_balanced_32k.yaml \
-  --output-root /home/sukhorukov/decomposer_artifacts/datasets/sft
-```
-
-Submit the four-H100 accelerated run at high priority:
-
-```bash
-/home/sukhorukov/.venv-mls/bin/python \
-  -m sft.run_train_jobs \
-  --filter qwen35-4b-nonthinking-gaia2-execution-only-v1-110-n10-teacher-prompt-r1-balanced-32k-hf-fa2-fla-b8-e24-full-4gpu \
-  --priority high
-```
-
-The 24-epoch ceiling approximately matches the supervised-token exposure of
-the mixed run. Validation and checkpointing happen after every epoch; early
-stopping uses patience two and the final export reloads the checkpoint with
-the lowest validation loss.
 
 #### Pinned partial Toolathlon snapshot
 

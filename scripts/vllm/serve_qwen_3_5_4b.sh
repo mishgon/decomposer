@@ -19,5 +19,5 @@ uv run --group dev \
   --enable-chunked-prefill \
   --reasoning-parser qwen3 \
   --enable-auto-tool-choice \
-  --tool-call-parser qwen3_xml \
+  --tool-call-parser qwen3_coder \
   --default-chat-template-kwargs '{"enable_thinking":false}'

@@ -7,7 +7,7 @@ in ``gyms/tau2_gym/subagents`` across runs, the store grew to gigabytes and made
 take tens of seconds. ``langgraph dev`` cannot switch this off: the CLI drops the
 ``disable_persistence`` key from ``langgraph.json``, and ``run_server`` then sets
 ``LANGGRAPH_DISABLE_FILE_PERSISTENCE=false`` itself. So this calls ``run_server``
-directly, as ``gyms/gaia2/langgraph_server.py`` does, from a per-run directory.
+directly, as ``gyms/gaia2/agents.py`` does, from a per-run directory.
 
 The graphs come from the committed ``subagents/langgraph.json``. Their file paths
 (``./graph.py:fn``) become module paths (``gyms.tau2_gym.subagents.graph:fn``), which import through

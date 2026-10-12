@@ -1,5 +1,6 @@
 import asyncio
 import json
+import threading
 from contextlib import asynccontextmanager
 from subprocess import CompletedProcess
 from unittest.mock import AsyncMock, MagicMock
@@ -10,6 +11,27 @@ import decomposer.visualization as visualization
 from examples.minimal import run as minimal
 from gyms.toolathlon_gym import run as gym
 from gyms.toolathlon_gym.task import model_metadata
+
+
+@pytest.mark.parametrize("limit,should_stop", [(1, True), (1024**2, False)])
+def test_episode_disk_limit_stops_only_oversized_episode(tmp_path, monkeypatch, limit, should_stop):
+    (tmp_path / "output.txt").write_bytes(b"x" * 8192)
+    monkeypatch.setattr(gym, "EPISODE_DISK_LIMIT_BYTES", limit)
+    docker = MagicMock()
+    monkeypatch.setattr(gym, "_docker", docker)
+    stop = MagicMock()
+    stop.wait.side_effect = [False, True]
+    exceeded = threading.Event()
+
+    gym._monitor_episode_disk(tmp_path, "episode-task", stop, exceeded)
+
+    assert exceeded.is_set() == should_stop
+    if should_stop:
+        docker.assert_called_once_with("kill", "episode-task", check=False)
+        assert json.loads((tmp_path / "disk_limit.json").read_text())["limit_bytes"] == limit
+    else:
+        docker.assert_not_called()
+        assert not (tmp_path / "disk_limit.json").exists()
 
 
 @pytest.mark.parametrize("agent_failed,skipped", [(False, False), (True, False), (False, True)])
@@ -47,6 +69,7 @@ def test_render_failure_preserves_evaluation_and_container_metadata(tmp_path, mo
         elif args[0] == "port":
             output = "127.0.0.1:2024"
         elif args[0] == "run" and args[-1] == gym.DEFAULT_IMAGE:
+            assert ("--ulimit", f"fsize={gym.FILE_SIZE_LIMIT_BYTES}:{gym.FILE_SIZE_LIMIT_BYTES}") in list(zip(args, args[1:]))
             assert ("--env", "OPENROUTER_API_KEY") in list(zip(args, args[1:]))
             assert "test-openrouter-secret" not in " ".join(args)
             assert ("--env", "https_proxy") in list(zip(args, args[1:]))

@@ -1,28 +1,27 @@
-"""A GAIA2 subagent whose tools are supplied per episode by runtime context."""
+"""A GAIA2 agent whose tools are supplied per episode by runtime context."""
 
 from __future__ import annotations
 
 import json
-import os
-from typing import Any, NotRequired, TypedDict
+from typing import Any
 
 import httpx
-from langchain.agents import create_agent
-from langchain.agents.middleware import AgentMiddleware
-from langchain_core.tools import StructuredTool
-from langchain_openai import ChatOpenAI
-from langgraph.graph import END, START, MessagesState, StateGraph
-from langgraph.runtime import Runtime
-
 from are.simulation.schema_reminders import render_openai_tool_retry_reminder
+from langchain_core.tools import StructuredTool
 
-from decomposer.models import ChatVLLM
-from decomposer.run_budget import RunBudgetMiddleware
-from gyms.gaia2.model_overflow import (
-    ExactModelCallLimitMiddleware,
-    Gaia2ModelOverflowMiddleware,
-)
-from gyms.gaia2.worker_prompt import LEGACY_WORKER_SYSTEM_PROMPT
+from decomposer.run_budget import RunBudgetContext
+
+
+class EpisodeContext(RunBudgetContext):
+    tool_schemas: list[dict[str, Any]]
+    broker_url: str
+    session_token: str
+    policy: str
+    scenario_id: str
+    run_number: int | None
+    notification_cursor: int
+    worker_system_prompt: str
+
 
 HIDDEN_AUI_TOOLS = frozenset(
     {
@@ -34,39 +33,6 @@ HIDDEN_AUI_TOOLS = frozenset(
     }
 )
 WAIT_FOR_NOTIFICATION_TOOL = "SystemApp__wait_for_notification"
-
-
-def _max_model_calls() -> int | None:
-    raw = os.environ.get("GAIA2_SUBAGENT_MAX_MODEL_CALLS")
-    if raw is None:
-        return None
-    value = int(raw)
-    if value < 1:
-        raise ValueError("GAIA2_SUBAGENT_MAX_MODEL_CALLS must be at least 1")
-    return value
-
-
-def _max_completion_tokens() -> int | None:
-    raw = os.environ.get("GAIA2_SUBAGENT_MAX_COMPLETION_TOKENS")
-    if raw is None:
-        return None
-    value = int(raw)
-    if value < 1:
-        raise ValueError(
-            "GAIA2_SUBAGENT_MAX_COMPLETION_TOKENS must be at least 1"
-        )
-    return value
-
-
-class EpisodeContext(TypedDict):
-    tool_schemas: list[dict[str, Any]]
-    broker_url: str
-    session_token: str
-    policy: str
-    scenario_id: str
-    run_number: int | None
-    notification_cursor: int
-    worker_system_prompt: NotRequired[str]
 
 
 def _serialize_tool_result(result: Any) -> str:
@@ -160,48 +126,6 @@ def _tool_from_schema(
     )
 
 
-def _model() -> ChatOpenAI:
-    thinking = os.environ.get("GAIA2_SUBAGENT_THINKING", "1") == "1"
-    extra_body: dict[str, Any] = {
-        "top_k": int(os.environ.get("GAIA2_SUBAGENT_TOP_K", "64")),
-    }
-    if min_p := os.environ.get("GAIA2_SUBAGENT_MIN_P"):
-        extra_body["min_p"] = float(min_p)
-    if repetition_penalty := os.environ.get("GAIA2_SUBAGENT_REPETITION_PENALTY"):
-        extra_body["repetition_penalty"] = float(repetition_penalty)
-    extra_body["chat_template_kwargs"] = {
-        "enable_thinking": thinking,
-        **({"preserve_thinking": True} if thinking else {}),
-    }
-    if not thinking:
-        extra_body.update(
-            {
-                "include_reasoning": False,
-            }
-        )
-    if os.environ.get("GAIA2_SUBAGENT_EXTRA_BODY"):
-        extra_body.update(json.loads(os.environ["GAIA2_SUBAGENT_EXTRA_BODY"]))
-    kwargs: dict[str, Any] = {
-        "model": os.environ["GAIA2_SUBAGENT_MODEL"],
-        "base_url": os.environ.get("GAIA2_SUBAGENT_ENDPOINT"),
-        "api_key": os.environ.get(
-            "GAIA2_SUBAGENT_API_KEY", os.environ.get("OPENAI_API_KEY", "EMPTY")
-        ),
-        "temperature": float(os.environ.get("GAIA2_SUBAGENT_TEMPERATURE", "1.0")),
-        "top_p": float(os.environ.get("GAIA2_SUBAGENT_TOP_P", "0.95")),
-        "use_responses_api": False,
-        "timeout": float(os.environ.get("GAIA2_SUBAGENT_TIMEOUT", "300")),
-        "max_retries": int(os.environ.get("GAIA2_SUBAGENT_MAX_RETRIES", "2")),
-    }
-    if (max_completion_tokens := _max_completion_tokens()) is not None:
-        kwargs["max_completion_tokens"] = max_completion_tokens
-    if presence_penalty := os.environ.get("GAIA2_SUBAGENT_PRESENCE_PENALTY"):
-        kwargs["presence_penalty"] = float(presence_penalty)
-    if extra_body:
-        kwargs["extra_body"] = extra_body
-    return ChatVLLM(preserve_reasoning=True, **kwargs)
-
-
 def _worker_tools(context: EpisodeContext, consumer: str) -> list[StructuredTool]:
     """Build one worker's broker tools around an independent journal cursor."""
 
@@ -269,72 +193,10 @@ def _worker_tools(context: EpisodeContext, consumer: str) -> list[StructuredTool
             coroutine=read_notifications,
             name="Gaia2Broker__read_notifications",
             description=(
-                "Read newly ready ARE notifications using this subagent's independent "
+                "Read newly ready ARE notifications using this agent's independent "
                 "cursor. Use when the environment may have changed; the wrapped "
                 "SystemApp__wait_for_notification both waits and returns notifications."
             ),
         )
     )
     return tools
-
-
-class Gaia2ToolChoiceAutoMiddleware(AgentMiddleware):
-    """Make the worker's vLLM tool-selection policy explicit and reproducible."""
-
-    async def awrap_model_call(self, request: Any, handler: Any) -> Any:
-        if request.tools:
-            request = request.override(tool_choice="auto")
-        return await handler(request)
-
-
-async def run_subagent(
-    state: MessagesState, runtime: Runtime[EpisodeContext]
-) -> dict[str, Any]:
-    context = runtime.context
-    tools = _worker_tools(context, consumer=f"subagent-{id(state)}")
-    # ARE's native system prompt, rendered by the proxy for this scenario; runs
-    # configured with `worker_system_prompt: legacy` get the earlier worker text.
-    system_prompt = (
-        context.get("worker_system_prompt")
-        or os.environ.get("GAIA2_SUBAGENT_SYSTEM_PROMPT")
-        or LEGACY_WORKER_SYSTEM_PROMPT
-    )
-    max_model_calls = _max_model_calls()
-    middleware: list[AgentMiddleware] = [
-        RunBudgetMiddleware(),
-        Gaia2ModelOverflowMiddleware(
-            "subagent",
-            max_completion_tokens=_max_completion_tokens(),
-            max_model_len=int(
-                os.environ.get("GAIA2_SUBAGENT_MAX_MODEL_LEN", "65536")
-            ),
-        ),
-        Gaia2ToolChoiceAutoMiddleware(),
-    ]
-    if max_model_calls is not None:
-        middleware.append(
-            ExactModelCallLimitMiddleware(
-                run_limit=max_model_calls,
-                exit_behavior="error",
-            )
-        )
-    agent = create_agent(
-        model=_model(),
-        tools=tools,
-        system_prompt=system_prompt,
-        middleware=middleware,
-        # The outer graph checkpoints the worker's conversation; this per-run agent
-        # needs none. Inheriting the thread's checkpointer breaks forked workers:
-        # the in-memory runtime copies a thread's checkpoints into a plain dict, so
-        # looking up this agent's new `subagent:<task id>` namespace raises KeyError.
-        checkpointer=False,
-    )
-    result = await agent.ainvoke({"messages": state["messages"]})
-    return {"messages": result["messages"][len(state["messages"]) :]}
-
-
-builder = StateGraph(MessagesState, context_schema=EpisodeContext)
-builder.add_node("subagent", run_subagent)
-builder.add_edge(START, "subagent")
-builder.add_edge("subagent", END)
-gaia2_worker = builder.compile()

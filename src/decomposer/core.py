@@ -3,6 +3,7 @@ import time
 import asyncio
 import logging
 from collections import Counter
+from dataclasses import asdict, is_dataclass
 from typing import Annotated, Any, NotRequired, Sequence
 from uuid import uuid4
 
@@ -511,8 +512,16 @@ def _build_run_tool(
     run_config = {}
     if recursion_limit is not None:
         run_config["recursion_limit"] = recursion_limit
-    if agent_run_budget_seconds is not None:
-        run_config["configurable"] = {
+
+    def run_context(context):
+        if agent_run_budget_seconds is None:
+            return context
+        if is_dataclass(context):
+            context = asdict(context)
+        elif isinstance(context, BaseModel):
+            context = context.model_dump()
+        return {
+            **(context or {}),
             "agent_run_budget_seconds": agent_run_budget_seconds,
             "agent_shutdown_grace_seconds": agent_shutdown_grace_seconds,
         }
@@ -543,7 +552,7 @@ def _build_run_tool(
                 assistant_id=agent["assistant_id"],
                 input={"messages": [{"role": "user", "content": prompt}]},
                 config=run_config or None,
-                context=runtime.context,
+                context=run_context(runtime.context),
                 multitask_strategy="reject",
             )
 
@@ -606,7 +615,7 @@ def _build_run_tool(
                 assistant_id=agent["assistant_id"],
                 input={"messages": [{"role": "user", "content": prompt}]},
                 config=run_config or None,
-                context=runtime.context,
+                context=run_context(runtime.context),
                 multitask_strategy="reject",
             )
 

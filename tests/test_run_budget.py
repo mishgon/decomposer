@@ -55,14 +55,12 @@ def test_report_follows_all_tool_results_and_next_run_has_fresh_budget(monkeypat
         tools=[work], middleware=[RunBudgetMiddleware(), Capture()],
         checkpointer=InMemorySaver(),
     )
-    config = {"configurable": {
-        "thread_id": "test", "agent_run_budget_seconds": 10,
-        "agent_shutdown_grace_seconds": 30,
-    }}
+    config = {"configurable": {"thread_id": "test"}}
+    context = {"agent_run_budget_seconds": 10, "agent_shutdown_grace_seconds": 30}
 
     async def run():
         inputs = {"messages": [HumanMessage(content="Do work")]}
-        first = await agent.ainvoke(inputs, config) if asynchronous else agent.invoke(inputs, config)
+        first = await agent.ainvoke(inputs, config, context=context) if asynchronous else agent.invoke(inputs, config, context=context)
         assert first["messages"][-1].content == "Partial result"
         assert first["messages"][-2].content == AGENT_GRACEFUL_SHUTDOWN_REQUEST
         assert all(isinstance(m, ToolMessage) for m in first["messages"][2:4])
@@ -70,7 +68,7 @@ def test_report_follows_all_tool_results_and_next_run_has_fresh_budget(monkeypat
         assert requests[1].tools == []
         assert requests[1].response_format is None
         inputs = {"messages": [HumanMessage(content="Continue")]}
-        second = await agent.ainvoke(inputs, config) if asynchronous else agent.invoke(inputs, config)
+        second = await agent.ainvoke(inputs, config, context=context) if asynchronous else agent.invoke(inputs, config, context=context)
         assert second["messages"][-1].content == "Completed"
         assert requests[2].tools
         assert sum(m.content == AGENT_GRACEFUL_SHUTDOWN_REQUEST for m in second["messages"]) == 1
@@ -119,7 +117,7 @@ def test_hard_deadline_cancels_slow_operations(phase):
             with pytest.raises(TimeoutError):
                 await agent.ainvoke(
                     {"messages": [HumanMessage(content="Work")]},
-                    {"configurable": {"agent_run_budget_seconds": .02, "agent_shutdown_grace_seconds": .1}},
+                    context={"agent_run_budget_seconds": .02, "agent_shutdown_grace_seconds": .1},
                 )
         assert cancelled == ["tool" if phase == "tool" else "model"]
 
@@ -151,7 +149,7 @@ def test_report_cannot_start_more_tools(monkeypatch):
     with pytest.raises(ValueError, match="instead of returning its report"):
         asyncio.run(agent.ainvoke(
             {"messages": [HumanMessage(content="Work")]},
-            {"configurable": {"agent_run_budget_seconds": 1, "agent_shutdown_grace_seconds": 30}},
+            context={"agent_run_budget_seconds": 1, "agent_shutdown_grace_seconds": 30},
         ))
     assert executed == [True]
 
@@ -188,7 +186,7 @@ def test_sync_deadline_limits_waiting(phase):
         with pytest.raises(TimeoutError):
             agent.invoke(
                 {"messages": [HumanMessage(content="Work")]},
-                {"configurable": {"agent_run_budget_seconds": .02, "agent_shutdown_grace_seconds": .1}},
+                context={"agent_run_budget_seconds": .02, "agent_shutdown_grace_seconds": .1},
             )
         assert time.monotonic() - started_at < 1
         assert not finished.is_set()

@@ -1,7 +1,0 @@
-{
-  "dependencies": ["../../.."],
-  "graphs": {
-    "gaia2_worker": "./graphs.py:gaia2_worker"
-  },
-  "python_version": "3.12"
-}

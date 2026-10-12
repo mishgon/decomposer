@@ -1,5 +1,5 @@
 from decomposer.core import create_decomposer_agent
-from decomposer.run_budget import RunBudgetMiddleware
+from decomposer.run_budget import RunBudgetContext, RunBudgetMiddleware
 from prompts import AGENT_SYSTEM_PROMPT
 from decomposer.models import create_model
 from langchain.agents import create_agent
@@ -14,6 +14,7 @@ def qwen_3_5_4b_thinking():
     from tools import get_runtime, get_tools, truncate_mcp_tool_output
 
     return create_agent(
+        context_schema=RunBudgetContext,
         model=create_model(QWEN_3_5_4B_THINKING_MODEL_ID),
         tools=get_tools(),
         system_prompt=AGENT_SYSTEM_PROMPT.format(workspace_dir=get_runtime()["agent_workspace"]),

@@ -31,6 +31,7 @@ from langchain.agents.middleware import (
 from langchain_core.language_models.chat_models import BaseChatModel
 from langgraph.graph.state import CompiledStateGraph
 from responses_api_agents.decomposer_agent.subagents.graph import (
+    AgentContext,
     NeMoGymSubagentMiddleware,
 )
 
@@ -98,6 +99,7 @@ def _system_prompt_with_policy(request: ModelRequest) -> str:
 
 def _create_subagent(model: BaseChatModel) -> CompiledStateGraph:
     return create_agent(
+        context_schema=AgentContext,
         model=model,
         tools=[],
         middleware=[

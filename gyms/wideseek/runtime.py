@@ -4,7 +4,6 @@ import json
 from pathlib import Path
 import sqlite3
 import time
-from typing import TypedDict
 from uuid import uuid4
 from datetime import datetime, timezone
 
@@ -14,6 +13,7 @@ from langchain_core.messages import message_to_dict
 from langgraph.config import get_config
 from gyms.model_logging import append_record, request_delta
 from decomposer.models import create_model as model
+from decomposer.run_budget import RunBudgetContext
 
 
 DEFAULT_MODEL = "lmrouter/qwen_3_5_4b_unlooped_thinking"
@@ -35,7 +35,7 @@ async def close_model(policy):
         await client.aclose()
 
 
-class Context(TypedDict):
+class Context(RunBudgetContext):
     directory: str
 
 

@@ -25,7 +25,7 @@ from are.simulation.time_manager import TimeManager
 from are.simulation.tool_utils import AppTool, AppToolArg, OperationType, app_tool
 from are.simulation.types import event_registered
 
-from gyms.gaia2.broker import ToolStateBroker, app_tool_schema
+from gyms.gaia2.are import ToolServer, app_tool_schema
 
 
 class Scenario:
@@ -98,7 +98,7 @@ def test_schema_conversion_and_hidden_filtering():
         "required": ["value"],
     }
 
-    broker = ToolStateBroker()
+    broker = ToolServer()
     try:
         session = broker.register(Scenario([visible, hidden]), notification_system())
         assert [s["function"]["name"] for s in session.schemas] == ["Calendar__write"]
@@ -155,7 +155,7 @@ def test_schema_uses_runtime_types_defaults_and_omits_variadic_kwargs():
 def test_token_tool_rejection_and_exactly_once_invocation():
     calls = []
     visible = tool("Calendar__write", lambda value: calls.append(value) or value + 1)
-    broker = ToolStateBroker()
+    broker = ToolServer()
     try:
         session = broker.register(Scenario([visible]), notification_system())
         url = f"{broker.base_url}/sessions/{session.session_id}/tools/Calendar__write/invoke"
@@ -194,7 +194,7 @@ def test_per_session_serialization_and_isolation():
             current -= 1
         return value
 
-    broker = ToolStateBroker()
+    broker = ToolServer()
     try:
         first = broker.register(
             Scenario([tool("App__slow", slow)]), notification_system()
@@ -228,7 +228,7 @@ def test_parallel_sessions_do_not_share_lock():
         barrier.wait(timeout=1)
         return value
 
-    broker = ToolStateBroker()
+    broker = ToolServer()
     try:
         first = broker.register(
             Scenario([tool("App__parallel", parallel)]), notification_system()
@@ -266,7 +266,7 @@ def test_notification_journal_consumes_native_queue_and_replays_attachments():
             timestamp=datetime.fromtimestamp(1000, tz=timezone.utc),
         )
     )
-    broker = ToolStateBroker()
+    broker = ToolServer()
     try:
         session = broker.register(Scenario([]), notifications)
         first = session.notifications_after(0)
@@ -300,7 +300,7 @@ def test_wait_adapter_never_moves_clock_back_and_preserves_native_event():
         )
     )
 
-    broker = ToolStateBroker()
+    broker = ToolServer()
     try:
         session = broker.register(
             Scenario(system_app.get_tools()), environment.notification_system
@@ -367,7 +367,7 @@ def test_parallel_workers_at_same_cursor_advance_native_time_once():
         )
     )
 
-    broker = ToolStateBroker()
+    broker = ToolServer()
     try:
         session = broker.register(
             Scenario(system_app.get_tools()), environment.notification_system
@@ -443,7 +443,7 @@ def test_broker_invocation_creates_one_native_are_event():
     environment = Environment(EnvironmentConfig(duration=1))
     environment.register_apps([app])
     scenario = Scenario(app.get_tools())
-    broker = ToolStateBroker()
+    broker = ToolServer()
     try:
         session = broker.register(scenario, environment.notification_system)
         assert environment.get_event_log_size() == 0
@@ -469,7 +469,7 @@ def test_broker_sanitizes_bound_app_paths_in_response_and_trace(tmp_path):
 
     failing_tool = tool("Files__read", fail)
     failing_tool.class_instance = SanitizingApp()
-    broker = ToolStateBroker()
+    broker = ToolServer()
     try:
         session = broker.register(Scenario([failing_tool]), notification_system())
         url = (
@@ -485,3 +485,46 @@ def test_broker_sanitizes_bound_app_paths_in_response_and_trace(tmp_path):
         assert session.trace[0]["ok"] is False
     finally:
         broker.close()
+
+
+@pytest.mark.parametrize(
+    "method, suffix, body, status",
+    [
+        ("GET", "notifications?cursor=bad", None, 400),
+        ("POST", "notifications/wait", {"cursor": True}, 400),
+        ("POST", "notifications/wait", {"cursor": 0}, 404),
+        ("POST", "tools/App__write/invoke", {"arguments": []}, 400),
+        ("POST", "tools/App__write/invoke", {"arguments": {}}, 400),
+    ],
+)
+def test_invalid_requests_do_not_invoke_tools(method, suffix, body, status):
+    calls = []
+    broker = ToolServer()
+    try:
+        session = broker.register(
+            Scenario([tool("App__write", lambda value: calls.append(value))]),
+            notification_system(),
+        )
+        with pytest.raises(urllib.error.HTTPError) as error:
+            request(
+                method,
+                f"{broker.base_url}/sessions/{session.session_id}/{suffix}",
+                session.token,
+                body,
+            )
+        assert error.value.code == status
+        assert json.loads(error.value.read())["error"]
+        assert calls == []
+    finally:
+        broker.close()
+
+
+def test_close_stops_server_and_releases_port():
+    from urllib.parse import urlparse
+
+    broker = ToolServer()
+    port = urlparse(broker.base_url).port
+    broker.close()
+    assert not broker._thread.is_alive()
+    replacement = ToolServer(port=port)
+    replacement.close()
