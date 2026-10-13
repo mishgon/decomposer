@@ -88,9 +88,11 @@ def test_flash_next_uses_nonthinking_sampling(provider):
 
 @pytest.mark.parametrize("host", [None, "host.docker.internal"])
 def test_local_flash_next_transport(monkeypatch, host):
-    import httpx
-    import decomposer.models as models
     from unittest.mock import MagicMock
+
+    import httpx
+
+    import decomposer.models as models
 
     monkeypatch.delenv("VLLM_HOST", raising=False)
     if host:
@@ -161,6 +163,7 @@ def test_local_qwen_sampling_and_transport(monkeypatch, profile, thinking, tempe
     from unittest.mock import MagicMock
 
     import httpx
+
     import decomposer.models as models
 
     monkeypatch.setenv("LLM_PROXY_UNIX_SOCKET", "/unused/router.sock")
@@ -193,6 +196,7 @@ def mock_vllm(monkeypatch):
     from unittest.mock import AsyncMock, MagicMock
 
     import httpx
+
     import decomposer.models as models
 
     process = SimpleNamespace(pid=123, returncode=None, wait=AsyncMock())
@@ -217,6 +221,7 @@ def mock_vllm(monkeypatch):
 def test_vllm_server_lifecycle(mock_vllm, body_fails, host):
     import asyncio
     import signal
+
     from decomposer.models import vllm_server
 
     async def run():
@@ -242,6 +247,7 @@ def test_vllm_server_lifecycle(mock_vllm, body_fails, host):
 
 def test_vllm_server_reports_startup_failure(mock_vllm):
     import asyncio
+
     from decomposer.models import vllm_server
 
     mock_vllm.process.returncode = 1
@@ -256,6 +262,7 @@ def test_vllm_server_reports_startup_failure(mock_vllm):
 
 def test_vllm_server_rejects_router_model(mock_vllm):
     import asyncio
+
     from decomposer.models import vllm_server
 
     async def run():
@@ -270,6 +277,7 @@ def test_vllm_server_rejects_router_model(mock_vllm):
 def test_agent_server_lifecycle(mock_vllm, tmp_path):
     import asyncio
     from pathlib import Path
+
     from decomposer.agent_server import agent_server
 
     config = tmp_path / "langgraph.json"
@@ -289,7 +297,9 @@ def test_agent_server_lifecycle(mock_vllm, tmp_path):
 
 def test_agent_server_startup_timeout_cleans_up(mock_vllm, tmp_path):
     import asyncio
+
     import httpx
+
     from decomposer.agent_server import agent_server
 
     mock_vllm.client.get.return_value = httpx.Response(503)
@@ -308,6 +318,7 @@ def test_vllm_server_forces_shutdown_if_term_fails(mock_vllm):
     import asyncio
     import signal
     from unittest.mock import call
+
     from decomposer.models import vllm_server
 
     mock_vllm.process.wait.side_effect = [TimeoutError, None]
@@ -322,6 +333,7 @@ def test_vllm_server_forces_shutdown_if_term_fails(mock_vllm):
 
 def test_vllm_server_rejects_occupied_port(mock_vllm):
     import asyncio
+
     import decomposer.models as models
 
     models.socket.socket.return_value.__enter__.return_value.bind.side_effect = OSError("Address in use")
@@ -375,3 +387,21 @@ def test_local_qwen_uses_container_host(monkeypatch, thinking):
     profile = "thinking" if thinking else "non_thinking"
     model = create_model(f"vllm/qwen_3_5_4b_{profile}")
     assert model.openai_api_base == "http://host.docker.internal:8024/v1"
+
+
+@pytest.mark.parametrize("model_id", [
+    "vllm/qwen_3_5_4b_thinking",
+    "vllm/qwen_3_5_4b_non_thinking",
+    "vllm/qwen_3_8_flash_next_non_thinking",
+])
+def test_vllm_address_override_preserves_model_settings(model_id):
+    default = create_model(model_id)
+    remote = create_model(model_id, base_url="http://127.0.0.1:18024/v1")
+    assert remote.openai_api_base == "http://127.0.0.1:18024/v1"
+    for field in ("model_name", "temperature", "top_p", "presence_penalty", "extra_body", "preserve_reasoning"):
+        assert getattr(remote, field) == getattr(default, field)
+
+
+def test_non_vllm_address_override_is_rejected():
+    with pytest.raises(ValueError, match="only for vllm"):
+        create_model("lmrouter/qwen_3_8_flash_next_non_thinking", base_url="http://local/v1")

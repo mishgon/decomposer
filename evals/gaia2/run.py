@@ -1,74 +1,42 @@
-"""Evaluate on GAIA2 in one command: run the evaluation, then compute metrics.
-
-Takes every flag of `gyms/gaia2/run.py` except `--purpose trace-generation` (trace
-generation stays in the gym). The runner skips a run that is already complete, so
-repeating the command only recomputes metrics. Metrics go to
-`<run_dir>/eval_metrics.json`; a full held-out execution run (`--partition test`,
-three repeats, no limit) also gets its baseline `comparison.json`.
-
-    python -m evals.gaia2.run --experiment <name> --partition test --num-repeats 3
-    python -m evals.gaia2.run --metrics-only <run_dir> [--no-write]
-"""
-
 from __future__ import annotations
 
 import argparse
 import json
 import sys
+import uuid
 from collections.abc import Sequence
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from evals.common import METRICS_FILENAME, read_json, write_json  # noqa: E402
-from evals.gaia2 import comparison  # noqa: E402
-from evals.gaia2.metrics import COMPLETION_MARKER, compute  # noqa: E402
+from evals.common import METRICS_FILENAME, write_json  # noqa: E402
+from evals.gaia2.metrics import compute, compute_suite  # noqa: E402
 from gyms.gaia2 import run as runner  # noqa: E402
-from gyms.gaia2.experiments import get_domain_spec, get_experiment  # noqa: E402
-
-COMPARISON_FILENAME = "comparison.json"
 
 
 def report(
     run_dir: Path,
     *,
     write: bool,
-    baselines: Sequence[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    result = compute(run_dir)
-    marker = read_json(run_dir / COMPLETION_MARKER)
-    compared = None
-    if comparison.applies(marker):
-        compared = comparison.build_heldout_comparison(
-            get_experiment(marker["experiment"]), run_dir, baselines=baselines
-        )
+    result = (
+        compute(run_dir)
+        if (run_dir / ".eval_done.json").is_file()
+        else compute_suite(run_dir)
+    )
     if write:
         write_json(run_dir / METRICS_FILENAME, result)
-        if compared is not None:
-            write_json(run_dir / COMPARISON_FILENAME, compared)
     summary = {
         "run_dir": str(run_dir),
         "metrics": result["metrics"],
-        "fixed_denominator_score": result["gym_metrics"]["fixed_denominator_score"],
-        "comparison": str(run_dir / COMPARISON_FILENAME) if compared is not None and write else None,
+        "domains": result.get("domains"),
         "written": str(run_dir / METRICS_FILENAME) if write else None,
     }
     print(json.dumps(summary, indent=2), flush=True)
     return result
-
-
-def output_dir(args: argparse.Namespace) -> Path:
-    """The directory `gyms/gaia2/run.py` writes for these evaluation arguments."""
-    spec = get_domain_spec(args.domain)
-    experiment = get_experiment(args.experiment)
-    return runner.selected_output_dir(
-        experiment,
-        args,
-        domain=spec.name,
-        ports=runner.Gaia2PortLayout(args.port_offset),
-    )
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -83,25 +51,46 @@ def main(argv: Sequence[str] | None = None) -> int:
         report(options.metrics_only, write=not options.no_write)
         return 0
 
-    if "-h" in rest or "--help" in rest:
-        print(__doc__)
-    args = runner.build_parser().parse_args(rest)
-    if args.purpose != "evaluation":
-        raise SystemExit("evals.gaia2.run evaluates; run trace generation with gyms/gaia2/run.py")
-    baselines = None
-    prospective = {
-        "domain": get_domain_spec(args.domain).name,
-        "partition": args.partition,
-        "limit": args.limit,
-        "num_repeats": args.num_repeats,
-    }
-    if not args.dry and comparison.applies(prospective):
-        # Fail before hours of rollouts if a baseline the comparison needs is missing.
-        baselines = comparison.collect_baseline_summaries()
-    code = runner.main(rest)
-    if code or args.dry:
-        return code
-    report(output_dir(args), write=not options.no_write, baselines=baselines)
+    parser = runner.build_parser(evaluation=True)
+    args = parser.parse_args(rest)
+    if len(set(args.domains)) != len(args.domains):
+        parser.error("--domains must not contain duplicates")
+    if args.task and len(args.domains) != 1:
+        parser.error("--task requires exactly one domain")
+    directory = (
+        (
+            args.output_dir
+            or runner.RESULTS_ROOT
+            / (
+                datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+                + "-"
+                + uuid.uuid4().hex[:8]
+            )
+        )
+        .expanduser()
+        .resolve()
+    )
+    if not args.dry and directory.exists() and any(directory.iterdir()):
+        raise FileExistsError(f"Output directory is not empty: {directory}")
+    # Validate both domains before starting any episodes.
+    for domain in args.domains:
+        run_args = argparse.Namespace(**vars(args), domain=domain)
+        runner.selected_scenario_ids(run_args)
+        if not args.dry:
+            runner.validate_preparation(domain=domain)
+    if not args.dry:
+        write_json(
+            directory / "evaluation.json",
+            {"agent": args.agent, "domains": args.domains},
+        )
+    for domain in args.domains:
+        run_args = argparse.Namespace(**vars(args), domain=domain)
+        run_args.output_dir = directory / domain
+        runner.execute(run_args)
+        if not args.dry:
+            report(run_args.output_dir, write=not options.no_write)
+    if not args.dry:
+        report(directory, write=not options.no_write)
     return 0
 
 

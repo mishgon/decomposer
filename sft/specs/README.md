@@ -1,7 +1,6 @@
 # SFT build specifications
 
-These specifications, those in `sft/gaia2/specs/` and
-`sft/workplace_assistant/specs/`, and the training configs in `sft/configs/`,
+These specifications, those in `sft/workplace_assistant/specs/`, and the training configs in `sft/configs/`,
 target the retired `spawn_subagent`/`wait` Decomposer core. Their datasets and
 checkpoints were built at `gaia2-eval` commit `2b1bda8`; rebuild or validate
 them only from that commit. The current preparation code accepts only

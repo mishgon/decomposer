@@ -73,6 +73,13 @@ use `/opt/agents`. Rebuild the adapter after changing packaged code.
 
 Workflows depend on this Gym, never the reverse.
 
+The host runner limits each task-container file to 1 GiB and checks the episode
+artifact directory every five seconds. Above 2 GiB it kills the task container,
+writes `disk_limit.json`, and reports an episode error. The directory limit can
+overshoot between checks; it does not cover PostgreSQL or the container's writable
+layer. Container logs rotate at 20 MiB with two files retained. These protections
+also apply when resuming SFT collection and do not require an image rebuild.
+
 Python MCP servers launch directly from their preinstalled per-project virtual
 environments. Task startup never resolves or rebuilds those dependencies. A missing
 executable is an image-build problem and fails explicitly. Numerical thread pools

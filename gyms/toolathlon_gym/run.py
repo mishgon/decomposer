@@ -8,6 +8,7 @@ import os
 import signal
 import shlex
 import subprocess
+import threading
 import time
 import urllib.request
 import uuid
@@ -32,6 +33,8 @@ DEFAULT_ARTIFACTS_DIR = DEFAULT_GYM_ARTIFACTS_DIR / "traces"
 DEFAULT_EVALS_DIR = DEFAULT_GYM_ARTIFACTS_DIR / "evals"
 DEFAULT_IMAGE = "decomposer-toolathlon:latest"
 POSTGRES_IMAGE = "docker.io/library/postgres:15"
+EPISODE_DISK_LIMIT_BYTES = 2 * 1024**3
+FILE_SIZE_LIMIT_BYTES = 1024**3
 POSTGRES_ENV = {
     "PGHOST": "postgres",
     "PG_HOST": "postgres",
@@ -59,6 +62,28 @@ def _docker(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
 
 def _handle_termination(signum: int, _frame: object) -> None:
     raise KeyboardInterrupt(f"received signal {signum}")
+
+
+def _monitor_episode_disk(episode_dir, task_container, stop, exceeded):
+    while not stop.wait(5):
+        usage = subprocess.run(
+            ["du", "--summarize", "--block-size=1", str(episode_dir)],
+            capture_output=True, text=True,
+        )
+        if not usage.stdout:
+            continue
+        used_bytes = int(usage.stdout.split()[0])
+        if used_bytes <= EPISODE_DISK_LIMIT_BYTES:
+            continue
+        exceeded.set()
+        print(f"Episode disk limit exceeded: {used_bytes} > {EPISODE_DISK_LIMIT_BYTES} bytes", flush=True)
+        try:
+            (episode_dir / "disk_limit.json").write_text(json.dumps({
+                "used_bytes": used_bytes, "limit_bytes": EPISODE_DISK_LIMIT_BYTES,
+            }))
+        finally:
+            _docker("kill", task_container, check=False)
+        return
 
 
 def _open_container_lock(path: Path | None):
@@ -222,6 +247,9 @@ def run_episode(args) -> None:
     started_at = datetime.now(timezone.utc).isoformat()
     container_lock = _open_container_lock(args.container_lock_file)
     container_lock_held = False
+    disk_monitor_stop = threading.Event()
+    disk_limit_exceeded = threading.Event()
+    disk_monitor = None
     try:
         _acquire_container_lock(container_lock)
         container_lock_held = container_lock is not None
@@ -354,6 +382,12 @@ def run_episode(args) -> None:
             "--detach",
             "--name",
             task_container,
+            "--ulimit",
+            f"fsize={FILE_SIZE_LIMIT_BYTES}:{FILE_SIZE_LIMIT_BYTES}",
+            "--log-opt",
+            "max-size=20m",
+            "--log-opt",
+            "max-file=2",
             "--network",
             network,
             "--add-host",
@@ -379,6 +413,12 @@ def run_episode(args) -> None:
             f"{episode_dir.resolve()}:/artifacts/data",
             args.image,
         )
+        disk_monitor = threading.Thread(
+            target=_monitor_episode_disk,
+            args=(episode_dir, task_container, disk_monitor_stop, disk_limit_exceeded),
+            daemon=True,
+        )
+        disk_monitor.start()
         mapping = _docker("port", task_container, "2024/tcp").stdout.strip()
         if ":" not in mapping:
             status = _docker(
@@ -577,6 +617,9 @@ def run_episode(args) -> None:
         print(f"\nArtifacts: {episode_dir}")
         print(f"Evaluation: {evaluation['pass']} ({evaluation_path})")
     finally:
+        disk_monitor_stop.set()
+        if disk_monitor is not None:
+            disk_monitor.join()
         if container_lock_held:
             _release_container_lock(container_lock)
             container_lock_held = False
@@ -593,6 +636,8 @@ def run_episode(args) -> None:
             _release_container_lock(container_lock)
             if container_lock is not None:
                 container_lock.close()
+        if disk_limit_exceeded.is_set():
+            raise RuntimeError(f"Episode disk limit exceeded ({EPISODE_DISK_LIMIT_BYTES} bytes)")
 
 
 

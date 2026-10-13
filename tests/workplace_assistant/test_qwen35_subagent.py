@@ -40,6 +40,7 @@ def test_repository_langgraph_registers_every_workplace_subagent() -> None:
     registered = json.loads(path.read_text())["graphs"]
     expected = {
         "qwen35_4b_non_thinking",
+        "qwen35_4b_unlooped_thinking",
         "gemma_4_2b_thinking",
         "gemma_4_2b_non_thinking",
         "gemma_4_4b_thinking",
@@ -48,6 +49,8 @@ def test_repository_langgraph_registers_every_workplace_subagent() -> None:
         "gemma_4_12b_non_thinking",
         "gemma_4_26b_a4b_thinking",
         "gemma_4_26b_a4b_non_thinking",
+        "gemma_4_31b_thinking",
+        "gemma_4_31b_non_thinking",
     }
     assert set(registered) == expected
     assert all(callable(getattr(graph, name)) for name in expected)

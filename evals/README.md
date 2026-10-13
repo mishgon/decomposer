@@ -11,7 +11,7 @@ and `--metrics-only <run_dir>` recomputes metrics without a GPU.
 |---|---|---|
 | tau2 | `python -m evals.tau2_gym.run --experiment ...` | `analyze_traces.py` (decomposition and parallelism statistics) |
 | Workplace Assistant | `python -m evals.workplace_assistant.run --experiment ...`; MLSpace: `evals.workplace_assistant.submit` | `comparison.py` (Qwen3.6 vs DeepSeek teacher), `migrate_call_limit_artifacts.py` |
-| GAIA2 | `python -m evals.gaia2.run --experiment ...`; MLSpace: `evals.gaia2.submit` | `comparison.py` (held-out baselines), `trace_stats.py` (cost, tokens, latency, parallelism), `chat_trace.py` (one rollout as a timeline) |
+| GAIA2 | `python -m evals.gaia2.run --harness decomposer --model-id ...` | `trace_stats.py` (cost, tokens, latency, parallelism), `chat_trace.py` (one rollout as a timeline) |
 
 `evals/common.py` holds the shared pass metrics: for tasks that each ran `k`
 times, `pass_at_1` is the share of passing rollouts, `pass_at_k` the share of

@@ -3,7 +3,7 @@ from __future__ import annotations
 import httpx
 from fastapi.testclient import TestClient
 
-from gyms.gaia2 import openrouter_proxy
+from gyms import remote_model_proxy as openrouter_proxy
 
 
 def test_proxy_injects_credential_and_reasoning_and_retries_500(monkeypatch) -> None:

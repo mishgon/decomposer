@@ -245,17 +245,18 @@ def test_run_records_run_and_passes_context(monkeypatch, async_invocation: bool,
         command = tool.func("thread_1", "do the task", runtime)
 
     expected_config = {"recursion_limit": 1}
+    expected_context = dict(context)
     if run_budget is not None:
-        expected_config["configurable"] = {
+        expected_context.update({
             "agent_run_budget_seconds": run_budget,
             "agent_shutdown_grace_seconds": 15.0,
-        }
+        })
     client.runs.create.assert_called_once_with(
         thread_id="thread_1",
         assistant_id="test_assistant",
         input={"messages": [{"role": "user", "content": "do the task"}]},
         config=expected_config,
-        context=context,
+        context=expected_context,
         multitask_strategy="reject",
     )
     assert "agents" not in command.update
@@ -689,10 +690,10 @@ def test_decomposer_delegates(monkeypatch, async_invocation: bool) -> None:
 
     assert client.runs.create.call_count == 2
     assert all(
-        call.kwargs["config"] == {"configurable": {
+        call.kwargs["config"] is None and call.kwargs["context"] == {
             "agent_run_budget_seconds": 60.0,
             "agent_shutdown_grace_seconds": 60.0,
-        }}
+        }
         for call in client.runs.create.call_args_list
     )
     assert result["agents"] == {
@@ -1061,3 +1062,36 @@ def test_third_prompt_attempt_forces_final_response(monkeypatch, async_invocatio
     assert result["run_prompt_counts"] == {}
     assert result["shutdown_requested"] is False
     assert len(requests[-1].tools) == 4
+
+
+@pytest.mark.parametrize("async_invocation", [False, True])
+@pytest.mark.parametrize("context_type", ["dict", "dataclass", "pydantic", "none"])
+def test_run_budget_and_context_share_one_server_field(async_invocation, context_type):
+    from dataclasses import make_dataclass
+    from pydantic import create_model
+
+    if context_type == "dataclass":
+        context = make_dataclass("Context", [("value", int)])(42)
+    elif context_type == "pydantic":
+        context = create_model("Context", value=(int, ...))(value=42)
+    else:
+        context = {"value": 42} if context_type == "dict" else None
+    client = AsyncMock() if async_invocation else MagicMock()
+    client.runs.create.return_value = {"run_id": "run", "status": "pending"}
+    tool = _build_run_tool(_client_cache(client), 100, 60, 15)
+    runtime = SimpleNamespace(
+        state={"agents": {"thread": _agent("thread")}, "agent_runs": {}},
+        context=context, tool_call_id="call",
+    )
+    if async_invocation:
+        asyncio.run(tool.coroutine("thread", "task", runtime))
+    else:
+        tool.func("thread", "task", runtime)
+    payload = client.runs.create.call_args.kwargs
+    assert payload["config"] == {"recursion_limit": 100}
+    assert payload["context"] == {
+        **({"value": 42} if context is not None else {}),
+        "agent_run_budget_seconds": 60, "agent_shutdown_grace_seconds": 15,
+    }
+    if context_type == "dict":
+        assert context == {"value": 42}

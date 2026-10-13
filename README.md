@@ -50,6 +50,17 @@ The final answer is printed, the raw state is saved to `examples/minimal/trace.j
 and the Gantt chart is generated in `examples/minimal/trace.html`.
 See `examples/minimal/README.md` for details.
 
+## Agent run budgets
+
+Decomposer passes `agent_run_budget_seconds` and `agent_shutdown_grace_seconds`
+through the Agent Server run `context`, alongside environment data. Agents that
+support the budget must declare these optional fields in their `context_schema`
+and install `RunBudgetMiddleware`. Extend `RunBudgetContext` for a `TypedDict`
+schema, or declare equivalent fields in a dataclass or Pydantic schema. The
+middleware reads `runtime.context`; nested agents must receive that context too.
+An absent or `None` work budget disables the limit. Shutdown grace defaults to
+60 seconds. `config` retains framework settings such as `recursion_limit`.
+
 ## Repo structure
 
 - `src/decomposer/`: core Decomposer package. This should stay benchmark- and training-agnostic.

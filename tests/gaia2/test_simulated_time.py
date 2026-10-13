@@ -25,10 +25,10 @@ from are.simulation.types import (
     event_registered,
 )
 
-from gyms.gaia2.broker import ToolStateBroker
-from gyms.gaia2.simulated_time import (
+from gyms.gaia2.are import (
     TOOL_CALL_STEP_SECONDS,
     FrozenTurnClock,
+    ToolServer,
     frozen_turn_refusals,
 )
 
@@ -69,7 +69,7 @@ def world():
     env = Environment(EnvironmentConfig(start_time=1000, duration=600, verbose=False))
     env.register_apps([counter, system])
     env.start()
-    broker = ToolStateBroker()
+    broker = ToolServer()
     session = broker.register(
         Scenario([*counter.get_tools(), *system.get_tools()]), env.notification_system
     )
@@ -232,7 +232,10 @@ def test_guard_admits_a_static_single_turn_scenario():
 @pytest.mark.parametrize(
     ("scenario", "reason"),
     [
-        (lambda: _scenario(Event.from_function(Counter().increment, amount=1)), "ENV event"),
+        (
+            lambda: _scenario(Event.from_function(Counter().increment, amount=1)),
+            "ENV event",
+        ),
         (
             lambda: _scenario(
                 Event.from_function(
@@ -264,12 +267,10 @@ def test_ares_litellm_engine_still_reports_no_generation_time():
     # The simple agent's clock stands still during generation only because ARE's
     # engine never reports `completion_duration` (base_agent.py resumes the
     # environment with `metadata.get("completion_duration", 0)`). If this changes,
-    # the two agents no longer share the clock rule gyms/gaia2/simulated_time.py
+    # the two agents no longer share the clock rule gyms/gaia2/are.py
     # assumes.
     engine = GAIA2_REPO / "are/simulation/agents/llm/litellm/litellm_engine.py"
     agent = GAIA2_REPO / "are/simulation/agents/default_agent/base_agent.py"
 
     assert "completion_duration" not in engine.read_text(encoding="utf-8")
-    assert 'metadata.get("completion_duration", 0)' in agent.read_text(
-        encoding="utf-8"
-    )
+    assert 'metadata.get("completion_duration", 0)' in agent.read_text(encoding="utf-8")

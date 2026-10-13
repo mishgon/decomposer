@@ -9,6 +9,7 @@ from langchain.agents.middleware import ModelCallLimitMiddleware
 from langchain_core.language_models.chat_models import BaseChatModel
 from langgraph.graph.state import CompiledStateGraph
 from responses_api_agents.decomposer_agent.subagents.graph import (
+    AgentContext,
     NeMoGymSubagentMiddleware,
 )
 
@@ -69,6 +70,7 @@ def _model_base_url(model_id: str, default_port: int) -> str:
 
 def _create_subagent(model: BaseChatModel) -> CompiledStateGraph:
     return create_agent(
+        context_schema=AgentContext,
         model=model,
         tools=[],
         middleware=[

@@ -356,8 +356,11 @@ def test_subagent_system_prompt_carries_the_domain_policy(budget) -> None:
         subagent = graph._create_subagent(RecordingModel(responses=[AIMessage(content="done")]))
         asyncio.run(subagent.ainvoke(
             {"messages": [HumanMessage(content="Cancel slot S-1.")]},
-            {"configurable": {"agent_run_budget_seconds": budget, "agent_shutdown_grace_seconds": 60}},
-            context=context,
+            context={
+                **context,
+                "agent_run_budget_seconds": budget,
+                "agent_shutdown_grace_seconds": 60,
+            },
         ))
 
     run([{"role": "system", "content": "# Policy\nRefunds need approval."}, {"role": "user", "content": "User request."}])
@@ -431,11 +434,11 @@ def test_subagent_budget_limits_dynamic_tools(monkeypatch, slow_tool):
         async with asyncio.timeout(2):
             return await agent.ainvoke(
                 {"messages": [HumanMessage(content="Work")]},
-                {"configurable": {
+                context={
+                    **context,
                     "agent_run_budget_seconds": .05 if slow_tool else 60,
                     "agent_shutdown_grace_seconds": .3 if slow_tool else 60,
-                }},
-                context=context,
+                },
             )
 
     if slow_tool:

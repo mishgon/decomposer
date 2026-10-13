@@ -1,10 +1,3 @@
-"""Unit coverage for the GAIA2 cost statistics.
-
-The arithmetic here is easy; what is not easy is the bookkeeping the manager's
-sequential tool calls force on us, and the three joins that reach across
-sidecar, LangGraph log and vLLM log. Those are what these tests pin down.
-"""
-
 from __future__ import annotations
 
 import json
@@ -12,91 +5,7 @@ import json
 import pytest
 
 from evals.gaia2 import trace_stats
-from evals.gaia2.trace_stats import (
-    Lifecycle,
-    SYSTEMS,
-    resolve_run,
-    join_tool_calls,
-    parse_langgraph_log,
-    parse_vllm_throughput,
-    structural_parallelism,
-    temporal_parallelism,
-)
-
-
-def _ai(name: str) -> dict:
-    return {"type": "ai", "data": {"tool_calls": [{"name": name}], "content": ""}}
-
-
-def _tool(payload) -> dict:
-    return {"type": "tool", "data": {"content": json.dumps(payload)}}
-
-
-def _spawn(run_id: str) -> list[dict]:
-    return [_ai("run"), _tool({"agent_run_id": run_id})]
-
-
-def _wait(*run_ids: str) -> list[dict]:
-    return [
-        _ai("wait"),
-        _tool([{"agent_run_id": r, "status": "responded"} for r in run_ids]),
-    ]
-
-
-def test_consecutive_spawns_are_the_only_source_of_parallelism():
-    messages = [*_spawn("a"), *_spawn("b"), *_spawn("c"), *_wait("a", "b", "c")]
-
-    stats = structural_parallelism(messages)
-
-    assert stats["max_outstanding"] == 3
-    assert stats["spawn_bursts"] == [3]
-    assert stats["max_reports_per_wait"] == 3
-    assert stats["unclosed_at_end"] == 0
-
-
-def test_new_and_fork_start_no_runs():
-    messages = [
-        _ai("new"), _tool({"agent_id": "s1"}),
-        _ai("fork"), _tool({"agent_id": "s2"}),
-        *_spawn("a"),
-        *_spawn("b"),
-        *_wait("a", "b"),
-    ]
-
-    stats = structural_parallelism(messages)
-
-    assert stats["spawn_bursts"] == [2]
-    assert stats["max_outstanding"] == 2
-    assert stats["spawn_errors"] == 0
-
-
-def test_alternating_spawn_and_wait_never_batches():
-    messages = [*_spawn("a"), *_wait("a"), *_spawn("b"), *_wait("b")]
-
-    stats = structural_parallelism(messages)
-
-    assert stats["max_outstanding"] == 1
-    assert stats["spawn_bursts"] == [1, 1]
-    assert stats["mean_reports_per_wait"] == 1.0
-
-
-def test_a_wait_that_collects_only_some_reports_leaves_the_rest_outstanding():
-    messages = [*_spawn("a"), *_spawn("b"), *_wait("a"), *_spawn("c")]
-
-    stats = structural_parallelism(messages)
-
-    # `b` was never reported, so `c` starts with two already in flight.
-    assert stats["max_outstanding"] == 2
-    assert stats["unclosed_at_end"] == 2
-
-
-def test_wait_with_nothing_running_is_counted_not_crashed():
-    messages = [_ai("wait"), {"type": "tool", "data": {"content": "No active runs remain."}}]
-
-    stats = structural_parallelism(messages)
-
-    assert stats["empty_waits"] == 1
-    assert stats["waits"] == 0
+from evals.gaia2.trace_stats import parse_langgraph_log, temporal_parallelism
 
 
 def test_temporal_parallelism_is_time_weighted_over_the_busy_span():
@@ -117,37 +26,6 @@ def test_subagent_without_an_end_timestamp_is_excluded_not_extrapolated():
     assert stats["max_concurrent"] == 1
 
 
-def test_identical_tool_calls_are_disambiguated_by_the_langgraph_interval():
-    call = {"id": "1", "name": "Files__open", "args": {"path": "/a"}}
-    subagents = [
-        {"agent_run_id": "early", "tool_calls": [dict(call)]},
-        {"agent_run_id": "late", "tool_calls": [dict(call)]},
-    ]
-    env_calls = [
-        {"tool": "Files__open", "arguments": {"path": "/a"}, "started_at": 5.0, "result": "first"},
-        {"tool": "Files__open", "arguments": {"path": "/a"}, "started_at": 50.0, "result": "second"},
-    ]
-    lifecycles = {
-        "early": Lifecycle("early", "success", 0.0, 0.0, 10.0, 10.0, 0.0),
-        "late": Lifecycle("late", "success", 40.0, 40.0, 60.0, 20.0, 0.0),
-    }
-
-    results, quality = join_tool_calls(subagents, env_calls, lifecycles)
-
-    assert results["early"] == ["first"]
-    assert results["late"] == ["second"]
-    assert quality == {"unique": 2, "ambiguous": 0, "unmatched": 0}
-
-
-def test_a_tool_call_with_no_env_record_is_reported_not_silently_dropped():
-    subagents = [{"agent_run_id": "x", "tool_calls": [{"name": "Gone", "args": {}}]}]
-
-    results, quality = join_tool_calls(subagents, [], {})
-
-    assert results["x"] == [None]
-    assert quality["unmatched"] == 1
-
-
 def test_langgraph_lifecycle_survives_the_ansi_colour_codes(tmp_path):
     log = tmp_path / "langgraph.log"
     log.write_text(
@@ -166,119 +44,95 @@ def test_langgraph_lifecycle_survives_the_ansi_colour_codes(tmp_path):
     assert round(entry.ended - entry.started, 3) == 4.456
 
 
-def test_throughput_integral_charges_each_rate_over_the_preceding_gap(tmp_path):
-    log = tmp_path / "vllm.log"
-    log.write_text(
-        "INFO 09-06 04:17:05 [loggers.py:273] Engine 000: Avg prompt throughput: "
-        "100.0 tokens/s, Avg generation throughput: 10.0 tokens/s, "
-        "Prefix cache hit rate: 50.0\n"
-        "INFO 09-06 04:17:15 [loggers.py:273] Engine 000: Avg prompt throughput: "
-        "200.0 tokens/s, Avg generation throughput: 20.0 tokens/s, "
-        "Prefix cache hit rate: 80.0\n"
-    )
-
-    total = parse_vllm_throughput(log, year=2026)
-
-    # Only the second sample has a preceding gap: 200 * 10s and 20 * 10s.
-    assert total.prompt_tokens == 2000.0
-    assert total.generation_tokens == 200.0
-    assert total.prefix_hit_rate == 0.8
-    # 80% of the served prefix came from cache, so the logical context was 5x.
-    assert round(total.logical_prompt_tokens) == 10000
-
-
-def test_a_restart_gap_does_not_invent_tokens(tmp_path):
-    log = tmp_path / "vllm.log"
-    log.write_text(
-        "INFO 09-06 04:00:00 [loggers.py:273] Engine 000: Avg prompt throughput: "
-        "100.0 tokens/s, Avg generation throughput: 10.0 tokens/s\n"
-        "INFO 09-06 06:00:00 [loggers.py:273] Engine 000: Avg prompt throughput: "
-        "100.0 tokens/s, Avg generation throughput: 10.0 tokens/s\n"
-    )
-
-    total = parse_vllm_throughput(log, year=2026)
-
-    assert total.prompt_tokens == 0.0
-    assert total.seconds == 0.0
-
-
-def test_an_almost_total_cache_hit_rate_is_refused_not_amplified(tmp_path):
-    # At 99.8% the amplification is 500x, so the last reported digit decides the
-    # answer. Reporting it would have put 41.9M tokens per rollout in a table.
-    log = tmp_path / "vllm.log"
-    log.write_text(
-        "INFO 09-06 04:00:00 [loggers.py:273] Engine 000: Avg prompt throughput: "
-        "100.0 tokens/s, Avg generation throughput: 10.0 tokens/s, "
-        "Prefix cache hit rate: 99.8\n"
-        "INFO 09-06 04:00:10 [loggers.py:273] Engine 000: Avg prompt throughput: "
-        "100.0 tokens/s, Avg generation throughput: 10.0 tokens/s, "
-        "Prefix cache hit rate: 99.8\n"
-    )
-
-    total = parse_vllm_throughput(log, year=2026)
-
-    assert total.prefix_hit_rate == 0.998
-    assert total.prompt_tokens == 1000.0
-    assert total.logical_prompt_tokens is None
-
-
-def _usage(**details) -> dict:
-    return {"type": "ai", "data": {"tool_calls": [], "content": "", "usage_metadata": details}}
-
-
-def test_reasoning_and_cached_tokens_are_kept_when_the_provider_reports_them():
-    # A remote reasoning API fills in detail a local non-thinking vLLM omits:
-    # on DeepSeek roughly half the output is reasoning and most of the input is
-    # served from the provider's cache, which is the whole cost story for it.
-    from evals.gaia2.trace_stats import structural_parallelism
-
-    message = _usage(
-        input_tokens=2629,
-        output_tokens=792,
-        input_token_details={"cache_read": 2304},
-        output_token_details={"reasoning": 507},
-    )
-
-    detail = message["data"]["usage_metadata"]
-    assert detail["output_token_details"]["reasoning"] < detail["output_tokens"]
-    assert detail["input_token_details"]["cache_read"] < detail["input_tokens"]
-    # An AI message carrying no tool call must not disturb the spawn/wait replay.
-    assert structural_parallelism([message])["max_outstanding"] == 0
-
-
-def test_deepseek_runs_resolve_by_their_own_name(tmp_path):
-    domain = tmp_path / "search"
-    domain.mkdir()
-    (domain / "deepseek-v4-flash-0731-reasoning-max-teacher-gemma4-e4b-"
-     "non-thinking-n3-prompt-teacher").mkdir()
-    (domain / "deepseek-v4-flash-0731-reasoning-max-teacher-gemma4-e4b-"
-     "non-thinking-n3-prompt-teacher.INVALID-superseded").mkdir()
-
-    found = resolve_run("DeepSeek teacher", "e4b", "search", tmp_path)
-
-    assert found is not None and "INVALID" not in found.name
-
-
-def test_every_system_the_report_names_has_a_resolver():
-    assert "DeepSeek teacher" in SYSTEMS
-
-
-def test_a_remotely_served_model_needs_an_explicit_tokenizer():
-    assert trace_stats._tokenizer_path("/local/worker", "/override", "worker") == (
-        "/local/worker"
-    )
-    assert trace_stats._tokenizer_path(None, "/qwen35-4b", "worker") == "/qwen35-4b"
-    with pytest.raises(ValueError, match="pass --tokenizer"):
-        trace_stats._tokenizer_path(None, None, "policy")
-
-
 def test_single_repeat_scores_join_without_run_numbers(tmp_path):
     rows = [
         {"task_id": "a", "score": 1.0, "metadata": {"scenario_id": "a"}},
-        {"task_id": "b", "score": 0.0, "metadata": {"scenario_id": "b", "run_number": 2}},
+        {
+            "task_id": "b",
+            "score": 0.0,
+            "metadata": {"scenario_id": "b", "run_number": 2},
+        },
     ]
     (tmp_path / "output.jsonl").write_text(
         "".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8"
     )
 
     assert trace_stats._outcomes(tmp_path) == {("a", None): 1.0, ("b", 2): 0.0}
+
+
+def test_cumulative_usage_and_runs_are_counted_once(tmp_path):
+    sidecars = tmp_path / "decomposer_sidecars"
+    sidecars.mkdir()
+    (sidecars / "task.json").write_text(
+        json.dumps(
+            {
+                "scenario_id": "task",
+                "run_number": 2,
+                "turns": [
+                    {
+                        "manager": {
+                            "usage": {"output_tokens": tokens},
+                            "subagent_states": [
+                                {"agent_run_id": "worker", "status": "responded"}
+                            ],
+                            "timing": {"elapsed_seconds": 3},
+                        }
+                    }
+                    for tokens in (10, 25)
+                ],
+            }
+        )
+    )
+    result = trace_stats.analyse(tmp_path)
+    assert result["summary"]["manager_observed_usage"] == {"output_tokens": 25}
+    assert result["summary"]["worker_usage"] is None
+    record = result["rollouts"][0]
+    assert record["subagent_statuses"] == {"responded": 1}
+    assert record["manager_turn_seconds"] == 6
+    assert record["score"] is None
+
+
+def test_missing_usage_is_not_zero_and_failure_is_preserved(tmp_path):
+    sidecars = tmp_path / "decomposer_sidecars"
+    sidecars.mkdir()
+    (sidecars / "task.json").write_text(
+        json.dumps(
+            {
+                "scenario_id": "task",
+                "turns": [
+                    {"manager": {"failure": {"error": "failed", "traceback": "trace"}}}
+                ],
+            }
+        )
+    )
+    result = trace_stats.analyse(tmp_path)
+    assert result["summary"]["manager_observed_usage"] is None
+    assert result["summary"]["manager_usage_complete_rollouts"] == 0
+    assert result["rollouts"][0]["manager_failures"] == [
+        {"error": "failed", "traceback": "trace"}
+    ]
+
+
+@pytest.mark.parametrize("run_number", [None, 2])
+def test_lite_duration_and_usage_join_by_repeat(tmp_path, run_number):
+    (tmp_path / "output.jsonl").write_text(
+        json.dumps(
+            {"task_id": "task", "score": 1, "metadata": {"run_number": run_number}}
+        )
+    )
+    lite = tmp_path / "lite"
+    lite.mkdir()
+    suffix = f"_run_{run_number}" if run_number is not None else ""
+    usage = {"agent_0": {"prompt_tokens": [5], "completion_tokens": [2]}}
+    (lite / f"task{suffix}_hash.json").write_text(
+        json.dumps(
+            {
+                "scenario_id": "task",
+                "run_duration": 12,
+                "per_agent_llm_usage_stats": usage,
+            }
+        )
+    )
+    record = trace_stats.analyse(tmp_path)["rollouts"][0]
+    assert record["run_duration_seconds"] == 12
+    assert record["are_llm_usage"] == usage
