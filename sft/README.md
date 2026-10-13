@@ -164,8 +164,10 @@ The command prints the reference to put in the spec, `snapshot: sha256:<hex>`.
 
 Adding data never changes a snapshot or a release: new traces for a gym become a
 new snapshot, used by a new spec file with a new dataset version. A new gym needs
-an adapter in `sft/adapters/registry.py` (`ADAPTERS`, `ADAPTER_VERSIONS`) and the
-list of files it reads in `SNAPSHOT_FILES`. Bump an adapter's `ADAPTER_VERSION`
+an adapter in `sft/adapters/registry.py` (`ADAPTERS`, `ADAPTER_VERSIONS`), the
+list of files it reads in `SNAPSHOT_FILES`, and its name in `SourceSpec.adapter`
+(`sft/schema.py`); a collection format also needs its `trace_format` there and in
+`COLLECTION_TRACE_FORMATS`. Bump an adapter's `ADAPTER_VERSION`
 whenever its output changes. Snapshots and releases are self-contained
 directories, so either can later be uploaded unchanged, for example to a Hugging
 Face dataset repository, and pinned by revision.
@@ -188,7 +190,9 @@ Hugging Face folder share one name. A published version never changes: any
 change, however small, becomes a new version. A minor release must keep every
 existing record on its side of the split, which the split does as long as
 `split.seed` and `split.validation_fraction` stay the same (see
-[Records](#records)).
+[Records](#records)). Release 1.0.0 used an earlier split rule and traces
+collected with the old core prompt, so the release after it cannot keep its
+split and is a major version.
 
 **Publishing.** Releases are published unchanged to the private Hugging Face
 dataset `decomposer-datasets/decomposer-manager-sft`: one folder per version
@@ -224,10 +228,11 @@ can be snapshotted.
   `selection.success_threshold` (0.9 for the collector). The record's reward is
   1 for a strict pass and the check fraction otherwise.
 - **Tools.** The traces store no tool schemas. The source declares the subagent
-  types the collection offered (`native_subagent_types`, from
-  `gyms/toolathlon_gym/agents.py`), and the adapter rebuilds the manager's tools
-  from them with the Decomposer core. A trace that creates an undeclared type
-  stops the build.
+  types the collection offered (`native_subagent_types`, copied exactly from
+  `gyms/toolathlon_gym/agents.py` at the collection's commit), and the adapter
+  rebuilds the manager's tools from them with the Decomposer core. Another
+  description would give tools the manager never saw, and nothing can check
+  it. A trace that creates an undeclared type stops the build.
 - **Messages.** The first message must equal the task in `runtime.json`.
   Mistakes the core answered stay, as for the NeMo Gym adapter.
 
@@ -242,12 +247,12 @@ can be snapshotted.
   trace_format: toolathlon_langgraph_v1
   native_subagent_types:
     - id: qwen_3_5_4b_thinking
-      description: Qwen3.5-4B thinking agent equipped with all the available tools.
+      description: Qwen3.5-4B thinking agent equipped with all the required tools.
   selection:
     policy: collector_qualifies
     success_threshold: 0.9
-  expected_native_rollouts: <finished episodes>
-  expected_candidates: <finished episodes>
+  expected_native_rollouts: <episodes in the snapshot>
+  expected_candidates: <episodes in the snapshot>
 ```
 
 ### WideSeek collections
@@ -284,8 +289,8 @@ requires, so the adapter does not read them.
   selection:
     policy: collector_qualifies
     success_threshold: 0.9
-  expected_native_rollouts: <finished attempts>
-  expected_candidates: <finished attempts>
+  expected_native_rollouts: <attempts in the snapshot>
+  expected_candidates: <attempts in the snapshot>
 ```
 
 ### Release 1.0.0 of decomposer-manager-sft
@@ -384,7 +389,10 @@ in the parent of the commit that removed the old configs:
 git show "$(git log --diff-filter=D -1 --format=%h -- sft/configs)^:sft/configs/qwen35_4b_unloop_nonthinking_manager_sft_1.0.0_lora_32k_4gpu.yaml"
 ```
 
-Point its `data` section at the new release and its `expected_fingerprint`.
+Point its `data` section at the new release and its `expected_fingerprint`,
+and drop `data.include_reasoning`, an option removed since. Unknown keys in the
+`training` section fail (they go to TRL's `SFTConfig`), but unknown keys in the
+other sections are ignored, so check them against the table above.
 Fractional `eval_steps`/`save_steps` (for example `0.0667`, a fifth of an epoch
 in a 3-epoch run) need no recount when the release grows.
 
@@ -395,7 +403,9 @@ at learning rate 2e-5. Both ran 3 epochs, evaluated and saved every 0.2 epoch
 (95 steps), kept the checkpoint with the lowest validation loss and stopped
 after three evaluations without improvement. A run resumed with
 `--resume-from-checkpoint <output>/checkpoint-<step>` (passed after the GPUs to
-`sft/train_qwen35_h200.sh`) keeps its early-stopping count.
+`sft/train_qwen35_h200.sh`) keeps its early-stopping count when the config
+sets `training.restore_callback_states_from_checkpoint: true`, as the 1.0.0
+configs do.
 
 **Evaluation.** Validation loss is reported for the whole split as
 `eval_all_loss`, which picks the checkpoint, and per gym as `eval_<gym>_loss`
@@ -446,7 +456,8 @@ saves them to `summary.json`.
 TRL keeps its first `max_length` tokens, which hold the system prompt, the tools
 and the task, and drops a record left with no supervised token.
 `training_summary.json` lists the cut records under `overlength_truncations`,
-each with the supervised tokens it keeps.
+each with the supervised tokens it keeps. Leave `training.truncation_mode`
+unset: that list assumes TRL's default, `keep_start`.
 
 Training tokenizes each record once, at start-up, with the model's training
 template. That pass checks the assistant mask and measures lengths, and TRL
@@ -545,7 +556,7 @@ numeric metric has an independent `train/<metric>` or `eval/<metric>` scalar
 plot. `train/weight_norm` is the global L2 norm of trainable parameters after
 the optimizer update; it is reduced directly over FSDP shards at the first
 training log, every `clearml.weight_norm_interval_steps` optimizer steps, and
-the final log. The checked-in interval of 10 keeps its expected overhead below
+the final log. The default interval of 10 keeps its expected overhead below
 0.5%. Large checkpoint upload is disabled by default; checkpoints remain on
 NFS. Set `clearml.log_model: true` only when checkpoint upload is desired.
 
@@ -558,15 +569,16 @@ The stable artifact path is a symlink into shared NFS:
   -> /home/sukhorukov/decomposer_artifacts
 ```
 
-Training outputs live under `sft/jobs/`, sanity outputs under
-`sft/jobs_sanity/`, staged clean Git snapshots under `code/`, and
+Training outputs live under `training/sft/jobs/`, sanity outputs under
+`training/sft/jobs_sanity/`, staged clean Git snapshots under `code/`, and
 shared training environments under `venvs/sft/<uv-lock-hash>/`. The launcher
 syncs only the base and `train` dependency group. It does not require `nvcc`:
 Liger is a pinned Python wheel whose kernels Triton compiles at runtime.
 
-Experiments are registered in `sft.experiments`. The `mls` submitter is
-kept in an isolated environment because its Click 8.1.8 pin conflicts with the
-Hugging Face stack's Click 8.4.2 requirement. Preview every payload without
+Experiments are registered in `sft.experiments`, which is empty until a config
+is added for MLSpace. The `mls` submitter is kept in an isolated environment
+because its Click 8.1.8 pin conflicts with the Hugging Face stack's Click 8.4.2
+requirement. Preview every payload without
 staging code, creating persistent environments, or submitting jobs:
 
 ```bash
@@ -601,5 +613,6 @@ Until 2026-10-13 this package also held Gemma-4 support, build specifications an
 training configs of every release up to 1.0.0, a collection-time length limit, a
 per-task trace cap, and options to exclude or refuse long records. None of them
 works with or is needed by the current code; they live in the parents of the
-commits that removed them (`git log --diff-filter=D -- sft`). The release 1.0.0
-specification lives at commit `53a88d8`, the only commit that reproduces it.
+commits that removed them, which `git log --oneline -- sft` lists. The release
+1.0.0 specification lives at commit `53a88d8`, the only commit that reproduces
+it.
