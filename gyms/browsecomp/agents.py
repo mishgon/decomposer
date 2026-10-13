@@ -4,6 +4,8 @@ from pathlib import Path
 from langchain.agents import create_agent
 from decomposer.core import create_decomposer_agent
 from decomposer.models import create_model
+from decomposer.prompts import AGENT_SYSTEM_PROMPT
+from decomposer.run_budget import RunBudgetContext, RunBudgetMiddleware
 from gyms.browsecomp.model_logging import log_model_call
 from gyms.browsecomp.tools import ResearchState, search, fetch
 
@@ -16,8 +18,9 @@ def researcher():
     return create_agent(
         create_model(RESEARCHER_MODEL), tools=[search, fetch],
         state_schema=ResearchState,
-        system_prompt=Path(__file__).with_name("prompt.txt").read_text(),
-        middleware=[log_model_call],
+        context_schema=RunBudgetContext,
+        system_prompt=Path(__file__).with_name("prompt.txt").read_text() + "\n\n" + AGENT_SYSTEM_PROMPT,
+        middleware=[RunBudgetMiddleware(), log_model_call],
     )
 
 
