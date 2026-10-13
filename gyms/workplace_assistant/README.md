@@ -444,8 +444,7 @@ payloads. The live allocation's selected instance types are kept in
 
 Current SFT releases mix Workplace with the other gyms; see
 [`sft/README.md`](../../sft/README.md). The specs of the earlier Workplace-only
-releases were removed with the other legacy SFT specs (see *Legacy specs and
-configs* there).
+releases were removed with the other legacy SFT specs (see *History* there).
 
 ## Artifact layout
 

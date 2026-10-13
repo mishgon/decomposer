@@ -1,46 +1,27 @@
 # Decomposer supervised fine-tuning
 
-This workflow converts valid Decomposer rollouts into tool-calling
-conversations and performs full-parameter SFT with TRL. The loss covers only
-Decomposer outputs. Benchmark prompts, tool definitions, tool responses, and
-subagent responses remain visible as context but receive label `-100`.
+This package turns successful Decomposer teacher traces into a versioned dataset
+release and trains a Qwen3.5 student manager on it, with LoRA or full SFT. The
+loss covers only the manager's own turns; the task, tool schemas, tool results
+and subagent summaries are context.
 
-Preparation accepts only trajectories of the current Decomposer core, whose
-manager has exactly the tools `new(agent_type_id)`, `fork(agent_id)`,
-`run(agent_id, prompt)` and `wait()`.
+## Pipeline
 
-Records keep the tool schemas each source's manager saw, so every gym keeps its
-own agent types. Toolathlon collections store none; `sft/chat_tools.py`
-rebuilds them from the live core and the spec's `native_subagent_types`. Each
-source must use one schema; the manifest records its hash per source (`tool_schema_sha256`) and
-lists the dataset's hashes (`content.tool_schema_sha256s`). The
-NeMo Gym adapter (tau2, Workplace) keeps successful rollouts in which the
-manager made a mistake the core answered: a call of an unknown tool, malformed
-arguments, or an answer before collecting every run, which the core follows with
-an injected user message (`EARLY_RESPONSE_ERROR`, `EMPTY_RESPONSE_ERROR`). The
-trace must still be well formed: one task, every call answered, and a final
-text answer. Toolathlon and WideSeek collections are read the same way (see
-below).
-
-Canonical records keep every assistant message as the teacher emitted it. A
-message with several tool calls stays one message, and its results follow in
-the order the harness returned them, so the student learns the same turns that
-OPD and RL later sample. Calls the harness refused without executing them keep
-the core's refusal text as their result, like other mistakes the core answered:
-a `wait` sharing its message with any other call, a `fork` and `run` of the same
-subagent, and several `run` calls of the same subagent
-(`PARALLEL_WAIT_CALL_ERROR`, `PARALLEL_FORK_RUN_CALL_ERROR` and
-`PARALLEL_RUN_CALL_ERROR` in `decomposer.prompts`).
-
-## Legacy specs and configs
-
-Every build specification and training config up to release 1.0.0 was removed
-on 2026-10-13: none of them works with the current code. They live in the parent
-of the commit that removed them (`git log --diff-filter=D -1 -- <path>`); the
-1.0.0 specification lives at commit `53a88d8`, which built the release. The
-current code builds only `spec_version` 4 specifications, whose sources are
-digest-pinned snapshots (see [Snapshots, releases and
-versioning](#snapshots-releases-and-versioning)).
+1. **Collect traces.** tau2 and Workplace traces are ordinary gym runs with a
+   teacher experiment (`gyms/tau2_gym/README.md`,
+   `gyms/workplace_assistant/README.md`). Toolathlon and WideSeek have SFT
+   collectors that repeat tasks until they have enough successes
+   (`sft/toolathlon_gym/README.md`, `sft/wideseek/README.md`).
+2. **Snapshot each run** into an immutable, digest-named copy of the files its
+   adapter reads:
+   `uv run --group train python -m sft.snapshots --adapter <adapter> --source <run dir>`.
+3. **Write a build specification** in `sft/specs/` that names the snapshots,
+   and commit it.
+4. **Build the release:**
+   `.venv/bin/python -m sft.prepare --spec sft/specs/<spec>.yaml --output-root /mnt/share14T-2/sukhorukov/decomposer_artifacts/datasets/sft`.
+5. **Train:** `sft/train_qwen35_h200.sh <config> <gpus>` on Hertz-2. The run
+   exports the merged model to `<output_dir>/final/`, which `evals/<gym>`
+   evaluates (`evals/README.md`).
 
 ## Install
 
@@ -52,40 +33,98 @@ uv sync --group train
 
 The root and `external/Gym` environments remain separate.
 
-## Prepare the dataset
+## Records
 
-Dataset releases are defined by strict, checked-in build specifications whose
-sources are snapshots (see [Snapshots, releases and
-versioning](#snapshots-releases-and-versioning)). Build one with:
+A release holds `train.jsonl`, `validation.jsonl` and `manifest.json`. Each line
+is one canonical record of one successful trace:
+
+- **Messages.** The system prompt, then the task and the manager's turns with
+  their tool results, ending in the final answer. The system prompt is the one
+  the manager saw: the Decomposer prompt rendered with the 60-second run budget,
+  as `create_decomposer_agent` sends it (`sft.chat_tools.decomposer_system_prompt`).
+  The manifest records its SHA-256.
+- **Tools.** The tool schemas the source's manager saw, so every gym keeps its
+  own agent types. The manager's tools are exactly `new(agent_type_id)`,
+  `fork(agent_id)`, `run(agent_id, prompt)` and `wait()`; each source uses one
+  schema, whose hash the manifest records (`tool_schema_sha256`).
+- **Turns as emitted.** An assistant message with several tool calls stays one
+  message, and its results follow in the order the harness returned them, so
+  the student learns the same turns that OPD and RL later sample. Mistakes the
+  core answered stay, with the core's answer as their result: calls of unknown
+  tools or agents, malformed arguments, refused parallel calls
+  (`PARALLEL_WAIT_CALL_ERROR`, `PARALLEL_FORK_RUN_CALL_ERROR` and
+  `PARALLEL_RUN_CALL_ERROR` in `decomposer.prompts`), and answers before every
+  run was collected, which the core follows with an injected user message
+  (`EARLY_RESPONSE_ERROR`, `EMPTY_RESPONSE_ERROR`). A trace must still be well
+  formed: one task, every call answered, and a final text answer.
+- **Reasoning.** The student trains non-thinking. Records keep the teacher's
+  reasoning (`teacher_reasoning`) as metadata, and training never renders it.
+- **Metadata.** `source` (adapter, source and task IDs, teacher), `outcome`
+  (reward) and `attributes` (category and adapter-specific fields).
+
+Releases do not depend on a model: they hold messages and tool schemas, with no
+token counts and no length limit. Training tokenizes them and decides what to do
+with long records (see [Length](#length)).
+
+**Selection.** A release takes every successful trace: reward 1 for tau2 and
+Workplace (`selection.policy: exact_reward`), and the collector's own success
+rule for Toolathlon and WideSeek (`collector_qualifies`). Traces that are not
+well formed are excluded with a reason code, and the manifest counts every
+exclusion per source.
+
+**Split.** A task goes to validation when the hash of `split.seed` and its group
+ID falls under `split.validation_fraction` (`0.1`, seed `42`). All rollouts of a
+task land on the same side, and a task's side depends only on its own ID: adding
+data never moves an existing task. The group ID is the task prompt's hash for
+tau2 and Workplace and the task name for Toolathlon and WideSeek.
+
+**Manifest.** It records the specification, the snapshots and their files,
+reason-coded exclusion counts, the split and its validation task IDs, record
+counts by teacher, gym and category, the system-prompt and tool-schema hashes,
+the files' sizes and hashes, the preparation Git revision, and a portable
+dataset fingerprint. Training accepts manifest format 3 only and verifies it
+before loading a model.
+
+## Build a release
 
 ```bash
 .venv/bin/python -m sft.prepare --spec sft/specs/<spec>.yaml \
   --output-root /mnt/share14T-2/sukhorukov/decomposer_artifacts/datasets/sft
 ```
 
-The current specifications keep tau2 and Workplace rollouts with reward `1.0`
-and Toolathlon and WideSeek episodes by their collectors' own success rule, and
-split by prompt with validation fraction `0.1` and seed `42`. All rollouts of
-one prompt are assigned to the same split, chosen by a hash of the seed and the
-prompt's group ID. The builder requires a clean Git
-worktree and refuses to replace an existing `<dataset-id>/<version>` directory.
+The builder refuses to replace an existing `<dataset-id>/<version>` directory.
+A specification (`spec_version: 4`) names the dataset and version, the sources
+by snapshot digest, the selection and the split:
 
-All builds use `decomposer.prompts.DECOMPOSER_SYSTEM_PROMPT`. The builder inserts
-it before tokenization and records its SHA-256 in the manifest. Training checks
-the hash and the system message in every prepared record. The student trains
-non-thinking: records keep the teacher's reasoning (`teacher_reasoning`) as
-metadata, and training never renders it.
+```yaml
+spec_version: 4
+dataset:
+  id: decomposer-manager-sft
+  version: <version>
+policy:
+  id: decomposer-default
+sources:
+  - id: tau2-qwen38-flash-nonthinking-broad-v1-n15
+    adapter: nemo_gym
+    snapshot: sha256:<hex>
+    benchmark: tau2_gym
+    environment: tau2_gym
+    partition: train
+    teacher: qwen38-flash-non-thinking
+    expected_native_rollouts: <rollouts>
+    expected_candidates: <rollouts>
+selection:
+  policy: exact_reward
+  success_reward: 1.0
+split:
+  strategy: prompt_fixed
+  seed: 42
+  validation_fraction: 0.1
+```
 
-Releases do not depend on a model: they hold messages and tool schemas, with no
-token counts and no length limit. Training tokenizes every record with the
-model's own chat template and decides what to do with long ones (see
-[Length](#length)).
-
-The output manifest records source hashes, reason-coded filtering counts,
-split keys, the system-prompt hash, the tool-schema hash, and generated-file
-hashes, canonical schema version, preparation Git revision, and portable
-dataset fingerprint. Training accepts manifest v3 only and verifies this
-metadata before loading a model.
+`expected_native_rollouts` pins how many rollouts the source holds; a different
+count stops the build. Toolathlon and WideSeek sources add their own fields (see
+below).
 
 ### Snapshots, releases and versioning
 
@@ -145,10 +184,9 @@ to that version, so the release directory
 (`…/datasets/sft/decomposer-manager-sft/<version>/`), the manifest and the
 Hugging Face folder share one name. A published version never changes: any
 change, however small, becomes a new version. A minor release must keep every
-existing record on its side of the split. The split guarantees that as long as
-`split.seed` and `split.validation_fraction` stay the same: a task goes to
-validation when the hash of the seed and its group ID falls under the fraction,
-so its side never depends on the rest of the data.
+existing record on its side of the split, which the split does as long as
+`split.seed` and `split.validation_fraction` stay the same (see
+[Records](#records)).
 
 **Publishing.** Releases are published unchanged to the private Hugging Face
 dataset `decomposer-datasets/decomposer-manager-sft`: one folder per version
@@ -173,8 +211,9 @@ Check the uploaded files' sha256 against `prepared_files` in the manifest.
 The Toolathlon adapter reads a collection written by `sft/toolathlon_gym`
 (`trace_format: toolathlon_langgraph_v1`), snapshotted with
 `--adapter toolathlon_gym`. The snapshot takes every finished episode: its
-`trace.json` and `runtime.json`, and its evaluation `result.json`. Episodes still running have no evaluation yet and are left out,
-so a running collection can be snapshotted.
+`trace.json` and `runtime.json`, and its evaluation `result.json`. Episodes
+still running have no evaluation yet and are left out, so a running collection
+can be snapshotted.
 
 - **Selection.** `selection.policy: collector_qualifies` keeps exactly the
   traces the collector counts as successes
@@ -212,7 +251,7 @@ so a running collection can be snapshotted.
 ### WideSeek collections
 
 The WideSeek adapter (`adapter: wideseek`, `trace_format: wideseek_langgraph_v1`)
-reads a collection written by `sft/wideseek` on main, snapshotted with
+reads a collection written by `sft/wideseek`, snapshotted with
 `--adapter wideseek`. Each attempt's `result.json` names the execution it scored.
 The snapshot takes, per finished attempt, that result, the execution's
 `trace.json`, and the manager's first logged model call, which holds the tools
@@ -220,7 +259,7 @@ and system prompt the manager saw. Restarted executions that no result names, an
 the rest of the call log, are left out.
 
 - **Selection.** `collector_qualifies` applies the collector's rule
-  (`gyms/wideseek/metrics.qualifies` on main): a normal finish, a scored
+  (`gyms/wideseek/metrics.qualifies`): a normal finish, a scored
   evaluation, no cleanup errors, and a score of 1 or above `success_threshold`.
   The record's reward is the score.
 - **Tools and prompt.** Records keep the logged tools. The logged system prompt
@@ -304,11 +343,78 @@ cd ~/decomposer_sft
 nohup sft/train_qwen35_h200.sh <config> 4,5,6,7 > ~/<run>.log 2>&1 &
 ```
 
-Validation loss is reported for the whole split as `eval_all_loss`, which picks
-the checkpoint, and per gym as `eval_<gym>_loss` when the split mixes gyms.
-ClearML plots each one separately and also all of them together in
-`eval/loss_by_dataset`. A config's `metric_for_best_model: eval_loss` means
-`eval_all_loss`.
+Arguments after the GPUs go to `python -m sft.train` and override the config
+(for example `--max-steps`, `--max-length`, `--output-dir` or
+`--resume-from-checkpoint`; see `--help`).
+
+**Checks at start.** Before loading the model, training refuses to run unless:
+
+- the process count equals `run.expected_world_size` (default 2);
+- the model is Qwen3.5 (`Qwen3_5ForConditionalGeneration`), which the template
+  patch, the LoRA targets and the kernels assume;
+- the manifest is format 3, its fingerprint matches its contents and, when set,
+  `data.expected_fingerprint`, and the files match their recorded sizes, hashes
+  and record counts;
+- the manifest's system-prompt hash and every record's first message equal the
+  prompt the current core renders;
+- the output directory is empty, unless the run resumes or sets
+  `run.overwrite_output_dir`;
+- with `run.required_runtime_profile` set, the pinned kernels are the ones loaded.
+
+**Config.** A training config is a YAML file with these sections:
+
+| Section | Holds |
+|---|---|
+| `model` | `name_or_path`, `revision`, `dtype`, `attn_implementation`, `trust_remote_code`, `qwen35_native_gva`, `freeze_modules` |
+| `data` | `train_file`, `validation_file`, `manifest_file`, `expected_fingerprint`, `num_proc`; `max_train_samples`/`max_eval_samples` for smokes and `longest_train_samples`/`stratified_train_samples` for benchmarks |
+| `training` | TRL `SFTConfig` fields, with `global_batch_size` instead of `gradient_accumulation_steps` (derived from the world size and per-device batch) and `max_length` |
+| `lora` | `r`, `alpha`, `dropout`; without it, training is full SFT |
+| `clearml` | `enabled`, `project`, `task`, `tags`, `weight_norm_interval_steps`, `log_model`, `output_uri` |
+| `run` | `expected_world_size`, `early_stopping` (`patience`, `threshold`), `resume_from_checkpoint`, `overwrite_output_dir`, `disable_cudnn_sdpa`, `required_runtime_profile`, `benchmark` |
+
+No config is checked in. Start from the release 1.0.0 LoRA config, which lives
+in the parent of the commit that removed the old configs:
+
+```bash
+git show "$(git log --diff-filter=D -1 --format=%h -- sft/configs)^:sft/configs/qwen35_4b_unloop_nonthinking_manager_sft_1.0.0_lora_32k_4gpu.yaml"
+```
+
+Point its `data` section at the new release and its `expected_fingerprint`.
+Fractional `eval_steps`/`save_steps` (for example `0.0667`, a fifth of an epoch
+in a 3-epoch run) need no recount when the release grows.
+
+The release 1.0.0 runs used the best cell of the v3 grid: 32K and global batch
+8. LoRA (`r: 32`, `alpha: 64`, `dropout: 0.05`) trained at learning rate 2e-4;
+full SFT took the benchmark's full recipe (fp32 weights, frozen `model.visual`)
+at learning rate 2e-5. Both ran 3 epochs, evaluated and saved every 0.2 epoch
+(95 steps), kept the checkpoint with the lowest validation loss and stopped
+after three evaluations without improvement. A run resumed with
+`--resume-from-checkpoint <output>/checkpoint-<step>` (passed after the GPUs to
+`sft/train_qwen35_h200.sh`) keeps its early-stopping count.
+
+**Evaluation.** Validation loss is reported for the whole split as
+`eval_all_loss`, which picks the checkpoint, and per gym as `eval_<gym>_loss`
+when the split mixes gyms. ClearML plots each one separately and also all of
+them together in `eval/loss_by_dataset`. A config's
+`metric_for_best_model: eval_loss` means `eval_all_loss`.
+
+**Outputs.** A run writes into `training.output_dir`:
+
+- `resolved_config.json`: the config after defaults and overrides, plus runtime
+  facts (resolved batch, token statistics, cut records, kernels);
+- `data_manifest.json`: a copy of the release manifest;
+- `training_chat_template.jinja`: the chat template with the assistant-mask
+  markers that training used;
+- `checkpoint-<step>/`: Trainer checkpoints; `save_total_limit: 2` keeps the best
+  and the latest;
+- `final/`: the model evaluation serves, in bf16, with the tokenizer, the
+  canonical chat template and `generation_config.json` (the tokenizer's EOS,
+  then the checkpoint's own EOS IDs);
+- `final-adapter/`: the trained LoRA adapter, for LoRA runs;
+- `training_summary.json`: the completed epoch and step, best validation loss and
+  checkpoint, resolved batch, token statistics, cut records, the generation
+  config, and whether early stopping fired (`benchmark_summary.json` in
+  benchmark mode).
 
 `sft/grid.py` runs a learning-rate × global-batch grid over one config, one run
 per GPU group at a time, and waits for each group's GPUs to be free:
@@ -326,47 +432,6 @@ run in `run/`. A cell whose `run/` exists is skipped, so a grid resumes after an
 interruption, and a symlinked `run/` reuses an earlier run as a cell. The report
 lists each cell's best epoch with its overall and per-gym validation loss and
 saves them to `summary.json`.
-
-The release 1.0.0 runs used the best cell of the v3 grid: 32K and global batch
-8. LoRA (`r: 32`, `alpha: 64`, `dropout: 0.05`) trained at learning rate 2e-4;
-full SFT took the benchmark's full recipe (fp32 weights, frozen `model.visual`)
-at learning rate 2e-5. Both ran 3 epochs, evaluated and saved every 0.2 epoch
-(95 steps), kept the checkpoint with the lowest validation loss and stopped
-after three evaluations without improvement. Their configs were removed with
-the other legacy configs (see [Legacy specs and
-configs](#legacy-specs-and-configs)). A run resumed with
-`--resume-from-checkpoint <output>/checkpoint-<step>` (passed after the GPUs to
-`sft/train_qwen35_h200.sh`) keeps its early-stopping count.
-
-`run.disable_cudnn_sdpa: true` disables only the cuDNN SDPA backend, which once
-failed with a cuDNN `mha_graph` error during attention recomputation in
-backward. PyTorch's flash, memory-efficient, and math SDPA backends remain
-enabled as fallbacks. The resolved state of every SDPA backend is written to
-`resolved_config.json`, connected to ClearML, and printed in the local console
-log.
-
-`training.use_liger_kernel: true` enables Liger fused CE, and the trainer then
-replaces TRL's incompatible chunked-NLL setting with Liger's fused linear
-cross-entropy. Fused CE does not return full logits, so token accuracy remains
-available but entropy is intentionally absent from train/eval logs. The package
-is a Python wheel and compiles kernels with Triton at runtime; `nvcc` is not
-required.
-
-Full SFT with FSDP (`training.fsdp`, for GPUs that cannot hold the whole model,
-such as MLSpace's H100s) saves internal checkpoints in FSDP's sharded
-state-dict format, so saving does not gather the full model onto rank 0, and
-merges the final shards on CPU after training. `save_total_limit: 2` retains the
-best and latest recovery points. The exported `final/` restores the model's
-canonical chat template for inference, and its `generation_config.json` lists
-the tokenizer's EOS followed by the checkpoint's own EOS IDs.
-`training_summary.json` records the completed epoch and step, best validation
-loss and checkpoint, resolved batch settings, the generation config, and whether
-early stopping fired.
-
-Full SFT keeps fp32 master weights (fp32 DDP weights, or FSDP's upcast), so the
-export rewrites `final/` in bf16, with a bf16 `config.json`, on both paths.
-Evaluation serves bf16 anyway (`--dtype bfloat16`), and resuming uses the Trainer
-checkpoints, which are unchanged.
 
 ### Length
 
@@ -412,6 +477,38 @@ lora:
 These are the settings of the 3-epoch release 1.0.0 runs. Dropout costs about 4%
 of throughput (`docs/sft_qwen35_h200_benchmark.md`); a single-epoch run can set
 it to 0, since one pass leaves little to overfit.
+
+### Kernels, SDPA and FSDP
+
+`training.use_liger_kernel: true` enables Liger fused CE, and the trainer then
+replaces TRL's incompatible chunked-NLL setting with Liger's fused linear
+cross-entropy. Fused CE does not return full logits, so token accuracy remains
+available but entropy is intentionally absent from train/eval logs. The package
+is a Python wheel and compiles kernels with Triton at runtime; `nvcc` is not
+required.
+
+`run.disable_cudnn_sdpa: true` disables only the cuDNN SDPA backend, which once
+failed with a cuDNN `mha_graph` error during attention recomputation in
+backward. PyTorch's flash, memory-efficient, and math SDPA backends remain
+enabled as fallbacks. The resolved state of every SDPA backend is written to
+`resolved_config.json`, connected to ClearML, and printed in the local console
+log.
+
+Full SFT with FSDP (`training.fsdp`, for GPUs that cannot hold the whole model,
+such as MLSpace's H100s) saves internal checkpoints in FSDP's sharded
+state-dict format, so saving does not gather the full model onto rank 0, and
+merges the final shards on CPU after training. `save_total_limit: 2` retains the
+best and latest recovery points. The exported `final/` restores the model's
+canonical chat template for inference, and its `generation_config.json` lists
+the tokenizer's EOS followed by the checkpoint's own EOS IDs.
+`training_summary.json` records the completed epoch and step, best validation
+loss and checkpoint, resolved batch settings, the generation config, and whether
+early stopping fired.
+
+Full SFT keeps fp32 master weights (fp32 DDP weights, or FSDP's upcast), so the
+export rewrites `final/` in bf16, with a bf16 `config.json`, on both paths.
+Evaluation serves bf16 anyway (`--dtype bfloat16`), and resuming uses the Trainer
+checkpoints, which are unchanged.
 
 ## ClearML
 
@@ -491,3 +588,12 @@ runs via `training_summary.json`, and deduplicates Pending/Running jobs by their
 normalized descriptions. Combined `torchrun` output is also persisted as
 `console.log` in each run directory with pipefail-safe exit propagation; save an
 MLSpace API log snapshot as `mlspace.log` after the job reaches terminal state.
+
+## History
+
+Until 2026-10-13 this package also held Gemma-4 support, build specifications and
+training configs of every release up to 1.0.0, a collection-time length limit, a
+per-task trace cap, and options to exclude or refuse long records. None of them
+works with or is needed by the current code; they live in the parents of the
+commits that removed them (`git log --diff-filter=D -- sft`). The release 1.0.0
+specification lives at commit `53a88d8`, the only commit that reproduces it.
