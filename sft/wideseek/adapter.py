@@ -95,12 +95,16 @@ def snapshot_files(source_dir: Path) -> list[str]:
     """Each finished attempt's result, trace and model-call log.
 
     The collector writes ``result.json`` when an attempt ends, so attempts still
-    running are left out. Executions no result names (restarted ones) are left
+    running are left out. Executions no result names (restarted ones) and results
+    that name no execution (episodes that failed before they started) are left
     out too.
     """
     files: list[str] = []
     for result_path in sorted(source_dir.glob("decomposer/*/attempt-*/result.json")):
-        execution_dir = _execution_dir(result_path, load_json(result_path))
+        try:
+            execution_dir = _execution_dir(result_path, load_json(result_path))
+        except TraceValidationError:
+            continue
         paths = (
             result_path,
             execution_dir / "trace.json",

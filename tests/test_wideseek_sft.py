@@ -227,3 +227,24 @@ def test_wideseek_snapshot_takes_each_result_trace_and_call_log(
     assert [record.id for record in _read(directory).records] == [
         record.id for record in _read(source).records
     ]
+
+
+def test_wideseek_snapshot_skips_attempts_that_never_started(tmp_path: Path) -> None:
+    _attempt(tmp_path, "width-0001")
+    # The gym's result for an episode that failed before it started.
+    _write_json(
+        tmp_path / "decomposer" / "width-0002" / "attempt-001" / "result.json",
+        {
+            "task_id": "width-0002",
+            "mode": "decomposer",
+            "attempt": 1,
+            "execution_directory": "",
+            "status": "error",
+            "evaluation": {"status": "evaluation_error", "score": None},
+        },
+    )
+
+    files = snapshot_files(tmp_path)
+
+    assert len(files) == 3
+    assert all("width-0002" not in path for path in files)
