@@ -414,13 +414,11 @@ $MLSPY -m gyms.workplace_assistant.run_eval \
 
 After the Workplace E4B SFT run has exported its merged `final/` checkpoint,
 evaluate the tuned non-thinking manager and vanilla thinking E4B subagent on
-dedicated GPUs:
+dedicated GPUs. vLLM serves the `final-vllm/` view next to `final/`; the
+`sft.vllm_compat` step that created it was removed with Gemma SFT support on
+2026-10-13 and lives in git history.
 
 ```bash
-uv run --group train python -m sft.vllm_compat \
-  --source /home/sukhorukov/decomposer_artifacts/training/sft/jobs/gemma4-e4b-nonthinking-deepseek-e4b-v1-8k-full-4gpu/final \
-  --output /home/sukhorukov/decomposer_artifacts/training/sft/jobs/gemma4-e4b-nonthinking-deepseek-e4b-v1-8k-full-4gpu/final-vllm
-
 .venv/bin/python -m gyms.workplace_assistant.prepare eval \
   --split validation \
   --experiment gemma4-e4b-sft-deepseek-e4b-v1-8k-non-thinking-gemma4-e4b-thinking \

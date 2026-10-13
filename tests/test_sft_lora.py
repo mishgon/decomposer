@@ -43,28 +43,27 @@ def _tiny_qwen35():
 
 
 def test_build_lora_config_is_none_for_full_sft() -> None:
-    assert _build_lora_config(None, training_config={"fsdp": True}, model_type="gemma4") is None
+    assert _build_lora_config(None, training_config={"fsdp": True}) is None
 
 
 @pytest.mark.parametrize(
-    ("lora", "training_config", "model_type", "match"),
+    ("lora", "training_config", "match"),
     [
-        ({"r": 4, "alpha": 8}, {}, "qwen3_5", "exactly r, alpha and dropout"),
-        ({**LORA, "rank": 4}, {}, "qwen3_5", "exactly r, alpha and dropout"),
-        (LORA, {"fsdp": True}, "qwen3_5", "use DDP"),
-        (LORA, {}, "gemma4", "Qwen3.5 only"),
-        ({**LORA, "r": 0}, {}, "qwen3_5", "lora.r"),
-        ({**LORA, "dropout": 1.0}, {}, "qwen3_5", "lora.dropout"),
+        ({"r": 4, "alpha": 8}, {}, "exactly r, alpha and dropout"),
+        ({**LORA, "rank": 4}, {}, "exactly r, alpha and dropout"),
+        (LORA, {"fsdp": True}, "use DDP"),
+        ({**LORA, "r": 0}, {}, "lora.r"),
+        ({**LORA, "dropout": 1.0}, {}, "lora.dropout"),
     ],
 )
-def test_build_lora_config_rejects_invalid_sections(lora, training_config, model_type, match) -> None:
+def test_build_lora_config_rejects_invalid_sections(lora, training_config, match) -> None:
     with pytest.raises(ValueError, match=match):
-        _build_lora_config(lora, training_config=training_config, model_type=model_type)
+        _build_lora_config(lora, training_config=training_config)
 
 
 def test_lora_adapts_only_language_model_projections() -> None:
     peft = pytest.importorskip("peft")
-    config = _build_lora_config(LORA, training_config={"fsdp": False}, model_type="qwen3_5")
+    config = _build_lora_config(LORA, training_config={"fsdp": False})
     assert (config.r, config.lora_alpha, config.lora_dropout) == (4, 8, 0.0)
     model = peft.get_peft_model(_tiny_qwen35(), config)
 
@@ -92,7 +91,7 @@ def test_lora_adapts_only_language_model_projections() -> None:
 
 def test_skipping_lora_input_cast_keeps_autocast_results() -> None:
     peft = pytest.importorskip("peft")
-    config = _build_lora_config(LORA, training_config={}, model_type="qwen3_5")
+    config = _build_lora_config(LORA, training_config={})
     config.init_lora_weights = False  # non-zero B, so the adapter path contributes
     model = peft.get_peft_model(_tiny_qwen35().to(torch.bfloat16), config)
     layer = model.base_model.model.model.language_model.layers[0].mlp.down_proj
@@ -124,7 +123,7 @@ def test_export_lora_saves_adapter_and_merged_weights(tmp_path: Path) -> None:
     peft = pytest.importorskip("peft")
     from safetensors.torch import load_file
 
-    config = _build_lora_config(LORA, training_config={}, model_type="qwen3_5")
+    config = _build_lora_config(LORA, training_config={})
     config.init_lora_weights = False  # non-zero B, so merging changes the weights
     model = peft.get_peft_model(_tiny_qwen35(), config)
     target = model.base_model.model.model.language_model.layers[0].mlp.down_proj

@@ -143,7 +143,7 @@ class Tau2Experiment:
         ):
             raise ValueError(f"{self.name}: upstream_replays_reasoning needs an llm_proxy thinking manager")
         if local and self.manager_reasoning_mode != "non_thinking":
-            # The SFT student is trained non-thinking only (sft/model_support.py).
+            # The SFT student is trained non-thinking only (sft/preprocessing.py).
             raise ValueError(f"{self.name}: a local manager must be non_thinking")
         for name in ("concurrency", "manager_max_model_calls", "subagent_recursion_limit"):
             if getattr(self, name) < 1:

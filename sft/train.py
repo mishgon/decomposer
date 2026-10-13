@@ -44,14 +44,6 @@ from .clearml_logging import (
     SeparatePlotsClearMLCallback,
     validate_weight_norm_interval,
 )
-from .gemma4_mixed_attention import ATTENTION_IMPLEMENTATION as GEMMA4_MIXED_ATTENTION
-from .gemma4_mixed_attention import register as register_gemma4_mixed_attention
-from .liger import configure_liger_for_model, liger_compatible_loss_type
-from .model_support import (
-    build_training_template,
-    tokenization_profile_for_model_config,
-    validate_reasoning_policy,
-)
 from .preprocessing import (
     configure_example as _configure_example,
 )
@@ -65,6 +57,7 @@ from .qwen35_fast_runtime import (
     PROFILE_NAME as QWEN35_FAST_PROFILE,
     validate_runtime_bundle,
 )
+from .qwen35_template import build_qwen35_training_template
 
 JsonObject = dict[str, Any]
 DEFAULT_MAX_LENGTH = 16384
@@ -78,7 +71,6 @@ QWEN35_LORA_TARGET_MODULES = (
     r"|linear_attn\.(in_proj_qkv|in_proj_z|out_proj)"
     r"|mlp\.(gate_proj|up_proj|down_proj))"
 )
-_GEMMA4_REQUIRED_STOP_TOKENS = ("<turn|>", "<|tool_response>")
 _PREPARED_SPLIT_FEATURES = Features(
     {
         "schema_version": Value("int64"),
@@ -522,7 +514,6 @@ def _benchmark_sample_manifest(dataset: Dataset) -> JsonObject:
 def _load_prepared_split(
     path: Path,
     *,
-    include_reasoning: bool,
     sample_limit: int | None,
     num_proc: int,
 ) -> Dataset:
@@ -556,10 +547,9 @@ def _load_prepared_split(
     workers = min(max(1, num_proc), len(dataset))
     return dataset.map(
         _configure_example,
-        fn_kwargs={"include_reasoning": include_reasoning},
         remove_columns=["messages"],
         num_proc=workers,
-        desc=f"Configuring {'thinking' if include_reasoning else 'non-thinking'} messages",
+        desc="Configuring non-thinking messages",
     )
 
 
@@ -865,11 +855,28 @@ def _positive_integer(value: Any, *, field: str) -> int:
     return value
 
 
+def _require_qwen35(config: Any) -> None:
+    """Decomposer SFT trains Qwen3.5 students (`Qwen3_5ForConditionalGeneration`) only."""
+    model_type = getattr(config, "model_type", None)
+    text_model_type = getattr(getattr(config, "text_config", None), "model_type", None)
+    if (model_type, text_model_type) != ("qwen3_5", "qwen3_5_text"):
+        raise ValueError(
+            f"Unsupported Decomposer SFT model_type: {model_type!r} "
+            f"(text model {text_model_type!r})."
+        )
+
+
+def _liger_compatible_loss_type(enabled: bool, loss_type: str | None) -> str | None:
+    """Use Liger's fused CE instead of TRL's incompatible chunked NLL."""
+    if enabled and loss_type == "chunked_nll":
+        return None
+    return loss_type
+
+
 def _build_lora_config(
     lora: Any,
     *,
     training_config: Mapping[str, Any],
-    model_type: str,
 ) -> Any:
     """PEFT LoRA config for the optional `lora:` section; None means full SFT."""
     if lora is None:
@@ -878,8 +885,6 @@ def _build_lora_config(
         raise ValueError("lora must set exactly r, alpha and dropout.")
     if training_config.get("fsdp"):
         raise ValueError("LoRA runs use DDP; set training.fsdp: false.")
-    if model_type != "qwen3_5":
-        raise ValueError(f"LoRA targets are defined for Qwen3.5 only, not {model_type!r}.")
     dropout = lora["dropout"]
     if (
         isinstance(dropout, bool)
@@ -957,59 +962,6 @@ def _generation_eos_ids(value: int | Sequence[int] | None) -> list[int]:
     return eos_ids
 
 
-def _configure_gemma4_generation(
-    generation_config: GenerationConfig,
-    *,
-    tokenizer: Any,
-) -> JsonObject:
-    """Align tokenizer IDs and preserve every required Gemma-4 stop token."""
-    eos_token_id = getattr(tokenizer, "eos_token_id", None)
-    if (
-        isinstance(eos_token_id, bool)
-        or not isinstance(eos_token_id, int)
-        or eos_token_id < 0
-    ):
-        raise ValueError("The Gemma-4 tokenizer must define a valid eos_token_id.")
-
-    eos_ids = [eos_token_id]
-    for token_id in _generation_eos_ids(generation_config.eos_token_id):
-        if token_id not in eos_ids:
-            eos_ids.append(token_id)
-
-    unk_token_id = getattr(tokenizer, "unk_token_id", None)
-    required_stop_ids: dict[str, int] = {}
-    for token in _GEMMA4_REQUIRED_STOP_TOKENS:
-        token_id = tokenizer.convert_tokens_to_ids(token)
-        roundtrip = (
-            tokenizer.convert_ids_to_tokens(token_id)
-            if isinstance(token_id, int) and not isinstance(token_id, bool)
-            else None
-        )
-        if (
-            isinstance(token_id, bool)
-            or not isinstance(token_id, int)
-            or token_id < 0
-            or token_id == unk_token_id
-            or roundtrip != token
-        ):
-            raise ValueError(
-                f"Required Gemma-4 stop token {token!r} is not an exact tokenizer token."
-            )
-        required_stop_ids[token] = token_id
-        if token_id not in eos_ids:
-            eos_ids.append(token_id)
-
-    generation_config.bos_token_id = tokenizer.bos_token_id
-    generation_config.pad_token_id = tokenizer.pad_token_id
-    generation_config.eos_token_id = eos_ids
-    return {
-        "bos_token_id": generation_config.bos_token_id,
-        "eos_token_id": eos_ids,
-        "pad_token_id": generation_config.pad_token_id,
-        "required_stop_token_ids": required_stop_ids,
-    }
-
-
 def _configure_qwen35_generation(
     generation_config: GenerationConfig,
     *,
@@ -1041,7 +993,6 @@ def _configure_qwen35_generation(
         "bos_token_id": generation_config.bos_token_id,
         "eos_token_id": eos_ids,
         "pad_token_id": pad_token_id,
-        "required_stop_token_ids": {},
     }
 
 
@@ -1063,19 +1014,6 @@ def _load_generation_config(
         # Qwen3.5 base snapshots may omit generation_config.json. Transformers'
         # model-derived defaults still preserve checkpoint EOS metadata.
         return GenerationConfig.from_model_config(model_config), "model_config"
-
-
-def _configure_generation(
-    profile: str,
-    generation_config: GenerationConfig,
-    *,
-    tokenizer: Any,
-) -> JsonObject:
-    if profile == "gemma4_sft_non_thinking":
-        return _configure_gemma4_generation(generation_config, tokenizer=tokenizer)
-    if profile == "qwen35_sft_non_thinking":
-        return _configure_qwen35_generation(generation_config, tokenizer=tokenizer)
-    raise ValueError(f"Unsupported prepared tokenization profile: {profile}")
 
 
 def _save_final_configuration(
@@ -1448,8 +1386,6 @@ def _resolve_config(config: JsonObject, args: argparse.Namespace) -> JsonObject:
     clearml = _nested_mapping(config, "clearml")
     run = _nested_mapping(config, "run")
 
-    if args.include_reasoning is not None:
-        data["include_reasoning"] = args.include_reasoning
     if args.max_length is not None:
         training["max_length"] = args.max_length
     # By default, records over max_length are cut from the end: TRL keeps the
@@ -1512,7 +1448,7 @@ def _resolve_config(config: JsonObject, args: argparse.Namespace) -> JsonObject:
         clearml.get("weight_norm_interval_steps", 10)
     )
 
-    training["loss_type"] = liger_compatible_loss_type(
+    training["loss_type"] = _liger_compatible_loss_type(
         bool(training.get("use_liger_kernel", False)),
         training.get("loss_type"),
     )
@@ -1530,11 +1466,6 @@ def _build_parser() -> argparse.ArgumentParser:
         description="Full-parameter SFT on Decomposer traces."
     )
     parser.add_argument("--config", type=Path, required=True)
-    parser.add_argument(
-        "--include-reasoning",
-        action=argparse.BooleanOptionalAction,
-        default=None,
-    )
     parser.add_argument("--max-length", type=int)
     parser.add_argument("--max-steps", type=int)
     parser.add_argument(
@@ -1616,18 +1547,13 @@ def main(argv: Sequence[str] | None = None) -> None:
         )
 
     model_name_or_path = str(model_config["name_or_path"])
-    include_reasoning = bool(data_config.get("include_reasoning", False))
     model_revision = str(model_config.get("revision", "main"))
     checkpoint_config = AutoConfig.from_pretrained(
         model_name_or_path,
         revision=model_revision,
         trust_remote_code=bool(model_config.get("trust_remote_code", False)),
     )
-    tokenization_profile = tokenization_profile_for_model_config(checkpoint_config)
-    validate_reasoning_policy(
-        tokenization_profile,
-        include_reasoning=include_reasoning,
-    )
+    _require_qwen35(checkpoint_config)
     num_proc = int(data_config.get("num_proc", 8))
     max_train_samples = data_config.get("max_train_samples")
     max_eval_samples = data_config.get("max_eval_samples")
@@ -1637,13 +1563,11 @@ def main(argv: Sequence[str] | None = None) -> None:
     manifest_path = Path(data_config["manifest_file"]).resolve()
     train_dataset = _load_prepared_split(
         train_path,
-        include_reasoning=include_reasoning,
         sample_limit=max_train_samples,
         num_proc=num_proc,
     )
     validation_dataset = _load_prepared_split(
         validation_path,
-        include_reasoning=include_reasoning,
         sample_limit=max_eval_samples,
         num_proc=num_proc,
     )
@@ -1673,18 +1597,14 @@ def main(argv: Sequence[str] | None = None) -> None:
         revision=model_revision,
         model_config=checkpoint_config,
     )
-    generation_runtime = _configure_generation(
-        tokenization_profile,
+    generation_runtime = _configure_qwen35_generation(
         generation_config,
         tokenizer=tokenizer,
     )
     generation_runtime["source"] = generation_config_source
     tokenizer.padding_side = "right"
     canonical_template = tokenizer.chat_template
-    training_template = build_training_template(
-        tokenization_profile,
-        canonical_template,
-    )
+    training_template = build_qwen35_training_template(canonical_template)
     tokenizer.chat_template = training_template
 
     train_dataset, raw_train_token_stats = _preflight_tokenization(
@@ -1789,16 +1709,10 @@ def main(argv: Sequence[str] | None = None) -> None:
         "attn_implementation", model_config.get("attn_implementation", "sdpa")
     )
     model_init_kwargs.setdefault("revision", model_config.get("revision", "main"))
-    # Gemma-4 mixes 256-wide sliding heads with 512-wide global heads, so no single
-    # backend covers the model; register the splitting implementation before the model
-    # is built so the attention interface can resolve it.
-    if model_init_kwargs.get("attn_implementation") == GEMMA4_MIXED_ATTENTION:
-        register_gemma4_mixed_attention()
     training_config["model_init_kwargs"] = model_init_kwargs
     peft_config = _build_lora_config(
         config.get("lora"),
         training_config=training_config,
-        model_type=str(checkpoint_config.model_type),
     )
 
     output_dir = Path(training_config["output_dir"]).resolve()
@@ -1813,14 +1727,6 @@ def main(argv: Sequence[str] | None = None) -> None:
                 f"Output directory {output_dir} is non-empty. Set a resume checkpoint or "
                 "explicitly enable run.overwrite_output_dir."
             )
-
-    liger_runtime = configure_liger_for_model(
-        model_name_or_path,
-        revision=str(model_config.get("revision", "main")),
-        trust_remote_code=bool(model_config.get("trust_remote_code", False)),
-        enabled=bool(training_config.get("use_liger_kernel", False)),
-        kernel_config=training_config.get("liger_kernel_config"),
-    )
 
     resolved = {
         **config,
@@ -1839,10 +1745,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             "generation_config": generation_runtime,
             "sdpa_backends": sdpa_backends,
             "required_runtime_profile": required_runtime,
-            "liger_kernel": liger_runtime,
-            "include_reasoning": include_reasoning,
             "system_prompt": system_prompt_runtime,
-            "tokenization_profile": tokenization_profile,
             "raw_train_token_stats": raw_train_token_stats,
             "raw_validation_token_stats": raw_validation_token_stats,
             "train_token_stats": train_token_stats,

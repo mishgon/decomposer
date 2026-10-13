@@ -7,7 +7,6 @@ from types import SimpleNamespace
 
 import pytest
 import torch
-from transformers import GenerationConfig
 
 from sft import train as train_module
 
@@ -30,7 +29,6 @@ from sft.train import (
     _attention_backend_runtime,
     _build_early_stopping_callback,
     _build_parser,
-    _configure_gemma4_generation,
     _configure_sdpa_backends,
     _has_existing_run_output,
     _load_prepared_split,
@@ -38,7 +36,6 @@ from sft.train import (
     _validate_required_runtime_profile,
     _resolve_config,
     _resolve_train_batch_config,
-    _save_final_configuration,
     _summarize_trainer_state,
 )
 from sft.qwen35_fast_runtime import (
@@ -92,36 +89,6 @@ def _prepared_loader_record(
     }
 
 
-class _FakeGemmaTokenizer:
-    bos_token_id = 2
-    eos_token_id = 1
-    pad_token_id = 0
-    unk_token_id = 3
-
-    def __init__(self, token_ids: dict[str, int] | None = None) -> None:
-        self.token_ids = token_ids or {
-            "<turn|>": 106,
-            "<|tool_response>": 50,
-        }
-
-    def convert_tokens_to_ids(self, token: str) -> int:
-        return self.token_ids.get(token, self.unk_token_id)
-
-    def convert_ids_to_tokens(self, token_id: int) -> str:
-        for token, candidate_id in self.token_ids.items():
-            if candidate_id == token_id:
-                return token
-        return "<unk>"
-
-    def save_pretrained(self, path: str | Path) -> None:
-        (Path(path) / "tokenizer_config.json").write_text("{}")
-
-
-class _FakeModelConfig:
-    def save_pretrained(self, path: str | Path) -> None:
-        (Path(path) / "config.json").write_text("{}")
-
-
 def _experiment(**overrides: object) -> ExperimentConfig:
     return ExperimentConfig(
         name="smoke",
@@ -165,7 +132,6 @@ def test_prepared_loader_preserves_dynamic_json_across_reader_chunks(
 
     dataset = _load_prepared_split(
         path,
-        include_reasoning=False,
         sample_limit=None,
         num_proc=1,
     )
@@ -194,7 +160,6 @@ def test_prepared_loader_rejects_invalid_jsonl(
     with pytest.raises(ValueError, match=match):
         _load_prepared_split(
             path,
-            include_reasoning=False,
             sample_limit=None,
             num_proc=1,
         )
@@ -560,50 +525,6 @@ def test_batch_resolution_rejects_invalid_values(
 ) -> None:
     with pytest.raises(ValueError, match=message):
         _resolve_train_batch_config(training_config, world_size=world_size)
-
-
-def test_gemma4_generation_preserves_multi_eos_and_saves_it(tmp_path: Path) -> None:
-    tokenizer = _FakeGemmaTokenizer()
-    generation_config = GenerationConfig(
-        bos_token_id=99,
-        eos_token_id=[1, 106, 50],
-        pad_token_id=99,
-    )
-    runtime = _configure_gemma4_generation(
-        generation_config,
-        tokenizer=tokenizer,
-    )
-    assert runtime == {
-        "bos_token_id": 2,
-        "eos_token_id": [1, 106, 50],
-        "pad_token_id": 0,
-        "required_stop_token_ids": {
-            "<turn|>": 106,
-            "<|tool_response>": 50,
-        },
-    }
-    _save_final_configuration(
-        tmp_path,
-        model_config=_FakeModelConfig(),
-        tokenizer=tokenizer,
-        generation_config=generation_config,
-    )
-    saved = GenerationConfig.from_pretrained(tmp_path)
-    assert saved.bos_token_id == 2
-    assert saved.eos_token_id == [1, 106, 50]
-    assert saved.pad_token_id == 0
-    assert (tmp_path / "config.json").is_file()
-    assert (tmp_path / "tokenizer_config.json").is_file()
-    assert (tmp_path / "generation_config.json").is_file()
-
-
-def test_gemma4_generation_rejects_missing_required_stop_token() -> None:
-    tokenizer = _FakeGemmaTokenizer({"<turn|>": 106})
-    with pytest.raises(ValueError, match="tool_response.*not an exact"):
-        _configure_gemma4_generation(
-            GenerationConfig(eos_token_id=1),
-            tokenizer=tokenizer,
-        )
 
 
 def test_configure_sdpa_backends_disables_only_cudnn(

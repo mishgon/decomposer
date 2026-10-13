@@ -76,8 +76,9 @@ worktree and refuses to replace an existing `<dataset-id>/<version>` directory.
 
 All builds use `decomposer.prompts.DECOMPOSER_SYSTEM_PROMPT`. The builder inserts
 it before tokenization and records its SHA-256 in the manifest. Training checks
-the hash and the system message in every prepared record. Hidden teacher
-reasoning remains controlled separately by `data.include_reasoning`.
+the hash and the system message in every prepared record. The student trains
+non-thinking: records keep the teacher's reasoning (`teacher_reasoning`) as
+metadata, and training never renders it.
 
 Releases do not depend on a model: they hold messages and tool schemas, with no
 token counts and no length limit. Training tokenizes every record with the
@@ -340,53 +341,35 @@ configs](#legacy-specs-and-configs)). A run resumed with
 `--resume-from-checkpoint <output>/checkpoint-<step>` (passed after the GPUs to
 `sft/train_qwen35_h200.sh`) keeps its early-stopping count.
 
-`run.disable_cudnn_sdpa: true` disables only the cuDNN SDPA backend: the first
-full Gemma-4 E2B run hit a cuDNN `mha_graph` execution failure during attention
-recomputation in backward. PyTorch's flash, memory-efficient, and math SDPA
-backends remain enabled as fallbacks. The resolved state of every SDPA backend is written to
+`run.disable_cudnn_sdpa: true` disables only the cuDNN SDPA backend, which once
+failed with a cuDNN `mha_graph` error during attention recomputation in
+backward. PyTorch's flash, memory-efficient, and math SDPA backends remain
+enabled as fallbacks. The resolved state of every SDPA backend is written to
 `resolved_config.json`, connected to ClearML, and printed in the local console
 log.
 
-`training.use_liger_kernel: true` enables Liger fused CE. Version
-0.8.1 officially patches `Gemma4ForConditionalGeneration`, including the outer
-multimodal forward used by the E4B-it checkpoint. When enabled, the trainer
+`training.use_liger_kernel: true` enables Liger fused CE, and the trainer then
 replaces TRL's incompatible chunked-NLL setting with Liger's fused linear
 cross-entropy. Fused CE does not return full logits, so token accuracy remains
 available but entropy is intentionally absent from train/eval logs. The package
 is a Python wheel and compiles kernels with Triton at runtime; `nvcc` is not
 required.
 
-Internal epoch checkpoints use FSDP's sharded state-dict format so saving does
-not gather the full model onto rank 0; this script reconstructs the annotated
-training template when resuming.
-`save_total_limit: 2` retains the best and latest recovery points. After
-training, the temporary final shards
-are merged on CPU and the exported `final/` model restores Gemma's canonical
-template for inference. Future exports also contain `generation_config.json`
-with Gemma-4's tokenizer EOS, `<turn|>`, and `<|tool_response>` stop IDs; this
-preserves the pretrained `[1, 106, 50]` multi-EOS behavior for Transformers and
-serving runtimes. `training_summary.json` records the completed epoch and step,
-best validation loss and checkpoint, resolved batch settings, exported stop
-IDs, and whether early stopping fired.
+Full SFT with FSDP (`training.fsdp`, for GPUs that cannot hold the whole model,
+such as MLSpace's H100s) saves internal checkpoints in FSDP's sharded
+state-dict format, so saving does not gather the full model onto rank 0, and
+merges the final shards on CPU after training. `save_total_limit: 2` retains the
+best and latest recovery points. The exported `final/` restores the model's
+canonical chat template for inference, and its `generation_config.json` lists
+the tokenizer's EOS followed by the checkpoint's own EOS IDs.
+`training_summary.json` records the completed epoch and step, best validation
+loss and checkpoint, resolved batch settings, the generation config, and whether
+early stopping fired.
 
 Full SFT keeps fp32 master weights (fp32 DDP weights, or FSDP's upcast), so the
 export rewrites `final/` in bf16, with a bf16 `config.json`, on both paths.
 Evaluation serves bf16 anyway (`--dtype bfloat16`), and resuming uses the Trainer
 checkpoints, which are unchanged.
-
-Gemma-4 KV-shared layers intentionally omit unused `k_norm` weights after SFT,
-but vLLM 0.24 still requires those parameters during checkpoint validation.
-Create a zero-copy compatibility view for vLLM without changing `final/`:
-
-```bash
-uv run --group train python -m sft.vllm_compat \
-  --source /path/to/run/final \
-  --output /path/to/run/final-vllm
-```
-
-The derived directory symlinks the original model tensor and adds identity
-`k_norm` tensors only for the KV-shared layers. Transformers consumers should
-continue to use `final/`; vLLM consumers should use `final-vllm/`.
 
 ### Length
 
@@ -480,8 +463,8 @@ The stable artifact path is a symlink into shared NFS:
 Training outputs live under `sft/jobs/`, sanity outputs under
 `sft/jobs_sanity/`, staged clean Git snapshots under `code/`, and
 shared training environments under `venvs/sft/<uv-lock-hash>/`. The launcher
-syncs only the base and `train` dependency group. It does not require `nvcc`;
-Gemma-4 Liger experiments use the pinned Python wheel and Triton JIT.
+syncs only the base and `train` dependency group. It does not require `nvcc`:
+Liger is a pinned Python wheel whose kernels Triton compiles at runtime.
 
 Experiments are registered in `sft.experiments`. The `mls` submitter is
 kept in an isolated environment because its Click 8.1.8 pin conflicts with the

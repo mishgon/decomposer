@@ -1,21 +1,21 @@
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 from transformers import GenerationConfig
 
-from sft.model_support import (
-    build_training_template,
-    tokenization_profile_for_model_config,
-    validate_reasoning_policy,
-)
 from sft.preprocessing import tokenize_example
 from sft.qwen35_template import (
     UnsupportedQwen35TemplateError,
     build_qwen35_training_template,
 )
-from sft.train import _configure_qwen35_generation
+from sft.train import (
+    _configure_qwen35_generation,
+    _require_qwen35,
+    _save_final_configuration,
+)
 
 
 @pytest.mark.integration
@@ -85,7 +85,7 @@ def test_qwen35_training_template_preserves_render_and_masks_only_assistant() ->
         },
         {"role": "assistant", "content": "ASSISTANT_FINAL", "tool_calls": []},
     ]
-    kwargs = {"enable_thinking": False}
+    kwargs = {"enable_thinking": False, "preserve_thinking": False}
     canonical = tokenizer.apply_chat_template(
         messages,
         tools=tools,
@@ -128,7 +128,7 @@ def test_qwen35_training_template_preserves_render_and_masks_only_assistant() ->
     assert "REPORT_SECRET" not in supervised
 
     tokenized = tokenize_example(
-        {"messages": messages, "tools": tools, "chat_template_kwargs": kwargs},
+        {"messages": messages, "tools": tools},
         tokenizer=tokenizer,
         training_template=training_template,
     )
@@ -143,17 +143,28 @@ def test_qwen35_template_fails_closed_on_unknown_template() -> None:
         build_qwen35_training_template("{{ bos_token }}")
 
 
-def test_qwen35_model_resolution_and_non_thinking_policy() -> None:
-    config = SimpleNamespace(
-        model_type="qwen3_5",
-        text_config=SimpleNamespace(model_type="qwen3_5_text"),
+def test_training_accepts_only_qwen35() -> None:
+    _require_qwen35(
+        SimpleNamespace(
+            model_type="qwen3_5",
+            text_config=SimpleNamespace(model_type="qwen3_5_text"),
+        )
     )
-    profile = tokenization_profile_for_model_config(config)
-    assert profile == "qwen35_sft_non_thinking"
-    assert build_training_template is not None
-    validate_reasoning_policy(profile, include_reasoning=False)
-    with pytest.raises(ValueError, match="only non-thinking targets"):
-        validate_reasoning_policy(profile, include_reasoning=True)
+
+
+@pytest.mark.parametrize(
+    "config",
+    [
+        # A text-only checkpoint has no `language_model` wrapper for the LoRA targets.
+        SimpleNamespace(model_type="qwen3_5_text"),
+        SimpleNamespace(
+            model_type="gemma4", text_config=SimpleNamespace(model_type="gemma4_text")
+        ),
+    ],
+)
+def test_training_refuses_other_models(config: SimpleNamespace) -> None:
+    with pytest.raises(ValueError, match="Unsupported Decomposer SFT model_type"):
+        _require_qwen35(config)
 
 
 def test_qwen35_generation_preserves_tokenizer_eos_and_model_eod() -> None:
@@ -168,5 +179,29 @@ def test_qwen35_generation_preserves_tokenizer_eos_and_model_eod() -> None:
         "bos_token_id": None,
         "eos_token_id": [248046, 248044],
         "pad_token_id": 248044,
-        "required_stop_token_ids": {},
     }
+
+
+def test_final_configuration_saves_the_qwen35_generation_config(tmp_path: Path) -> None:
+    tokenizer = SimpleNamespace(
+        bos_token_id=None,
+        eos_token_id=248046,
+        pad_token_id=248044,
+        save_pretrained=lambda path: (Path(path) / "tokenizer_config.json").write_text("{}"),
+    )
+    model_config = SimpleNamespace(
+        save_pretrained=lambda path: (Path(path) / "config.json").write_text("{}")
+    )
+    generation = GenerationConfig(eos_token_id=248044, pad_token_id=None)
+    _configure_qwen35_generation(generation, tokenizer=tokenizer)
+    _save_final_configuration(
+        tmp_path,
+        model_config=model_config,
+        tokenizer=tokenizer,
+        generation_config=generation,
+    )
+    saved = GenerationConfig.from_pretrained(tmp_path)
+    assert saved.eos_token_id == [248046, 248044]
+    assert saved.pad_token_id == 248044
+    assert (tmp_path / "config.json").is_file()
+    assert (tmp_path / "tokenizer_config.json").is_file()

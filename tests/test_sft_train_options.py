@@ -18,6 +18,7 @@ from sft.train import (
     _enable_qwen35_native_gva,
     _evaluation_datasets,
     _freeze_modules,
+    _liger_compatible_loss_type,
     _resolve_config,
     _rewrite_weights_in_bf16,
     _select_longest_by_token_length,
@@ -328,3 +329,9 @@ def test_longest_sample_selection_happens_after_tokenization() -> None:
 def test_longest_sample_selection_requires_positive_integer(limit: object) -> None:
     with pytest.raises(ValueError, match="positive integer"):
         _select_longest_by_token_length(_tokenized_dataset(100), limit)  # type: ignore[arg-type]
+
+
+def test_liger_uses_fused_ce_instead_of_chunked_nll() -> None:
+    assert _liger_compatible_loss_type(True, "chunked_nll") is None
+    assert _liger_compatible_loss_type(False, "chunked_nll") == "chunked_nll"
+    assert _liger_compatible_loss_type(True, "custom") == "custom"
