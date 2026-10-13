@@ -370,13 +370,11 @@ checkpoints, which are unchanged.
 ### Length
 
 `training.max_length` sets the longest sequence a run trains on; it defaults to
-16,384 (`max_length: null` means no limit). A record over it is cut from the end
-by default: TRL keeps its first `max_length` tokens, which hold the system
-prompt, the tools and the task, and drops a record left with no supervised
-token. A config can instead drop such records (`data.exclude_overlength: true`)
-or refuse them (`data.error_on_truncation: true`). `training_summary.json` lists
-dropped records under `overlength_exclusions` and cut ones under
-`overlength_truncations`, each with the supervised tokens it keeps.
+16,384 (`max_length: null` means no limit). A record over it is cut from the end:
+TRL keeps its first `max_length` tokens, which hold the system prompt, the tools
+and the task, and drops a record left with no supervised token.
+`training_summary.json` lists the cut records under `overlength_truncations`,
+each with the supervised tokens it keeps.
 
 Training tokenizes each record once, at start-up, with the model's training
 template. That pass checks the assistant mask and measures lengths, and TRL

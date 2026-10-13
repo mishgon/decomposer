@@ -19,7 +19,6 @@ from sft.qwen35_fast_runtime import (
     PROFILE_NAME as QWEN35_FAST_PROFILE,
 )
 from sft.train import (
-    _apply_overlength_policy,
     _attention_backend_runtime,
     _benchmark_sample_manifest,
     _bf16_config,
@@ -31,6 +30,7 @@ from sft.train import (
     _freeze_modules,
     _has_existing_run_output,
     _liger_compatible_loss_type,
+    _overlength_truncations,
     _load_prepared_split,
     _qwen35_linear_attention_runtime,
     _resolve_config,
@@ -220,18 +220,9 @@ def test_config_cuts_at_16k_from_the_end_by_default() -> None:
     args = _build_parser().parse_args(["--config", "unused.yaml"])
     resolved = _resolve_config(sections, args)
     assert resolved["training"]["max_length"] == 16384
-    assert resolved["data"]["error_on_truncation"] is False
 
-    explicit = _resolve_config(
-        {
-            **sections,
-            "data": {"error_on_truncation": True},
-            "training": {"max_length": None},
-        },
-        args,
-    )
+    explicit = _resolve_config({**sections, "training": {"max_length": None}}, args)
     assert explicit["training"]["max_length"] is None
-    assert explicit["data"]["error_on_truncation"] is True
 
     override = _resolve_config(
         sections,
@@ -269,49 +260,10 @@ def _tokenized_dataset(*lengths: int) -> Dataset:
     )
 
 
-def test_overlength_policy_refuses_with_error_on_truncation() -> None:
-    with pytest.raises(ValueError, match="data.error_on_truncation: false"):
-        _apply_overlength_policy(
-            _tokenized_dataset(100, 35044),
-            split="train",
-            max_length=32768,
-            exclude_overlength=False,
-            error_on_truncation=True,
-        )
-
-
-def test_overlength_policy_explicitly_excludes_and_records_trace() -> None:
-    filtered, excluded, truncated = _apply_overlength_policy(
-        _tokenized_dataset(100, 35044, 200),
-        split="train",
-        max_length=32768,
-        exclude_overlength=True,
-        error_on_truncation=True,
-    )
-    assert filtered["id"] == ["example-0", "example-2"]
-    assert excluded == [
-        {
-            "id": "example-1",
-            "split": "train",
-            "token_length": 35044,
-            "max_length": 32768,
-        }
-    ]
-    assert truncated == []
-
-
-def test_overlength_policy_can_leave_traces_for_trl_to_cut() -> None:
-    dataset = _tokenized_dataset(100, 35044)
-    kept, excluded, truncated = _apply_overlength_policy(
-        dataset,
-        split="train",
-        max_length=32768,
-        exclude_overlength=False,
-        error_on_truncation=False,
-    )
-    assert kept is dataset
-    assert excluded == []
-    assert truncated == [
+def test_overlength_truncations_report_the_supervised_tokens_kept() -> None:
+    assert _overlength_truncations(
+        _tokenized_dataset(100, 35044, 200), split="train", max_length=32768
+    ) == [
         {
             "id": "example-1",
             "split": "train",
@@ -323,15 +275,10 @@ def test_overlength_policy_can_leave_traces_for_trl_to_cut() -> None:
     ]
 
 
-def test_overlength_policy_refuses_to_empty_split() -> None:
-    with pytest.raises(ValueError, match="emptied the validation split"):
-        _apply_overlength_policy(
-            _tokenized_dataset(40000),
-            split="validation",
-            max_length=32768,
-            exclude_overlength=True,
-            error_on_truncation=True,
-        )
+def test_overlength_truncations_are_empty_within_or_without_a_limit() -> None:
+    dataset = _tokenized_dataset(100, 35044)
+    assert _overlength_truncations(dataset, split="validation", max_length=40000) == []
+    assert _overlength_truncations(dataset, split="validation", max_length=None) == []
 
 
 def test_longest_sample_selection_happens_after_tokenization() -> None:
@@ -516,7 +463,6 @@ def test_benchmark_cli_can_override_prepared_dataset_paths() -> None:
         "train_file": "/candidate/train.jsonl",
         "validation_file": "/candidate/validation.jsonl",
         "manifest_file": "/candidate/manifest.json",
-        "error_on_truncation": False,
     }
 
 

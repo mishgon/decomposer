@@ -740,78 +740,42 @@ def _validate_dataset_system_prompt(
     }
 
 
-def _apply_overlength_policy(
+def _overlength_truncations(
     dataset: Dataset,
     *,
     split: str,
     max_length: int | None,
-    exclude_overlength: bool,
-    error_on_truncation: bool,
-) -> tuple[Dataset, list[JsonObject], list[JsonObject]]:
-    """Return the dataset, the traces it excludes and the traces TRL will cut.
+) -> list[JsonObject]:
+    """The traces over ``max_length``, with the supervised tokens each keeps.
 
-    Over ``max_length`` a trace is cut from the end (TRL keeps its start), and
-    each cut trace reports the supervised tokens it keeps. With
-    ``data.exclude_overlength`` it is excluded instead, and with
-    ``data.error_on_truncation: true`` it is refused.
+    TRL cuts such a trace from the end and keeps its start, which holds the
+    system prompt, the tools and the task.
     """
-    if not isinstance(exclude_overlength, bool):
-        raise ValueError("data.exclude_overlength must be a boolean.")
-    if not isinstance(error_on_truncation, bool):
-        raise ValueError("data.error_on_truncation must be a boolean.")
     if max_length is None:
-        if exclude_overlength:
-            raise ValueError(
-                "data.exclude_overlength requires training.max_length to be set."
-            )
-        return dataset, [], []
-
+        return []
     limit = int(max_length)
     # Every row carries its token IDs and masks: read single columns, and masks only
     # for the overlength rows.
     lengths = list(dataset["_token_length"])
-    retained_indices = [
-        index for index, length in enumerate(lengths) if length <= limit
-    ]
-    if len(retained_indices) == len(dataset):
-        return dataset, [], []
     overlength = dataset.select(
         [index for index, length in enumerate(lengths) if length > limit]
     )
-    excluded = [
+    return [
         {
             "id": str(record_id),
             "split": split,
             "token_length": int(token_length),
             "max_length": limit,
+            "supervised_tokens": sum(masks),
+            "supervised_tokens_kept": sum(masks[:limit]),
         }
-        for record_id, token_length in zip(
-            overlength["id"], overlength["_token_length"], strict=True
+        for record_id, token_length, masks in zip(
+            overlength["id"],
+            overlength["_token_length"],
+            overlength["assistant_masks"],
+            strict=True,
         )
     ]
-    if not exclude_overlength:
-        if error_on_truncation:
-            longest = max(item["token_length"] for item in excluded)
-            raise ValueError(
-                f"The longest prepared trace has {longest} tokens, exceeding "
-                f"max_length={limit}. Increase max_length, enable "
-                "data.exclude_overlength, or set data.error_on_truncation: false "
-                "to cut such traces from the end."
-            )
-        truncated = [
-            {
-                **item,
-                "supervised_tokens": sum(masks),
-                "supervised_tokens_kept": sum(masks[:limit]),
-            }
-            for item, masks in zip(excluded, overlength["assistant_masks"], strict=True)
-        ]
-        return dataset, [], truncated
-    if not retained_indices:
-        raise ValueError(
-            f"Excluding traces longer than {limit} tokens emptied the {split} split."
-        )
-    return dataset.select(retained_indices), excluded, []
 
 
 def _git_revision() -> str | None:
@@ -1388,10 +1352,9 @@ def _resolve_config(config: JsonObject, args: argparse.Namespace) -> JsonObject:
 
     if args.max_length is not None:
         training["max_length"] = args.max_length
-    # By default, records over max_length are cut from the end: TRL keeps the
-    # start, which holds the system prompt, the tools and the task.
+    # Records over max_length are cut from the end: TRL keeps the start, which
+    # holds the system prompt, the tools and the task.
     training.setdefault("max_length", DEFAULT_MAX_LENGTH)
-    data.setdefault("error_on_truncation", False)
     if args.max_steps is not None:
         training["max_steps"] = args.max_steps
     if args.use_liger_kernel is not None:
@@ -1613,41 +1576,19 @@ def main(argv: Sequence[str] | None = None) -> None:
         training_template=training_template,
         num_proc=num_proc,
     )
-    validation_dataset, raw_validation_token_stats = _preflight_tokenization(
+    validation_dataset, validation_token_stats = _preflight_tokenization(
         validation_dataset,
         tokenizer=tokenizer,
         training_template=training_template,
         num_proc=num_proc,
     )
     max_length = training_config.get("max_length")
-    exclude_overlength = data_config.get("exclude_overlength", False)
-    error_on_truncation = data_config["error_on_truncation"]
-    (
-        train_dataset,
-        train_overlength_exclusions,
-        train_overlength_truncations,
-    ) = _apply_overlength_policy(
-        train_dataset,
-        split="train",
-        max_length=max_length,
-        exclude_overlength=exclude_overlength,
-        error_on_truncation=error_on_truncation,
+    train_overlength_truncations = _overlength_truncations(
+        train_dataset, split="train", max_length=max_length
     )
-    (
-        validation_dataset,
-        validation_overlength_exclusions,
-        validation_overlength_truncations,
-    ) = _apply_overlength_policy(
-        validation_dataset,
-        split="validation",
-        max_length=max_length,
-        exclude_overlength=exclude_overlength,
-        error_on_truncation=error_on_truncation,
+    validation_overlength_truncations = _overlength_truncations(
+        validation_dataset, split="validation", max_length=max_length
     )
-    overlength_exclusions = [
-        *train_overlength_exclusions,
-        *validation_overlength_exclusions,
-    ]
     longest_train_samples = data_config.get("longest_train_samples")
     train_dataset = _select_longest_by_token_length(
         train_dataset,
@@ -1670,21 +1611,9 @@ def main(argv: Sequence[str] | None = None) -> None:
     ]
     train_token_stats = (
         _summarize_tokenization(train_dataset)
-        if train_overlength_exclusions
-        or longest_train_samples is not None
-        or stratified_train_samples is not None
+        if longest_train_samples is not None or stratified_train_samples is not None
         else raw_train_token_stats
     )
-    validation_token_stats = (
-        _summarize_tokenization(validation_dataset)
-        if validation_overlength_exclusions
-        else raw_validation_token_stats
-    )
-    if _is_rank_zero() and overlength_exclusions:
-        print(
-            "Excluded overlength prepared traces: "
-            + json.dumps(overlength_exclusions, sort_keys=True)
-        )
     if _is_rank_zero() and overlength_truncations:
         kept = sum(item["supervised_tokens_kept"] for item in overlength_truncations)
         total = sum(item["supervised_tokens"] for item in overlength_truncations)
@@ -1747,10 +1676,8 @@ def main(argv: Sequence[str] | None = None) -> None:
             "required_runtime_profile": required_runtime,
             "system_prompt": system_prompt_runtime,
             "raw_train_token_stats": raw_train_token_stats,
-            "raw_validation_token_stats": raw_validation_token_stats,
             "train_token_stats": train_token_stats,
             "validation_token_stats": validation_token_stats,
-            "overlength_exclusions": overlength_exclusions,
             "overlength_truncations": overlength_truncations,
             "effective_records": {
                 "train": len(train_dataset),
@@ -1945,7 +1872,6 @@ def main(argv: Sequence[str] | None = None) -> None:
                 "training_state": training_state,
                 "train_token_stats": train_token_stats,
                 "validation_token_stats": validation_token_stats,
-                "overlength_exclusions": overlength_exclusions,
                 "overlength_truncations": overlength_truncations,
                 "train_batch": batch_runtime,
                 "generation_config": generation_runtime,
