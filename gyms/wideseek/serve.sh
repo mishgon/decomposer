@@ -19,6 +19,9 @@ case "${1:-}" in
     ;;
   workers)
     source gyms/wideseek/env.sh
+    # Completed episodes are archived by the runner; avoid repeated checkpoint snapshots.
+    export LANGGRAPH_DISABLE_FILE_PERSISTENCE=true
+    ulimit -n 65536
     exec gyms/wideseek/.venv/bin/langgraph dev --config gyms/wideseek/langgraph.json --host 127.0.0.1 \
       --port 18081 --no-browser --no-reload --n-jobs-per-worker 4
     ;;

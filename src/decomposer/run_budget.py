@@ -2,13 +2,24 @@ import asyncio
 import time
 from concurrent.futures import ThreadPoolExecutor
 from contextvars import copy_context
-from typing import NotRequired
+from collections.abc import Mapping
+from typing import NotRequired, TypedDict
 
 from langchain.agents.middleware import AgentMiddleware, AgentState
 from langchain_core.messages import HumanMessage, SystemMessage
-from langgraph.config import get_config
 
 from .prompts import AGENT_RUN_BUDGET_NOTICE, AGENT_GRACEFUL_SHUTDOWN_REQUEST
+
+
+class RunBudgetContext(TypedDict, total=False):
+    agent_run_budget_seconds: float | None
+    agent_shutdown_grace_seconds: float
+
+
+def _run_budget(context):
+    if isinstance(context, Mapping):
+        return context.get("agent_run_budget_seconds"), context.get("agent_shutdown_grace_seconds", 60.0)
+    return getattr(context, "agent_run_budget_seconds", None), getattr(context, "agent_shutdown_grace_seconds", 60.0)
 
 
 class RunBudgetState(AgentState):
@@ -35,9 +46,7 @@ class RunBudgetMiddleware(AgentMiddleware):
     state_schema = RunBudgetState
 
     def before_agent(self, state, runtime):
-        config = {**get_config().get("configurable", {}), **(runtime.context or {})}
-        agent_run_budget_seconds = config.get("agent_run_budget_seconds")
-        agent_shutdown_grace_seconds = config.get("agent_shutdown_grace_seconds")
+        agent_run_budget_seconds, agent_shutdown_grace_seconds = _run_budget(runtime.context)
         shutdown_at = None
         timeout_at = None
         if agent_run_budget_seconds is not None:
@@ -67,8 +76,7 @@ class RunBudgetMiddleware(AgentMiddleware):
         return None
 
     def _prepare_model_request(self, request):
-        config = {**get_config().get("configurable", {}), **(request.runtime.context or {})}
-        agent_run_budget_seconds = config.get("agent_run_budget_seconds")
+        agent_run_budget_seconds, _ = _run_budget(request.runtime.context)
         if agent_run_budget_seconds is not None:
             notice = AGENT_RUN_BUDGET_NOTICE.format(
                 agent_run_budget_seconds=agent_run_budget_seconds,

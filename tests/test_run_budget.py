@@ -23,8 +23,7 @@ class FakeModel(FakeMessagesListChatModel):
 
 
 @pytest.mark.parametrize("asynchronous", [False, True])
-@pytest.mark.parametrize("use_context", [False, True])
-def test_report_follows_all_tool_results_and_next_run_has_fresh_budget(monkeypatch, asynchronous, use_context):
+def test_report_follows_all_tool_results_and_next_run_has_fresh_budget(monkeypatch, asynchronous):
     clock = SimpleNamespace(now=0.0)
     monkeypatch.setattr(budget_module, "time", SimpleNamespace(monotonic=lambda: clock.now))
     requests = []
@@ -56,14 +55,8 @@ def test_report_follows_all_tool_results_and_next_run_has_fresh_budget(monkeypat
         tools=[work], middleware=[RunBudgetMiddleware(), Capture()],
         checkpointer=InMemorySaver(),
     )
-    config = {"configurable": {
-        "thread_id": "test", "agent_run_budget_seconds": 10,
-        "agent_shutdown_grace_seconds": 30,
-    }}
-    context = None
-    if use_context:
-        context = dict(config["configurable"])
-        config = {"configurable": {"thread_id": "test"}}
+    config = {"configurable": {"thread_id": "test"}}
+    context = {"agent_run_budget_seconds": 10, "agent_shutdown_grace_seconds": 30}
 
     async def run():
         inputs = {"messages": [HumanMessage(content="Do work")]}
@@ -124,7 +117,7 @@ def test_hard_deadline_cancels_slow_operations(phase):
             with pytest.raises(TimeoutError):
                 await agent.ainvoke(
                     {"messages": [HumanMessage(content="Work")]},
-                    {"configurable": {"agent_run_budget_seconds": .02, "agent_shutdown_grace_seconds": .1}},
+                    context={"agent_run_budget_seconds": .02, "agent_shutdown_grace_seconds": .1},
                 )
         assert cancelled == ["tool" if phase == "tool" else "model"]
 
@@ -156,7 +149,7 @@ def test_report_cannot_start_more_tools(monkeypatch):
     with pytest.raises(ValueError, match="instead of returning its report"):
         asyncio.run(agent.ainvoke(
             {"messages": [HumanMessage(content="Work")]},
-            {"configurable": {"agent_run_budget_seconds": 1, "agent_shutdown_grace_seconds": 30}},
+            context={"agent_run_budget_seconds": 1, "agent_shutdown_grace_seconds": 30},
         ))
     assert executed == [True]
 
@@ -193,7 +186,7 @@ def test_sync_deadline_limits_waiting(phase):
         with pytest.raises(TimeoutError):
             agent.invoke(
                 {"messages": [HumanMessage(content="Work")]},
-                {"configurable": {"agent_run_budget_seconds": .02, "agent_shutdown_grace_seconds": .1}},
+                context={"agent_run_budget_seconds": .02, "agent_shutdown_grace_seconds": .1},
             )
         assert time.monotonic() - started_at < 1
         assert not finished.is_set()
