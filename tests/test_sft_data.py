@@ -26,7 +26,6 @@ from sft.schema import (
     canonical_json,
     normalize_response_tools,
     sha256_text,
-    validate_chat_tools,
     validate_decomposer_messages,
 )
 from decomposer.prompts import (
@@ -57,10 +56,6 @@ TOOLS = [
     _response_tool("new", "agent_type_id"),
     _response_tool("fork", "agent_id"),
     _response_tool("run", "agent_id", "prompt"),
-    _response_tool("wait"),
-]
-LEGACY_TOOLS = [
-    _response_tool("spawn_subagent", "subagent_type_id", "prompt"),
     _response_tool("wait"),
 ]
 
@@ -184,37 +179,6 @@ def _rollout(
         "_ng_task_index": task_index,
         "_ng_rollout_index": rollout_index,
     }
-
-
-def _legacy_rollout(task_index: int) -> dict:
-    """A spawn_subagent/wait trajectory of the retired Decomposer core."""
-    rollout = _rollout(task_index)
-    spawn_id = f"spawn-{task_index}"
-    wait_id = f"wait-{task_index}"
-    rollout["response"]["tools"] = deepcopy(LEGACY_TOOLS)
-    rollout["final_state"]["messages"] = [
-        rollout["final_state"]["messages"][0],
-        _ai(
-            "",
-            tool_calls=[
-                _call(
-                    "spawn_subagent",
-                    spawn_id,
-                    agent_type_id="small",
-                    prompt=f"Do task {task_index}.",
-                )
-            ],
-        ),
-        _result("spawn_subagent", spawn_id, {"subagent_run_id": "run"}),
-        _ai("", tool_calls=[_call("wait", wait_id)]),
-        _result(
-            "wait",
-            wait_id,
-            [{"subagent_run_id": "run", "status": "success", "content": "Done."}],
-        ),
-        _ai("The task is complete."),
-    ]
-    return rollout
 
 
 def _materialized(
@@ -808,8 +772,6 @@ def test_prepare_excludes_malformed_successful_traces_by_reason(tmp_path: Path) 
     rollouts[6]["responses_create_params"]["input"] = _input(999)
     rollouts[7]["response"]["tools"][0]["name"] = "other"
     rollouts[8]["reward"] = 0.0
-    rollouts.append(_legacy_rollout(9))
-    materialized.append(_materialized(9))
     source = _source(tmp_path, "teacher", rollouts, materialized)
     with (source / "rollouts.jsonl").open("a", encoding="utf-8") as file:
         file.write("{not json}\n")
@@ -818,10 +780,10 @@ def test_prepare_excludes_malformed_successful_traces_by_reason(tmp_path: Path) 
     filtering = prepared.manifest["filtering"]
     # rollouts[4]'s argument-less `new` is a mistake the core answers, so it stays.
     assert filtering["included"] == 2
-    assert filtering["excluded_malformed"] == 8
-    assert filtering["excluded_malformed_by_source"] == {"teacher": 8}
+    assert filtering["excluded_malformed"] == 7
+    assert filtering["excluded_malformed_by_source"] == {"teacher": 7}
     source_manifest = prepared.manifest["sources"][0]
-    assert source_manifest["native_rollouts"] == source_manifest["candidate_rollouts"] == 11
+    assert source_manifest["native_rollouts"] == source_manifest["candidate_rollouts"] == 10
     assert filtering["excluded_invalid_agent_ref"] == 1
     assert filtering["excluded_missing_final_state"] == 1
     assert filtering["excluded_empty_training_target"] == 1
@@ -830,61 +792,6 @@ def test_prepare_excludes_malformed_successful_traces_by_reason(tmp_path: Path) 
     assert filtering["excluded_invalid_tool_schema"] == 1
     assert filtering["excluded_reward"] == 1
     assert filtering["excluded_invalid_json"] == 1
-    assert filtering["excluded_legacy_tool_interface"] == 1
-
-
-def test_schema_rejects_legacy_spawn_subagent_traces() -> None:
-    def reason(function: Callable[[], object]) -> str:
-        with pytest.raises(TraceValidationError) as error:
-            function()
-        return error.value.reason
-
-    legacy_chat_tools = [
-        {
-            "type": "function",
-            "function": {
-                key: tool[key] for key in ("name", "description", "parameters")
-            },
-        }
-        for tool in LEGACY_TOOLS
-    ]
-    spawn = {
-        "type": "function",
-        "id": "spawn-1",
-        "function": {
-            "name": "spawn_subagent",
-            "arguments": {"agent_type_id": "small", "prompt": "Do it."},
-        },
-    }
-    legacy_messages = [
-        {"role": "system", "content": "System."},
-        {"role": "user", "content": "Task."},
-        {"role": "assistant", "content": "", "tool_calls": [spawn]},
-        {
-            "role": "tool",
-            "content": '{"subagent_run_id": "run"}',
-            "tool_call_id": "spawn-1",
-            "name": "spawn_subagent",
-        },
-        {"role": "assistant", "content": "Done.", "tool_calls": []},
-    ]
-    parallel_legacy = deepcopy(legacy_messages)
-    parallel_legacy[2]["tool_calls"].append({**spawn, "id": "spawn-2"})
-    parallel_legacy.insert(4, {**legacy_messages[3], "tool_call_id": "spawn-2"})
-
-    legacy = "excluded_legacy_tool_interface"
-    assert reason(lambda: normalize_response_tools(deepcopy(LEGACY_TOOLS))) == legacy
-    assert reason(lambda: validate_chat_tools(legacy_chat_tools)) == legacy
-    assert reason(lambda: validate_decomposer_messages(legacy_messages)) == legacy
-    assert reason(lambda: validate_decomposer_messages(parallel_legacy)) == legacy
-    # A tool set missing fork/run is structurally invalid, not legacy.
-    assert (
-        reason(lambda: normalize_response_tools(deepcopy(TOOLS[:1] + TOOLS[3:])))
-        == "excluded_invalid_tool_schema"
-    )
-    assert [
-        tool["function"]["name"] for tool in normalize_response_tools(deepcopy(TOOLS))
-    ] == ["new", "fork", "run", "wait"]
 
 
 def _renamed_core_rollout(task_index: int) -> dict:
@@ -1250,10 +1157,6 @@ def test_prepare_refuses_overwrite_and_bad_materialized_source(tmp_path: Path) -
                 )
             ),
             "before tool results",
-        ),
-        (
-            lambda rollout: rollout.update(_legacy_rollout(0)),
-            "retired 'spawn_subagent' tool",
         ),
     ],
 )

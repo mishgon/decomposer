@@ -24,13 +24,11 @@ MANIFEST_FORMAT_VERSION = 3
 
 EXCLUSION_REASONS = (
     "excluded_reward",
-    "excluded_quality",
     "excluded_invalid_json",
     "excluded_invalid_reward",
     "excluded_invalid_indices",
     "excluded_invalid_agent_ref",
     "excluded_missing_materialized_input",
-    "excluded_missing_evaluation",
     "excluded_prompt_mismatch",
     "excluded_missing_final_state",
     "excluded_empty_training_target",
@@ -39,7 +37,6 @@ EXCLUSION_REASONS = (
     "excluded_invalid_messages",
     "excluded_invalid_metadata",
     "excluded_prompt_teacher_cap",
-    "excluded_legacy_tool_interface",
 )
 
 # The Decomposer manager's tool interface. Canonical SFT records use exactly these
@@ -52,9 +49,6 @@ DECOMPOSER_TOOL_PARAMETERS: dict[str, tuple[str, ...]] = {
     "run": ("agent_id", "prompt"),
     "wait": (),
 }
-# Tools of the retired spawn_subagent/wait core. Preparation accepts only the
-# new/fork/run/wait interface and excludes traces that use these tools.
-LEGACY_DECOMPOSER_TOOL_NAMES = frozenset({"spawn_subagent"})
 # Exact user messages the core injects when the manager answers before collecting
 # every run, or answers with empty text; the manager then continues.
 CORE_USER_MESSAGES = frozenset({EARLY_RESPONSE_ERROR, EMPTY_RESPONSE_ERROR})
@@ -353,16 +347,6 @@ def require_mapping(value: Any, description: str, reason: str) -> Mapping[str, A
     return value
 
 
-def reject_legacy_tool_name(name: Any, description: str) -> None:
-    """Exclude traces of the retired spawn_subagent/wait Decomposer core."""
-    if name in LEGACY_DECOMPOSER_TOOL_NAMES:
-        raise TraceValidationError(
-            "excluded_legacy_tool_interface",
-            f"{description} uses the retired {name!r} tool; SFT preparation "
-            "accepts only new/fork/run/wait Decomposer trajectories.",
-        )
-
-
 def normalize_response_tools(tools: Any) -> list[JsonObject]:
     """Normalize Responses API function tools into Transformers chat format."""
     if not isinstance(tools, list):
@@ -387,7 +371,6 @@ def normalize_response_tools(tools: Any) -> list[JsonObject]:
             raise TraceValidationError(
                 "excluded_invalid_tool_schema", f"Tool {index} has no name."
             )
-        reject_legacy_tool_name(name, f"response.tools[{index}]")
         if not isinstance(description, str) or not isinstance(parameters, Mapping):
             raise TraceValidationError(
                 "excluded_invalid_tool_schema", f"Tool {name!r} has an invalid schema."
@@ -427,7 +410,6 @@ def validate_chat_tools(tools: Any) -> list[JsonObject]:
         name = function.get("name")
         description = function.get("description")
         parameters = function.get("parameters")
-        reject_legacy_tool_name(name, f"trace.tools[{index}]")
         if (
             tool.get("type") != "function"
             or not isinstance(name, str)
@@ -568,7 +550,6 @@ def validate_decomposer_messages(messages: list[JsonObject]) -> None:
                 )
                 name = function.get("name")
                 arguments = function.get("arguments")
-                reject_legacy_tool_name(name, f"Assistant message {index}")
                 if (
                     call.get("type") != "function"
                     or not isinstance(call_id, str)

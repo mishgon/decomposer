@@ -40,7 +40,6 @@ from .schema import (
 _SELECTION_EXCLUSION_REASONS = frozenset(
     {
         "excluded_reward",
-        "excluded_quality",
         "excluded_prompt_teacher_cap",
     }
 )
@@ -151,7 +150,6 @@ def _assert_filter_counts(counts: Counter[str], description: str) -> None:
     )
     if counts["rollouts"] != (
         counts["excluded_reward"]
-        + counts["excluded_quality"]
         + invalid
         + counts["eligible"]
     ):

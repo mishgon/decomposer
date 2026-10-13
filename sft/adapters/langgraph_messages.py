@@ -8,7 +8,6 @@ from typing import Any
 from ..schema import (
     JsonObject,
     TraceValidationError,
-    reject_legacy_tool_name,
     require_mapping,
     validate_decomposer_messages,
 )
@@ -49,7 +48,6 @@ def _convert_tool_call(
     call_id = raw_tool_call.get("id")
     name = raw_tool_call.get("name")
     arguments = raw_tool_call.get("args")
-    reject_legacy_tool_name(name, f"Assistant message {message_index}")
     if (
         not isinstance(call_id, str)
         or not call_id
@@ -81,7 +79,6 @@ def _convert_message(message: Mapping[str, Any], index: int) -> JsonObject:
     if message_type == "tool":
         call_id = message.get("tool_call_id")
         name = message.get("name")
-        reject_legacy_tool_name(name, f"Tool message {index}")
         if (
             not isinstance(call_id, str)
             or not call_id
