@@ -400,8 +400,9 @@ after three evaluations without improvement. A run resumed with
 **Evaluation.** Validation loss is reported for the whole split as
 `eval_all_loss`, which picks the checkpoint, and per gym as `eval_<gym>_loss`
 when the split mixes gyms. ClearML plots each one separately and also all of
-them together in `eval/loss_by_dataset`. A config's
-`metric_for_best_model: eval_loss` means `eval_all_loss`.
+them together in `eval/loss_by_dataset`. A config's `metric_for_best_model` of
+`eval_loss` or `loss`, or none when the run loads the best model, means
+`eval_all_loss`.
 
 **Outputs.** A run writes into `training.output_dir`:
 

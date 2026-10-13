@@ -402,7 +402,7 @@ def _select_longest_by_token_length(
     dataset: Dataset,
     limit: int | None,
 ) -> Dataset:
-    """Select the longest examples after full tokenization and length filtering."""
+    """Select the longest examples by token length."""
     if limit is None:
         return dataset
     if not isinstance(limit, int) or isinstance(limit, bool) or limit <= 0:
@@ -1426,7 +1426,7 @@ def _resolve_config(config: JsonObject, args: argparse.Namespace) -> JsonObject:
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Full-parameter SFT on Decomposer traces."
+        description="LoRA or full-parameter SFT on Decomposer traces."
     )
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--max-length", type=int)
@@ -1626,8 +1626,14 @@ def main(argv: Sequence[str] | None = None) -> None:
     training_config["assistant_only_loss"] = True
     training_config["packing"] = False
     training_config["dataset_num_proc"] = num_proc
-    # The whole validation split is evaluated as `all` (see _evaluation_datasets).
-    if training_config.get("metric_for_best_model") == "eval_loss":
+    # The whole validation split is evaluated as `all` (see _evaluation_datasets),
+    # so no `eval_loss` exists. TrainingArguments defaults the metric to `loss`
+    # when it loads the best model.
+    metric_for_best_model = training_config.get("metric_for_best_model")
+    if metric_for_best_model in ("loss", "eval_loss") or (
+        metric_for_best_model is None
+        and training_config.get("load_best_model_at_end")
+    ):
         training_config["metric_for_best_model"] = "eval_all_loss"
     # A custom ClearML callback preserves the integration lifecycle while giving
     # every scalar its own plot instead of grouping all train/eval series.
