@@ -2,11 +2,9 @@ from __future__ import annotations
 
 import json
 import os
-from pathlib import Path
 
 import pytest
 import torch
-import yaml
 from datasets import Dataset
 
 # Training runs FLA on its Triton kernels; its TileLang backend is not the validated path.
@@ -16,7 +14,6 @@ from sft.train import (
     _apply_overlength_policy,
     _benchmark_sample_manifest,
     _bf16_config,
-    _build_early_stopping_callback,
     _build_parser,
     _enable_qwen35_native_gva,
     _evaluation_datasets,
@@ -331,71 +328,3 @@ def test_longest_sample_selection_happens_after_tokenization() -> None:
 def test_longest_sample_selection_requires_positive_integer(limit: object) -> None:
     with pytest.raises(ValueError, match="positive integer"):
         _select_longest_by_token_length(_tokenized_dataset(100), limit)  # type: ignore[arg-type]
-
-
-def test_qwen35_unloop_v3_lora_configs_differ_only_in_length() -> None:
-    root = Path("sft/configs")
-    configs = {
-        length: yaml.safe_load(
-            (root / f"qwen35_4b_unloop_nonthinking_mixed_v3_lora_{length}_4gpu.yaml").read_text()
-        )
-        for length in ("16k", "32k")
-    }
-    for length, max_length in (("16k", 16384), ("32k", 32768)):
-        config = configs[length]
-        assert config["training"]["max_length"] == max_length
-        assert config["training"]["output_dir"].endswith(f"mixed-v3-lora-{length}")
-        assert config["data"]["expected_fingerprint"] == (
-            "50a733439db998f83c559946eb5f57fc77c811916142b787bdf2245d1fdb8df4"
-        )
-        assert config["lora"] == {"r": 32, "alpha": 64, "dropout": 0.05}
-        assert config["training"]["fsdp"] is False
-        assert _build_early_stopping_callback(config["run"], config["training"]) is not None
-
-    def without_length(config: dict) -> str:
-        text = yaml.safe_dump(config)
-        for length in ("16k", "32k", "16K", "32K", "16384", "32768"):
-            text = text.replace(length, "")
-        return text
-
-    assert without_length(configs["16k"]) == without_length(configs["32k"])
-
-
-def test_qwen35_unloop_manager_sft_1_0_0_configs_differ_only_in_mode() -> None:
-    root = Path("sft/configs")
-    full, lora = (
-        yaml.safe_load(
-            (
-                root / f"qwen35_4b_unloop_nonthinking_manager_sft_1.0.0_{mode}_32k_4gpu.yaml"
-            ).read_text()
-        )
-        for mode in ("full", "lora")
-    )
-    for config in (full, lora):
-        training = config["training"]
-        assert config["data"]["expected_fingerprint"] == (
-            "fb6d86f62061f540947636fb5706832542e4ce73577e26f0e6b87df1c0a25556"
-        )
-        # 0.2 epoch: 3,797 records make 475 steps per epoch at global batch 8 on 4 GPUs.
-        assert training["global_batch_size"] == 8
-        assert config["run"]["expected_world_size"] == 4
-        assert training["eval_strategy"] == training["save_strategy"] == "steps"
-        assert training["eval_steps"] == training["save_steps"] == 95
-        assert training["restore_callback_states_from_checkpoint"] is True
-        assert config["run"]["early_stopping"]["patience"] == 3
-        assert _build_early_stopping_callback(config["run"], training) is not None
-
-    assert full["model"].pop("dtype") == "float32"
-    assert lora["model"].pop("dtype") == "bfloat16"
-    assert full["model"].pop("freeze_modules") == ["model.visual"]
-    assert full["training"].pop("learning_rate") == 2.0e-5
-    assert lora["training"].pop("learning_rate") == 2.0e-4
-    assert lora.pop("lora") == {"r": 32, "alpha": 64, "dropout": 0.05}
-
-    def without_mode(config: dict) -> str:
-        text = yaml.safe_dump(config)
-        for mode in ("full", "lora", "LoRA"):
-            text = text.replace(mode, "")
-        return text
-
-    assert without_mode(full) == without_mode(lora)

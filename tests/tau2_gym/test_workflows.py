@@ -5,7 +5,6 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
-import yaml
 
 from gyms.tau2_gym import run as run_module
 from gyms.tau2_gym.experiments import (
@@ -26,16 +25,6 @@ def test_experiment_names_are_unique_and_pools_exist() -> None:
     assert len(names) == len(set(names))
     for experiment in EXPERIMENTS:
         load_pool(experiment.pool)
-
-
-def test_subagent_type_preserves_legacy_sft_releases() -> None:
-    spec = yaml.safe_load(
-        (REPO_ROOT / "sft/specs/decomposer_mixed_deepseek_qwen35_4b_nonthinking_v5_32k_student.yaml").read_text()
-    )
-    (subagent,) = spec["policy"]["subagent_types"]
-    assert subagent["id"] == "subagent_non_thinking"
-    assert SUBAGENT_TYPE_ID == "qwen_3_5_4b_thinking"
-    assert SUBAGENT_DESCRIPTION == "Qwen3.5-4B thinking agent equipped with all the required tools."
 
 
 @pytest.mark.parametrize(

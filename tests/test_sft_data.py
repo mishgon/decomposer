@@ -1269,13 +1269,7 @@ def test_malformed_tool_calls_raise_in_error_mode(
         )
 
 
-# Specs before spec_version 4 are records of older releases; they load and build
-# only at the commits that built them.
-SFT_SPEC_PATHS = sorted(
-    path
-    for path in Path(__file__).resolve().parents[1].glob("sft/**/specs/*.yaml")
-    if yaml.safe_load(path.read_text())["spec_version"] == 4
-)
+SFT_SPEC_PATHS = sorted(Path(__file__).resolve().parents[1].glob("sft/**/specs/*.yaml"))
 
 
 def test_sft_specs_live_under_sft():

@@ -26,25 +26,26 @@ trace must still be well formed: one task, every call answered, and a final
 text answer. Toolathlon and WideSeek collections are read the same way (see
 below).
 
+Canonical records keep every assistant message as the teacher emitted it. A
+message with several tool calls stays one message, and its results follow in
+the order the harness returned them, so the student learns the same turns that
+OPD and RL later sample. Calls the harness refused without executing them keep
+the core's refusal text as their result, like other mistakes the core answered:
+a `wait` sharing its message with any other call, a `fork` and `run` of the same
+subagent, and several `run` calls of the same subagent
+(`PARALLEL_WAIT_CALL_ERROR`, `PARALLEL_FORK_RUN_CALL_ERROR` and
+`PARALLEL_RUN_CALL_ERROR` in `decomposer.prompts`).
+
 ## Legacy specs and configs
 
-Every build specification in `sft/specs/` and
-`sft/workplace_assistant/specs/`, and every training config in `sft/configs/`,
-that predates the `new`/`fork`/`run`/`wait` core targets the retired
-`spawn_subagent`/`wait` core. Their
-datasets and checkpoints were built at `gaia2-eval` commit `2b1bda8`; rebuild
-or validate them only from that commit. The current pipeline rejects their
-source traces. Their historical system prompts also differ from the current
-Decomposer prompt. The files stay in place as
-experiment records, and the release walkthroughs below describe those
-historical builds.
-
-The current code builds only `spec_version` 4 specifications, whose sources are
-digest-pinned snapshots (see [Snapshots, releases and
-versioning](#snapshots-releases-and-versioning)). Older specifications no longer
-load; rebuild them only from the commit that built them. Releases built from a
-specification with a `tokenization:` block (before tokenizer-free releases,
-2026-10-08) still train: training ignores the token counts stored in them.
+Every build specification except release 1.0.0's, and every training config,
+was removed on 2026-10-13: none of them works with the current code. They live in
+the parent of the commit that removed them
+(`git log --diff-filter=D -1 -- sft/configs`). The current code builds only
+`spec_version` 4 specifications, whose sources are digest-pinned snapshots (see
+[Snapshots, releases and versioning](#snapshots-releases-and-versioning)). The
+1.0.0 specification stays as the record of the published release; see
+`sft/specs/README.md`.
 
 ## Install
 
@@ -82,6 +83,12 @@ Releases do not depend on a model: they hold messages and tool schemas, with no
 token counts and no length limit. Training tokenizes every record with the
 model's own chat template and decides what to do with long ones (see
 [Length](#length)).
+
+The output manifest records source hashes, reason-coded filtering counts,
+split keys, the system-prompt hash, the tool-schema hash, and generated-file
+hashes, canonical schema version, preparation Git revision, and portable
+dataset fingerprint. Training accepts manifest v3 only and verifies this
+metadata before loading a model.
 
 ### Snapshots, releases and versioning
 
@@ -139,13 +146,11 @@ decided when each release is cut:
 A new spec names the dataset `decomposer-manager-sft` and sets `dataset.version`
 to that version, so the release directory
 (`…/datasets/sft/decomposer-manager-sft/<version>/`), the manifest and the
-Hugging Face folder share one name. Earlier releases keep their internal names
-(`v1` to `v3`); v3 was rebuilt as 1.0.0. A
-published version never changes: any change, however small, becomes a new
-version. A minor release must keep every existing record on its side of the
-split, which the `prompt_fixed` split does not guarantee (it moved 15 records
-between v2 and v3), so compare the two manifests' `split.validation_group_ids`
-before calling a release minor.
+Hugging Face folder share one name. A published version never changes: any
+change, however small, becomes a new version. A minor release must keep every
+existing record on its side of the split, which the `prompt_fixed` split does
+not guarantee, so compare the two manifests' `split.validation_group_ids` before
+calling a release minor.
 
 **Publishing.** Releases are published unchanged to the private Hugging Face
 dataset `decomposer-datasets/decomposer-manager-sft`: one folder per version
@@ -243,10 +248,10 @@ the rest of the call log, are left out.
 
 ### Release 1.0.0 of decomposer-manager-sft
 
-Version 1.0.0 is the v3 release below, rebuilt under its published name:
-`sft/specs/decomposer_manager_sft_1.0.0.yaml` is the v3 spec with the dataset
-renamed `decomposer-manager-sft`, version `1.0.0`. It was built on Hertz-2 at
-commit `53a88d8` with:
+Release 1.0.0 (`sft/specs/decomposer_manager_sft_1.0.0.yaml`) has four sources.
+Each has the Qwen3.8-Flash non-thinking manager and Qwen3.5-4B-unlooped thinking
+subagents, collected with the old core prompt. It was built on Hertz-2 at
+commit `53a88d8`, the only commit that reproduces it (see `sft/specs/README.md`):
 
 ```bash
 .venv/bin/python -m sft.prepare \
@@ -254,13 +259,29 @@ commit `53a88d8` with:
   --output-root /mnt/share14T-2/sukhorukov/decomposer_artifacts/datasets/sft
 ```
 
-Its `train.jsonl` and `validation.jsonl` are byte-identical to v3's. Only the
-manifest's name, spec and git revision differ, so the fingerprint is
-`fb6d86f6…c0a25556` instead of `50a73343…1fdb8df4`. Later commits rebuild the
-same records, but their manifests leave out spec fields removed since, so the
-fingerprint of a rebuild differs. The v3 directory stays,
-because the checkpoints trained on it pin its fingerprint; new training configs
-use 1.0.0.
+| Source | Snapshot | Rollouts | Selected | Rule |
+|---|---|---:|---:|---|
+| tau2 | `170d2e3d…` | 4,843 | 2,948 | reward 1 |
+| Workplace | `c36c909e…` | 1,255 | 988 | reward 1 |
+| Toolathlon | `c9ea4cfe…` | 1,095 | 214 | collector: pass or check fraction > 0.9 |
+| WideSeek | `c160625c…` | 253 | 70 | collector: score 1 or > 0.9 |
+
+That gives 4,220 records (3,797 train, 423 validation) with fingerprint
+`fb6d86f6…c0a25556`. Each gym keeps its own tool schema. With the Qwen3.5
+template the release has 38.4M tokens, 8.86M of them supervised.
+
+| Gym | Median tokens | Max | Supervised share | Cut at 16K | Kept at 16K | Cut at 32K | Kept at 32K |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| tau2 | 6.8K | 65.5K | 54% | 93 | 97% | 4 | 99% |
+| Workplace | 6.0K | 30.7K | 13% | 6 | 99% | 0 | 100% |
+| Toolathlon | 29.3K | 64.3K | 27% | 191 | 44% | 84 | 80% |
+| WideSeek | 20.5K | 54.8K | 6% | 45 | 55% | 17 | 88% |
+| All | | | | 335 | 80% | 105 | 93% |
+
+"Kept" is the share of supervised tokens left after cutting from the end; no
+record is left without any. The Toolathlon snapshot holds the LLM proxy master
+key (the task containers exposed it, and subagents listed their environment), so
+the snapshot must not be published.
 
 Version 1.0.0 is published unchanged on Hugging Face as
 `decomposer-datasets/decomposer-manager-sft` (folder `1.0.0/`, tag `v1.0.0`).
@@ -274,457 +295,16 @@ hf download decomposer-datasets/decomposer-manager-sft --repo-type dataset \
   --revision v1.0.0 --local-dir <dir>
 ```
 
-### Qwen3.8 four-gym release v3 for the unloop student
-
-The v3 release (`v3-tau2-workplace-toolathlon-wideseek-20261008`) has the same
-sources and rules as v2 below. Toolathlon and WideSeek were snapshotted again as
-byte-for-byte copies at 19:41 and 19:44 UTC, and the tau2 and Workplace
-snapshots are unchanged. Build it on Hertz-2 from a clean checkout:
-
-```bash
-.venv/bin/python -m sft.prepare \
-  --spec sft/specs/decomposer_mixed_qwen38_qwen35_4b_unloop_nonthinking_v3.yaml \
-  --output-root /mnt/share14T-2/sukhorukov/decomposer_artifacts/datasets/sft
-```
-
-| Source | Snapshot | Rollouts | Selected |
-|---|---|---:|---:|
-| tau2 | `170d2e3d…` | 4,843 | 2,948 |
-| Workplace | `c36c909e…` | 1,255 | 988 |
-| Toolathlon | `c9ea4cfe…` | 1,095 | 214 |
-| WideSeek | `c160625c…` | 253 | 70 |
-
-That gives 4,220 records (3,797 train, 423 validation) with fingerprint
-`50a73343…1fdb8df4`. Every v2 record is in v3 unchanged, plus 4 Toolathlon and 6
-WideSeek records. The added task groups shift the per-category validation
-quotas, so 15 records changed sides (13 of them tau2). With the Qwen3.5 template
-the release has 38.4M tokens, 8.86M of them supervised.
-
-| Gym | Median tokens | Max | Supervised share | Cut at 16K | Kept at 16K | Cut at 32K | Kept at 32K |
-|---|---:|---:|---:|---:|---:|---:|---:|
-| tau2 | 6.8K | 65.5K | 54% | 93 | 97% | 4 | 99% |
-| Workplace | 6.0K | 30.7K | 13% | 6 | 99% | 0 | 100% |
-| Toolathlon | 29.3K | 64.3K | 27% | 191 | 44% | 84 | 80% |
-| WideSeek | 20.5K | 54.8K | 6% | 45 | 55% | 17 | 88% |
-| All | | | | 335 | 80% | 105 | 93% |
-
-"Kept" is the share of supervised tokens left after cutting from the end; no
-record is left without any. A two-step LoRA smoke on the 4 longest train records
-with the training defaults (16K) trained and exported
-(`/mnt/share14T-2/sukhorukov/decomposer_artifacts/training/sft/smokes/mixed-v3-20261008`).
-The Toolathlon snapshot holds the proxy key, like v2's, and must not be
-published.
-
-### Qwen3.8 four-gym release v2 for the unloop student
-
-The v2 release (`v2-tau2-workplace-toolathlon-wideseek-20261008`) adds the
-Toolathlon and WideSeek coverage collections, as finished on 2026-10-08, to the
-Workplace traces of v1 and the tau2 rerun in which only subagents get the domain
-policy (FP8 teacher). Every source has the Qwen3.8-Flash non-thinking manager
-and Qwen3.5-4B-unlooped thinking subagents, and the records keep parallel tool
-calls as emitted. Build it on Hertz-2 from a clean checkout:
-
-```bash
-.venv/bin/python -m sft.prepare \
-  --spec sft/specs/decomposer_mixed_qwen38_qwen35_4b_unloop_nonthinking_v2.yaml \
-  --output-root /mnt/share14T-2/sukhorukov/decomposer_artifacts/datasets/sft
-```
-
-| Source | Snapshot | Rollouts | Selected | Rule |
-|---|---|---:|---:|---|
-| tau2 | `170d2e3d…` | 4,843 | 2,948 | reward 1 |
-| Workplace | `c36c909e…` | 1,255 | 988 | reward 1 |
-| Toolathlon | `35ea4233…` | 1,064 | 210 | collector: pass or check fraction > 0.9 |
-| WideSeek | `50cc2286…` | 242 | 64 | collector: score 1 or > 0.9 |
-
-That gives 4,210 records (3,789 train, 421 validation) with fingerprint
-`cb774a4e…f62573`. Each gym keeps its own tool schema. With the Qwen3.5 template
-the release has 38.1M tokens, 8.7M of them supervised; Toolathlon contributes 5%
-of the records but 26% of the supervised tokens.
-
-| Gym | Median tokens | Over 16K | Over 32K | Max |
-|---|---:|---:|---:|---:|
-| tau2 | 6.8K | 93 | 4 | 65.5K |
-| Workplace | 6.0K | 6 | 0 | 30.7K |
-| Toolathlon | 29.1K | 187 | 81 | 64.3K |
-| WideSeek | 20.5K | 42 | 16 | 54.8K |
-
-Cutting from the end keeps this share of the supervised tokens; no record is
-left without any:
-
-| Gym | Cut at 16K | Kept at 16K | Cut at 32K | Kept at 32K |
-|---|---:|---:|---:|---:|
-| tau2 | 93 | 97% | 4 | 99% |
-| Workplace | 6 | 99% | 0 | 100% |
-| Toolathlon | 187 | 44% | 81 | 80% |
-| WideSeek | 42 | 55% | 16 | 88% |
-| All | 328 | 81% | 101 | 94% |
-
-A two-step LoRA smoke on the 4 longest train records, each cut to 32,768 tokens,
-trained and exported
-(`/mnt/share14T-2/sukhorukov/decomposer_artifacts/training/sft/smokes/mixed-v2-20261008`).
-
-The Toolathlon traces contain the LLM proxy master key: the task containers
-exposed it, and subagents listed their environment while looking for API
-tokens. The snapshot keeps the traces as collected, so it must not be
-published.
-
-### Qwen3.8 tau2 + Workplace release for the unloop student (current core)
-
-The first release of the current core trains the non-thinking Qwen3.5-4B unloop
-checkpoint on the 2026-10-06 Qwen3.8-Flash non-thinking teacher traces: tau2
-`decomposer_broad_v1` and the Workplace train split, one rollout per task, with
-Qwen3.5-4B-unlooped thinking subagents. Build it on Hertz-2 from a clean checkout
-of the committed specification:
-
-```bash
-HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 .venv/bin/python -m sft.prepare \
-  --spec sft/specs/decomposer_mixed_qwen38_qwen35_4b_unloop_nonthinking_v1_32k.yaml \
-  --output-root /mnt/share14T-2/sukhorukov/decomposer_artifacts/datasets/sft
-```
-
-Of 6,098 rollouts, 3,976 have reward `1`. Each keeps its gym's own tool schema
-and the teacher prompt, together with the mistakes the core answered (for
-example, 36 calls of non-Decomposer tools and 7 early answers). The 32K token
-limit excludes 3 tau2 traces, producing 3,973 records (2,985 tau2, 988
-Workplace): 3,578 train and 395 validation. Of 3,834 prompt groups, 135 tau2
-prompts appear in both a domain and its `_dsh` implementation; each such pair
-stays on one side of the split. The median record has 7.3K tokens, and 20% of
-the tokens are supervised.
-
-### Qwen Workplace + Toolathlon final all-reward release
-
-The final mixed Qwen release intentionally keeps both full- and non-full-reward
-traces. Its terminal Toolathlon run contains 404 completed episodes and 99
-failed episodes with no trace/result pair. Import only that run into a
-hash-namespaced immutable location:
-
-```bash
-.venv/bin/python -m sft.import_toolathlon \
-  --archive /home/sukhorukov/traces_full.tar.gz \
-  --archive-prefix matrosov/decomposer-qwen/artifacts/gyms/toolathlon_gym \
-  --run-id 20260826T122838Z-84ae95f3 \
-  --expected-sha256 493c24c4f8853230c0b7557b905ce2027138522ee6da06d5d2e71d0cade94753 \
-  --output-root /home/sukhorukov/decomposer_artifacts/evaluation/data/toolathlon_gym/imports/snapshots/493c24c4
-```
-
-Build the immutable mixed release after committing the preparation code and
-specification:
-
-```bash
-HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 .venv/bin/python -m sft.prepare \
-  --spec sft/specs/decomposer_mixed_deepseek_qwen35_4b_nonthinking_v1_32k.yaml \
-  --output-root /home/sukhorukov/decomposer_artifacts/datasets/sft \
-  --source toolathlon-deepseek-v4-flash-0731-qwen35-4b-nonthinking-n1=/home/sukhorukov/decomposer_artifacts/evaluation/data/toolathlon_gym/imports/snapshots/493c24c4/20260826T122838Z-84ae95f3
-```
-
-Preparation starts from 1,659 candidates: 404 completed Toolathlon episodes
-plus one of three Workplace rollouts for each of 1,255 tasks, selected by a
-stable seed-42 hash before validation. Structural validation retains 375
-Toolathlon traces and 1,243 Workplace traces. The 32K token limit excludes 17
-Toolathlon traces, producing 1,601 records: 1,441 train and 160 validation.
-Toolathlon contributes 358 records (60 reward `1`, 298 reward `0`), while
-Workplace contributes 1,243 (953 reward `1`, 290 reward `0`). Reward value
-alone never excludes a trace, and no trace is truncated. Toolathlon adapter v3
-accepts terminal `completed_with_errors` manifests, selects only completed
-episodes, and records the 99 failed episodes separately. Because this archive
-uses the legacy trace format, the canonical policy interface supplies the tool
-schema.
-
-Submit the final run from the base Qwen3.5-4B checkpoint on four GPUs with
-high priority:
-
-```bash
-/home/sukhorukov/.venv-mls/bin/python \
-  -m sft.run_train_jobs \
-  --filter qwen35-4b-nonthinking-mixed-v1-final-493c24c4-404-32k-full-4gpu \
-  --priority high
-```
-
-The run evaluates once per epoch and uses early-stopping patience one.
-
-#### Filtered Workplace reward-1 and Toolathlon pass-or-quality variant
-
-The filtered comparison reuses exactly the same pinned sources and the same
-seed-42 one-of-three Workplace sampling as the all-rewards release. Workplace
-then keeps only reward-1 traces. Toolathlon always keeps a binary native pass;
-for binary failures it keeps traces whose available check ratio is strictly
-greater than `0.9`, or traces whose evaluator does not expose check counts.
-Check ratios support both native result schemas: `total_passed / total_checks`
-and `passed / (passed + failed)`.
-
-Build the separate immutable release from a clean committed checkout:
-
-```bash
-HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 .venv/bin/python -m sft.prepare \
-  --spec sft/specs/decomposer_mixed_deepseek_qwen35_4b_nonthinking_v1_filtered_pass_quality_32k.yaml \
-  --output-root /home/sukhorukov/decomposer_artifacts/datasets/sft \
-  --source toolathlon-deepseek-v4-flash-0731-qwen35-4b-nonthinking-n1=/home/sukhorukov/decomposer_artifacts/evaluation/data/toolathlon_gym/imports/snapshots/493c24c4/20260826T122838Z-84ae95f3
-```
-
-The expected 32K release has 1,239 records: 953 Workplace traces and 286
-Toolathlon traces, split into 1,116 train and 123 validation records. The
-deterministic prompt-fixed split is recomputed after source filtering. Before
-structural and length filtering, the Toolathlon policy keeps 314 of 404
-completed traces: 68 binary passes, 21 binary failures above the quality
-threshold, and 225 binary failures without check counts. It excludes 90
-binary failures at or below the threshold. Structural validation excludes 16
-of the selected traces and the 32K limit excludes another 12.
-
-Submit a separate run from the base Qwen3.5-4B checkpoint on four GPUs with
-high priority:
-
-```bash
-/home/sukhorukov/.venv-mls/bin/python \
-  -m sft.run_train_jobs \
-  --filter qwen35-4b-nonthinking-mixed-v1-final-493c24c4-404-filtered-pass-qgt90-32k-full-4gpu \
-  --priority high
-```
-
-This run uses the same optimization settings as the all-rewards comparison:
-32K inputs, four GPUs, five epochs at most, per-epoch evaluation, and
-early-stopping patience two. It has an independent output directory and does
-not resume or overwrite the all-rewards run.
-
-#### Filtered GAIA2 n=3 extension
-
-The GAIA2 extension adds only binary reward-1 traces from logical rollouts
-1–3 on the immutable `execution-110-50-v1` training partition. Universes 25,
-26, and 28 remain isolated as test holdout. A checked-in assignment manifest
-preserves all 1,251 Workplace/Toolathlon task memberships and pins all 110
-GAIA2 task groups now (99 train, 11 validation), including tasks without a
-correct n=3 trace, so later logical rollouts 4–10 cannot move a task between
-splits.
-
-Build the release from a clean committed checkout:
-
-```bash
-HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 .venv/bin/python -m sft.prepare \
-  --spec sft/specs/decomposer_mixed_deepseek_qwen35_4b_nonthinking_v2_gaia2_execution_110_n3_filtered_32k.yaml \
-  --output-root /home/sukhorukov/decomposer_artifacts/datasets/sft
-```
-
-The expected source grid has 1,989 candidates. Filtering retains 1,347
-structurally valid correct/quality-selected traces before tokenization,
-including 96 GAIA2 reward-1 traces from 330 training-partition attempts. The
-32K limit excludes 13 traces (12 Toolathlon and one GAIA2), producing 1,334
-records: 1,209 train and 125 validation. GAIA2 rewards are strictly validated
-as binary `0` or `1`.
-
-Submit the base Qwen3.5-4B run on four GPUs at high priority:
-
-```bash
-/home/sukhorukov/.venv-mls/bin/python \
-  -m sft.run_train_jobs \
-  --filter qwen35-4b-nonthinking-mixed-v2-493c24c4-gaia2-110-n3-filtered-32k-full-4gpu \
-  --priority high
-```
-
-The run has a five-epoch ceiling and early-stopping patience two. It uses the
-student prompt, removes teacher reasoning at preprocessing time, and has a
-distinct immutable dataset and checkpoint path.
-
-#### Filtered GAIA2 n=7 teacher-prompt extension
-
-The n=7 release combines the immutable logical 1–3 evaluation source with a
-compact snapshot of completed trace rounds 4–7. It intentionally excludes
-round 8 and later rounds so future releases can extend the same pinned task
-split without changing this dataset. The 770-attempt GAIA grid contains 215
-binary reward-1 traces; structural validation retains 210 and the 32K limit
-retains 208.
-
-The complete mixed source grid has 2,429 candidates. Reward, quality, and
-structural filtering retains 1,461 before tokenization. The teacher prompt
-makes 20 records exceed 32K, producing 1,441 records: 1,314 train and 127
-validation. The final environment counts are 953 Workplace, 280 Toolathlon,
-and 208 GAIA2 records.
-
-Build the release with the explicit teacher prompt from a clean checkout:
-
-```bash
-HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 .venv/bin/python -m sft.prepare \
-  --spec sft/specs/decomposer_mixed_deepseek_qwen35_4b_nonthinking_v3_gaia2_execution_110_n7_teacher_prompt_filtered_32k.yaml \
-  --output-root /home/sukhorukov/decomposer_artifacts/datasets/sft
-```
-
-Submit the stable SDPA, global-batch-4 run from the base Qwen3.5-4B checkpoint:
-
-```bash
-/home/sukhorukov/.venv-mls/bin/python \
-  -m sft.run_train_jobs \
-  --filter qwen35-4b-nonthinking-mixed-v3-493c24c4-gaia2-110-n7-teacher-prompt-filtered-32k-full-4gpu \
-  --priority high
-```
-
-The training config requires the dataset's teacher profile and matching prompt
-hash, removes hidden teacher reasoning, and uses early-stopping patience two.
-
-#### Accelerated Toolathlon-only ablation
-
-The checksum-pinned Toolathlon-only candidate view contains 252 training and
-28 validation records inherited byte-for-byte from the mixed v3 release. Its
-eight-epoch ceiling approximately matches the supervised-token exposure of
-the five-epoch mixed run. It starts independently from the pinned base
-Qwen3.5-4B checkpoint and retains early-stopping patience two.
-
-Submit the four-H100 run with the pinned HF FlashAttention-2 and FLA/causal
-runtime at high priority:
-
-```bash
-/home/sukhorukov/.venv-mls/bin/python \
-  -m sft.run_train_jobs \
-  --filter qwen35-4b-nonthinking-toolathlon-only-v1-493c24c4-teacher-prompt-filtered-32k-hf-fa2-fla-b8-e8-full-4gpu \
-  --priority high
-```
-
-#### Pinned partial Toolathlon snapshot
-
-The snapshot-specific release
-`v1-partial-3983f605-327-32k` is an immutable experiment input built from
-Toolathlon archive SHA-256
-`3983f60540f1887befbc2654db8a8d7b169c397a88d62d1017625cd480386f5f`.
-It uses the 327 trace/result pairs available for run
-`20260826T122838Z-84ae95f3`; it does not claim that the 503-task source run is
-complete. Import it into a hash-namespaced location so that a later completed
-archive for the same run ID cannot collide with it:
-
-```bash
-.venv/bin/python -m sft.import_toolathlon \
-  --archive /home/sukhorukov/traces.tar.gz \
-  --archive-prefix matrosov/decomposer-qwen/artifacts/gyms/toolathlon_gym \
-  --run-id 20260826T122838Z-84ae95f3 \
-  --expected-sha256 3983f60540f1887befbc2654db8a8d7b169c397a88d62d1017625cd480386f5f \
-  --output-root /home/sukhorukov/decomposer_artifacts/evaluation/data/toolathlon_gym/imports/snapshots/3983f605
-```
-
-After committing the preparation implementation, build the release:
-
-```bash
-HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 .venv/bin/python -m sft.prepare \
-  --spec sft/specs/decomposer_mixed_deepseek_qwen35_4b_nonthinking_v1_partial_3983f605_327_32k.yaml \
-  --output-root /home/sukhorukov/decomposer_artifacts/datasets/sft \
-  --source toolathlon-deepseek-v4-flash-0731-qwen35-4b-nonthinking-n1=/home/sukhorukov/decomposer_artifacts/evaluation/data/toolathlon_gym/imports/snapshots/3983f605/20260826T122838Z-84ae95f3
-```
-
-This build has 1,532 retained traces: 1,379 train and 153 validation. The
-train split contains 1,118 Workplace and 261 Toolathlon traces; validation
-contains 125 and 28 respectively. Preparation excludes 36 malformed traces
-and 14 Toolathlon traces over 32K without truncating any record. The longest
-retained train trace has 32,394 Qwen tokens.
-
-Run the longest-trace, one-step smoke at high priority before the full job:
-
-```bash
-/home/sukhorukov/.venv-mls/bin/python \
-  -m sft.run_train_jobs \
-  --sanity-check \
-  --filter qwen35-4b-nonthinking-mixed-v1-partial-3983f605-327-32k-smoke-4gpu \
-  --priority high
-```
-
-Submit the full five-epoch run only after that smoke succeeds:
-
-```bash
-/home/sukhorukov/.venv-mls/bin/python \
-  -m sft.run_train_jobs \
-  --filter qwen35-4b-nonthinking-mixed-v1-partial-3983f605-327-32k-full-4gpu \
-  --priority high
-```
-
-Canonical records keep every assistant message as the teacher emitted it. A
-message with several tool calls stays one message, and its results follow in
-the order the harness returned them, so the student learns the same turns that
-OPD and RL later sample. Calls the harness refused without executing them keep
-the core's refusal text as their result, like other mistakes the core answered:
-a `wait` sharing its message with any other call, a `fork` and `run` of the same
-subagent, and several `run` calls of the same subagent
-(`PARALLEL_WAIT_CALL_ERROR`, `PARALLEL_FORK_RUN_CALL_ERROR` and
-`PARALLEL_RUN_CALL_ERROR` in `decomposer.prompts`). Releases built before
-`nemo_gym` adapter 8, `toolathlon_gym` adapter 9 and `gaia2` adapter 5 split
-such messages into one call per turn.
-
-The historical adapter-v1 all-subagent source pair contains 2,497 rollouts.
-Canonical validation excludes 467 non-success rewards, 13 invalid tool-call
-traces, and seven traces with multiple calls in one assistant message. Its v3
-release therefore has 1,815 train and 195 validation traces. This intentionally
-drops 20 malformed traces that the original permissive dataset included.
-
-The historical adapter-v1 frozen 26B-A4B source pair contains 2,508 rollouts.
-Preparation excludes 398 non-success rewards, two invalid tool-call traces, and
-six traces that emit multiple calls in one assistant message. The resulting
-prompt-fixed split has 1,886 train and 216 validation traces. The GLM source
-ended terminally failed after 1,253 of 1,255 rollouts with two sidecar failures;
-its valid traces are included intentionally, and the v3 manifest pins the exact
-source hashes and counts. A completed GLM rerun must produce a new dataset
-version.
-
-One v3 training trace has 35,044 Gemma tokens. The v3 training configs set
-`data.exclude_overlength: true`, so it is recorded and excluded before TRL sees
-the dataset. The effective 32K split is therefore 1,885 train and 216
-validation traces; no trace is truncated.
-
-The partial DeepSeek-manager/E4B-thinking-subagent v1 release contains 934
-successful traces: 839 train and 95 validation. With teacher reasoning removed,
-the longest traces have 23,132 train tokens and 13,906 validation tokens. The
-8K E4B configs retain 827 train and 92 validation traces, explicitly record the
-12 train and three validation exclusions, and never truncate a trace.
-
-The new `v2-8k` and `v2-32k` releases materialize those length policies during
-preparation. They require Gemma-4 E4B non-thinking token metadata on every row;
-there is no fallback for a missing count, tokenizer revision, or template hash.
-Training freshly tokenizes each row to construct assistant masks, verifies the
-stored counts exactly, filters against `training.max_length` before TRL is
-constructed, and keeps TRL's `max_length` at the same value. It never uses
-truncation to repair an overlength conversation.
-
-Prepare both releases before selecting a v2 training experiment:
-
-```bash
-uv run --group train python -m sft.workplace_assistant.prepare \
-  --dataset workplace-deepseek-e4b-thinking-v2-8k
-uv run --group train python -m sft.workplace_assistant.prepare \
-  --dataset workplace-deepseek-e4b-thinking-v2-32k
-```
-
-The default v2 run remains 8K. Its smoke and full MLSpace experiments are:
-
-```bash
-uv run --with-requirements sft/requirements-mlspace.txt \
-  python -m sft.run_train_jobs --sanity-check \
-  --filter gemma4-e4b-nonthinking-deepseek-e4b-v2-8k-smoke-4gpu
-
-uv run --with-requirements sft/requirements-mlspace.txt \
-  python -m sft.run_train_jobs \
-  --filter gemma4-e4b-nonthinking-deepseek-e4b-v2-8k-full-4gpu
-```
-
-The registered `v2-32k` experiment uses the 32K release and
-`training.max_length: 32768`. It is available for local or MLSpace execution,
-but its four-GPU memory envelope has not been smoke-tested and should not be
-submitted as a full run until a dedicated 32K smoke configuration succeeds.
-
-The output manifest records source hashes, reason-coded filtering counts,
-split keys, the system-prompt hash, the tool-schema hash, and generated-file
-hashes, canonical schema version, preparation Git revision, and portable
-dataset fingerprint. Training accepts manifest v3 only and verifies this
-metadata before loading a model.
-
 ## Train
 
-LoRA for the Qwen3.5-4B unloop student on the v3 four-gym release, on Hertz-2:
+Training runs on Hertz-2 through `sft/train_qwen35_h200.sh`, which sets the
+environment from `docs/sft_qwen35_h200_benchmark.md` and refuses any listed GPU
+that holds memory:
 
 ```bash
 cd ~/decomposer_sft
-nohup sft/train_qwen35_h200.sh \
-  sft/configs/qwen35_4b_unloop_nonthinking_mixed_v3_lora_16k_4gpu.yaml 4,5,6,7 \
-  > ~/qwen35-v3-lora-16k.log 2>&1 &
+nohup sft/train_qwen35_h200.sh <config> 4,5,6,7 > ~/<run>.log 2>&1 &
 ```
-
-The 32K config (`…_lora_32k_4gpu.yaml`) differs only in `max_length` and the
-output directory. Both use the H200 benchmark recipe with LoRA `r: 32`,
-`alpha: 64` and `dropout: 0.05`. They run 3 epochs, evaluating and saving after
-each one, and keep the checkpoint with the lowest validation loss; training
-stops after an epoch that does not improve it. Both log to ClearML.
 
 Validation loss is reported for the whole split as `eval_all_loss`, which picks
 the checkpoint, and per gym as `eval_<gym>_loss` when the split mixes gyms.
@@ -737,7 +317,7 @@ per GPU group at a time, and waits for each group's GPUs to be free:
 
 ```bash
 nohup .venv/bin/python -m sft.grid \
-  --config sft/configs/qwen35_4b_unloop_nonthinking_mixed_v3_lora_32k_4gpu.yaml \
+  --config <config> \
   --learning-rates 5e-5 1e-4 2e-4 --global-batch-sizes 8 16 32 \
   --gpu-groups 0,1,2,3 4,5,6,7 --output-root <grid root> > grid.log 2>&1 &
 .venv/bin/python -m sft.grid --report <grid root>
@@ -749,102 +329,25 @@ interruption, and a symlinked `run/` reuses an earlier run as a cell. The report
 lists each cell's best epoch with its overall and per-gym validation loss and
 saves them to `summary.json`.
 
-Release 1.0.0 has a LoRA and a full-SFT config,
-`qwen35_4b_unloop_nonthinking_manager_sft_1.0.0_{lora,full}_32k_4gpu.yaml`. Both
-use the grid's best cell: 32K and global batch 8, with learning rate 2e-4 for
-LoRA. The full config takes the benchmark's full recipe (fp32 weights, frozen
-`model.visual`) at learning rate 2e-5. Both evaluate and save every 0.2 epoch
-(95 steps) and stop after three evaluations without improvement. A run resumed
-with `--resume-from-checkpoint <output>/checkpoint-<step>` (passed after the
-GPUs to `sft/train_qwen35_h200.sh`) keeps its early-stopping count.
+The release 1.0.0 runs used the best cell of the v3 grid: 32K and global batch
+8. LoRA (`r: 32`, `alpha: 64`, `dropout: 0.05`) trained at learning rate 2e-4;
+full SFT took the benchmark's full recipe (fp32 weights, frozen `model.visual`)
+at learning rate 2e-5. Both ran 3 epochs, evaluated and saved every 0.2 epoch
+(95 steps), kept the checkpoint with the lowest validation loss and stopped
+after three evaluations without improvement. Their configs were removed with
+the other legacy configs (see [Legacy specs and
+configs](#legacy-specs-and-configs)). A run resumed with
+`--resume-from-checkpoint <output>/checkpoint-<step>` (passed after the GPUs to
+`sft/train_qwen35_h200.sh`) keeps its early-stopping count.
 
-`sft/train_qwen35_h200.sh` sets the environment from
-`docs/sft_qwen35_h200_benchmark.md` and refuses any listed GPU that holds memory.
-
-Four-GPU E2B with fused CE and global batch eight:
-
-```bash
-CUDA_VISIBLE_DEVICES=0,1,2,3 uv run --group train \
-  torchrun --standalone --nproc-per-node=4 \
-  -m sft.train \
-  --config sft/configs/gemma4_e2b_nonthinking_4gpu_liger_workplace_26b_v3.yaml
-```
-
-Four-GPU E4B with fused CE and global batch four:
-
-```bash
-CUDA_VISIBLE_DEVICES=0,1,2,3 uv run --group train \
-  torchrun --standalone --nproc-per-node=4 \
-  -m sft.train \
-  --config sft/configs/gemma4_e4b_nonthinking_4gpu_liger_workplace_26b_v3.yaml
-```
-
-For the 8K DeepSeek/E4B v1 run, first launch the one-step smoke experiment into
-the separate sanity artifact root:
-
-```bash
-uv run --with-requirements sft/requirements-mlspace.txt \
-  python -m sft.run_train_jobs \
-  --sanity-check \
-  --filter gemma4-e4b-nonthinking-deepseek-e4b-v1-8k-smoke-4gpu
-```
-
-After the smoke run succeeds, launch the full experiment:
-
-```bash
-uv run --with-requirements sft/requirements-mlspace.txt \
-  python -m sft.run_train_jobs \
-  --filter gemma4-e4b-nonthinking-deepseek-e4b-v1-8k-full-4gpu
-```
-
-Both use the student prompt, omit teacher reasoning, exclude traces longer than
-8,192 tokens, and train with four GPUs at global batch four without gradient
-accumulation. The smoke run tokenizes the complete release, selects the four
-longest retained train traces so every rank exercises one in the first global
-batch, evaluates after its single optimizer step, and exports a complete final
-checkpoint.
-
-The retained full-run configs are:
-
-```text
-sft/configs/gemma4_e2b_nonthinking_4gpu_liger_workplace_26b_v3.yaml
-sft/configs/gemma4_e4b_nonthinking_4gpu_liger_workplace_26b_v3.yaml
-```
-
-Both configs use unquantized full-parameter training, BF16, FSDP2 with
-activation checkpointing, 32,768-token contexts, no packing, and batch one per
-GPU. Configs request `training.global_batch_size`; startup validates exact
-divisibility and derives gradient accumulation as global batch divided by world
-size and per-device batch. The E2B config requests global batch eight, so its
-four-GPU run derives two accumulation steps and uses a `2e-5` learning rate.
-The E4B config requests global batch four, so
-four GPUs derive no gradient accumulation; its learning rate is linearly scaled
-from `2e-5` to `1e-5`. Carrying FSDP
-gradients into a second microbatch left insufficient room for Liger's fused-CE
-weight-gradient temporary. The E4B MLSpace experiment also
-sets `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True`; varying sequence lengths
-otherwise fragmented reserved memory. Liger 0.8.1's outer Gemma-4 fused linear
-cross-entropy avoids materializing the full token-by-vocabulary logits tensor,
-although its BF16 gradient accumulation can still need a temporary 2.5 GiB
-FP32 vocabulary projection. The E4B config leaves RMSNorm, GeGLU, RoPE,
-attention, and every other kernel native so the loss path is the only changed
-implementation. Prepared traces are tokenized before model loading. Standard
-configs fail if any trace would be truncated or has an empty assistant mask.
-The v3 configs explicitly record and exclude overlength traces, then enforce
-the same no-truncation invariant on the effective dataset. Each rank loads the
-checkpoint into CPU memory before FSDP2 shards it;
-Accelerate 1.14's RAM-efficient loader is incompatible with Gemma-4's persistent
-buffer tensors. Both full-run configs have a five-epoch ceiling and stop after
-two consecutive epoch evaluations without any decrease in validation loss.
-
-Both full-run configs disable only the cuDNN SDPA backend because the first full E2B
-run hit a cuDNN `mha_graph` execution failure during attention recomputation in
-backward. PyTorch's flash, memory-efficient, and math SDPA backends remain
-enabled as fallbacks. The resolved state of every SDPA backend is written to
+`run.disable_cudnn_sdpa: true` disables only the cuDNN SDPA backend: the first
+full Gemma-4 E2B run hit a cuDNN `mha_graph` execution failure during attention
+recomputation in backward. PyTorch's flash, memory-efficient, and math SDPA
+backends remain enabled as fallbacks. The resolved state of every SDPA backend is written to
 `resolved_config.json`, connected to ClearML, and printed in the local console
 log.
 
-Liger fused CE is enabled for both retained full runs. Version
+`training.use_liger_kernel: true` enables Liger fused CE. Version
 0.8.1 officially patches `Gemma4ForConditionalGeneration`, including the outer
 multimodal forward used by the E4B-it checkpoint. When enabled, the trainer
 replaces TRL's incompatible chunked-NLL setting with Liger's fused linear
@@ -853,25 +356,9 @@ available but entropy is intentionally absent from train/eval logs. The package
 is a Python wheel and compiles kernels with Triton at runtime; `nvcc` is not
 required.
 
-To train the teachers' available hidden reasoning, use a distinct output
-directory and a 65,536-token context:
-
-```bash
-CUDA_VISIBLE_DEVICES=0,1,2,3 uv run --group train \
-  torchrun --standalone --nproc-per-node=4 \
-  -m sft.train \
-  --config sft/configs/gemma4_e2b_nonthinking_4gpu_liger_workplace_26b_v3.yaml \
-  --include-reasoning \
-  --max-length 65536 \
-  --output-dir /home/sukhorukov/decomposer_artifacts/training/sft/checkpoints/gemma4-e2b-thinking
-```
-
 Internal epoch checkpoints use FSDP's sharded state-dict format so saving does
 not gather the full model onto rank 0; this script reconstructs the annotated
-training template when resuming. E2B checkpoints are written about every 229
-optimizer steps; E4B global-batch-4 checkpoints are written about every 458
-steps. On the effective v3 dataset, the corresponding intervals are about 236
-and 472 steps per epoch.
+training template when resuming.
 `save_total_limit: 2` retains the best and latest recovery points. After
 training, the temporary final shards
 are merged on CPU and the exported `final/` model restores Gemma's canonical
@@ -941,15 +428,12 @@ The recommended settings:
 lora:
   r: 32
   alpha: 64
-  dropout: 0.0
+  dropout: 0.05
 ```
 
-Dropout is 0 for single-epoch runs. The four-gym release
-(`v2-tau2-workplace-toolathlon-wideseek-20261008`) has about 38M tokens, roughly
-9M of them supervised. The LoRA config trains 1 epoch, so every record is seen
-once. In a single pass there is little to overfit, and dropout mostly adds noise
-and costs about 4% of throughput (`docs/sft_qwen35_h200_benchmark.md`). For
-multi-epoch runs, raise it (for example to 0.05) if validation loss starts rising.
+These are the settings of the 3-epoch release 1.0.0 runs. Dropout costs about 4%
+of throughput (`docs/sft_qwen35_h200_benchmark.md`); a single-epoch run can set
+it to 0, since one pass leaves little to overfit.
 
 ## ClearML
 
@@ -972,9 +456,8 @@ export CLEARML_CONFIG_FILE=/home/sukhorukov/.secrets/clearml.conf
 chmod 600 "$CLEARML_CONFIG_FILE"
 ```
 
-Tasks use project `decomposer` and tags `sft`, `workplace-assistant`, plus the
-actual student model (`gemma-4-E2B-it` or `gemma-4-E4B-it`). Each invocation
-creates a new ClearML task. The task logs resolved
+Tasks take their project, name and tags from the config's `clearml` section.
+Each invocation creates a new ClearML task. The task logs resolved
 hyperparameters, source/version information, the data manifest, console output,
 losses, learning rate, gradient norm, token accuracy, and throughput. Every
 numeric metric has an independent `train/<metric>` or `eval/<metric>` scalar
@@ -984,19 +467,6 @@ training log, every `clearml.weight_norm_interval_steps` optimizer steps, and
 the final log. The checked-in interval of 10 keeps its expected overhead below
 0.5%. Large checkpoint upload is disabled by default; checkpoints remain on
 NFS. Set `clearml.log_model: true` only when checkpoint upload is desired.
-
-## Real smoke run
-
-The smoke config loads the real E2B checkpoint, uses two GPUs and two prepared
-train and validation examples, performs one optimizer step plus evaluation,
-and exports a full checkpoint:
-
-```bash
-CUDA_VISIBLE_DEVICES=0,1 uv run --group train \
-  torchrun --standalone --nproc-per-node=2 \
-  -m sft.train \
-  --config sft/configs/gemma4_e2b_smoke.yaml
-```
 
 ## MLSpace jobs
 
@@ -1034,7 +504,7 @@ highest numeric `checkpoint-N` that has a completed `trainer_state.json`:
 uv run --no-project \
   --with-requirements sft/requirements-mlspace.txt \
   python -m sft.run_train_jobs \
-  --filter gemma4-e2b-nonthinking --resume-latest
+  --filter <experiment> --resume-latest
 ```
 
 Job descriptions contain only the `#sukhorukov` tag. Real submission refuses a

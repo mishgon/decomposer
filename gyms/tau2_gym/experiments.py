@@ -50,8 +50,7 @@ OPENROUTER_API_KEY_ENV = "OPENROUTER_API_KEY_DECOMPOSER"
 LLM_PROXY_URL_ENV = "LLM_PROXY_URL"
 LLM_PROXY_API_KEY_ENV = "LLM_PROXY_MASTER_KEY"
 
-# The `new` tool's type-table entry. Subagents have the domain policy;
-# legacy SFT specs override this description with their original text.
+# The `new` tool's type-table entry. Subagents have the domain policy.
 SUBAGENT_TYPE_ID = "qwen_3_5_4b_thinking"
 SUBAGENT_DESCRIPTION = "Qwen3.5-4B thinking agent equipped with all the required tools."
 SUBAGENT_ASSISTANT_ID = "qwen35_4b_non_thinking"

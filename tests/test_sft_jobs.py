@@ -7,13 +7,13 @@ from types import SimpleNamespace
 
 import pytest
 import torch
-import yaml
 from transformers import GenerationConfig
 
 from sft import train as train_module
 
 from sft.experiments import (
     INSTANCE_TYPES_BY_NUM_GPUS,
+    ExperimentConfig,
     build_train_command,
     collect_experiments,
     has_experiment_artifacts,
@@ -122,68 +122,20 @@ class _FakeModelConfig:
         (Path(path) / "config.json").write_text("{}")
 
 
-def test_sft_experiments_are_unique_and_register_retained_configs() -> None:
+def _experiment(**overrides: object) -> ExperimentConfig:
+    return ExperimentConfig(
+        name="smoke",
+        config_path="sft/configs/smoke.yaml",
+        description="SFT smoke",
+        **overrides,
+    )
+
+
+def test_sft_experiments_are_unique() -> None:
     experiments = collect_experiments()
     assert len({experiment.name for experiment in experiments}) == len(experiments)
     assert INSTANCE_TYPES_BY_NUM_GPUS[2] == "a100plus.2gpu.80vG.24C.488G"
     assert INSTANCE_TYPES_BY_NUM_GPUS[4] == "a100plus.4gpu.80vG.48C.976G"
-    assert {experiment.use_liger_kernel for experiment in experiments[:2]} == {
-        False,
-        True,
-    }
-    assert len(experiments) == 22
-    e2b_four_gpu = experiments[2]
-    assert e2b_four_gpu.num_gpus == 4
-    assert e2b_four_gpu.use_liger_kernel is True
-    assert e2b_four_gpu.pytorch_cuda_alloc_conf == "expandable_segments:True"
-    e4b_gb4 = experiments[3]
-    assert e4b_gb4.num_gpus == 4
-    assert e4b_gb4.use_liger_kernel is True
-    assert e4b_gb4.pytorch_cuda_alloc_conf == "expandable_segments:True"
-    assert {experiment.name for experiment in experiments[2:]} == {
-        "gemma4-e2b-nonthinking-4gpu-liger-workplace-26b-v3",
-        "gemma4-e4b-nonthinking-4gpu-liger-workplace-26b-v3",
-        "gemma4-e4b-nonthinking-deepseek-e4b-v1-8k-smoke-4gpu",
-        "gemma4-e4b-nonthinking-deepseek-e4b-v1-8k-full-4gpu",
-        "gemma4-e4b-nonthinking-deepseek-e4b-v2-8k-smoke-4gpu",
-        "gemma4-e4b-nonthinking-deepseek-e4b-v2-8k-full-4gpu",
-        "gemma4-e4b-nonthinking-deepseek-e4b-v2-32k-full-4gpu",
-        "qwen35-4b-nonthinking-mixed-v1-32k-smoke-4gpu",
-        ("qwen35-4b-nonthinking-mixed-v1-final-493c24c4-404-32k-full-4gpu"),
-        (
-            "qwen35-4b-nonthinking-mixed-v1-final-493c24c4-404-"
-            "filtered-pass-qgt90-32k-full-4gpu"
-        ),
-        ("qwen35-4b-nonthinking-mixed-v2-493c24c4-gaia2-110-n3-filtered-32k-full-4gpu"),
-        (
-            "qwen35-4b-nonthinking-mixed-v3-493c24c4-gaia2-110-n7-"
-            "teacher-prompt-filtered-32k-full-4gpu"
-        ),
-        (
-            "qwen35-4b-nonthinking-mixed-v3-493c24c4-gaia2-110-n7-"
-            "teacher-prompt-filtered-32k-hf-fa2-fla-b8-smoke-4gpu"
-        ),
-        (
-            "qwen35-4b-nonthinking-mixed-v3-493c24c4-gaia2-110-n7-"
-            "teacher-prompt-filtered-32k-hf-fa2-fla-b8-full-4gpu"
-        ),
-        (
-            "qwen35-4b-nonthinking-toolathlon-only-v1-493c24c4-"
-            "teacher-prompt-filtered-32k-hf-fa2-fla-b8-e8-full-4gpu"
-        ),
-        (
-            "qwen35-4b-nonthinking-gaia2-execution-only-v1-110-n10-"
-            "teacher-prompt-r1-balanced-32k-hf-fa2-fla-b8-e24-full-4gpu"
-        ),
-        ("qwen35-4b-nonthinking-mixed-v1-partial-3983f605-327-32k-smoke-4gpu"),
-        ("qwen35-4b-nonthinking-mixed-v1-partial-3983f605-327-32k-full-4gpu"),
-        "qwen35-4b-nonthinking-workplace-v1-1444-32k-full-4gpu",
-        "qwen35-4b-nonthinking-workplace-v1-3765-32k-full-4gpu",
-    }
-    for experiment in experiments[4:]:
-        assert experiment.num_gpus == 4
-        assert experiment.use_liger_kernel is True
-        assert experiment.pytorch_cuda_alloc_conf == "expandable_segments:True"
 
 
 def test_prepared_loader_preserves_dynamic_json_across_reader_chunks(
@@ -249,7 +201,8 @@ def test_prepared_loader_rejects_invalid_jsonl(
 
 
 def test_build_train_command_uses_torchrun_and_explicit_liger_mode() -> None:
-    native, liger = collect_experiments()[:2]
+    native = _experiment()
+    liger = _experiment(use_liger_kernel=True)
     native_command = build_train_command(
         native, workdir="/staged", output_dir="/artifacts/native"
     )
@@ -257,14 +210,14 @@ def test_build_train_command_uses_torchrun_and_explicit_liger_mode() -> None:
         liger, workdir="/staged", output_dir="/artifacts/liger"
     )
     assert native_command[:3] == ["torchrun", "--standalone", "--nproc-per-node=2"]
-    assert "/staged/sft/configs/gemma4_e2b_smoke.yaml" in native_command
+    assert "/staged/sft/configs/smoke.yaml" in native_command
     assert "--clearml" in native_command
     assert "--no-use-liger-kernel" in native_command
     assert "--use-liger-kernel" in liger_command
 
 
 def test_build_train_command_can_resume_an_explicit_checkpoint() -> None:
-    native = collect_experiments()[2]
+    native = _experiment()
     command = build_train_command(
         native,
         workdir="/staged",
@@ -803,130 +756,6 @@ def test_training_state_summary_reports_early_stop_and_best_checkpoint() -> None
     }
 
 
-@pytest.mark.parametrize(
-    ("config_name", "model_tag"),
-    [
-        ("gemma4_e2b_smoke.yaml", "gemma-4-E2B-it"),
-        (
-            "gemma4_e2b_nonthinking_4gpu_liger_workplace_26b_v3.yaml",
-            "gemma-4-E2B-it",
-        ),
-        (
-            "gemma4_e4b_nonthinking_4gpu_liger_workplace_26b_v3.yaml",
-            "gemma-4-E4B-it",
-        ),
-        (
-            "gemma4_e4b_nonthinking_4gpu_liger_workplace_deepseek_e4b_v1_8k_smoke.yaml",
-            "gemma-4-E4B-it",
-        ),
-        (
-            "gemma4_e4b_nonthinking_4gpu_liger_workplace_deepseek_e4b_v1_8k.yaml",
-            "gemma-4-E4B-it",
-        ),
-        (
-            "gemma4_e4b_nonthinking_4gpu_liger_workplace_deepseek_e4b_v2_8k_smoke.yaml",
-            "gemma-4-E4B-it",
-        ),
-        (
-            "gemma4_e4b_nonthinking_4gpu_liger_workplace_deepseek_e4b_v2_8k.yaml",
-            "gemma-4-E4B-it",
-        ),
-        (
-            "gemma4_e4b_nonthinking_4gpu_liger_workplace_deepseek_e4b_v2_32k.yaml",
-            "gemma-4-E4B-it",
-        ),
-    ],
-)
-def test_sft_configs_have_clearml_project_and_model_tags(
-    config_name: str,
-    model_tag: str,
-) -> None:
-    config_path = Path("sft/configs") / config_name
-    config = yaml.safe_load(config_path.read_text())
-    clearml = config["clearml"]
-    assert clearml["project"] == "decomposer"
-    assert clearml["weight_norm_interval_steps"] == 10
-    assert clearml["tags"] == ["sft", model_tag, "workplace-assistant"]
-
-
-def test_smoke_config_evaluates_clearml_metrics_after_one_step() -> None:
-    config = yaml.safe_load(
-        Path("sft/configs/gemma4_e2b_smoke.yaml").read_text()
-    )
-    assert config["training"]["max_steps"] == 1
-    assert config["training"]["eval_strategy"] == "steps"
-    assert config["training"]["eval_steps"] == 1
-    assert config["training"]["global_batch_size"] == 2
-    assert "gradient_accumulation_steps" not in config["training"]
-
-
-def test_e4b_deepseek_v1_8k_configs_are_oom_safe_and_non_thinking() -> None:
-    root = Path("sft/configs")
-    filenames = (
-        "gemma4_e4b_nonthinking_4gpu_liger_workplace_deepseek_e4b_v1_8k_smoke.yaml",
-        "gemma4_e4b_nonthinking_4gpu_liger_workplace_deepseek_e4b_v1_8k.yaml",
-    )
-    smoke, full = [
-        yaml.safe_load((root / filename).read_text()) for filename in filenames
-    ]
-
-    for config in (smoke, full):
-        data = config["data"]
-        training = config["training"]
-        assert "decomposer-workplace-deepseek-e4b-thinking/v1" in data["train_file"]
-        assert data["include_reasoning"] is False
-        assert data["exclude_overlength"] is True
-        assert data["error_on_truncation"] is True
-        assert data["max_train_samples"] is None
-        assert data["max_eval_samples"] is None
-        assert training["max_length"] == 8192
-        assert training["global_batch_size"] == 4
-        assert training["per_device_train_batch_size"] == 1
-        assert training["packing"] is False
-        assert training["use_liger_kernel"] is True
-        assert training["fsdp_config"]["activation_checkpointing"] is True
-        assert config["run"]["expected_world_size"] == 4
-        resolved, _ = _resolve_train_batch_config(training, world_size=4)
-        assert resolved["gradient_accumulation_steps"] == 1
-
-    assert smoke["training"]["max_steps"] == 1
-    assert smoke["data"]["longest_train_samples"] == 4
-    assert smoke["training"]["eval_strategy"] == "steps"
-    assert smoke["training"]["eval_steps"] == 1
-    assert smoke["training"]["save_strategy"] == "no"
-    assert full["training"]["num_train_epochs"] == 5
-    assert full["training"]["learning_rate"] == 1.0e-5
-    assert full["training"]["eval_strategy"] == "epoch"
-    assert full["training"]["save_strategy"] == "epoch"
-    assert full["training"]["load_best_model_at_end"] is True
-    assert full["run"]["early_stopping"] == {
-        "patience": 2,
-        "threshold": 0.0,
-    }
-
-
-def test_e4b_deepseek_v2_configs_require_matching_prepared_releases() -> None:
-    root = Path("sft/configs")
-    variants = {
-        "deepseek_e4b_v2_8k.yaml": ("v2-8k", 8192),
-        "deepseek_e4b_v2_8k_smoke.yaml": ("v2-8k", 8192),
-        "deepseek_e4b_v2_32k.yaml": ("v2-32k", 32768),
-    }
-    for suffix, (version, max_length) in variants.items():
-        config = yaml.safe_load(
-            (
-                root / ("gemma4_e4b_nonthinking_4gpu_liger_workplace_" + suffix)
-            ).read_text()
-        )
-        data = config["data"]
-        assert f"/{version}/" in data["train_file"]
-        assert f"/{version}/" in data["validation_file"]
-        assert f"/{version}/" in data["manifest_file"]
-        assert data["include_reasoning"] is False
-        assert data["exclude_overlength"] is True
-        assert config["training"]["max_length"] == max_length
-
-
 def test_training_completion_requires_summary_and_final_weights(tmp_path: Path) -> None:
     output = tmp_path / "run"
     (output / "final").mkdir(parents=True)
@@ -945,480 +774,9 @@ def test_training_completion_accepts_sharded_safetensors_index(tmp_path: Path) -
 
 
 def test_benchmark_experiment_completion_uses_benchmark_summary(tmp_path: Path) -> None:
-    smoke = collect_experiments("hf-fa2-fla-b8-smoke-4gpu")[0]
+    smoke = _experiment(benchmark=True)
     output = tmp_path / "smoke"
     output.mkdir()
     assert not has_experiment_artifacts(smoke, output)
     (output / "benchmark_summary.json").write_text("{}")
     assert has_experiment_artifacts(smoke, output)
-
-
-@pytest.mark.parametrize(
-    (
-        "config_name",
-        "global_batch_size",
-        "gradient_accumulation_steps",
-        "learning_rate",
-    ),
-    [
-        (
-            "gemma4_e2b_nonthinking_4gpu_liger_workplace_26b_v3.yaml",
-            8,
-            2,
-            2.0e-5,
-        ),
-        (
-            "gemma4_e4b_nonthinking_4gpu_liger_workplace_26b_v3.yaml",
-            4,
-            1,
-            1.0e-5,
-        ),
-    ],
-)
-def test_workplace_26b_v3_configs_use_cleaned_data_and_32k_exclusion(
-    config_name: str,
-    global_batch_size: int,
-    gradient_accumulation_steps: int,
-    learning_rate: float,
-) -> None:
-    config = yaml.safe_load((Path("sft/configs") / config_name).read_text())
-    data = config["data"]
-    training = config["training"]
-    assert (
-        "datasets/sft/decomposer-workplace-26b-a4b-nonthinking/v3" in data["train_file"]
-    )
-    assert data["exclude_overlength"] is True
-    assert data["error_on_truncation"] is True
-    assert training["max_length"] == 32768
-    assert training["global_batch_size"] == global_batch_size
-    assert "gradient_accumulation_steps" not in training
-    resolved, _ = _resolve_train_batch_config(training, world_size=4)
-    assert resolved["gradient_accumulation_steps"] == gradient_accumulation_steps
-    assert training["learning_rate"] == learning_rate
-    assert training["num_train_epochs"] == 5
-    assert training["eval_strategy"] == "epoch"
-    assert training["save_strategy"] == "epoch"
-    assert training["save_total_limit"] == 2
-    assert training["use_liger_kernel"] is True
-    assert training["liger_kernel_config"] == {
-        "fused_linear_cross_entropy": True,
-        "cross_entropy": False,
-        "rms_norm": False,
-        "geglu": False,
-        "rope": False,
-        "layer_norm": False,
-    }
-    assert config["run"]["expected_world_size"] == 4
-    assert config["run"]["disable_cudnn_sdpa"] is True
-    assert config["run"]["early_stopping"] == {
-        "patience": 2,
-        "threshold": 0.0,
-    }
-
-
-def test_qwen35_workplace_partial_config_is_pinned_and_uses_full_recipe() -> None:
-    config = yaml.safe_load(
-        Path(
-            "sft/configs/"
-            "qwen35_4b_nonthinking_workplace_v1_1444_32k_full_4gpu.yaml"
-        ).read_text()
-    )
-    revision = "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a"
-    assert config["model"]["name_or_path"] == "Qwen/Qwen3.5-4B"
-    assert config["model"]["revision"] == revision
-    data = config["data"]
-    release = (
-        "datasets/sft/decomposer-workplace-deepseek-qwen35-4b-nonthinking/v1-1444-32k"
-    )
-    assert release in data["train_file"]
-    assert release in data["validation_file"]
-    assert release in data["manifest_file"]
-    assert data["include_reasoning"] is False
-    assert data["exclude_overlength"] is True
-    assert data["error_on_truncation"] is True
-    training = config["training"]
-    assert training["max_length"] == 32768
-    assert training["global_batch_size"] == 4
-    assert training["num_train_epochs"] == 5
-    assert training["learning_rate"] == 1.0e-5
-    assert training["use_liger_kernel"] is True
-    assert training["fsdp_config"]["activation_checkpointing"] is True
-    resolved, _ = _resolve_train_batch_config(training, world_size=4)
-    assert resolved["gradient_accumulation_steps"] == 1
-    assert config["run"]["expected_world_size"] == 4
-    assert config["run"]["early_stopping"] == {
-        "patience": 2,
-        "threshold": 0.0,
-    }
-    experiments = collect_experiments(
-        "qwen35-4b-nonthinking-workplace-v1-1444-32k-full-4gpu"
-    )
-    assert len(experiments) == 1
-    command = build_train_command(
-        experiments[0], workdir="/staged", output_dir="/artifacts/qwen-workplace"
-    )
-    assert command[:3] == ["torchrun", "--standalone", "--nproc-per-node=4"]
-    assert command[-1] == "--use-liger-kernel"
-
-
-def test_qwen35_workplace_full_config_is_pinned_and_uses_full_recipe() -> None:
-    config = yaml.safe_load(
-        Path(
-            "sft/configs/"
-            "qwen35_4b_nonthinking_workplace_v1_3765_32k_full_4gpu.yaml"
-        ).read_text()
-    )
-    revision = "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a"
-    assert config["model"]["name_or_path"] == "Qwen/Qwen3.5-4B"
-    assert config["model"]["revision"] == revision
-    data = config["data"]
-    release = (
-        "datasets/sft/decomposer-workplace-deepseek-qwen35-4b-nonthinking/v1-3765-32k"
-    )
-    assert release in data["train_file"]
-    assert release in data["validation_file"]
-    assert release in data["manifest_file"]
-    assert data["include_reasoning"] is False
-    assert data["exclude_overlength"] is True
-    assert data["error_on_truncation"] is True
-    training = config["training"]
-    assert training["max_length"] == 32768
-    assert training["global_batch_size"] == 4
-    assert training["num_train_epochs"] == 5
-    assert training["learning_rate"] == 1.0e-5
-    assert training["use_liger_kernel"] is True
-    assert training["fsdp_config"]["activation_checkpointing"] is True
-    resolved, _ = _resolve_train_batch_config(training, world_size=4)
-    assert resolved["gradient_accumulation_steps"] == 1
-    assert config["run"]["expected_world_size"] == 4
-    assert config["run"]["early_stopping"] == {
-        "patience": 2,
-        "threshold": 0.0,
-    }
-    experiments = collect_experiments(
-        "qwen35-4b-nonthinking-workplace-v1-3765-32k-full-4gpu"
-    )
-    assert len(experiments) == 1
-    command = build_train_command(
-        experiments[0], workdir="/staged", output_dir="/artifacts/qwen-workplace"
-    )
-    assert command[:3] == ["torchrun", "--standalone", "--nproc-per-node=4"]
-    assert command[-1] == "--use-liger-kernel"
-
-
-@pytest.mark.parametrize(
-    "config_name",
-    [
-        "qwen35_4b_nonthinking_mixed_v1_32k_smoke_4gpu.yaml",
-        "qwen35_4b_nonthinking_mixed_v1_32k_full_4gpu.yaml",
-        ("qwen35_4b_nonthinking_mixed_v1_filtered_pass_quality_32k_full_4gpu.yaml"),
-        (
-            "qwen35_4b_nonthinking_mixed_v2_gaia2_execution_110_n3_"
-            "filtered_32k_full_4gpu.yaml"
-        ),
-        ("qwen35_4b_nonthinking_mixed_v1_partial_3983f605_327_32k_smoke_4gpu.yaml"),
-        ("qwen35_4b_nonthinking_mixed_v1_partial_3983f605_327_32k_full_4gpu.yaml"),
-    ],
-)
-def test_qwen35_mixed_configs_pin_model_revision(config_name: str) -> None:
-    config = yaml.safe_load((Path("sft/configs") / config_name).read_text())
-    assert config["model"] == {
-        "name_or_path": "Qwen/Qwen3.5-4B",
-        "revision": "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a",
-        "dtype": "bfloat16",
-        "attn_implementation": "sdpa",
-        "trust_remote_code": False,
-    }
-
-
-def test_qwen35_final_mixed_config_pins_release_and_patience_one() -> None:
-    config = yaml.safe_load(
-        Path(
-            "sft/configs/qwen35_4b_nonthinking_mixed_v1_32k_full_4gpu.yaml"
-        ).read_text()
-    )
-    release = (
-        "datasets/sft/decomposer-mixed-deepseek-qwen35-4b-nonthinking/"
-        "v1-final-493c24c4-404-32k"
-    )
-    assert release in config["data"]["train_file"]
-    assert release in config["data"]["validation_file"]
-    assert release in config["data"]["manifest_file"]
-    assert config["data"]["include_reasoning"] is False
-    assert config["training"]["max_length"] == 32768
-    assert config["training"]["global_batch_size"] == 4
-    assert config["training"]["num_train_epochs"] == 5
-    assert config["run"]["expected_world_size"] == 4
-    assert config["run"]["resume_from_checkpoint"] is None
-    assert config["run"]["early_stopping"] == {
-        "patience": 1,
-        "threshold": 0.0,
-    }
-
-
-def test_qwen35_filtered_mixed_config_pins_release_and_experiment() -> None:
-    config = yaml.safe_load(
-        Path(
-            "sft/configs/"
-            "qwen35_4b_nonthinking_mixed_v1_filtered_pass_quality_"
-            "32k_full_4gpu.yaml"
-        ).read_text()
-    )
-    release = (
-        "datasets/sft/decomposer-mixed-deepseek-qwen35-4b-nonthinking/"
-        "v1-final-493c24c4-404-wp-r1-tool-pass-or-qgt90-or-missing-32k"
-    )
-    assert release in config["data"]["train_file"]
-    assert release in config["data"]["validation_file"]
-    assert release in config["data"]["manifest_file"]
-    assert config["data"]["include_reasoning"] is False
-    assert config["training"]["max_length"] == 32768
-    assert config["training"]["global_batch_size"] == 4
-    assert config["training"]["num_train_epochs"] == 5
-    assert config["run"]["resume_from_checkpoint"] is None
-    assert config["run"]["overwrite_output_dir"] is False
-    assert config["run"]["early_stopping"] == {
-        "patience": 2,
-        "threshold": 0.0,
-    }
-
-    experiments = collect_experiments("filtered-pass-qgt90-32k-full-4gpu")
-    assert len(experiments) == 1
-    assert experiments[0].num_gpus == 4
-    assert experiments[0].config_path.endswith(
-        "qwen35_4b_nonthinking_mixed_v1_filtered_pass_quality_32k_full_4gpu.yaml"
-    )
-
-
-def test_qwen35_gaia2_mixed_config_uses_base_four_gpus_and_patience_two() -> None:
-    config = yaml.safe_load(
-        Path(
-            "sft/configs/"
-            "qwen35_4b_nonthinking_mixed_v2_gaia2_execution_110_n3_"
-            "filtered_32k_full_4gpu.yaml"
-        ).read_text()
-    )
-    assert config["model"]["name_or_path"] == "Qwen/Qwen3.5-4B"
-    assert config["model"]["revision"] == ("851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a")
-    release = (
-        "datasets/sft/decomposer-mixed-deepseek-qwen35-4b-nonthinking/"
-        "v2-493c24c4-gaia2-execution-110-n3-wp-r1-tool-pass-qgt90-or-"
-        "missing-gaia-r1-32k"
-    )
-    assert release in config["data"]["train_file"]
-    assert release in config["data"]["validation_file"]
-    assert release in config["data"]["manifest_file"]
-    assert config["data"]["include_reasoning"] is False
-    assert config["training"]["global_batch_size"] == 4
-    assert config["training"]["max_length"] == 32768
-    assert config["run"]["expected_world_size"] == 4
-    assert config["run"]["early_stopping"] == {
-        "patience": 2,
-        "threshold": 0.0,
-    }
-
-    experiments = collect_experiments("gaia2-110-n3-filtered-32k-full-4gpu")
-    assert len(experiments) == 1
-    assert experiments[0].num_gpus == 4
-    command = build_train_command(
-        experiments[0], workdir="/staged", output_dir="/artifacts/gaia2-mixed"
-    )
-    assert command[:3] == ["torchrun", "--standalone", "--nproc-per-node=4"]
-
-
-def test_qwen35_gaia2_n7_teacher_prompt_config_is_isolated_and_stable() -> None:
-    config = yaml.safe_load(
-        Path(
-            "sft/configs/"
-            "qwen35_4b_nonthinking_mixed_v3_gaia2_execution_110_n7_"
-            "teacher_prompt_filtered_32k_full_4gpu.yaml"
-        ).read_text()
-    )
-    assert config["model"]["name_or_path"] == "Qwen/Qwen3.5-4B"
-    assert config["model"]["attn_implementation"] == "sdpa"
-    assert "gaia2-execution-110-n7-teacher-prompt" in config["data"]["train_file"]
-    assert config["data"]["include_reasoning"] is False
-    assert config["training"]["per_device_train_batch_size"] == 1
-    assert config["training"]["global_batch_size"] == 4
-    assert config["run"]["expected_world_size"] == 4
-    assert config["run"]["early_stopping"] == {
-        "patience": 2,
-        "threshold": 0.0,
-    }
-    experiments = collect_experiments(
-        "gaia2-110-n7-teacher-prompt-filtered-32k-full-4gpu"
-    )
-    assert len(experiments) == 1
-    assert experiments[0].num_gpus == 4
-
-
-def test_qwen35_gaia2_n7_fast_configs_are_distinct_and_pinned() -> None:
-    config_dir = Path("sft/configs")
-    prefix = (
-        "qwen35_4b_nonthinking_mixed_v3_gaia2_execution_110_n7_"
-        "teacher_prompt_filtered_32k_hf_fa2_fla_b8_"
-    )
-    smoke = yaml.safe_load((config_dir / f"{prefix}smoke_4gpu.yaml").read_text())
-    full = yaml.safe_load((config_dir / f"{prefix}full_4gpu.yaml").read_text())
-    for config in (smoke, full):
-        assert config["model"]["attn_implementation"] == HF_FA2_IMPLEMENTATION
-        assert "gaia2-execution-110-n7-teacher-prompt" in config["data"]["train_file"]
-        training = config["training"]
-        assert training["per_device_train_batch_size"] == 2
-        assert training["global_batch_size"] == 8
-        assert training["train_sampling_strategy"] == "group_by_length"
-        assert training["length_column_name"] == "_token_length"
-        assert training["num_train_epochs"] == 5
-        assert training["learning_rate"] == 1.0e-5
-        assert config["run"]["required_runtime_profile"] == QWEN35_FAST_PROFILE
-        assert config["run"]["early_stopping"]["patience"] == 2
-        resolved, runtime = _resolve_train_batch_config(training, world_size=4)
-        assert resolved["gradient_accumulation_steps"] == 1
-        assert runtime["global_batch_size"] == 8
-    assert smoke["data"]["longest_train_samples"] == 8
-    assert smoke["data"]["max_eval_samples"] == 1
-    assert full["data"].get("longest_train_samples") is None
-
-    smoke_experiment = collect_experiments("hf-fa2-fla-b8-smoke-4gpu")
-    full_experiment = collect_experiments("hf-fa2-fla-b8-full-4gpu")
-    assert len(smoke_experiment) == len(full_experiment) == 1
-    assert smoke_experiment[0].runtime_profile == QWEN35_FAST_PROFILE
-    assert smoke_experiment[0].benchmark is True
-    command = build_train_command(
-        smoke_experiment[0], workdir="/staged", output_dir="/artifacts/smoke"
-    )
-    assert command[-1] == "--benchmark"
-    assert full_experiment[0].runtime_profile == QWEN35_FAST_PROFILE
-    assert full_experiment[0].benchmark is False
-
-
-def test_qwen35_toolathlon_only_fast_config_is_isolated_and_pinned() -> None:
-    config = yaml.safe_load(
-        Path(
-            "sft/configs/"
-            "qwen35_4b_nonthinking_toolathlon_only_v1_493c24c4_"
-            "teacher_prompt_filtered_32k_hf_fa2_fla_b8_e8_full_4gpu.yaml"
-        ).read_text()
-    )
-    release = (
-        "datasets/sft/decomposer-toolathlon-gym-deepseek-qwen35-4b-nonthinking/"
-        "candidate-v1-493c24c4-teacher-prompt-pass-or-qgt90-32k"
-    )
-    assert config["model"]["name_or_path"] == "Qwen/Qwen3.5-4B"
-    assert config["model"]["revision"] == "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a"
-    assert config["model"]["attn_implementation"] == HF_FA2_IMPLEMENTATION
-    for key in ("train_file", "validation_file", "manifest_file"):
-        assert release in config["data"][key]
-    assert config["data"]["include_reasoning"] is False
-    training = config["training"]
-    assert training["per_device_train_batch_size"] == 2
-    assert training["global_batch_size"] == 8
-    assert training["train_sampling_strategy"] == "group_by_length"
-    assert training["length_column_name"] == "_token_length"
-    assert training["num_train_epochs"] == 8
-    assert training["learning_rate"] == 1.0e-5
-    assert config["run"]["expected_world_size"] == 4
-    assert config["run"]["required_runtime_profile"] == QWEN35_FAST_PROFILE
-    assert config["run"]["early_stopping"] == {
-        "patience": 2,
-        "threshold": 0.0,
-    }
-
-    experiments = collect_experiments("toolathlon-only-v1-493c24c4")
-    assert len(experiments) == 1
-    experiment = experiments[0]
-    assert experiment.num_gpus == 4
-    assert experiment.runtime_profile == QWEN35_FAST_PROFILE
-    assert experiment.benchmark is False
-    command = build_train_command(
-        experiment, workdir="/staged", output_dir="/artifacts/toolathlon-only"
-    )
-    assert command[:3] == ["torchrun", "--standalone", "--nproc-per-node=4"]
-    assert "--benchmark" not in command
-
-
-def test_qwen35_gaia2_execution_only_fast_config_is_isolated_and_pinned() -> None:
-    config = yaml.safe_load(
-        Path(
-            "sft/configs/"
-            "qwen35_4b_nonthinking_gaia2_execution_only_v1_110_n10_"
-            "teacher_prompt_r1_balanced_32k_hf_fa2_fla_b8_e24_full_4gpu.yaml"
-        ).read_text()
-    )
-    release = (
-        "datasets/sft/decomposer-gaia2-execution-deepseek-qwen35-4b-nonthinking/"
-        "v1-execution-110-n10-teacher-prompt-r1-balanced-32k"
-    )
-    assert config["model"]["name_or_path"] == "Qwen/Qwen3.5-4B"
-    assert config["model"]["revision"] == "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a"
-    assert config["model"]["attn_implementation"] == HF_FA2_IMPLEMENTATION
-    for key in ("train_file", "validation_file", "manifest_file"):
-        assert release in config["data"][key]
-    assert config["data"]["include_reasoning"] is False
-    training = config["training"]
-    assert training["per_device_train_batch_size"] == 2
-    assert training["global_batch_size"] == 8
-    assert training["train_sampling_strategy"] == "group_by_length"
-    assert training["length_column_name"] == "_token_length"
-    assert training["num_train_epochs"] == 24
-    assert training["learning_rate"] == 1.0e-5
-    assert training["eval_strategy"] == training["save_strategy"] == "epoch"
-    assert training["load_best_model_at_end"] is True
-    assert training["metric_for_best_model"] == "eval_loss"
-    assert training["greater_is_better"] is False
-    assert config["run"]["expected_world_size"] == 4
-    assert config["run"]["required_runtime_profile"] == QWEN35_FAST_PROFILE
-    assert config["run"]["early_stopping"] == {
-        "patience": 2,
-        "threshold": 0.0,
-    }
-
-    experiments = collect_experiments("gaia2-execution-only-v1-110-n10")
-    assert len(experiments) == 1
-    experiment = experiments[0]
-    assert experiment.num_gpus == 4
-    assert experiment.runtime_profile == QWEN35_FAST_PROFILE
-    assert experiment.benchmark is False
-    command = build_train_command(
-        experiment, workdir="/staged", output_dir="/artifacts/gaia2-only"
-    )
-    assert command[:3] == ["torchrun", "--standalone", "--nproc-per-node=4"]
-    assert "--benchmark" not in command
-
-
-def test_qwen35_partial_mixed_configs_use_snapshot_release_and_32k_recipe() -> None:
-    config_dir = Path("sft/configs")
-    release = (
-        "datasets/sft/decomposer-mixed-deepseek-qwen35-4b-nonthinking/"
-        "v1-partial-3983f605-327-32k"
-    )
-    smoke = yaml.safe_load(
-        (
-            config_dir
-            / (
-                "qwen35_4b_nonthinking_mixed_"
-                "v1_partial_3983f605_327_32k_smoke_4gpu.yaml"
-            )
-        ).read_text()
-    )
-    full = yaml.safe_load(
-        (
-            config_dir
-            / ("qwen35_4b_nonthinking_mixed_v1_partial_3983f605_327_32k_full_4gpu.yaml")
-        ).read_text()
-    )
-    for config in (smoke, full):
-        data = config["data"]
-        assert release in data["train_file"]
-        assert release in data["validation_file"]
-        assert release in data["manifest_file"]
-        assert data["include_reasoning"] is False
-        assert config["training"]["max_length"] == 32768
-        assert config["training"]["global_batch_size"] == 4
-        assert config["training"]["fsdp_config"]["activation_checkpointing"] is True
-        assert config["run"]["expected_world_size"] == 4
-    assert smoke["data"]["max_train_samples"] is None
-    assert smoke["data"]["longest_train_samples"] == 4
-    assert smoke["training"]["max_steps"] == 1
-    assert full["training"]["num_train_epochs"] == 5
-    assert full["run"]["early_stopping"]["patience"] == 2
