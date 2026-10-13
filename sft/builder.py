@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import math
 import os
 import shutil
 import subprocess
@@ -188,59 +187,49 @@ def _record_category(record: CanonicalRollout) -> str:
     return category if isinstance(category, str) and category else "uncategorized"
 
 
-def _allocate_prompt_fixed_split(
+def _split_by_group_hash(
     records: Sequence[CanonicalRollout],
     *,
     validation_fraction: float,
     seed: int,
 ) -> tuple[list[CanonicalRollout], list[CanonicalRollout], JsonObject]:
-    categories_by_group: dict[str, set[str]] = defaultdict(set)
-    for record in records:
-        categories_by_group[record.group_id].add(_record_category(record))
-    # A prompt can appear under several categories (for example, a tau2 domain and
-    # its independent `_dsh` implementation). Its group stays whole, so the prompt
-    # never lands on both sides, and counts toward its first category.
-    groups_by_category: dict[str, set[str]] = defaultdict(set)
-    for group_id, categories in categories_by_group.items():
-        groups_by_category[min(categories)].add(group_id)
-    num_groups = len(categories_by_group)
-    target = round(num_groups * validation_fraction)
-    raw = {
-        category: len(groups) * target / num_groups
-        for category, groups in groups_by_category.items()
+    """Send a task group to validation when its hash falls under the fraction.
+
+    A group's side depends only on its ID and the seed, so adding sources, tasks
+    or rollouts never moves an existing group.
+    """
+    groups = {record.group_id for record in records}
+    validation_groups = {
+        group
+        for group in groups
+        if int(sha256_text(f"{seed}\0{group}"), 16) / 2**256 < validation_fraction
     }
-    quotas = {category: math.floor(value) for category, value in raw.items()}
-    remaining = target - sum(quotas.values())
-    remainders = sorted(
-        (
-            (raw[category] - quotas[category], category)
-            for category in groups_by_category
-        ),
-        key=lambda item: (-item[0], item[1]),
-    )
-    for _, category in remainders[:remaining]:
-        quotas[category] += 1
-    validation_groups: set[str] = set()
-    for category, groups in groups_by_category.items():
-        ranked = sorted(groups, key=lambda key: sha256_text(f"{seed}\0{key}"))
-        validation_groups.update(ranked[: quotas[category]])
     train = [record for record in records if record.group_id not in validation_groups]
     validation = [record for record in records if record.group_id in validation_groups]
+    # A prompt can appear under several categories (for example, a tau2 domain and
+    # its `_dsh` implementation); it counts toward its first.
+    categories_by_group: dict[str, set[str]] = defaultdict(set)
+    for record in validation:
+        categories_by_group[record.group_id].add(_record_category(record))
     return (
         train,
         validation,
         {
             "strategy": "prompt_fixed",
+            "assignment": "group_hash",
             "group_key": "adapter-supplied stable task group ID",
             "seed": seed,
             "validation_fraction": validation_fraction,
-            "num_groups": num_groups,
-            "multi_category_groups": sum(
-                len(categories) > 1 for categories in categories_by_group.values()
-            ),
-            "train_groups": num_groups - len(validation_groups),
+            "num_groups": len(groups),
+            "train_groups": len(groups) - len(validation_groups),
             "validation_groups": len(validation_groups),
-            "validation_groups_by_category": dict(sorted(quotas.items())),
+            "validation_groups_by_category": dict(
+                sorted(
+                    Counter(
+                        min(categories) for categories in categories_by_group.values()
+                    ).items()
+                )
+            ),
             "validation_group_ids": sorted(validation_groups),
         },
     )
@@ -418,7 +407,7 @@ def prepare_dataset(
             )
         source_manifest["tool_schema_sha256"] = next(iter(schemas), None)
     tool_schema_sha256s = sorted(set().union(*tool_schemas_by_source.values()))
-    train_records, validation_records, split_manifest = _allocate_prompt_fixed_split(
+    train_records, validation_records, split_manifest = _split_by_group_hash(
         retained,
         validation_fraction=spec.split.validation_fraction,
         seed=spec.split.seed,

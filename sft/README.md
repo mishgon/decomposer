@@ -67,7 +67,8 @@ versioning](#snapshots-releases-and-versioning)). Build one with:
 The current specifications keep tau2 and Workplace rollouts with reward `1.0`
 and Toolathlon and WideSeek episodes by their collectors' own success rule, and
 split by prompt with validation fraction `0.1` and seed `42`. All rollouts of
-one prompt are assigned to the same split. The builder requires a clean Git
+one prompt are assigned to the same split, chosen by a hash of the seed and the
+prompt's group ID. The builder requires a clean Git
 worktree and refuses to replace an existing `<dataset-id>/<version>` directory.
 
 All builds use `decomposer.prompts.DECOMPOSER_SYSTEM_PROMPT`. The builder inserts
@@ -145,9 +146,10 @@ to that version, so the release directory
 (`…/datasets/sft/decomposer-manager-sft/<version>/`), the manifest and the
 Hugging Face folder share one name. A published version never changes: any
 change, however small, becomes a new version. A minor release must keep every
-existing record on its side of the split, which the `prompt_fixed` split does
-not guarantee, so compare the two manifests' `split.validation_group_ids` before
-calling a release minor.
+existing record on its side of the split. The split guarantees that as long as
+`split.seed` and `split.validation_fraction` stay the same: a task goes to
+validation when the hash of the seed and its group ID falls under the fraction,
+so its side never depends on the rest of the data.
 
 **Publishing.** Releases are published unchanged to the private Hugging Face
 dataset `decomposer-datasets/decomposer-manager-sft`: one folder per version

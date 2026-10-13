@@ -501,9 +501,35 @@ def test_prompt_shared_by_two_categories_stays_on_one_side(tmp_path: Path) -> No
         {record["id"] for record in split} & shared for split in (train, validation)
     ]
     assert sorted(len(side) for side in sides) == [0, 2]
-    split = prepared.manifest["split"]
-    assert split["num_groups"] == 9
-    assert split["multi_category_groups"] == 1
+    assert prepared.manifest["split"]["num_groups"] == 9
+
+
+def test_adding_a_source_never_moves_a_task(tmp_path: Path) -> None:
+    first = _source(tmp_path, "teacher-a")
+    extra = _source(
+        tmp_path,
+        "teacher-b",
+        [_rollout(index) for index in range(10, 40)],
+        [_materialized(index) for index in range(10, 40)],
+    )
+    alone = _prepare_fixture_dataset([first], tmp_path / "alone", validation_fraction=0.2)
+    together = _prepare_fixture_dataset(
+        [first, extra], tmp_path / "together", validation_fraction=0.2
+    )
+
+    def sides(prepared) -> dict[str, str]:
+        return {
+            record["group_id"]: split
+            for split, path in (
+                ("train", prepared.train_path),
+                ("validation", prepared.validation_path),
+            )
+            for record in _read_jsonl(path)
+        }
+
+    before, after = sides(alone), sides(together)
+    assert before == {group: after[group] for group in before}
+    assert len(after) == len(before) + 30
 
 
 def test_prepare_is_reproducible(tmp_path: Path) -> None:
