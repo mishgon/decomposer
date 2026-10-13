@@ -29,7 +29,7 @@ from .base import (
 )
 from .langgraph_messages import convert_langgraph_messages
 
-ADAPTER_VERSION = 10
+ADAPTER_VERSION = 11
 
 
 def snapshot_files(source_dir: Path) -> list[str]:

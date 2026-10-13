@@ -34,7 +34,7 @@ from ..schema import (
     sha256_text,
 )
 
-ADAPTER_VERSION = 8
+ADAPTER_VERSION = 9
 
 
 def _canonical_prompt_input(value: Any) -> str:

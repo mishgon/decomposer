@@ -463,8 +463,9 @@ def validate_decomposer_messages(messages: list[JsonObject]) -> None:
     It keeps the mistakes the core answered and the manager recovered from:
     calls of any tool name with any arguments, which the core rejects with an
     error result or runs ignoring extra arguments, and the user messages the
-    core injects (``CORE_USER_MESSAGES``), including the empty answer that
-    precedes ``EMPTY_RESPONSE_ERROR``. The structure is still checked: one task,
+    core injects (``CORE_USER_MESSAGES``), including after an empty answer, which
+    the core answers with ``EARLY_RESPONSE_ERROR`` while runs are active and with
+    ``EMPTY_RESPONSE_ERROR`` otherwise. The structure is still checked: one task,
     every call answered, and a final text answer.
     """
     if len(messages) < 3 or messages[0].get("role") != "system":
@@ -522,7 +523,8 @@ def validate_decomposer_messages(messages: list[JsonObject]) -> None:
             answered_empty = (
                 index + 1 < len(messages)
                 and messages[index + 1].get("role") == "user"
-                and messages[index + 1].get("content") == EMPTY_RESPONSE_ERROR
+                and messages[index + 1].get("content")
+                in (EARLY_RESPONSE_ERROR, EMPTY_RESPONSE_ERROR)
             )
             if not content.strip() and not raw_calls and not answered_empty:
                 raise TraceValidationError(

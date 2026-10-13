@@ -325,7 +325,7 @@ def test_prepare_groups_teacher_variants_and_writes_manifest_v3(tmp_path: Path) 
         "wait",
     ]
     assert example["source"]["adapter"] == "nemo_gym"
-    assert example["source"]["adapter_version"] == 8
+    assert example["source"]["adapter_version"] == 9
     assert example["source"]["benchmark"] == "workplace_assistant"
     assert example["outcome"]["success"] is True
     for filename in ("train.jsonl", "validation.jsonl"):
@@ -434,7 +434,7 @@ def test_prepare_keeps_parallel_calls_as_emitted(tmp_path: Path) -> None:
         m for m in record_messages if m.get("tool_call_id") == "refused-wait"
     )
     assert refusal["content"] == PARALLEL_WAIT_CALL_ERROR
-    assert prepared.manifest["preparation"]["adapter_versions"]["nemo_gym"] == 8
+    assert prepared.manifest["preparation"]["adapter_versions"]["nemo_gym"] == 9
     assert "normalization" not in prepared.manifest
 
 
@@ -490,6 +490,27 @@ def test_validator_accepts_the_core_graceful_shutdown_request() -> None:
         _chat_turn("Done."),
     ]
     validate_decomposer_messages(messages)
+
+
+def test_validator_accepts_an_empty_answer_while_runs_are_active() -> None:
+    # The core checks for active runs before empty text, so it answers an empty
+    # answer given while a run is active with EARLY_RESPONSE_ERROR.
+    messages = [
+        {"role": "system", "content": "System."},
+        {"role": "user", "content": "Task."},
+        _chat_turn("", _chat_call("run", "run-1", agent_id="a", prompt="Do it.")),
+        _chat_result("run", "run-1", '{"agent_run_id": "r"}'),
+        _chat_turn(""),
+        {"role": "user", "content": EARLY_RESPONSE_ERROR},
+        _chat_turn("", _chat_call("wait", "wait-1")),
+        _chat_result("wait", "wait-1", "[]"),
+        _chat_turn("Done."),
+    ]
+    validate_decomposer_messages(messages)
+
+    unanswered = [*messages[:5], *messages[6:]]
+    with pytest.raises(TraceValidationError, match="neither text nor a tool call"):
+        validate_decomposer_messages(unanswered)
 
 
 def test_prompt_shared_by_two_categories_stays_on_one_side(tmp_path: Path) -> None:
