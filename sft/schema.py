@@ -12,7 +12,11 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from decomposer.prompts import EARLY_RESPONSE_ERROR, EMPTY_RESPONSE_ERROR
+from decomposer.prompts import (
+    DECOMPOSER_GRACEFUL_SHUTDOWN_REQUEST,
+    EARLY_RESPONSE_ERROR,
+    EMPTY_RESPONSE_ERROR,
+)
 
 JsonObject = dict[str, Any]
 InvalidPolicy = Literal["exclude", "error"]
@@ -49,8 +53,11 @@ DECOMPOSER_TOOL_PARAMETERS: dict[str, tuple[str, ...]] = {
     "wait": (),
 }
 # Exact user messages the core injects when the manager answers before collecting
-# every run, or answers with empty text; the manager then continues.
-CORE_USER_MESSAGES = frozenset({EARLY_RESPONSE_ERROR, EMPTY_RESPONSE_ERROR})
+# every run, answers with empty text, or assigns the same task a third time (the
+# graceful-shutdown request); the manager then continues.
+CORE_USER_MESSAGES = frozenset(
+    {EARLY_RESPONSE_ERROR, EMPTY_RESPONSE_ERROR, DECOMPOSER_GRACEFUL_SHUTDOWN_REQUEST}
+)
 
 # Collection formats whose sources select with collector_qualifies.
 COLLECTION_TRACE_FORMATS = frozenset(

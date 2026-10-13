@@ -29,6 +29,7 @@ from sft.schema import (
     validate_decomposer_messages,
 )
 from decomposer.prompts import (
+    DECOMPOSER_GRACEFUL_SHUTDOWN_REQUEST,
     EARLY_RESPONSE_ERROR,
     PARALLEL_WAIT_CALL_ERROR,
 )
@@ -473,6 +474,22 @@ def test_validator_accepts_parallel_calls_and_requires_every_result() -> None:
     missing = [*messages[:4], *messages[5:]]
     with pytest.raises(TraceValidationError, match="before tool results"):
         validate_decomposer_messages(missing)
+
+
+def test_validator_accepts_the_core_graceful_shutdown_request() -> None:
+    # On a third assignment of the same task the core answers the whole batch with
+    # the request and injects it as a user message; the manager waits and answers.
+    messages = [
+        {"role": "system", "content": "System."},
+        {"role": "user", "content": "Task."},
+        _chat_turn("", _chat_call("run", "run-3", agent_id="a", prompt="Do it.")),
+        _chat_result("run", "run-3", DECOMPOSER_GRACEFUL_SHUTDOWN_REQUEST),
+        {"role": "user", "content": DECOMPOSER_GRACEFUL_SHUTDOWN_REQUEST},
+        _chat_turn("", _chat_call("wait", "wait-1")),
+        _chat_result("wait", "wait-1", "[]"),
+        _chat_turn("Done."),
+    ]
+    validate_decomposer_messages(messages)
 
 
 def test_prompt_shared_by_two_categories_stays_on_one_side(tmp_path: Path) -> None:

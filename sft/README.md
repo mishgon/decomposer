@@ -53,10 +53,12 @@ is one canonical record of one successful trace:
   core answered stay, with the core's answer as their result: calls of unknown
   tools or agents, malformed arguments, refused parallel calls
   (`PARALLEL_WAIT_CALL_ERROR`, `PARALLEL_FORK_RUN_CALL_ERROR` and
-  `PARALLEL_RUN_CALL_ERROR` in `decomposer.prompts`), and answers before every
-  run was collected, which the core follows with an injected user message
-  (`EARLY_RESPONSE_ERROR`, `EMPTY_RESPONSE_ERROR`). A trace must still be well
-  formed: one task, every call answered, and a final text answer.
+  `PARALLEL_RUN_CALL_ERROR` in `decomposer.prompts`), answers that are empty or
+  come before every run was collected, and a third assignment of the same task.
+  The core follows the last two with an injected user message
+  (`EARLY_RESPONSE_ERROR`, `EMPTY_RESPONSE_ERROR`,
+  `DECOMPOSER_GRACEFUL_SHUTDOWN_REQUEST`). A trace must still be well formed:
+  one task, every call answered, and a final text answer.
 - **Reasoning.** The student trains non-thinking. Records keep the teacher's
   reasoning (`teacher_reasoning`) as metadata, and training never renders it.
 - **Metadata.** `source` (adapter, source and task IDs, teacher), `outcome`
