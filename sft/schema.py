@@ -61,7 +61,7 @@ CORE_USER_MESSAGES = frozenset(
 
 # Collection formats whose sources select with collector_qualifies.
 COLLECTION_TRACE_FORMATS = frozenset(
-    {"toolathlon_langgraph_v1", "wideseek_langgraph_v1"}
+    {"toolathlon_langgraph_v1", "wideseek_langgraph_v2"}
 )
 
 _IDENTIFIER = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
@@ -165,7 +165,7 @@ class SourceSpec(StrictModel):
     trace_format: Literal[
         "native",
         "toolathlon_langgraph_v1",
-        "wideseek_langgraph_v1",
+        "wideseek_langgraph_v2",
     ] = "native"
     # The subagent types a toolathlon_langgraph_v1 collection offered the
     # manager. Its traces store no tool schemas, so the builder rebuilds them
@@ -211,11 +211,11 @@ class SourceSpec(StrictModel):
             raise ValueError(
                 "Toolathlon sources, and only they, use toolathlon_langgraph_v1"
             )
-        if (self.trace_format == "wideseek_langgraph_v1") != (
+        if (self.trace_format == "wideseek_langgraph_v2") != (
             self.adapter == "wideseek"
         ):
             raise ValueError(
-                "WideSeek sources, and only they, use wideseek_langgraph_v1"
+                "WideSeek sources, and only they, use wideseek_langgraph_v2"
             )
         if bool(self.native_subagent_types) != (
             self.trace_format == "toolathlon_langgraph_v1"

@@ -252,13 +252,16 @@ can be snapshotted.
 
 ### WideSeek collections
 
-The WideSeek adapter (`adapter: wideseek`, `trace_format: wideseek_langgraph_v1`)
+The WideSeek adapter (`adapter: wideseek`, `trace_format: wideseek_langgraph_v2`)
 reads a collection written by `sft/wideseek`, snapshotted with
 `--adapter wideseek`. Each attempt's `result.json` names the execution it scored.
 The snapshot takes, per finished attempt, that result, the execution's
-`trace.json`, and the manager's first logged model call, which holds the tools
-and system prompt the manager saw. Restarted executions that no result names, and
-the rest of the call log, are left out.
+`trace.json` and its model-call log `model_calls.jsonl`. The log holds tools and
+the system prompt only on each thread's first call, so the manager's first call
+holds the ones the manager saw. Restarted executions that no result names are
+left out. Collections written before the gym logged `model_calls.jsonl`
+(`1994bb3`, 2026-10-07) predate the current core prompt, which training
+requires, so the adapter does not read them.
 
 - **Selection.** `collector_qualifies` applies the collector's rule
   (`gyms/wideseek/metrics.qualifies`): a normal finish, a scored
@@ -277,7 +280,7 @@ the rest of the call log, are left out.
   environment: wideseek
   partition: train
   teacher: qwen38-flash-non-thinking
-  trace_format: wideseek_langgraph_v1
+  trace_format: wideseek_langgraph_v2
   selection:
     policy: collector_qualifies
     success_threshold: 0.9

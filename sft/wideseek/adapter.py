@@ -2,9 +2,11 @@
 
 A collection holds one ``result.json`` per attempt,
 ``decomposer/<task>/attempt-NNN/result.json``, naming the execution it scored.
-The execution keeps the manager's LangGraph state (``trace.json``) and a log of
-every model call (``model_calls/*.json``). The manager's first logged call holds
-the tools and system prompt it saw.
+The execution keeps the manager's LangGraph state (``trace.json``, messages as
+LangChain ``message_to_dict`` dumps) and a log of every model call
+(``model_calls.jsonl``, written by ``gyms/wideseek/runtime.ModelLog``). The log
+holds the tools and system prompt only on each thread's first call, so the
+manager's first call holds the ones it saw.
 """
 
 from __future__ import annotations
@@ -34,7 +36,7 @@ from ..schema import (
     validate_chat_tools,
 )
 
-ADAPTER_VERSION = 1
+ADAPTER_VERSION = 2
 
 
 def _qualifies(result: Mapping[str, Any], threshold: float) -> bool:
@@ -65,24 +67,32 @@ def _execution_dir(result_path: Path, result: Mapping[str, Any]) -> Path:
     return result_path.parent / name
 
 
-def _first_manager_call(execution_dir: Path) -> tuple[Path, JsonObject] | None:
-    first: tuple[float, str, Path, JsonObject] | None = None
-    for path in execution_dir.glob("model_calls/*.json"):
-        call = load_json(path)
-        if call.get("role") != "decomposer":
-            continue
-        started_at = call.get("started_at")
-        if isinstance(started_at, bool) or not isinstance(started_at, (int, float)):
-            raise TraceValidationError(
-                "excluded_invalid_metadata", f"Model call {path} has no started_at."
-            )
-        if first is None or (started_at, path.name) < first[:2]:
-            first = (started_at, path.name, path, call)
-    return None if first is None else (first[2], first[3])
+def _first_manager_call(execution_dir: Path) -> JsonObject | None:
+    path = execution_dir / "model_calls.jsonl"
+    if not path.is_file():
+        return None
+    with path.open(encoding="utf-8") as calls:
+        for line in calls:
+            call = json.loads(line)
+            if call.get("role") == "decomposer" and "tools" in call:
+                return call
+    return None
+
+
+def _unwrap(messages: Any) -> list[Any]:
+    """The flat message dumps inside LangChain ``message_to_dict`` dumps."""
+    if not isinstance(messages, list) or not all(
+        isinstance(message, Mapping) and isinstance(message.get("data"), Mapping)
+        for message in messages
+    ):
+        raise TraceValidationError(
+            "excluded_invalid_messages", "Messages must be message_to_dict dumps."
+        )
+    return [message["data"] for message in messages]
 
 
 def snapshot_files(source_dir: Path) -> list[str]:
-    """Each finished attempt's result, trace and first manager model call.
+    """Each finished attempt's result, trace and model-call log.
 
     The collector writes ``result.json`` when an attempt ends, so attempts still
     running are left out. Executions no result names (restarted ones) are left
@@ -91,13 +101,13 @@ def snapshot_files(source_dir: Path) -> list[str]:
     files: list[str] = []
     for result_path in sorted(source_dir.glob("decomposer/*/attempt-*/result.json")):
         execution_dir = _execution_dir(result_path, load_json(result_path))
-        first = _first_manager_call(execution_dir)
-        if first is None or not (execution_dir / "trace.json").is_file():
-            continue
-        files.extend(
-            path.relative_to(source_dir).as_posix()
-            for path in (result_path, execution_dir / "trace.json", first[0])
+        paths = (
+            result_path,
+            execution_dir / "trace.json",
+            execution_dir / "model_calls.jsonl",
         )
+        if all(path.is_file() for path in paths):
+            files.extend(path.relative_to(source_dir).as_posix() for path in paths)
     return files
 
 
@@ -150,17 +160,17 @@ def read_wideseek_source(
                     "excluded_missing_final_state",
                     f"Missing trace.json in {execution_dir}.",
                 )
-            first = _first_manager_call(execution_dir)
-            if first is None:
+            call = _first_manager_call(execution_dir)
+            if call is None:
                 raise TraceValidationError(
                     "excluded_invalid_tool_schema",
                     f"No manager model call in {execution_dir}.",
                 )
-            call = first[1]
             logged_system = call.get("system_message")
             if (
                 not isinstance(logged_system, Mapping)
-                or logged_system.get("content") != teacher_prompt
+                or not isinstance(logged_system.get("data"), Mapping)
+                or logged_system["data"].get("content") != teacher_prompt
             ):
                 raise ValueError(
                     f"Source {source.id!r} {execution_dir.name}: the manager's "
@@ -168,11 +178,13 @@ def read_wideseek_source(
                 )
             native_tools = validate_chat_tools(call.get("tools"))
             trace = load_json(execution_dir / "trace.json")
-            messages = convert_langgraph_messages(trace.get("messages"), system_prompt)
+            messages = convert_langgraph_messages(
+                _unwrap(trace.get("messages")), system_prompt
+            )
             logged_tasks = [
                 message.get("content")
-                for message in call.get("messages") or []
-                if isinstance(message, Mapping) and message.get("type") == "human"
+                for message in _unwrap(call.get("request_delta"))
+                if message.get("type") == "human"
             ]
             if logged_tasks[:1] != [messages[1]["content"]]:
                 raise TraceValidationError(

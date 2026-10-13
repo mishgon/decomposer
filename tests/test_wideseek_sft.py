@@ -41,18 +41,25 @@ def _tool(name: str, call_id: str, content: str) -> dict:
     return {"type": "tool", "name": name, "tool_call_id": call_id, "content": content}
 
 
-def _model_call(role: str, started_at: float, task: str, **overrides: object) -> dict:
+def _dump(message: dict) -> dict:
+    """A LangChain ``message_to_dict`` dump, the form the gym writes messages in."""
+    return {"type": message["type"], "data": message}
+
+
+def _first_call(role: str, call_id: str, task: str, system_prompt: str) -> dict:
+    """The logged start of a thread's first model call, the only one with tools."""
     return {
+        "call_id": call_id,
         "role": role,
-        "started_at": started_at,
+        "thread_id": f"thread-{role}",
+        "started_at": "2026-10-11T12:00:00+00:00",
+        "max_tokens": 4096,
         "generation": {"model_name": "Qwen/Qwen3.8-Flash-Next-NVFP4"},
+        "request_message_count": 1,
+        "request_delta": [_dump({"type": "human", "content": task})],
         "tools": TOOLS if role == "decomposer" else [],
-        "messages": [{"type": "human", "content": task}],
-        "system_message": {
-            "type": "system",
-            "content": decomposer_system_prompt(),
-        },
-        **overrides,
+        "system_message": _dump({"type": "system", "content": system_prompt}),
+        "status": "started",
     }
 
 
@@ -72,48 +79,49 @@ def _attempt(
     execution = attempt_dir / f"execution-{task_id[-4:]}abc"
     # A restarted execution that no result names.
     _write_json(attempt_dir / "execution-stale" / "trace.json", {"messages": []})
+    messages = [
+        {"type": "human", "content": task},
+        _ai(
+            "Two parts.",
+            _call("new", "new-a", agent_type_id=RESEARCHER),
+            _call("new", "new-b", agent_type_id=f'"{RESEARCHER}"'),
+        ),
+        _tool("new", "new-a", '{"agent_id": "a"}'),
+        _tool("new", "new-b", f'Unknown agent type ID `"{RESEARCHER}"`.'),
+        _ai("", _call("run", "run-a", agent_id="a", prompt="Find rows.")),
+        _tool("run", "run-a", '{"agent_run_id": "run-a"}'),
+        _ai("", _call("wait", "wait")),
+        _tool("wait", "wait", '[{"agent_id": "a", "status": "responded"}]'),
+        _ai("| a | b |"),
+    ]
     _write_json(
         execution / "trace.json",
         {
-            "messages": [
-                {"type": "human", "content": task},
-                _ai(
-                    "Two parts.",
-                    _call("new", "new-a", agent_type_id=RESEARCHER),
-                    _call("new", "new-b", agent_type_id=f'"{RESEARCHER}"'),
-                ),
-                _tool("new", "new-a", '{"agent_id": "a"}'),
-                _tool("new", "new-b", f'Unknown agent type ID `"{RESEARCHER}"`.'),
-                _ai("", _call("run", "run-a", agent_id="a", prompt="Find rows.")),
-                _tool("run", "run-a", '{"agent_run_id": "run-a"}'),
-                _ai("", _call("wait", "wait")),
-                _tool("wait", "wait", '[{"agent_id": "a", "status": "responded"}]'),
-                _ai("| a | b |"),
-            ],
+            "messages": [_dump(message) for message in messages],
             "decomposer_agent_runs": [{"prompt": task}],
             "agents": {"a": {"agent_id": "a", "agent_type_id": RESEARCHER}},
             "agent_runs": {},
         },
     )
-    later = {"tools": [], "system_message": {"content": "changed later"}}
-    for name, call in (
-        ("0-researcher", _model_call("researcher", 5.0, task)),
-        ("1-later", _model_call("decomposer", 9.0, task, **later)),
-        (
-            "2-first",
-            _model_call(
-                "decomposer",
-                1.0,
-                task,
-                **(
-                    {"system_message": {"content": system_prompt}}
-                    if system_prompt is not None
-                    else {}
-                ),
-            ),
+    calls = [
+        # A researcher's first call carries tools and a system message too.
+        _first_call("researcher", "r-1", "Find rows.", "You are a researcher."),
+        _first_call(
+            "decomposer", "d-1", task, system_prompt or decomposer_system_prompt()
         ),
-    ):
-        _write_json(execution / "model_calls" / f"{name}.json", call)
+        {"call_id": "d-1", "role": "decomposer", "status": "success", "response": []},
+        # Later calls log only the new messages.
+        {
+            "call_id": "d-2",
+            "role": "decomposer",
+            "status": "started",
+            "request_delta": [_dump(messages[1]), _dump(messages[2])],
+        },
+        {"call_id": "r-1", "role": "researcher", "status": "success", "response": []},
+    ]
+    (execution / "model_calls.jsonl").write_text(
+        "".join(json.dumps(call) + "\n" for call in calls), encoding="utf-8"
+    )
     _write_json(
         attempt_dir / "result.json",
         {
@@ -147,7 +155,7 @@ def _source(path: Path) -> SourceSpec:
         environment="wideseek",
         partition="train",
         teacher="qwen38-flash-non-thinking",
-        trace_format="wideseek_langgraph_v1",
+        trace_format="wideseek_langgraph_v2",
     )
 
 
@@ -203,7 +211,7 @@ def test_wideseek_requires_the_teacher_prompt(tmp_path: Path, logged: str) -> No
         _read(tmp_path)
 
 
-def test_wideseek_snapshot_takes_each_result_trace_and_first_manager_call(
+def test_wideseek_snapshot_takes_each_result_trace_and_call_log(
     tmp_path: Path,
 ) -> None:
     source = tmp_path / "collection"
@@ -215,9 +223,7 @@ def test_wideseek_snapshot_takes_each_result_trace_and_first_manager_call(
 
     assert len(manifest["files"]) == 18
     assert all("stale" not in path for path in manifest["files"])
-    assert sorted(
-        path.rsplit("/", 1)[1] for path in manifest["files"] if "model_calls" in path
-    ) == ["2-first.json"] * 6
+    assert sum(path.endswith("/model_calls.jsonl") for path in manifest["files"]) == 6
     assert [record.id for record in _read(directory).records] == [
         record.id for record in _read(source).records
     ]
