@@ -36,7 +36,6 @@ EXCLUSION_REASONS = (
     "excluded_invalid_tool_calls",
     "excluded_invalid_messages",
     "excluded_invalid_metadata",
-    "excluded_prompt_teacher_cap",
 )
 
 # The Decomposer manager's tool interface. Canonical SFT records use exactly these
@@ -145,16 +144,6 @@ class SourceSelectionSpec(StrictModel):
 
 class SelectionSpec(SourceSelectionSpec):
     invalid_policy: InvalidPolicy = "exclude"
-    max_traces_per_prompt_per_teacher: int | None = None
-
-    @field_validator("max_traces_per_prompt_per_teacher")
-    @classmethod
-    def validate_cap(cls, value: int | None) -> int | None:
-        if value is not None and value <= 0:
-            raise ValueError(
-                "selection.max_traces_per_prompt_per_teacher must be positive"
-            )
-        return value
 
 
 class SourceSpec(StrictModel):
@@ -313,10 +302,7 @@ class TraceValidationError(ValueError):
     """A reason-coded error local to one native rollout."""
 
     def __init__(self, reason: str, message: str) -> None:
-        if reason not in EXCLUSION_REASONS or reason in {
-            "excluded_reward",
-            "excluded_prompt_teacher_cap",
-        }:
+        if reason not in EXCLUSION_REASONS or reason == "excluded_reward":
             raise ValueError(f"Invalid trace-exclusion reason: {reason}")
         super().__init__(message)
         self.reason = reason

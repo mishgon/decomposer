@@ -34,14 +34,13 @@ subagent, and several `run` calls of the same subagent
 
 ## Legacy specs and configs
 
-Every build specification except release 1.0.0's, and every training config,
-was removed on 2026-10-13: none of them works with the current code. They live in
-the parent of the commit that removed them
-(`git log --diff-filter=D -1 -- sft/configs`). The current code builds only
-`spec_version` 4 specifications, whose sources are digest-pinned snapshots (see
-[Snapshots, releases and versioning](#snapshots-releases-and-versioning)). The
-1.0.0 specification stays as the record of the published release; see
-`sft/specs/README.md`.
+Every build specification and training config up to release 1.0.0 was removed
+on 2026-10-13: none of them works with the current code. They live in the parent
+of the commit that removed them (`git log --diff-filter=D -1 -- <path>`); the
+1.0.0 specification lives at commit `53a88d8`, which built the release. The
+current code builds only `spec_version` 4 specifications, whose sources are
+digest-pinned snapshots (see [Snapshots, releases and
+versioning](#snapshots-releases-and-versioning)).
 
 ## Install
 
@@ -247,10 +246,10 @@ the rest of the call log, are left out.
 
 ### Release 1.0.0 of decomposer-manager-sft
 
-Release 1.0.0 (`sft/specs/decomposer_manager_sft_1.0.0.yaml`) has four sources.
-Each has the Qwen3.8-Flash non-thinking manager and Qwen3.5-4B-unlooped thinking
-subagents, collected with the old core prompt. It was built on Hertz-2 at
-commit `53a88d8`, the only commit that reproduces it (see `sft/specs/README.md`):
+Release 1.0.0 has four sources. Each has the Qwen3.8-Flash non-thinking manager
+and Qwen3.5-4B-unlooped thinking subagents, collected with the old core prompt.
+It was built on Hertz-2 at commit `53a88d8`, the only commit that reproduces it
+and the one that holds its specification:
 
 ```bash
 .venv/bin/python -m sft.prepare \

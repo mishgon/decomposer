@@ -248,7 +248,6 @@ def _prepare_fixture_dataset(
     seed: int = 42,
     success_reward: float = 1.0,
     invalid_policy: str = "exclude",
-    max_traces_per_prompt_per_teacher: int | None = None,
     version: str = "v3",
 ):
     """Test helper that exercises the new canonical builder without Git state."""
@@ -263,7 +262,6 @@ def _prepare_fixture_dataset(
         selection=SelectionSpec(
             success_reward=success_reward,
             invalid_policy=invalid_policy,
-            max_traces_per_prompt_per_teacher=max_traces_per_prompt_per_teacher,
         ),
         split=SplitSpec(
             strategy="prompt_fixed",
@@ -304,7 +302,6 @@ def test_prepare_groups_teacher_variants_and_writes_manifest_v3(tmp_path: Path) 
     assert prepared.manifest["split"]["validation_groups"] == 2
     filtering = prepared.manifest["filtering"]
     assert filtering["rollouts"] == 22
-    assert filtering["eligible_before_cap"] == 20
     assert filtering["included"] == 20
     assert filtering["excluded_reward"] == 2
     assert filtering["sidecar_failure_records"] == 2
@@ -1098,49 +1095,6 @@ def test_additional_row_exclusion_reasons(
     assert prepared.manifest["filtering"][reason] == 1
 
 
-def test_prompt_teacher_cap_is_deterministic_and_keeps_split_groups(
-    tmp_path: Path,
-) -> None:
-    sources = []
-    for teacher in ("teacher-a", "teacher-b"):
-        rollouts = [
-            _rollout(0, rollout_index=index, prompt_task_index=0) for index in range(5)
-        ] + [
-            _rollout(1, rollout_index=index, prompt_task_index=1) for index in range(5)
-        ]
-        materialized = [
-            _materialized(0, rollout_index=index, prompt_task_index=0)
-            for index in range(5)
-        ] + [
-            _materialized(1, rollout_index=index, prompt_task_index=1)
-            for index in range(5)
-        ]
-        sources.append(_source(tmp_path, teacher, rollouts, materialized))
-
-    first = _prepare_fixture_dataset(
-        sources,
-        tmp_path / "first",
-        validation_fraction=0.5,
-        max_traces_per_prompt_per_teacher=2,
-    )
-    second = _prepare_fixture_dataset(
-        sources,
-        tmp_path / "second",
-        validation_fraction=0.5,
-        max_traces_per_prompt_per_teacher=2,
-    )
-    assert first.manifest["filtering"]["eligible_before_cap"] == 20
-    assert first.manifest["filtering"]["excluded_prompt_teacher_cap"] == 12
-    assert first.manifest["filtering"]["included"] == 8
-    assert first.train_path.read_bytes() == second.train_path.read_bytes()
-    assert first.validation_path.read_bytes() == second.validation_path.read_bytes()
-    train = _read_jsonl(first.train_path)
-    validation = _read_jsonl(first.validation_path)
-    assert {record["group_id"] for record in train}.isdisjoint(
-        record["group_id"] for record in validation
-    )
-
-
 def test_prepare_refuses_overwrite_and_bad_materialized_source(tmp_path: Path) -> None:
     source = _source(tmp_path, "teacher")
     output = tmp_path / "prepared"
@@ -1199,10 +1153,6 @@ def test_malformed_tool_calls_raise_in_error_mode(
 
 
 SFT_SPEC_PATHS = sorted(Path(__file__).resolve().parents[1].glob("sft/**/specs/*.yaml"))
-
-
-def test_sft_specs_live_under_sft():
-    assert SFT_SPEC_PATHS
 
 
 @pytest.mark.parametrize("spec_path", SFT_SPEC_PATHS, ids=lambda path: path.name)

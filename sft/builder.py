@@ -36,12 +36,7 @@ from .schema import (
     sha256_text,
 )
 
-_SELECTION_EXCLUSION_REASONS = frozenset(
-    {
-        "excluded_reward",
-        "excluded_prompt_teacher_cap",
-    }
-)
+_SELECTION_EXCLUSION_REASONS = frozenset({"excluded_reward"})
 
 
 @dataclass(frozen=True)
@@ -134,7 +129,6 @@ def _serialized_counts(counts: Counter[str]) -> JsonObject:
     )
     return {
         "rollouts": counts["rollouts"],
-        "eligible_before_cap": counts["eligible"],
         "included": counts["included"],
         "excluded_malformed": malformed,
         **{reason: counts[reason] for reason in EXCLUSION_REASONS},
@@ -155,31 +149,10 @@ def _assert_filter_counts(counts: Counter[str], description: str) -> None:
         raise AssertionError(
             f"Rollout filtering counts do not add up for {description}."
         )
-    if counts["eligible"] != counts["included"] + counts["excluded_prompt_teacher_cap"]:
+    if counts["eligible"] != counts["included"]:
         raise AssertionError(
-            f"Prompt-cap filtering counts do not add up for {description}."
+            f"Adapter counts and records disagree for {description}."
         )
-
-
-def _apply_prompt_teacher_cap(
-    records: Sequence[CanonicalRollout],
-    *,
-    limit: int | None,
-    seed: int,
-) -> tuple[list[CanonicalRollout], Counter[str]]:
-    exclusions: Counter[str] = Counter()
-    if limit is None:
-        return list(records), exclusions
-    groups: dict[tuple[str, str], list[CanonicalRollout]] = defaultdict(list)
-    for record in records:
-        groups[(record.group_id, record.source.teacher)].append(record)
-    retained: list[CanonicalRollout] = []
-    for group in groups.values():
-        ranked = sorted(group, key=lambda record: sha256_text(f"{seed}\0{record.id}"))
-        retained.extend(ranked[:limit])
-        for excluded in ranked[limit:]:
-            exclusions[excluded.source.source_id] += 1
-    return retained, exclusions
 
 
 def _record_category(record: CanonicalRollout) -> str:
@@ -372,28 +345,21 @@ def prepare_dataset(
         source_manifests.append(result.source_manifest)
         counts_by_source[source.id] = result.counts
 
-    retained, cap_exclusions = _apply_prompt_teacher_cap(
-        records,
-        limit=spec.selection.max_traces_per_prompt_per_teacher,
-        seed=spec.split.seed,
-    )
     for source_manifest in source_manifests:
         source_id = str(source_manifest["id"])
         counts = counts_by_source[source_id]
-        source_records = [
-            record for record in retained if record.source.source_id == source_id
-        ]
-        counts["excluded_prompt_teacher_cap"] += cap_exclusions[source_id]
-        counts["included"] = len(source_records)
+        counts["included"] = sum(
+            record.source.source_id == source_id for record in records
+        )
         _assert_filter_counts(counts, source_id)
         source_manifest["counts"] = _serialized_counts(counts)
-    if not retained:
+    if not records:
         raise ValueError("No usable rollout traces were found.")
 
     # Sources may expose different native tool schemas (for example, each gym's
     # own agent types), but each source must use one.
     tool_schemas_by_source: defaultdict[str, set[str]] = defaultdict(set)
-    for record in retained:
+    for record in records:
         tool_schemas_by_source[record.source.source_id].add(
             sha256_text(canonical_json(record.tools))
         )
@@ -408,7 +374,7 @@ def prepare_dataset(
         source_manifest["tool_schema_sha256"] = next(iter(schemas), None)
     tool_schema_sha256s = sorted(set().union(*tool_schemas_by_source.values()))
     train_records, validation_records, split_manifest = _split_by_group_hash(
-        retained,
+        records,
         validation_fraction=spec.split.validation_fraction,
         seed=spec.split.seed,
     )
@@ -462,14 +428,14 @@ def prepare_dataset(
         "filtering": {
             **_serialized_counts(total_counts),
             "excluded_malformed_by_source": excluded_malformed_by_source,
-            "included": len(retained),
+            "included": len(records),
             "sidecar_failure_records": sum(
                 int(source["sidecar_failure_records"]) for source in source_manifests
             ),
         },
         "split": split_manifest,
         "records": {
-            "total": len(retained),
+            "total": len(records),
             "train": len(train_records),
             "validation": len(validation_records),
             "train_by_teacher": _count_by(train_records, "teacher"),

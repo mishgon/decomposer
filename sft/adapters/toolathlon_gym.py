@@ -263,7 +263,7 @@ def read_toolathlon_gym_source(
             "tool_schema_origin": "native_subagent_types",
             "selection": selection.model_dump(
                 mode="json",
-                exclude={"invalid_policy", "max_traces_per_prompt_per_teacher"},
+                exclude={"invalid_policy"},
             ),
             "qualifying": {
                 "strict_pass": strict_passes,

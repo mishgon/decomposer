@@ -245,7 +245,7 @@ def read_wideseek_source(
             "tool_schema_origin": "first_manager_model_call",
             "selection": selection.model_dump(
                 mode="json",
-                exclude={"invalid_policy", "max_traces_per_prompt_per_teacher"},
+                exclude={"invalid_policy"},
             ),
         },
         counts=counts,
