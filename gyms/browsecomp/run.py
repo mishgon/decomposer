@@ -12,8 +12,9 @@ import sys
 from uuid import uuid4
 
 import httpx
-from decomposer.agent_server import agent_server, invoke_and_capture
-from decomposer.usage import build_usage_summary
+from decomposer.agent_server import agent_server
+from gyms.agent_server import invoke_and_capture
+from gyms.usage import build_usage_summary
 from decomposer.visualization import write_trace_html
 from gyms.browsecomp import REPO_ROOT
 from gyms.browsecomp.agents import DECOMPOSER_MODEL, RESEARCHER_MODEL

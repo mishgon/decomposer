@@ -6,7 +6,7 @@ from uuid import uuid4
 
 from langchain.agents.middleware import wrap_model_call
 from langchain_core.messages import message_to_dict
-from decomposer.model_logging import append_record, request_delta
+from gyms.model_logging import append_record, request_delta
 
 
 @wrap_model_call
