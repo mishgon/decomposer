@@ -66,7 +66,7 @@ def test_judge_errors_are_unscored_and_inclusion_is_not_a_pass(monkeypatch, tmp_
 
 
 @pytest.mark.parametrize("error", [None, TimeoutError("stopped")])
-@pytest.mark.parametrize("agent", ["researcher", "researcher_flash_next"])
+@pytest.mark.parametrize("agent", ["researcher", "researcher_flash_next", "researcher_qwen27b"])
 def test_episode_artifacts_and_partial_capture(monkeypatch, tmp_path, error, agent):
     directory = tmp_path / "run" / "traces" / "task-r001"
     directory.mkdir(parents=True)

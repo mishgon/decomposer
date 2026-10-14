@@ -14,10 +14,12 @@ DECOMPOSER_MODEL = "lmrouter/qwen_3_8_flash_next_non_thinking"
 JUDGE_MODEL = "lmrouter/qwen_3_8_flash_next_non_thinking"
 BASE_DECOMPOSER_MODEL = "vllm/qwen_3_5_4b_non_thinking"
 BASE_DECOMPOSER_URL = "http://127.0.0.1:8026/v1"
+QWEN27_MODEL = "lmrouter/qwen_3_8_27b_non_thinking"
 AGENT_MODELS = {"researcher": RESEARCHER_MODEL, "decomposer": DECOMPOSER_MODEL,
                 "decomposer_qwen4b": BASE_DECOMPOSER_MODEL,
-                "researcher_flash_next": DECOMPOSER_MODEL}
-REACT_AGENTS = {"researcher", "researcher_flash_next"}
+                "researcher_flash_next": DECOMPOSER_MODEL,
+                "researcher_qwen27b": QWEN27_MODEL}
+REACT_AGENTS = {"researcher", "researcher_flash_next", "researcher_qwen27b"}
 
 
 def researcher():
@@ -33,6 +35,16 @@ def researcher():
 def researcher_flash_next():
     return create_agent(
         create_model(DECOMPOSER_MODEL), tools=[search, fetch],
+        state_schema=ResearchState,
+        context_schema=RunBudgetContext,
+        system_prompt=Path(__file__).with_name("prompt.txt").read_text() + "\n\n" + AGENT_SYSTEM_PROMPT,
+        middleware=[RunBudgetMiddleware(), log_model_call],
+    )
+
+
+def researcher_qwen27b():
+    return create_agent(
+        create_model(QWEN27_MODEL), tools=[search, fetch],
         state_schema=ResearchState,
         context_schema=RunBudgetContext,
         system_prompt=Path(__file__).with_name("prompt.txt").read_text() + "\n\n" + AGENT_SYSTEM_PROMPT,
