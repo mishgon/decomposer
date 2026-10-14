@@ -5,7 +5,8 @@
     "researcher_flash_next": "./agents.py:researcher_flash_next",
     "researcher_qwen27b": "./agents.py:researcher_qwen27b",
     "decomposer": "./agents.py:decomposer",
-    "decomposer_qwen4b": "./agents.py:decomposer_qwen4b"
+    "decomposer_qwen4b": "./agents.py:decomposer_qwen4b",
+    "decomposer_sft": "./agents.py:decomposer_sft"
   },
   "python_version": "3.12"
 }
