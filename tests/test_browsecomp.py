@@ -66,7 +66,8 @@ def test_judge_errors_are_unscored_and_inclusion_is_not_a_pass(monkeypatch, tmp_
 
 
 @pytest.mark.parametrize("error", [None, TimeoutError("stopped")])
-def test_episode_artifacts_and_partial_capture(monkeypatch, tmp_path, error):
+@pytest.mark.parametrize("agent", ["researcher", "researcher_flash_next"])
+def test_episode_artifacts_and_partial_capture(monkeypatch, tmp_path, error, agent):
     directory = tmp_path / "run" / "traces" / "task-r001"
     directory.mkdir(parents=True)
     (directory / "task.json").write_text(json.dumps({"task_id": "task", "question": "Q", "answer": "A"}))
@@ -77,13 +78,15 @@ def test_episode_artifacts_and_partial_capture(monkeypatch, tmp_path, error):
         content='```json\n{"final_answer":"A"}\n```'))]}, error))
     monkeypatch.setattr(run, "agent_server", server)
     monkeypatch.setattr(run, "invoke_and_capture", capture)
-    args = run.parser().parse_args(["--episode", "--output-dir", str(directory), "--agent", "researcher"])
+    args = run.parser().parse_args(["--episode", "--output-dir", str(directory), "--agent", agent])
     asyncio.run(run.episode(args))
     result = json.loads((directory / "result.json").read_text())
     assert result["status"] == ("timeout" if error else "finished")
     assert result["evaluation"]["score"] == 1
     assert (directory / "trace.json").exists()
     assert (directory / "usage.json").exists()
+    assert json.loads((directory / "trace.json").read_text())["harness"] == "react"
+    assert "react" in json.loads((directory / "usage.json").read_text())
     assert capture.call_args.kwargs["config"] == {"recursion_limit": 410}
 
 

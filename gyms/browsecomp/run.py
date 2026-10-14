@@ -17,7 +17,7 @@ from gyms.agent_server import invoke_and_capture
 from gyms.usage import build_usage_summary
 from decomposer.visualization import write_trace_html
 from gyms.browsecomp import REPO_ROOT
-from gyms.browsecomp.agents import AGENT_MODELS
+from gyms.browsecomp.agents import AGENT_MODELS, REACT_AGENTS
 from gyms.browsecomp.evaluate import FINAL_FORMAT, evaluate
 
 
@@ -57,7 +57,7 @@ async def episode(args):
     result["agent_finished_at"] = now()
     result["status"] = "finished" if error is None else "timeout" if isinstance(error, TimeoutError) else "error"
     result["error"] = repr(error) if error else None
-    trace = {**state, **result, "harness": "react" if args.agent == "researcher" else "decomposer",
+    trace = {**state, **result, "harness": "react" if args.agent in REACT_AGENTS else "decomposer",
              "agent_error": result["error"], "finished_at": result["agent_finished_at"],
              "model": AGENT_MODELS[args.agent],
              "messages": state.get("messages", []), "agents": state.get("agents", {}),
@@ -65,7 +65,7 @@ async def episode(args):
     save(root / "trace.json", trace)
     write_trace_html(trace, root / "trace.html")
     usage = build_usage_summary(trace["messages"], trace["agent_runs"], trace["agents"])
-    if args.agent == "researcher":
+    if args.agent in REACT_AGENTS:
         usage["react"] = usage.pop("decomposer")
     save(root / "usage.json", usage)
     last = trace["messages"][-1] if trace["messages"] else {}
