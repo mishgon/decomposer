@@ -14,7 +14,7 @@ DECOMPOSER_MODEL = "lmrouter/qwen_3_8_flash_next_non_thinking"
 JUDGE_MODEL = "lmrouter/qwen_3_8_flash_next_non_thinking"
 BASE_DECOMPOSER_MODEL = "vllm/qwen_3_5_4b_non_thinking"
 BASE_DECOMPOSER_URL = "http://127.0.0.1:8026/v1"
-QWEN27_MODEL = "lmrouter/qwen_3_8_27b_non_thinking"
+QWEN27_MODEL = "lmrouter/qwen_3_8_27b_medium_thinking"
 AGENT_MODELS = {"researcher": RESEARCHER_MODEL, "decomposer": DECOMPOSER_MODEL,
                 "decomposer_qwen4b": BASE_DECOMPOSER_MODEL,
                 "researcher_flash_next": DECOMPOSER_MODEL,

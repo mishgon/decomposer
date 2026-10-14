@@ -109,7 +109,7 @@ def create_model(
         "lmrouter/qwen_3_5_4b_unlooped_thinking",
         "lmrouter/qwen_3_5_4b_unlooped_non_thinking",
         "lmrouter/qwen_3_8_flash_next_non_thinking",
-        "lmrouter/qwen_3_8_27b_non_thinking",
+        "lmrouter/qwen_3_8_27b_medium_thinking",
         "lmrouter/qwen_3_8_flash_next_low_thinking",
         "lmrouter/qwen_3_8_flash_next_medium_thinking",
         "temp/qwen_3_5_4b_unlooped_thinking",
@@ -212,18 +212,21 @@ def create_model(
                 disable_streaming=True,
                 use_responses_api=False,
             )
-        case "lmrouter/qwen_3_8_27b_non_thinking":
+        case "lmrouter/qwen_3_8_27b_medium_thinking":
             return ChatVLLM(
                 model="Qwen/Qwen3.8-27B-FP8",
                 base_url="https://lmrouter.2a2i.org/v1",
                 api_key=os.environ.get("LLM_PROXY_MASTER_KEY", "EMPTY"),
                 # https://huggingface.co/Qwen/Qwen3.8-27B-FP8#api-usage
-                temperature=0.7,
-                top_p=0.8,
-                presence_penalty=1.5,
-                extra_body={"top_k": 20, "min_p": 0.0, "repetition_penalty": 1.0,
-                            "chat_template_kwargs": {"enable_thinking": False}},
-                preserve_reasoning=False,
+                temperature=1.0,
+                top_p=0.95,
+                presence_penalty=0.0,
+                reasoning_effort="medium",
+                extra_body={"allowed_openai_params": ["reasoning_effort"],
+                            "top_k": 20, "min_p": 0.0, "repetition_penalty": 1.0,
+                            "chat_template_kwargs": {"enable_thinking": True,
+                                                     "preserve_thinking": True}},
+                preserve_reasoning=True,
                 timeout=600,
                 max_retries=2,
                 http_client=sync_client,
