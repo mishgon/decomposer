@@ -2,7 +2,8 @@
   "dependencies": ["../.."],
   "graphs": {
     "researcher": "./agents.py:researcher",
-    "decomposer": "./agents.py:decomposer"
+    "decomposer": "./agents.py:decomposer",
+    "decomposer_qwen4b": "./agents.py:decomposer_qwen4b"
   },
   "python_version": "3.12"
 }

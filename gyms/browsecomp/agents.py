@@ -12,6 +12,10 @@ from gyms.browsecomp.tools import ResearchState, search, fetch
 RESEARCHER_MODEL = "lmrouter/qwen_3_5_4b_unlooped_thinking"
 DECOMPOSER_MODEL = "lmrouter/qwen_3_8_flash_next_non_thinking"
 JUDGE_MODEL = "lmrouter/qwen_3_8_flash_next_non_thinking"
+BASE_DECOMPOSER_MODEL = "vllm/qwen_3_5_4b_non_thinking"
+BASE_DECOMPOSER_URL = "http://127.0.0.1:8026/v1"
+AGENT_MODELS = {"researcher": RESEARCHER_MODEL, "decomposer": DECOMPOSER_MODEL,
+                "decomposer_qwen4b": BASE_DECOMPOSER_MODEL}
 
 
 def researcher():
@@ -27,6 +31,18 @@ def researcher():
 def decomposer():
     return create_decomposer_agent(
         decomposer_model=create_model(DECOMPOSER_MODEL),
+        agent_types=[{
+            "agent_type_id": "researcher", "assistant_id": "researcher",
+            "description": "Researcher with search and fetch over the BrowseComp-Plus corpus.",
+            "url": os.environ["BROWSECOMP_AGENT_URL"],
+        }],
+        agent_recursion_limit=410, middleware=[log_model_call],
+    )
+
+
+def decomposer_qwen4b():
+    return create_decomposer_agent(
+        decomposer_model=create_model(BASE_DECOMPOSER_MODEL, base_url=BASE_DECOMPOSER_URL),
         agent_types=[{
             "agent_type_id": "researcher", "assistant_id": "researcher",
             "description": "Researcher with search and fetch over the BrowseComp-Plus corpus.",

@@ -17,7 +17,7 @@ from gyms.agent_server import invoke_and_capture
 from gyms.usage import build_usage_summary
 from decomposer.visualization import write_trace_html
 from gyms.browsecomp import REPO_ROOT
-from gyms.browsecomp.agents import DECOMPOSER_MODEL, RESEARCHER_MODEL
+from gyms.browsecomp.agents import AGENT_MODELS
 from gyms.browsecomp.evaluate import FINAL_FORMAT, evaluate
 
 
@@ -57,9 +57,9 @@ async def episode(args):
     result["agent_finished_at"] = now()
     result["status"] = "finished" if error is None else "timeout" if isinstance(error, TimeoutError) else "error"
     result["error"] = repr(error) if error else None
-    trace = {**state, **result, "harness": "decomposer" if args.agent == "decomposer" else "react",
+    trace = {**state, **result, "harness": "react" if args.agent == "researcher" else "decomposer",
              "agent_error": result["error"], "finished_at": result["agent_finished_at"],
-             "model": DECOMPOSER_MODEL if args.agent == "decomposer" else RESEARCHER_MODEL,
+             "model": AGENT_MODELS[args.agent],
              "messages": state.get("messages", []), "agents": state.get("agents", {}),
              "agent_runs": state.get("agent_runs", {})}
     save(root / "trace.json", trace)
@@ -160,6 +160,8 @@ async def main(args):
             manifest["episodes"].append(entry)
             save(root / "manifest.json", manifest)
             print(f"{len(manifest['episodes'])}/{len(tasks) * args.repetitions} {task['task_id']}: {entry['status']}", flush=True)
+            if "Server exited during startup" in (entry.get("error") or ""):
+                raise RuntimeError("Agent Server startup failed; stopping evaluation. Inspect runner.log.")
 
     jobs = [asyncio.create_task(launch(task, rep)) for task in tasks for rep in range(1, args.repetitions + 1)]
     try:
@@ -179,7 +181,7 @@ async def main(args):
 
 def parser():
     cli = argparse.ArgumentParser(description=__doc__)
-    cli.add_argument("--agent", choices=["researcher", "decomposer"], default="decomposer")
+    cli.add_argument("--agent", choices=list(AGENT_MODELS), default="decomposer")
     select = cli.add_mutually_exclusive_group()
     select.add_argument("--tasks", nargs="+")
     select.add_argument("--all", action="store_true")
