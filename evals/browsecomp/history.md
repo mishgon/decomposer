@@ -27,3 +27,12 @@ Time: 38680361.19 ms
 
 Average subagents: 6.85586
 ---
+
+Date: 14-10-2026
+LLM: Qwen Flash Next; Qwen 4B unlooped
+Mode: decomposer
+
+pass@1: 57.7%
+pass@3: 75.0%
+pass^3: 37.0%
+---
