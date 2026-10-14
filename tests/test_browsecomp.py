@@ -12,6 +12,21 @@ from gyms.browsecomp import tools, run, evaluate
 from evals.browsecomp.run import summarize
 
 
+def test_sft_decomposer_uses_checkpoint_and_unchanged_researcher(monkeypatch):
+    from gyms.browsecomp import agents
+    monkeypatch.setenv("BROWSECOMP_AGENT_URL", "http://episode-server")
+    monkeypatch.setattr(agents, "create_decomposer_agent", lambda **kwargs: kwargs)
+    config = agents.decomposer_sft()
+    model = config["decomposer_model"]
+    assert model.model_name == agents.SFT_MODEL
+    assert model.openai_api_base == "http://127.0.0.1:8029/v1"
+    assert model.temperature == .7 and model.top_p == .8
+    assert model.extra_body["chat_template_kwargs"]["enable_thinking"] is False
+    assert config["agent_recursion_limit"] == 410
+    assert config["agent_types"][0]["assistant_id"] == "researcher"
+    assert agents.RESEARCHER_MODEL == "lmrouter/qwen_3_5_4b_unlooped_thinking"
+
+
 def test_tools_isolate_url_access_and_preserve_state(monkeypatch):
     request = AsyncMock(return_value={"results": [
         {"url": "https://page", "page_id": "p1", "title": "Page", "snippet": "evidence"}]})
