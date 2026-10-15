@@ -79,8 +79,8 @@ def decomposer_qwen4b():
 
 
 def decomposer_sft():
-    model = create_model(BASE_DECOMPOSER_MODEL, base_url="http://127.0.0.1:8029/v1")
-    model = model.model_copy(update={"model_name": SFT_MODEL})
+    # Shared deployment: goncharov-qwen35-4b-sft-8988, checkpoint-8988-merged.
+    model = create_model(BASE_DECOMPOSER_MODEL, base_url="http://127.0.0.1:8028/v1")
     return create_decomposer_agent(
         decomposer_model=model,
         agent_types=[{
