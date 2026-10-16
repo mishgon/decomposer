@@ -26,6 +26,24 @@ async def cancel_worker_run(client, thread_id, run_id):
             raise
 
 
+async def cleanup_worker(client, thread_id, directory):
+    # Cleanup operations are idempotent; never retry COPY/CHECK execution.
+    for attempt in range(3):
+        try:
+            for status in ("pending", "running"):
+                while runs := await client.runs.list(thread_id, status=status, limit=100):
+                    for run in runs:
+                        await cancel_worker_run(client, thread_id, run["run_id"])
+            checkpoint = await client.threads.get_state(thread_id)
+            (directory / f"worker-{thread_id}.json").write_text(json.dumps(checkpoint, default=str))
+            await client.threads.delete(thread_id)
+            return
+        except Exception:
+            if attempt == 2:
+                raise
+            await asyncio.sleep(2 ** attempt)
+
+
 async def episode(task, policy, directory, worker_url, *, timeout=180, recursion_limit=80):
     initialize(directory, task)
     (directory / "task.json").write_text(json.dumps(task, indent=2))
@@ -54,13 +72,7 @@ async def episode(task, policy, directory, worker_url, *, timeout=180, recursion
             for worker in state.get("agents", {}).values():
                 thread_id = worker["thread_id"]
                 try:
-                    for status in ("pending", "running"):
-                        while runs := await client.runs.list(thread_id, status=status, limit=100):
-                            for run in runs:
-                                await cancel_worker_run(client, thread_id, run["run_id"])
-                    checkpoint = await client.threads.get_state(thread_id)
-                    (directory / f"worker-{thread_id}.json").write_text(json.dumps(checkpoint, default=str))
-                    await client.threads.delete(thread_id)
+                    await cleanup_worker(client, thread_id, directory)
                 except Exception as exc:
                     cleanup_errors.append(repr(exc))
         trace = {**state, "task": task["task_id"], "episode_id": directory.name,
