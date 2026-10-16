@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 import json
 from pathlib import Path
 import traceback
+from httpx import HTTPStatusError
 
 from langchain_core.messages import message_to_dict
 from langgraph.checkpoint.memory import InMemorySaver
@@ -13,6 +14,16 @@ from decomposer.usage import build_usage_summary
 from decomposer.visualization import write_trace_html
 from gyms.synth.executor import initialize, grade
 from gyms.synth.worker import Context
+
+
+async def cancel_worker_run(client, thread_id, run_id):
+    try:
+        await client.runs.cancel(thread_id, run_id, wait=True, action="interrupt")
+    except HTTPStatusError as exc:
+        # A worker can finish and disappear between listing and cancellation.
+        # The caller rechecks active runs before archiving and deleting the thread.
+        if exc.response.status_code != 404:
+            raise
 
 
 async def episode(task, policy, directory, worker_url, *, timeout=180, recursion_limit=80):
@@ -46,7 +57,7 @@ async def episode(task, policy, directory, worker_url, *, timeout=180, recursion
                     for status in ("pending", "running"):
                         while runs := await client.runs.list(thread_id, status=status, limit=100):
                             for run in runs:
-                                await client.runs.cancel(thread_id, run["run_id"], wait=True, action="interrupt")
+                                await cancel_worker_run(client, thread_id, run["run_id"])
                     checkpoint = await client.threads.get_state(thread_id)
                     (directory / f"worker-{thread_id}.json").write_text(json.dumps(checkpoint, default=str))
                     await client.threads.delete(thread_id)
