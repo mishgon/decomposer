@@ -3,7 +3,9 @@
 Each task asks Decomposer to swap two independent pairs of files, with two
 empty scratch files. Only opaque filenames and their presentation vary.
 Training and held-out names come from separate fixed seeds. Contents and worker
-behavior stay fixed. The policy uses the unchanged main Decomposer harness.
+behavior stay fixed. The policy uses the main Decomposer tools with a
+gym-specific system prompt in `prompt.txt`. That prompt explains that workers
+execute exact commands and cannot interpret prose or plan operations.
 
 Workers are LangGraph graphs with **no LLM**. Their regex parser accepts one
 command per line:

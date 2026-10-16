@@ -1,4 +1,29 @@
-# Stock Qwen3.5-4B Baseline
+# Synthetic Evaluation
+
+## Teacher Calibration
+
+Test the OPD teacher on the same task templates and system prompt before
+interpreting student learning. With router credentials loaded:
+
+```bash
+export PYTHONPATH="$PWD/src:$PWD"
+for split in eval train; do
+  tasks=8
+  if [ "$split" = train ]; then tasks=16; fi
+  .venv-workers/bin/python -m evals.synth.run \
+    --model lmrouter/qwen_3_8_flash_next_non_thinking \
+    --split "$split" --tasks "$tasks" -n 4 --concurrency 8 \
+    --output "artifacts/evals/synth/teacher-$split"
+done
+```
+
+The calibration target is approximately 95% **pass@1**, counting errors as
+failures. Pass@4 only measures whether at least one attempt succeeded.
+Inspect failed traces before changing task difficulty. Keep results from
+different task or prompt versions in separate directories. These 96 attempts
+provide a calibration sample, not a precise guarantee of the true pass rate.
+
+## Stock Qwen3.5-4B Baseline
 
 With the existing OPD/vLLM environment active on Hertz-2:
 
