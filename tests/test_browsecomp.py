@@ -12,14 +12,15 @@ from gyms.browsecomp import tools, run, evaluate
 from evals.browsecomp.run import summarize
 
 
-def test_sft_decomposer_uses_checkpoint_and_unchanged_researcher(monkeypatch):
+@pytest.mark.parametrize("full", [False, True])
+def test_sft_decomposer_uses_checkpoint_and_unchanged_researcher(monkeypatch, full):
     from gyms.browsecomp import agents
     monkeypatch.setenv("BROWSECOMP_AGENT_URL", "http://episode-server")
     monkeypatch.setattr(agents, "create_decomposer_agent", lambda **kwargs: kwargs)
-    config = agents.decomposer_sft()
+    config = agents.decomposer_full_sft() if full else agents.decomposer_sft()
     model = config["decomposer_model"]
-    assert model.model_name == "Qwen/Qwen3.5-4B"
-    assert model.openai_api_base == "http://127.0.0.1:8028/v1"
+    assert model.model_name == (agents.FULL_SFT_MODEL if full else "Qwen/Qwen3.5-4B")
+    assert model.openai_api_base == ("http://127.0.0.1:8029/v1" if full else "http://127.0.0.1:8028/v1")
     assert agents.AGENT_MODELS["decomposer_sft"] == agents.SFT_MODEL
     assert model.temperature == .7 and model.top_p == .8
     assert model.extra_body["chat_template_kwargs"]["enable_thinking"] is False
