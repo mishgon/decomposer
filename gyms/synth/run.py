@@ -2,6 +2,7 @@
 import asyncio
 from datetime import datetime, timezone
 import json
+from pathlib import Path
 import traceback
 
 from langchain_core.messages import message_to_dict
@@ -21,7 +22,8 @@ async def episode(task, policy, directory, worker_url, *, timeout=180, recursion
         agent_types=[{"agent_type_id": "file_worker", "assistant_id": "file_worker",
                       "description": "Deterministic executor. Accepts only newline-separated COPY and CHECK commands as specified in the task.",
                       "url": worker_url}],
-        context_schema=Context, checkpointer=InMemorySaver(), agent_recursion_limit=8)
+        context_schema=Context, checkpointer=InMemorySaver(), agent_recursion_limit=8,
+        system_prompt=Path(__file__).with_name("prompt.txt").read_text())
     config = {"configurable": {"thread_id": directory.name}, "recursion_limit": recursion_limit}
     started = datetime.now(timezone.utc).isoformat()
     state, error = {}, None

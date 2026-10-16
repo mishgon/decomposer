@@ -1010,6 +1010,7 @@ def create_decomposer_agent(
     checkpointer: Checkpointer | None = None,
     decomposer_recursion_limit: int | None = None,
     agent_recursion_limit: int | None = None,
+    system_prompt: str = DECOMPOSER_SYSTEM_PROMPT,
 ) -> CompiledStateGraph:
     decomposer_middelware = DecomposerAgentMiddleware(
         agent_types, agent_recursion_limit
@@ -1018,7 +1019,7 @@ def create_decomposer_agent(
     agent = create_agent(
         model=decomposer_model,
         tools=[],
-        system_prompt=DECOMPOSER_SYSTEM_PROMPT,
+        system_prompt=system_prompt,
         middleware=[
             decomposer_middelware,
             *(middleware or []),

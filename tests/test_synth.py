@@ -57,6 +57,9 @@ class PlanModel(FakeMessagesListChatModel):
         return self
 
     def _generate(self, messages, *args, **kwargs):
+        system = messages[0].content
+        assert "You must plan the file operations yourself" in system
+        assert "Never explain to agents how to execute tasks" not in system
         outputs = {m.tool_call_id: m.content for m in messages if isinstance(m, ToolMessage)}
         def call(name, identifier, **arguments):
             return {"name": name, "id": identifier, "args": arguments}
