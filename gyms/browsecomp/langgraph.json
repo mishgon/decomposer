@@ -7,7 +7,8 @@
     "decomposer": "./agents.py:decomposer",
     "decomposer_qwen4b": "./agents.py:decomposer_qwen4b",
     "decomposer_sft": "./agents.py:decomposer_sft",
-    "decomposer_full_sft": "./agents.py:decomposer_full_sft"
+    "decomposer_full_sft": "./agents.py:decomposer_full_sft",
+    "decomposer_early_sft": "./agents.py:decomposer_early_sft"
   },
   "python_version": "3.12"
 }

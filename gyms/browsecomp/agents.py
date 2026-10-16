@@ -17,12 +17,14 @@ BASE_DECOMPOSER_URL = "http://127.0.0.1:8026/v1"
 QWEN27_MODEL = "lmrouter/qwen_3_8_27b_medium_thinking"
 SFT_MODEL = "qwen35-4b-manager-sft-2.1.0-checkpoint-8988"
 FULL_SFT_MODEL = "qwen35-4b-manager-full-sft-2.1.0-checkpoint-8980"
+EARLY_SFT_MODEL = "qwen35-4b-manager-sft-early-checkpoint-4490"
 AGENT_MODELS = {"researcher": RESEARCHER_MODEL, "decomposer": DECOMPOSER_MODEL,
                 "decomposer_qwen4b": BASE_DECOMPOSER_MODEL,
                 "researcher_flash_next": DECOMPOSER_MODEL,
                 "researcher_qwen27b": QWEN27_MODEL,
                 "decomposer_sft": SFT_MODEL,
-                "decomposer_full_sft": FULL_SFT_MODEL}
+                "decomposer_full_sft": FULL_SFT_MODEL,
+                "decomposer_early_sft": EARLY_SFT_MODEL}
 REACT_AGENTS = {"researcher", "researcher_flash_next", "researcher_qwen27b"}
 
 
@@ -97,6 +99,20 @@ def decomposer_sft():
 def decomposer_full_sft():
     model = create_model(BASE_DECOMPOSER_MODEL, base_url="http://127.0.0.1:8029/v1")
     model = model.model_copy(update={"model_name": FULL_SFT_MODEL})
+    return create_decomposer_agent(
+        decomposer_model=model,
+        agent_types=[{
+            "agent_type_id": "researcher", "assistant_id": "researcher",
+            "description": "Researcher with search and fetch over the BrowseComp-Plus corpus.",
+            "url": os.environ["BROWSECOMP_AGENT_URL"],
+        }],
+        agent_recursion_limit=410, middleware=[log_model_call],
+    )
+
+
+def decomposer_early_sft():
+    model = create_model(BASE_DECOMPOSER_MODEL, base_url="http://127.0.0.1:8030/v1")
+    model = model.model_copy(update={"model_name": EARLY_SFT_MODEL})
     return create_decomposer_agent(
         decomposer_model=model,
         agent_types=[{
