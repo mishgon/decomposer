@@ -1,0 +1,115 @@
+import asyncio
+from contextlib import asynccontextmanager
+import json
+from pathlib import Path
+from unittest.mock import AsyncMock
+
+import pytest
+
+from gyms.deepdive.prepare import normalize
+from gyms.wideseek.prepare import agent_input
+
+
+def test_normalization_keeps_split_identity_and_hides_reference():
+    row = {"id": 7, "question": "Which city?", "answer": "Secret answer",
+           "conversations": [{"role": "assistant", "content": "Secret solution"}]}
+    rl = normalize(row, "qa_rl")
+    sft = normalize(row, "qa_sft")
+    assert rl["task_id"] != sft["task_id"]
+    assert rl["metadata"]["original_id"] == 7
+    assert rl["question_sha256"] == sft["question_sha256"]
+    assert rl["answer"] == row["answer"]
+    assert rl["unique_columns"] == []
+    prompt = json.dumps(agent_input(rl))
+    assert row["question"] in prompt
+    assert "Secret" not in prompt
+    assert "conversations" not in rl["metadata"]
+
+
+def test_preparation_retains_duplicate_questions_and_pins_source(tmp_path, monkeypatch):
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+    from gyms.deepdive import prepare
+
+    raw = tmp_path / "input.parquet"
+    pq.write_table(pa.Table.from_pylist([
+        {"id": 1, "question": "Same question", "answer": "A"},
+        {"id": 2, "question": "Same question", "answer": "A"},
+    ]), raw)
+    urls = []
+
+    def download(url, **kwargs):
+        urls.append(url)
+        return raw.open("rb")
+
+    monkeypatch.setattr(prepare, "urlopen", download)
+    monkeypatch.setitem(prepare.SPLITS, "qa_rl", 2)
+    output = tmp_path / "prepared"
+    manifest = prepare.prepare("qa_rl", output)
+    assert manifest["examples"] == 2
+    assert manifest["unique_questions"] == 1
+    assert manifest["filtered"] is False
+    assert prepare.REVISION in urls[0]
+    assert len((output / "tasks.jsonl").read_text().splitlines()) == 2
+    assert (output / "source.parquet").read_bytes() == raw.read_bytes()
+
+
+@pytest.mark.parametrize("failure", [False, True])
+def test_qa_judge_failure_stays_unscored(tmp_path, monkeypatch, failure):
+    from gyms.wideseek import evaluate
+    from langchain_core.messages import AIMessage
+
+    judge = AsyncMock()
+    if failure:
+        judge.ainvoke.side_effect = RuntimeError("judge unavailable")
+    else:
+        judge.ainvoke.return_value = AIMessage(content="Correct")
+    monkeypatch.setattr(evaluate, "model", lambda _: judge)
+    monkeypatch.setattr(evaluate, "close_model", AsyncMock())
+    task = normalize({"id": 1, "question": "Which city?", "answer": "Paris"}, "qa_rl")
+    result = asyncio.run(evaluate.evaluate(task, r"\boxed{Paris}", tmp_path))
+    assert result["metric"] == "qa_accuracy"
+    assert result["score"] == (None if failure else 1.0)
+    assert result["status"] == ("judge_error" if failure else "scored")
+    assert len(list((tmp_path / "judge_calls").glob("*.json"))) == 1
+
+
+def test_launcher_uses_deepdive_data_and_cleans_workers_on_failure(tmp_path, monkeypatch):
+    from sft.deepdive import launch
+
+    args = launch.create_parser().parse_args([
+        "--agent", "decomposer", "--output", str(tmp_path),
+    ])
+    assert "deepdive" in args.data.parts
+    assert args.concurrency == 128
+    assert args.limit is None and args.n == 1
+    assert args.episode_timeout == 2700
+    assert args.output_tokens is None
+    assert not args.adaptive
+    events = []
+
+    @asynccontextmanager
+    async def workers(config, **kwargs):
+        assert config.parent.name == "deepdive"
+        assert kwargs["n_jobs_per_worker"] == 512
+        events.append("started")
+        try:
+            yield "http://worker"
+        finally:
+            events.append("stopped")
+
+    async def collect(args):
+        assert args.worker_url == "http://worker"
+        raise RuntimeError("collection failed")
+
+    monkeypatch.setattr(launch, "agent_server", workers)
+    monkeypatch.setattr(launch, "collect", collect)
+    with pytest.raises(RuntimeError, match="collection failed"):
+        asyncio.run(launch.main(args))
+    assert events == ["started", "stopped"]
+
+
+def test_deepdive_worker_uses_wideseek_retrieval_agent():
+    root = Path(__file__).resolve().parents[1]
+    graphs = json.loads((root / "gyms/deepdive/langgraph.json").read_text())["graphs"]
+    assert graphs == {"researcher": "gyms.wideseek.agents:researcher"}
