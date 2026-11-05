@@ -9,7 +9,7 @@ from langgraph.graph.state import CompiledStateGraph
 def qwen_3_5_4b_thinking() -> CompiledStateGraph:
     return create_agent(
         context_schema=RunBudgetContext,
-        model=create_model("lmrouter/qwen_3_5_4b_unlooped_thinking"),
+        model=create_model("lmrouter/qwen_3_5_4b_thinking"),
         tools=[],
         middleware=[RunBudgetMiddleware()],
         system_prompt=AGENT_SYSTEM_PROMPT,

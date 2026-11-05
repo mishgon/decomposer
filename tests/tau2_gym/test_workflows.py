@@ -281,14 +281,14 @@ def test_preset_teacher_takes_both_roles_from_models_py(
     env = run_module.base_environment(run_module.PortLayout(), subagent_backend="preset", subagent_model_id=model)
     assert json.loads(env["TAU2_GYM_MODEL_BASE_URLS_JSON"]) == {}
     record = run_module.subagent_sampling_record(env, experiment.subagent_preset)
-    assert record["preset"] == "lmrouter/qwen_3_5_4b_unlooped_thinking"
-    assert (record["temperature"], record["top_p"], record["max_completion_tokens"]) == (0.6, 0.95, None)
+    assert record["preset"] == "lmrouter/qwen_3_5_4b_thinking"
+    assert (record["temperature"], record["top_p"], record["max_completion_tokens"]) == (1.0, 0.95, None)
 
     monkeypatch.setenv("LLM_PROXY_MASTER_KEY", "secret-value")
     run_module.main(["--experiment", PRESET_TEACHER, "--limit", "10", "--dry"])
     plan = json.loads(capsys.readouterr().out)
     assert plan["subagent_backend"] == "preset" and plan["subagent"] is None
-    assert plan["subagent_sampling"]["preset"] == "lmrouter/qwen_3_5_4b_unlooped_thinking"
+    assert plan["subagent_sampling"]["preset"] == "lmrouter/qwen_3_5_4b_thinking"
     langgraph = plan["langgraph"]
     assert langgraph[langgraph.index("-m") + 1] == "gyms.tau2_gym.langgraph_server"
     assert langgraph[langgraph.index("--config") + 1] == f"{plan['output_dir']}/langgraph/langgraph.json"
@@ -321,8 +321,8 @@ def test_preset_subagent_graph_is_the_models_py_client(monkeypatch: pytest.Monke
     monkeypatch.setattr(graph, "create_model", lambda preset: seen.setdefault("preset", preset))
     monkeypatch.setattr(graph, "create_agent", lambda **kwargs: seen.update(kwargs) or object())
     graph.qwen35_4b_unlooped_thinking()
-    assert seen["preset"] == "lmrouter/qwen_3_5_4b_unlooped_thinking"
-    assert seen["model"] == "lmrouter/qwen_3_5_4b_unlooped_thinking"
+    assert seen["preset"] == "lmrouter/qwen_3_5_4b_thinking"
+    assert seen["model"] == "lmrouter/qwen_3_5_4b_thinking"
     assert graph._system_prompt_with_policy in seen["middleware"]
     assert "system_prompt" not in seen
 

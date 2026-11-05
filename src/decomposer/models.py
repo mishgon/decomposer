@@ -106,12 +106,12 @@ def create_model(
         "vllm/qwen_3_5_4b_thinking",
         "vllm/qwen_3_5_4b_non_thinking",
         "vllm/qwen_3_8_flash_next_non_thinking",
-        "lmrouter/qwen_3_5_4b_unlooped_thinking",
-        "lmrouter/qwen_3_5_4b_unlooped_non_thinking",
+        "lmrouter/qwen_3_5_4b_thinking",
+        "lmrouter/qwen_3_5_4b_non_thinking",
         "lmrouter/qwen_3_8_flash_next_non_thinking",
         "lmrouter/qwen_3_8_flash_next_low_thinking",
         "lmrouter/qwen_3_8_flash_next_medium_thinking",
-        "temp/qwen_3_5_4b_unlooped_thinking",
+        "temp/qwen_3_5_4b_thinking",
         "temp/qwen_3_8_flash_next_non_thinking",
         "openrouter/qwen_3_8_flash_next_non_thinking",
         "openrouter/qwen_3_8_flash_next_low_thinking",
@@ -133,12 +133,25 @@ def create_model(
             trust_env=False,
         )
     match model_id:
-        case "vllm/qwen_3_5_4b_thinking" | "vllm/qwen_3_5_4b_non_thinking":
-            thinking = model_id == "vllm/qwen_3_5_4b_thinking"
+        case (
+            "vllm/qwen_3_5_4b_thinking" | "vllm/qwen_3_5_4b_non_thinking"
+            | "lmrouter/qwen_3_5_4b_thinking" | "lmrouter/qwen_3_5_4b_non_thinking"
+            | "temp/qwen_3_5_4b_thinking"
+        ):
+            thinking = not model_id.endswith("_non_thinking")
+            if model_id.startswith("vllm/"):
+                url = base_url or f"http://{os.environ.get('VLLM_HOST', '127.0.0.1')}:{_QWEN_3_5_4B_PORT}/v1"
+                key = "EMPTY"
+            elif model_id.startswith("lmrouter/"):
+                url = "https://lmrouter.2a2i.org/v1"
+                key = os.environ.get("LLM_PROXY_MASTER_KEY", "EMPTY")
+            else:
+                url = "https://135-106-142-250.sslip.io/v1"
+                key = os.environ.get("TEMP_LLM_PROXY_MASTER_KEY", "EMPTY")
             return ChatVLLM(
                 model="Qwen/Qwen3.5-4B",
-                base_url=base_url or f"http://{os.environ.get('VLLM_HOST', '127.0.0.1')}:{_QWEN_3_5_4B_PORT}/v1",
-                api_key="EMPTY",
+                base_url=url,
+                api_key=key,
                 # https://huggingface.co/Qwen/Qwen3.5-4B#best-practices
                 temperature=1.0 if thinking else 0.7,
                 top_p=0.95 if thinking else 0.8,
@@ -171,38 +184,6 @@ def create_model(
                     "repetition_penalty": 1.0,
                     "chat_template_kwargs": {"enable_thinking": False},
                 },
-                preserve_reasoning=False,
-                timeout=600,
-                max_retries=2,
-                http_client=sync_client,
-                http_async_client=client,
-                disable_streaming=True,
-                use_responses_api=False,
-            )
-        case "lmrouter/qwen_3_5_4b_unlooped_thinking":
-            return ChatVLLM(
-                model="Qwen/Qwen3.5-4B-unlooped",
-                base_url="https://lmrouter.2a2i.org/v1",
-                api_key=os.environ.get("LLM_PROXY_MASTER_KEY", "EMPTY"),
-                temperature=0.6,
-                top_p=0.95,
-                extra_body={"top_k": 20, "chat_template_kwargs": {"enable_thinking": True}},
-                preserve_reasoning=True,
-                timeout=600,
-                max_retries=2,
-                http_client=sync_client,
-                http_async_client=client,
-                disable_streaming=True,
-                use_responses_api=False,
-            )
-        case "lmrouter/qwen_3_5_4b_unlooped_non_thinking":
-            return ChatVLLM(
-                model="Qwen/Qwen3.5-4B-unlooped",
-                base_url="https://lmrouter.2a2i.org/v1",
-                api_key=os.environ.get("LLM_PROXY_MASTER_KEY", "EMPTY"),
-                temperature=0.7,
-                top_p=0.8,
-                extra_body={"top_k": 20, "chat_template_kwargs": {"enable_thinking": False}},
                 preserve_reasoning=False,
                 timeout=600,
                 max_retries=2,
@@ -256,22 +237,6 @@ def create_model(
                         "preserve_thinking": True,
                     },
                 },
-                preserve_reasoning=True,
-                timeout=600,
-                max_retries=2,
-                http_client=sync_client,
-                http_async_client=client,
-                disable_streaming=True,
-                use_responses_api=False,
-            )
-        case "temp/qwen_3_5_4b_unlooped_thinking":
-            return ChatVLLM(
-                model="Qwen/Qwen3.5-4B-unlooped",
-                base_url="https://135-106-142-250.sslip.io/v1",
-                api_key=os.environ.get("TEMP_LLM_PROXY_MASTER_KEY", "EMPTY"),
-                temperature=0.6,
-                top_p=0.95,
-                extra_body={"top_k": 20, "chat_template_kwargs": {"enable_thinking": True}},
                 preserve_reasoning=True,
                 timeout=600,
                 max_retries=2,

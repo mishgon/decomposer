@@ -20,7 +20,7 @@ from typing import Any
 from decomposer.models import ChatVLLM, create_model
 
 QWEN38_FLASH_NON_THINKING_PRESET = "lmrouter/qwen_3_8_flash_next_non_thinking"
-QWEN35_UNLOOPED_THINKING_PRESET = "lmrouter/qwen_3_5_4b_unlooped_thinking"
+QWEN35_UNLOOPED_THINKING_PRESET = "lmrouter/qwen_3_5_4b_thinking"
 
 # Subagent presets and the LangGraph graph serving each, in this gym's
 # subagents/langgraph.json.

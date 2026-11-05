@@ -12,7 +12,7 @@ from sft.schema import SelectionSpec, SourceSpec
 from sft.snapshots import create_snapshot
 from sft.wideseek.adapter import read_wideseek_source, snapshot_files
 
-RESEARCHER = "lmrouter/qwen_3_5_4b_unlooped_thinking"
+RESEARCHER = "lmrouter/qwen_3_5_4b_thinking"
 TOOLS = build_decomposer_chat_tools(
     [
         {

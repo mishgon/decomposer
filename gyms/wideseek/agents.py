@@ -7,7 +7,7 @@ from gyms.wideseek.prompts import AGENT_SYSTEM_PROMPT
 from gyms.wideseek.runtime import Context, ModelLog, model
 from gyms.wideseek.worker import access, search
 
-REACT_MODEL = "lmrouter/qwen_3_5_4b_unlooped_thinking"
+REACT_MODEL = "lmrouter/qwen_3_5_4b_thinking"
 DECOMPOSER_MODEL = "lmrouter/qwen_3_8_flash_next_non_thinking"
 RESEARCHER_MODEL = REACT_MODEL
 JUDGE_MODEL = "lmrouter/qwen_3_8_flash_next_non_thinking"

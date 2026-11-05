@@ -97,7 +97,7 @@ config from it and writes it to `<run>/configuration/tau2_gym.yaml`.
 | `qwen38_flash_teacher_{non_thinking,thinking}` | Qwen3.8-Flash-Next via the LLM proxy | teacher | train_v2 |
 | `qwen38_flash_teacher_thinking_low` | the same, thinking with `reasoning.effort` low | teacher | train_v2 |
 | `qwen38_flash_thinking_low_teacher_qwen35_4b_unlooped` | the same at effort low without the presence penalty; subagents on the unlooped model's own non-thinking sampling, 8192-token cap | teacher | train_v2 |
-| `qwen38_flash_non_thinking_teacher_qwen35_4b_unlooped_thinking` | `models.py` presets: `lmrouter/qwen_3_8_flash_next_non_thinking` manager; `lmrouter/qwen_3_5_4b_unlooped_thinking` subagents (type `subagent_thinking`, no output cap) | teacher | broad_v1 |
+| `qwen38_flash_non_thinking_teacher_qwen35_4b_unlooped_thinking` | `models.py` presets: `lmrouter/qwen_3_8_flash_next_non_thinking` manager; `lmrouter/qwen_3_5_4b_thinking` subagents (type `subagent_thinking`, no output cap) | teacher | broad_v1 |
 | `deepseek_v4_flash_teacher` | DeepSeek-v4-flash via OpenRouter (effort max) | teacher | train_v2 |
 | `qwen35_4b_base_student` | untuned Qwen3.5-4B, local vLLM | student | eval_v1 |
 | `qwen35_4b_sft_mixed_v3_student` | Qwen3.5-4B SFT (v5 student release), local vLLM | student | eval_v1 |
