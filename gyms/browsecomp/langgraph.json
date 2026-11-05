@@ -1,0 +1,8 @@
+{
+  "dependencies": ["../.."],
+  "graphs": {
+    "researcher": "./agents.py:researcher",
+    "decomposer": "./agents.py:decomposer"
+  },
+  "python_version": "3.12"
+}
