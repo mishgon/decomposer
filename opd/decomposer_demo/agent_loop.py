@@ -6,7 +6,7 @@ from uuid import uuid4
 
 from verl.experimental.agent_loop.agent_loop import AgentLoopBase,AgentLoopOutput,register
 from gyms.decomposer_demo.run import episode
-from opd.policy import PolicyTokens,VerlChatModel
+from opd.policy import PolicyTokens,VerlChatModel,is_episode_failure
 
 
 @register('demo_decomposer')
@@ -27,11 +27,12 @@ class DemoAgentLoop(AgentLoopBase):
         result=await episode(info['task_id'],VerlChatModel(tokens=tokens),
                              language=info['language'])
         (directory/'result.json').write_text(json.dumps(result,ensure_ascii=False,default=str))
-        if result['error_type'] not in {None,'RolloutBudgetExceeded','GraphRecursionError','TimeoutError'}:
+        if result['error_type'] is not None and not is_episode_failure(result):
             raise RuntimeError(f'Demo validation infrastructure failure: {result["error_type"]}; see {directory}')
         if not tokens.response_ids or not any(tokens.mask):
             raise RuntimeError('No validation student tokens produced')
         return AgentLoopOutput(prompt_ids=tokens.prompt_ids,response_ids=tokens.response_ids,
-            response_mask=tokens.mask,response_logprobs=tokens.logprobs,reward_score=result['score'],
+            response_mask=tokens.mask,response_logprobs=tokens.logprobs,
+            reward_score=0. if result['error_type'] else result['score'],
             num_turns=tokens.turns,metrics={'passed':float(result['passed'])},
             extra_fields={**tokens.extra,'task_id':info['task_id'],'stop_reason':result['status']})

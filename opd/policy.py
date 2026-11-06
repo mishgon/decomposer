@@ -42,11 +42,20 @@ class RolloutBudgetExceeded(Exception):
 
 def is_episode_failure(result):
     """Recognize agent stopping failures without hiding runtime or data errors."""
-    if result.get('error_type') in {'RolloutBudgetExceeded', 'GraphRecursionError', 'TimeoutError'}:
+    worker_errors = result.get('worker_errors', [])
+    if any(not is_episode_failure({'error_type': error.split(':', 1)[0], 'error': error})
+           for error in worker_errors):
+        return False
+    if result.get('error_type') == 'WorkerError':
+        return bool(worker_errors)
+    if result.get('error_type') in {'RolloutBudgetExceeded', 'GraphRecursionError', 'TimeoutError',
+                                  'ModelCallLimitExceededError'}:
         return True
-    shutdown = 'Decomposer requested tools instead of completing graceful shutdown'
-    return result.get('error_type') == 'ValueError' and result.get('error') in {
-        repr(ValueError(shutdown)), f'ValueError: {shutdown}'}
+    shutdowns = ('Decomposer requested tools instead of completing graceful shutdown',
+                 'Agent requested tools instead of returning its report')
+    return result.get('error_type') == 'ValueError' and any(
+        result.get('error') in {repr(ValueError(message)), f'ValueError: {message}'}
+        for message in shutdowns)
 
 
 class PolicyTokens:
