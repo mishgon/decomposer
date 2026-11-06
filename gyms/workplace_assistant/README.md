@@ -61,7 +61,7 @@ The matched text-default profiles are:
   (`gyms/workplace_assistant/model_presets.py`). The manager is `lmrouter/qwen_3_8_flash_next_non_thinking`
   behind the loopback manager proxy, whose extra body is that preset with
   `reasoning.effort: "none"` (the proxy ignores `chat_template_kwargs` on the
-  Responses API). The subagents are `lmrouter/qwen_3_5_4b_unlooped_thinking`
+  Responses API). The subagents are `lmrouter/qwen_3_5_4b_thinking`
   (`subagent_backend="preset"`): the `qwen35_4b_unlooped_thinking` graph is the
   preset's own `create_model()` client, thinking, with reasoning kept across turns and
   no output cap, reaching the proxy on its own endpoint with `LLM_PROXY_MASTER_KEY`.
