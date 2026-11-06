@@ -1,0 +1,16 @@
+diff --git a/verl/experimental/fully_async_policy/fully_async_rollouter.py b/verl/experimental/fully_async_policy/fully_async_rollouter.py
+--- a/verl/experimental/fully_async_policy/fully_async_rollouter.py
++++ b/verl/experimental/fully_async_policy/fully_async_rollouter.py
+@@ -779,6 +779,14 @@
+         if is_distillation_enabled(self.config.get("distillation")):
++            manager_class = self.config.async_training.get("teacher_manager_class")
++            if manager_class:
++                from importlib import import_module
++
++                module, name = manager_class.rsplit(".", 1)
++                self.teacher_model_manager = getattr(import_module(module), name)(self.config)
++                return
++
+             from verl.experimental.teacher_loop import MultiTeacherModelManager
+ 
+             resource_pool_spec = {}

@@ -1,0 +1,11 @@
+# The async trainer alternates training and rollout on its single GPU.
+defaults:
+  - experiment
+  - _self_
+rollout:
+  nnodes: 0
+async_training:
+  use_dynamic_resource_scheduling: true
+  # Finish one batch before lending the only GPU to training; queued episodes
+  # otherwise spend their wall-clock budgets waiting for rollout to resume.
+  staleness_threshold: 0.0
