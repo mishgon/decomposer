@@ -30,18 +30,22 @@ def remote(monkeypatch):
             return '\n'.join(f'2026-10-30 12:00 {len(data)} {key}'
                              for key, data in objects.items() if key.startswith(prefix))
         if args[0] == 'sync':
-            root = Path(args[1])
+            root = Path(args[-2])
             for path in root.rglob('*'):
                 if path.is_file():
-                    objects[args[2] + str(path.relative_to(root))] = path.read_bytes()
+                    objects[args[-1] + str(path.relative_to(root))] = path.read_bytes()
+        elif args[0] == 'put':
+            objects[args[-1]] = kwargs['input'].encode()
+        elif args[0] == 'del':
+            del objects[args[-1]]
         elif args[0] == 'get':
-            prefix, destination = args[-2:]
-            for key, data in objects.items():
-                if key.startswith(prefix):
-                    path = Path(destination) / key[len(prefix):]
-                    if not path.exists():
-                        path.parent.mkdir(parents=True, exist_ok=True)
-                        path.write_bytes(data)
+            uri, destination = args[-2:]
+            if uri in objects:
+                if destination == '-':
+                    return objects[uri].decode()
+                path = Path(destination)
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(objects[uri])
         return ''
     monkeypatch.setattr(storage, 's3cmd', command)
     return objects, calls
@@ -125,3 +129,86 @@ def test_cleanup_cannot_follow_directory_symlink(checkpoint, remote, tmp_path):
     with pytest.raises(ValueError, match='escapes'):
         storage.offload(checkpoint, URI)
     assert weight.read_bytes() == b'adapter weights'
+
+
+def test_same_sized_remote_collision_preserves_both_checkpoints(checkpoint, remote):
+    objects, calls = remote
+    for f in storage.payload_files(checkpoint):
+        objects[URI + '/' + f['name']] = b'X' * f['size']
+    original = (checkpoint / 'actor/model.pt').read_bytes()
+    with pytest.raises(RuntimeError, match='already occupied'):
+        storage.offload(checkpoint, URI)
+    assert (checkpoint / 'actor/model.pt').read_bytes() == original
+    assert objects[URI + '/actor/model.pt'] == b'X' * len(original)
+    assert not any(c[0] == 'sync' for c in calls)
+    assert not (checkpoint / storage.MARKER).exists()
+
+
+def test_same_sized_changed_residue_is_not_deleted(checkpoint, remote):
+    storage.offload(checkpoint, URI)
+    path = checkpoint / 'data.pt'
+    path.write_bytes(b'X' * len(b'loader state'))
+    with pytest.raises(RuntimeError, match='Local checkpoint changed'):
+        storage.offload(checkpoint, URI)
+    assert path.exists()
+
+
+@pytest.mark.parametrize('residue', [b'x', b'X' * len(b'adapter weights')])
+def test_restore_repairs_incomplete_or_wrong_content(checkpoint, remote, residue):
+    storage.offload(checkpoint, URI)
+    (checkpoint / 'actor/model.pt').write_bytes(residue)
+    storage.restore(checkpoint)
+    assert (checkpoint / 'actor/model.pt').read_bytes() == b'adapter weights'
+    assert not (checkpoint / storage.MARKER).exists()
+
+
+def test_corrupt_remote_payload_keeps_marker_and_existing_file(checkpoint, remote):
+    storage.offload(checkpoint, URI)
+    remote[0][URI + '/actor/model.pt'] = b'X' * len(b'adapter weights')
+    path = checkpoint / 'actor/model.pt'
+    path.write_bytes(b'incomplete')
+    with pytest.raises(RuntimeError, match='content verification failed'):
+        storage.restore(checkpoint)
+    assert path.read_bytes() == b'incomplete'
+    assert (checkpoint / storage.MARKER).exists()
+
+
+def test_interrupted_download_can_be_retried(checkpoint, remote, monkeypatch):
+    storage.offload(checkpoint, URI)
+    command = storage.s3cmd
+    def interrupted(*args, **kwargs):
+        if args[0] == 'get':
+            Path(args[-1]).write_bytes(b'partial')
+            raise subprocess.CalledProcessError(1, ['s3cmd', 'get'])
+        return command(*args, **kwargs)
+    with monkeypatch.context() as patch:
+        patch.setattr(storage, 's3cmd', interrupted)
+        with pytest.raises(subprocess.CalledProcessError):
+            storage.restore(checkpoint)
+    assert (checkpoint / storage.MARKER).exists()
+    assert not (checkpoint / 'actor/model.pt').exists()
+    storage.restore(checkpoint)
+    assert (checkpoint / 'actor/model.pt').read_bytes() == b'adapter weights'
+
+
+def test_legacy_size_only_marker_can_still_restore(checkpoint, remote):
+    import json
+    record = storage.offload(checkpoint, URI)
+    for f in record['removed_files']:
+        f.pop('sha256')
+    (checkpoint / storage.MARKER).write_text(json.dumps(record))
+    storage.restore(checkpoint)
+    assert (checkpoint / 'actor/model.pt').read_bytes() == b'adapter weights'
+
+
+def test_storage_preflight_rejects_existing_experiment_before_writes(remote):
+    remote[0][URI + '/model.pt'] = b'previous checkpoint'
+    with pytest.raises(RuntimeError, match='experiment destination is already occupied'):
+        storage.check_access(URI)
+    assert [call[0] for call in remote[1]] == ['ls']
+
+
+def test_storage_preflight_uses_and_removes_only_its_probe(remote):
+    storage.check_access(URI)
+    assert not remote[0]
+    assert [call[0] for call in remote[1]] == ['ls', 'put', 'get', 'del']

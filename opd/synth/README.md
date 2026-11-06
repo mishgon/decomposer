@@ -199,8 +199,8 @@ training with local data intact. Successful offloads preserve `evaluation/` and
 The marker is written before deletion so interrupted cleanup remains explicit.
 S3 checkpoints are retained; local heavy files do not accumulate between updates.
 
-The job checks S3 write/read/delete access with a unique tiny probe before
-training. No credentials are included in the job description or environment.
+The job rejects an occupied experiment prefix and checks S3 write/read/delete
+access with a unique tiny probe before training. No credentials are included in the job description or environment.
 
 Restore a checkpoint before passing it to `--resume-from`:
 
@@ -208,8 +208,9 @@ Restore a checkpoint before passing it to `--resume-from`:
 UV_BIN=/home/jovyan/.local/bin/uv python -m opd.checkpoint_offload restore /absolute/path/to/global_step_8
 ```
 
-Restore uses `s3cmd get --recursive --skip-existing`, verifies sizes, and removes
-the marker only on success. Partially restored checkpoints remain marked.
+Restore fetches missing or mismatched payloads individually into temporary files,
+verifies sizes and SHA-256 hashes when present, and replaces files atomically.
+It removes the marker only on success. Partially restored checkpoints remain marked.
 This follows team ADR 0008's NFS → S3 → verified offload convention, with
 automatic offload at the completed-checkpoint boundary for these MLSpace jobs.
 
@@ -268,3 +269,30 @@ evaluation, shared local workers, and demo tests are unchanged. Optional OPD dem
 adapter documentation and tests live under `opd/decomposer_demo/` and
 `tests/test_opd_demo_validation.py`. The default learning validation remains the
 synthetic probes and the selected Workplace-20 panel.
+
+## Review Hardening
+
+Workplace validation and optional OPD demo validation use the shared episode-failure
+classifier. Worker recursion, time, and model-call budgets are zero-reward task
+outcomes. Worker transport failures and invalid token alignment remain fatal, even
+when another worker or the coordinator also exhausted a budget. Raw worker errors
+remain in the saved result. The standalone demo gym and its scoring are unchanged.
+
+Before starting training, probe the exact Workplace worker profile used for panel
+calibration: `lmrouter/qwen_3_5_4b_unlooped_non_thinking`. The MLSpace entrypoint does
+this before baseline inference; direct synth launches do it before creating the
+training output. An unavailable worker is an explicit preflight failure. Replacing
+that model requires a separately recorded calibration change.
+
+Checkpoint offload refuses any occupied destination unless the local offload marker
+already identifies the completed upload. This prevents same-sized old objects from
+being mistaken for the new checkpoint. Use a fresh experiment destination after an
+interrupted upload without a marker; the local payload is preserved. Do not run two
+writers against the same checkpoint prefix.
+
+New markers record local SHA-256 hashes. Restore downloads missing, truncated, or
+hash-mismatched payloads into temporary files, verifies them, and atomically replaces
+the destination. It keeps the marker until every payload passes verification and
+leaves local evaluation artifacts alone. Older size-only markers remain readable,
+but cannot detect same-sized content corruption. Upload verification still relies
+on s3cmd transfer integrity and remote sizes; it does not perform a full readback.
