@@ -259,3 +259,55 @@ def test_registered_factories_match_trace_models_and_worker_identity(monkeypatch
             "description": "Qwen3.5-4B thinking agent equipped with search and access tools.",
             "url": "http://worker",
         }]
+
+
+@pytest.mark.parametrize("mismatch", [None, "agent", "timeout", "running"])
+def test_resume_keeps_completed_episodes_and_archives_partial_logs(monkeypatch, tmp_path, mismatch):
+    data = tmp_path / "tasks.jsonl"
+    data.write_text(json.dumps({"task_id": "a", "question": "Q", "answer": "A"}) + "\n")
+    root = tmp_path / "run"
+    complete = root / "traces/a-r001"
+    complete.mkdir(parents=True)
+    (complete / "trace.json").write_text('original trace')
+    partial = root / "traces/a-r002"
+    partial.mkdir()
+    (partial / "model_calls.jsonl").write_text('interrupted request')
+    args = run.parser().parse_args(["--data", str(data), "--all", "-n", "3",
+        "--agent", "researcher", "--resume", str(root), "--concurrency", "8"])
+    config = {k: str(v) if isinstance(v, run.Path) else v for k, v in vars(args).items()}
+    config["concurrency"] = 2
+    manifest = {"run_id": "run", "status": "interrupted", "started_at": run.now(),
+        "finished_at": run.now(), "assistant_id": "researcher", "tasks": ["a"],
+        "repetitions": 3, "config": config, "episodes": [{"task": "a", "repetition": 1,
+            "status": "finished", "evaluation": {"score": 1, "passed": True}}]}
+    if mismatch == "agent":
+        manifest["assistant_id"] = "decomposer"
+    elif mismatch == "timeout":
+        manifest["config"]["timeout"] = 100
+    elif mismatch == "running":
+        manifest["status"] = "running"
+    run.save(root / "manifest.json", manifest)
+    monkeypatch.setattr(run, "preflight", AsyncMock())
+    calls = []
+    async def spawn(*command, **kwargs):
+        calls.append(command)
+        directory = run.Path(command[command.index("--output-dir") + 1])
+        assert not (directory / "model_calls.jsonl").exists()
+        return SimpleNamespace(returncode=1, wait=AsyncMock(return_value=1))
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", spawn)
+    if mismatch:
+        with pytest.raises(ValueError, match="Resume"):
+            asyncio.run(run.main(args))
+        assert not calls
+        assert (partial / "model_calls.jsonl").read_text() == 'interrupted request'
+        return
+    assert asyncio.run(run.main(args)) == root
+    result = json.loads((root / "manifest.json").read_text())
+    assert len(calls) == 2
+    assert len(result["episodes"]) == 3
+    assert {(x["task"], x["repetition"]) for x in result["episodes"]} == {("a", 1), ("a", 2), ("a", 3)}
+    assert result["episodes"][0] == manifest["episodes"][0]
+    assert (complete / "trace.json").read_text() == 'original trace'
+    assert next((root / "interrupted").glob('*/model_calls.jsonl')).read_text() == 'interrupted request'
+    assert result["resumptions"][-1]["concurrency"] == 8
+    assert result["status"] == "completed"
