@@ -152,7 +152,7 @@ def create_model(
                 },
                 preserve_reasoning=thinking,
                 timeout=600,
-                max_retries=0 if hosted else 2,
+                max_retries=0 if model_id.startswith("lmrouter/") else 2,
                 http_client=sync_client,
                 http_async_client=client,
                 disable_streaming=True,

@@ -1,6 +1,7 @@
 import asyncio
 import json
 import ssl
+from typing import get_args, get_type_hints
 
 import httpx
 import pytest
@@ -99,13 +100,11 @@ def test_other_requests_are_not_replayed(url, delays):
 
 
 @pytest.mark.parametrize('profile', [
-    'qwen_3_5_4b_thinking', 'qwen_3_5_4b_non_thinking',
-    'qwen_3_5_4b_unlooped_thinking', 'qwen_3_5_4b_unlooped_non_thinking',
-    'qwen_3_8_flash_next_non_thinking', 'qwen_3_8_flash_next_low_thinking',
-    'qwen_3_8_flash_next_medium_thinking',
+    profile for profile in get_args(get_type_hints(create_model)['model_id'])
+    if profile.startswith('lmrouter/')
 ])
 def test_every_lmrouter_profile_uses_recovery(profile):
-    model = create_model('lmrouter/' + profile)
+    model = create_model(profile)
     try:
         assert isinstance(model.http_client._transport, recovery.RecoveringTransport)
         assert isinstance(model.http_async_client._transport, recovery.AsyncRecoveringTransport)
