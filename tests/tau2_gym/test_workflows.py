@@ -273,10 +273,10 @@ def test_preset_teacher_takes_both_roles_from_models_py(
     with pytest.raises(SystemExit, match="no subagent preset"):
         run_module.resolve_subagent_backend(get_experiment("qwen38_flash_thinking_low_teacher_qwen35_4b_unlooped"), "preset")
     model = run_module.resolve_subagent_model_id("preset", None, experiment)
-    assert model == "Qwen/Qwen3.5-4B-unlooped"
+    assert model == "Qwen/Qwen3.5-4B"
     assert run_module.upstream_model_ids(experiment, subagent_backend="preset", subagent_model_id=model) == [
         "Qwen/Qwen3.8-Flash-Next-NVFP4",
-        "Qwen/Qwen3.5-4B-unlooped",
+        "Qwen/Qwen3.5-4B",
     ]
     env = run_module.base_environment(run_module.PortLayout(), subagent_backend="preset", subagent_model_id=model)
     assert json.loads(env["TAU2_GYM_MODEL_BASE_URLS_JSON"]) == {}
