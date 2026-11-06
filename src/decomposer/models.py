@@ -106,7 +106,7 @@ def create_model(
         "vllm/qwen_3_5_4b_thinking",
         "vllm/qwen_3_5_4b_non_thinking",
         "vllm/decomposer_manager_qwen35_4b_sft_1_2_0",
-        "lmrouter/qwen_3_8_27b_thinking",
+        "lmrouter/qwen_3_8_27b_medium_thinking",
         "vllm/qwen_3_8_flash_next_non_thinking",
         "lmrouter/qwen_3_5_4b_thinking",
         "lmrouter/qwen_3_5_4b_non_thinking",
@@ -175,7 +175,7 @@ def create_model(
                 disable_streaming=True,
                 use_responses_api=False,
             )
-        case "lmrouter/qwen_3_8_27b_thinking":
+        case "lmrouter/qwen_3_8_27b_medium_thinking":
             return ChatVLLM(
                 model="Qwen/Qwen3.8-27B-FP8",
                 base_url="https://lmrouter.2a2i.org/v1",
@@ -184,8 +184,9 @@ def create_model(
                 temperature=1.0,
                 top_p=0.95,
                 presence_penalty=0.0,
-                reasoning_effort="xhigh",
+                reasoning_effort="medium",
                 extra_body={
+                    "allowed_openai_params": ["reasoning_effort"],
                     "top_k": 20, "min_p": 0.0, "repetition_penalty": 1.0,
                     "chat_template_kwargs": {"enable_thinking": True, "preserve_thinking": True},
                 },

@@ -49,7 +49,7 @@ def researcher_4b_thinking():
 
 
 def researcher_27b_thinking():
-    return _researcher("lmrouter/qwen_3_8_27b_thinking")
+    return _researcher("lmrouter/qwen_3_8_27b_medium_thinking")
 
 
 def decomposer_4b_non_thinking():
@@ -65,7 +65,7 @@ AGENTS = {
     "researcher": (RESEARCHER_MODEL, "react"),
     "decomposer": (DECOMPOSER_MODEL, "decomposer"),
     "researcher_4b_thinking": (RESEARCHER_MODEL, "react"),
-    "researcher_27b_thinking": ("lmrouter/qwen_3_8_27b_thinking", "react"),
+    "researcher_27b_thinking": ("lmrouter/qwen_3_8_27b_medium_thinking", "react"),
     "decomposer_4b_non_thinking": ("lmrouter/qwen_3_5_4b_non_thinking", "decomposer"),
     "decomposer_sft_1_2_0": ("vllm/decomposer_manager_qwen35_4b_sft_1_2_0", "decomposer"),
 }

@@ -80,7 +80,7 @@ Choose a Python factory with `--agent`:
 | Agent | Model | Harness |
 | --- | --- | --- |
 | `researcher_4b_thinking` | Qwen3.5-4B thinking | ReAct |
-| `researcher_27b_thinking` | Qwen3.8-27B-FP8 thinking (xhigh) | ReAct |
+| `researcher_27b_thinking` | Qwen3.8-27B-FP8 thinking (medium) | ReAct |
 | `decomposer_4b_non_thinking` | Qwen3.5-4B non-thinking | Decomposer |
 | `decomposer_sft_1_2_0` | Decomposer manager SFT 1.2.0 | Decomposer |
 
