@@ -216,3 +216,7 @@ marimo/_lsp/
 __marimo__/
 
 /student-tokenizer/
+# OPD runtime installed by opd/setup.sh
+.venv-opd
+.venv-workers
+/external/verl

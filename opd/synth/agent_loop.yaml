@@ -1,0 +1,6 @@
+- name: synth_decomposer
+  _target_: opd.synth.agent_loop.SynthAgentLoop
+- name: demo_decomposer
+  _target_: opd.decomposer_demo.agent_loop.DemoAgentLoop
+- name: workplace_decomposer
+  _target_: opd.workplace_assistant.agent_loop.WorkplaceAgentLoop
