@@ -105,6 +105,8 @@ def create_model(
     model_id: Literal[
         "vllm/qwen_3_5_4b_thinking",
         "vllm/qwen_3_5_4b_non_thinking",
+        "vllm/decomposer_manager_qwen35_4b_sft_1_2_0",
+        "lmrouter/qwen_3_8_27b_thinking",
         "vllm/qwen_3_8_flash_next_non_thinking",
         "lmrouter/qwen_3_5_4b_thinking",
         "lmrouter/qwen_3_5_4b_non_thinking",
@@ -137,10 +139,13 @@ def create_model(
             "vllm/qwen_3_5_4b_thinking" | "vllm/qwen_3_5_4b_non_thinking"
             | "lmrouter/qwen_3_5_4b_thinking" | "lmrouter/qwen_3_5_4b_non_thinking"
             | "temp/qwen_3_5_4b_thinking"
+            | "vllm/decomposer_manager_qwen35_4b_sft_1_2_0"
         ):
-            thinking = not model_id.endswith("_non_thinking")
+            sft = model_id == "vllm/decomposer_manager_qwen35_4b_sft_1_2_0"
+            thinking = not sft and not model_id.endswith("_non_thinking")
             if model_id.startswith("vllm/"):
-                url = base_url or f"http://{os.environ.get('VLLM_HOST', '127.0.0.1')}:{_QWEN_3_5_4B_PORT}/v1"
+                port = 18024 if sft else _QWEN_3_5_4B_PORT
+                url = base_url or f"http://{os.environ.get('VLLM_HOST', '127.0.0.1')}:{port}/v1"
                 key = "EMPTY"
             elif model_id.startswith("lmrouter/"):
                 url = "https://lmrouter.2a2i.org/v1"
@@ -149,7 +154,7 @@ def create_model(
                 url = "https://135-106-142-250.sslip.io/v1"
                 key = os.environ.get("TEMP_LLM_PROXY_MASTER_KEY", "EMPTY")
             return ChatVLLM(
-                model="Qwen/Qwen3.5-4B",
+                model="decomposer-manager-qwen35-4b-sft-1.2.0" if sft else "Qwen/Qwen3.5-4B",
                 base_url=url,
                 api_key=key,
                 # https://huggingface.co/Qwen/Qwen3.5-4B#best-practices
@@ -169,6 +174,25 @@ def create_model(
                 http_async_client=client,
                 disable_streaming=True,
                 use_responses_api=False,
+            )
+        case "lmrouter/qwen_3_8_27b_thinking":
+            return ChatVLLM(
+                model="Qwen/Qwen3.8-27B-FP8",
+                base_url="https://lmrouter.2a2i.org/v1",
+                api_key=os.environ.get("LLM_PROXY_MASTER_KEY", "EMPTY"),
+                # https://huggingface.co/Qwen/Qwen3.8-27B#best-practices
+                temperature=1.0,
+                top_p=0.95,
+                presence_penalty=0.0,
+                reasoning_effort="xhigh",
+                extra_body={
+                    "top_k": 20, "min_p": 0.0, "repetition_penalty": 1.0,
+                    "chat_template_kwargs": {"enable_thinking": True, "preserve_thinking": True},
+                },
+                preserve_reasoning=True,
+                timeout=600, max_retries=2,
+                http_client=sync_client, http_async_client=client,
+                disable_streaming=True, use_responses_api=False,
             )
         case "vllm/qwen_3_8_flash_next_non_thinking":
             return ChatVLLM(

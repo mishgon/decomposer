@@ -65,8 +65,9 @@ def test_judge_errors_are_unscored_and_inclusion_is_not_a_pass(monkeypatch, tmp_
     assert evaluate.extract_answer("plain text") == ""
 
 
+@pytest.mark.parametrize("agent", list(run.AGENTS))
 @pytest.mark.parametrize("error", [None, TimeoutError("stopped")])
-def test_episode_artifacts_and_partial_capture(monkeypatch, tmp_path, error):
+def test_episode_artifacts_and_partial_capture(monkeypatch, tmp_path, error, agent):
     directory = tmp_path / "run" / "traces" / "task-r001"
     directory.mkdir(parents=True)
     (directory / "task.json").write_text(json.dumps({"task_id": "task", "question": "Q", "answer": "A"}))
@@ -77,12 +78,15 @@ def test_episode_artifacts_and_partial_capture(monkeypatch, tmp_path, error):
         content='```json\n{"final_answer":"A"}\n```'))]}, error))
     monkeypatch.setattr(run, "agent_server", server)
     monkeypatch.setattr(run, "invoke_and_capture", capture)
-    args = run.parser().parse_args(["--episode", "--output-dir", str(directory), "--agent", "researcher"])
+    args = run.parser().parse_args(["--episode", "--output-dir", str(directory), "--agent", agent])
     asyncio.run(run.episode(args))
     result = json.loads((directory / "result.json").read_text())
     assert result["status"] == ("timeout" if error else "finished")
     assert result["evaluation"]["score"] == 1
-    assert (directory / "trace.json").exists()
+    trace = json.loads((directory / "trace.json").read_text())
+    assert (trace["model"], trace["harness"]) == run.AGENTS[agent]
+    usage = json.loads((directory / "usage.json").read_text())
+    assert ("react" in usage) == (run.AGENTS[agent][1] == "react")
     assert (directory / "usage.json").exists()
     assert capture.call_args.kwargs["config"] == {"recursion_limit": 410}
 
@@ -232,3 +236,26 @@ def researcher():
         service.shutdown()
         service.server_close()
         thread.join()
+
+
+@pytest.mark.parametrize("name", list(run.AGENTS))
+def test_registered_factories_match_trace_models_and_worker_identity(monkeypatch, name):
+    from gyms.browsecomp import agents
+    monkeypatch.setenv("BROWSECOMP_AGENT_URL", "http://worker")
+    monkeypatch.setattr(agents, "create_model", lambda model: model)
+    monkeypatch.setattr(agents, "create_agent", lambda model, **kw: {"model": model, **kw})
+    monkeypatch.setattr(agents, "create_decomposer_agent", lambda **kw: kw)
+    graphs = json.loads(run.Path(agents.__file__).with_name("langgraph.json").read_text())["graphs"]
+    assert graphs[name] == f"./agents.py:{name}"
+    config = getattr(agents, name)()
+    model, harness = run.AGENTS[name]
+    if harness == "react":
+        assert config["model"] == model
+        assert config["tools"] == [tools.search, tools.fetch]
+    else:
+        assert config["decomposer_model"] == model
+        assert config["agent_types"] == [{
+            "agent_type_id": "qwen_3_5_4b_thinking", "assistant_id": "researcher",
+            "description": "Qwen3.5-4B thinking agent equipped with search and access tools.",
+            "url": "http://worker",
+        }]

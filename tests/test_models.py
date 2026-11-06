@@ -409,3 +409,28 @@ def test_vllm_address_override_preserves_model_settings(model_id):
 def test_non_vllm_address_override_is_rejected():
     with pytest.raises(ValueError, match="only for vllm"):
         create_model("lmrouter/qwen_3_8_flash_next_non_thinking", base_url="http://local/v1")
+
+
+def test_sft_1_2_0_reuses_base_non_thinking_sampling():
+    base = create_model("lmrouter/qwen_3_5_4b_non_thinking")
+    sft = create_model("vllm/decomposer_manager_qwen35_4b_sft_1_2_0")
+    expected = base._get_request_payload("test")
+    actual = sft._get_request_payload("test")
+    assert actual.pop("model") == "decomposer-manager-qwen35-4b-sft-1.2.0"
+    expected.pop("model")
+    assert actual == expected
+    assert not sft.preserve_reasoning
+    assert sft.openai_api_base == "http://127.0.0.1:18024/v1"
+
+
+def test_qwen38_27b_thinking_uses_official_sampling():
+    model = create_model("lmrouter/qwen_3_8_27b_thinking")
+    payload = model._get_request_payload("test")
+    assert payload["model"] == "Qwen/Qwen3.8-27B-FP8"
+    assert (payload["temperature"], payload["top_p"], payload["presence_penalty"]) == (1.0, .95, 0.0)
+    assert payload["reasoning_effort"] == "xhigh"
+    assert payload["extra_body"] == {
+        "top_k": 20, "min_p": 0.0, "repetition_penalty": 1.0,
+        "chat_template_kwargs": {"enable_thinking": True, "preserve_thinking": True},
+    }
+    assert model.preserve_reasoning
