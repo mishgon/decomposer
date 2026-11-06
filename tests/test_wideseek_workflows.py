@@ -98,8 +98,9 @@ def test_models_use_shared_registry_without_sampling_environment(monkeypatch):
     monkeypatch.setenv("LLM_PROXY_MASTER_KEY", "test-secret")
     policy = model(DEFAULT_SUBAGENT)
     metadata = model_metadata(policy)
-    assert metadata["model_name"] == "Qwen/Qwen3.5-4B-unlooped"
-    assert metadata["temperature"] == .6
+    assert metadata["model_name"] == "Qwen/Qwen3.5-4B"
+    assert metadata["temperature"] == 1.0
+    assert metadata["presence_penalty"] == 1.5
     assert metadata["top_p"] == .95
     assert metadata["extra_body"]["chat_template_kwargs"]["enable_thinking"]
     assert metadata["preserve_reasoning"]
@@ -123,9 +124,10 @@ def test_sft_collection_runs_without_tokenizer_or_length_guard(tmp_path, monkeyp
     monkeypatch.setattr(run, "prepare_collection", AsyncMock(return_value=(tasks, tmp_path)))
     launches = []
 
-    async def run_jobs(tasks, jobs, root, args, *, middleware=()):
+    async def run_jobs(tasks, jobs, root, args, *, middleware=(), episode_runner=None):
         launches.extend(tuple(job) for job in jobs)
         assert not middleware
+        assert episode_runner is not None
         assert args.episode_timeout == 2700
 
     monkeypatch.setattr(run, "run_jobs", run_jobs)

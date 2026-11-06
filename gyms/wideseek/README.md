@@ -60,9 +60,9 @@ and refuses to overwrite an existing directory. Agents receive only the question
 and output-format instructions. Split future held-out sets by question hash.
 
 `--agent react|decomposer` selects a named configuration from `agents.py`.
-ReAct and delegated researchers use thinking Qwen3.5-4B unlooped and the same
+ReAct and delegated researchers use thinking Qwen3.5-4B and the same
 system prompt. Decomposer uses non-thinking
-Qwen3.8 Flash Next with thinking Qwen3.5-4B unlooped researchers. The judge is
+Qwen3.8 Flash Next with thinking Qwen3.5-4B researchers. The judge is
 Flash Next. Model profiles are constants in `agents.py`; sampling settings come
 from the shared model registry. There are no model-override CLI flags.
 
