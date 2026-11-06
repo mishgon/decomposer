@@ -113,3 +113,18 @@ class EpisodeFailureTests(unittest.TestCase):
         from opd.policy import is_episode_failure
         for kind in ('RolloutBudgetExceeded', 'GraphRecursionError', 'TimeoutError'):
             self.assertTrue(is_episode_failure({'error_type': kind, 'error': kind + ': exhausted'}))
+
+
+    def test_expected_worker_errors_are_preserved(self):
+        from opd.policy import is_episode_failure
+        for error in ('GraphRecursionError: exhausted', 'TimeoutError: run budget',
+                      'ModelCallLimitExceededError: too many calls',
+                      'ValueError: Agent requested tools instead of returning its report'):
+            self.assertTrue(is_episode_failure({'error_type': 'WorkerError', 'worker_errors': [error]}))
+
+    def test_worker_infrastructure_errors_override_other_budget_errors(self):
+        from opd.policy import is_episode_failure
+        for kind in ('WorkerError', 'TimeoutError', 'GraphRecursionError'):
+            self.assertFalse(is_episode_failure({'error_type': kind, 'worker_errors': [
+                'GraphRecursionError: exhausted', 'APIConnectionError: offline']}))
+        self.assertFalse(is_episode_failure({'error_type': 'WorkerError'}))
