@@ -1,0 +1,10 @@
+# Same experiment; accelerated actor kernels and higher activation-memory use.
+defaults:
+  - full
+  - _self_
+actor_rollout_ref:
+  model:
+    use_fused_kernels: true
+    fused_kernel_options:
+      impl_backend: torch
+    enable_gradient_checkpointing: false

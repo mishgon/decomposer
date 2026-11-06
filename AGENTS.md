@@ -38,6 +38,14 @@ When custom code is necessary, write the minimum needed to meet current requirem
 
 Keep changes limited to the task. Do not improve adjacent code, comments, or formatting, or perform unrequested refactoring. Match existing style. Remove imports, variables, and functions that your changes made unused. Mention pre-existing dead code; do not delete it unless asked.
 
+### Episode Failures and Run Failures
+
+Do not promote an expected episode failure into a fatal experiment failure. A model can exhaust its time, token, or tool budget, produce an invalid answer, or fail a task. These are outcomes the benchmark measures. Preserve the raw trace and failure reason, apply the benchmark's scoring policy, and continue independent episodes. Do not let one expected failure cancel a batch through an uncaught exception in a task group.
+
+Classify failures by cause, not merely by an exception or a missing score. In WideSeek OPD, exhausting the episode deadline counts as zero reward; a missing score caused by a judge failure does not. Infrastructure failures, corrupt data, token alignment failures, and failed worker cleanup must remain explicit and must not silently become model scores. Use bounded retries for known transient infrastructure failures where supported; abort when continuing would invalidate results or leave resources uncontrolled.
+
+Keep baseline, validation, and training adapters consistent with the same gym's failure and scoring semantics. When fixing this class of bug, test both that an expected failed episode lets the batch finish and that a genuine infrastructure failure remains visible. Fix the classification rather than increasing budgets or broadly swallowing exceptions.
+
 ## LangChain Docs MCP
 
 Connect both LangChain documentation MCP servers to my coding agent so it can look up current LangChain, LangGraph, and LangSmith docs and API reference.
