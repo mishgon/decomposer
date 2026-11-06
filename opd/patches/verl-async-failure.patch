@@ -1,0 +1,14 @@
+diff --git a/verl/experimental/fully_async_policy/fully_async_rollouter.py b/verl/experimental/fully_async_policy/fully_async_rollouter.py
+--- a/verl/experimental/fully_async_policy/fully_async_rollouter.py
++++ b/verl/experimental/fully_async_policy/fully_async_rollouter.py
+@@ -1105,8 +1105,9 @@
+         try:
+             # Run build and monitoring tasks concurrently
+-            await asyncio.gather(generation_task, monitor_task, return_exceptions=True)
++            await asyncio.gather(generation_task, monitor_task)
+         except Exception as e:
+             print(f"[FullyAsyncRollouter] Asynchronous task execution error: {e}")
++            raise
+         finally:
+             if not generation_task.done():
+                 generation_task.cancel()
