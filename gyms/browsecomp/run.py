@@ -31,7 +31,7 @@ def now():
     return datetime.now(timezone.utc).isoformat()
 
 
-async def episode(args):
+async def episode(args, *, server_config=None, final_format=FINAL_FORMAT, evaluator=evaluate):
     """Runs in its own process so server addresses and log paths cannot collide."""
     model_id, harness = AGENTS[args.agent]
     root = args.output_dir.resolve()
@@ -47,10 +47,10 @@ async def episode(args):
     state = {}
     error = None
     try:
-        async with agent_server(Path(__file__).with_name("langgraph.json"), port=port):
+        async with agent_server(server_config or Path(__file__).with_name("langgraph.json"), port=port):
             state, error = await invoke_and_capture(
                 os.environ["BROWSECOMP_AGENT_URL"], args.agent,
-                {"messages": [{"role": "user", "content": task["question"] + FINAL_FORMAT}]},
+                {"messages": [{"role": "user", "content": task["question"] + final_format}]},
                 timeout=args.timeout, config={"recursion_limit": 410},
             )
     except Exception as exc:
@@ -75,7 +75,7 @@ async def episode(args):
     if not isinstance(output, str):
         output = "\n".join(block.get("text", "") for block in output if isinstance(block, dict))
     try:
-        result["evaluation"] = await asyncio.wait_for(evaluate(task, output, root), 180)
+        result["evaluation"] = await asyncio.wait_for(evaluator(task, output, root), 180)
     except Exception as exc:
         result["evaluation"] = {"status": "evaluation_error", "score": None, "passed": False, "error": repr(exc)}
     result["finished_at"] = now()
@@ -100,7 +100,7 @@ async def preflight(url):
             raise RuntimeError(f"BrowseComp fetch preflight failed: {response.json()['error']}")
 
 
-async def main(args):
+async def main(args, *, episode_module="gyms.browsecomp.run"):
     if args.concurrency < 1 or args.repetitions < 1 or args.timeout <= 0:
         raise ValueError("Concurrency, repetitions and timeout must be positive")
     tasks = [json.loads(line) for line in args.data.read_text().splitlines() if line.strip()]
@@ -120,7 +120,8 @@ async def main(args):
         manifest = json.loads((root / "manifest.json").read_text())
         if manifest["status"] != "interrupted":
             raise ValueError("Resume requires an interrupted run; stop its runner first")
-        if (manifest["tasks"] != [t["task_id"] for t in tasks]
+        if (manifest.get("episode_module", "gyms.browsecomp.run") != episode_module
+                or manifest["tasks"] != [t["task_id"] for t in tasks]
                 or manifest["repetitions"] != args.repetitions
                 or manifest["assistant_id"] != args.agent
                 or any(manifest["config"][key] != config[key]
@@ -139,6 +140,7 @@ async def main(args):
         root.mkdir(parents=True)
         manifest = {"run_id": run_id, "status": "running", "started_at": now(),
                     "revision": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=REPO_ROOT, text=True).strip(),
+                    "episode_module": episode_module,
                     "assistant_id": args.agent, "tasks": [t["task_id"] for t in tasks],
                     "repetitions": args.repetitions, "episodes": [],
                     "config": config}
@@ -156,7 +158,7 @@ async def main(args):
                 directory.rename(archived / f"{directory.name}-{uuid4().hex[:8]}")
             directory.mkdir(parents=True)
             save(directory / "task.json", task)
-            command = [sys.executable, "-m", "gyms.browsecomp.run", "--episode",
+            command = [sys.executable, "-m", episode_module, "--episode",
                        "--agent", args.agent, "--output-dir", str(directory),
                        "--retrieval-url", args.retrieval_url, "--timeout", str(args.timeout),
                        "--repetition", str(repetition)]

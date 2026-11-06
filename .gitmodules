@@ -16,3 +16,6 @@
 [submodule "external/RLinf"]
 	path = external/RLinf
 	url = https://github.com/RLinf/RLinf.git
+[submodule "external/WideSearch"]
+	path = external/WideSearch
+	url = https://github.com/ByteDance-Seed/WideSearch.git

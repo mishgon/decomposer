@@ -1,0 +1,6 @@
+datasets>=3,<6
+pandas==2.2.3
+dateparser>=1.2,<2
+loguru>=0.7,<1
+pandarallel==1.6.5
+volcengine-ark-runtime==5.0.57
