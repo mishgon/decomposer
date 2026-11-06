@@ -82,12 +82,17 @@ Choose a Python factory with `--agent`:
 | `researcher_4b_thinking` | Qwen3.5-4B thinking | ReAct |
 | `researcher_27b_thinking` | Qwen3.8-27B-FP8 thinking (medium) | ReAct |
 | `decomposer_4b_non_thinking` | Qwen3.5-4B non-thinking | Decomposer |
+| `decomposer_sft_1_0_0` | Decomposer manager SFT 1.0.0 | Decomposer |
 | `decomposer_sft_1_2_0` | Decomposer manager SFT 1.2.0 | Decomposer |
 
-Both Decomposer variants use the `researcher` graph, a Qwen3.5-4B thinking
+All Decomposer variants use the `researcher` graph, a Qwen3.5-4B thinking
 subagent with the same search and fetch tools as the standalone researcher.
 The existing `researcher` and `decomposer` factories remain available;
 `decomposer` uses the Flash Next manager.
+
+SFT 1.0.0 is available for historical comparisons through `decomposer_sft_1_0_0`.
+Its server must serve `decomposer-manager-qwen35-4b-sft-1.0.0` on
+`127.0.0.1:18025`. It uses the same sampling and workers as SFT 1.2.0.
 
 Sampling comes from `src/decomposer/models.py`. SFT 1.2.0 shares the base
 Qwen3.5-4B non-thinking sampling settings. Its OpenAI-compatible server must
