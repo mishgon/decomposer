@@ -17,7 +17,7 @@ from gyms.agent_server import invoke_and_capture
 from gyms.usage import build_usage_summary
 from decomposer.visualization import write_trace_html
 from gyms.browsecomp import REPO_ROOT
-from gyms.browsecomp.agents import DECOMPOSER_MODEL, RESEARCHER_MODEL
+from gyms.browsecomp.agents import AGENTS
 from gyms.browsecomp.evaluate import FINAL_FORMAT, evaluate
 
 
@@ -33,6 +33,7 @@ def now():
 
 async def episode(args):
     """Runs in its own process so server addresses and log paths cannot collide."""
+    model_id, harness = AGENTS[args.agent]
     root = args.output_dir.resolve()
     task = json.loads((root / "task.json").read_text())
     os.environ["BROWSECOMP_RETRIEVAL_URL"] = args.retrieval_url
@@ -57,15 +58,15 @@ async def episode(args):
     result["agent_finished_at"] = now()
     result["status"] = "finished" if error is None else "timeout" if isinstance(error, TimeoutError) else "error"
     result["error"] = repr(error) if error else None
-    trace = {**state, **result, "harness": "decomposer" if args.agent == "decomposer" else "react",
+    trace = {**state, **result, "harness": harness,
              "agent_error": result["error"], "finished_at": result["agent_finished_at"],
-             "model": DECOMPOSER_MODEL if args.agent == "decomposer" else RESEARCHER_MODEL,
+             "model": model_id,
              "messages": state.get("messages", []), "agents": state.get("agents", {}),
              "agent_runs": state.get("agent_runs", {})}
     save(root / "trace.json", trace)
     write_trace_html(trace, root / "trace.html")
     usage = build_usage_summary(trace["messages"], trace["agent_runs"], trace["agents"])
-    if args.agent == "researcher":
+    if harness == "react":
         usage["react"] = usage.pop("decomposer")
     save(root / "usage.json", usage)
     last = trace["messages"][-1] if trace["messages"] else {}
@@ -179,7 +180,7 @@ async def main(args):
 
 def parser():
     cli = argparse.ArgumentParser(description=__doc__)
-    cli.add_argument("--agent", choices=["researcher", "decomposer"], default="decomposer")
+    cli.add_argument("--agent", choices=list(AGENTS), default="decomposer")
     select = cli.add_mutually_exclusive_group()
     select.add_argument("--tasks", nargs="+")
     select.add_argument("--all", action="store_true")

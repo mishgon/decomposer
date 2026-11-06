@@ -72,3 +72,33 @@ the equivalence judge. Invalid judge responses and provider errors are unscored,
 not ordinary wrong answers. This is our migrated answer-equivalence evaluator,
 not a claim of reproducing the official BrowseComp scorer. Historical results
 in `evals/browsecomp/history.md` also used different models and prompts.
+
+## Evaluation Variants
+
+Choose a Python factory with `--agent`:
+
+| Agent | Model | Harness |
+| --- | --- | --- |
+| `researcher_4b_thinking` | Qwen3.5-4B thinking | ReAct |
+| `researcher_27b_thinking` | Qwen3.8-27B-FP8 thinking (xhigh) | ReAct |
+| `decomposer_4b_non_thinking` | Qwen3.5-4B non-thinking | Decomposer |
+| `decomposer_sft_1_2_0` | Decomposer manager SFT 1.2.0 | Decomposer |
+
+Both Decomposer variants use the `researcher` graph, a Qwen3.5-4B thinking
+subagent with the same search and fetch tools as the standalone researcher.
+The existing `researcher` and `decomposer` factories remain available;
+`decomposer` uses the Flash Next manager.
+
+Sampling comes from `src/decomposer/models.py`. SFT 1.2.0 shares the base
+Qwen3.5-4B non-thinking sampling settings. Its OpenAI-compatible server must
+serve `decomposer-manager-qwen35-4b-sft-1.2.0` on `127.0.0.1:18024`.
+Forward that port from the inference machine before running locally.
+The other evaluation models use `https://lmrouter.2a2i.org/v1` and
+`LLM_PROXY_MASTER_KEY`.
+
+For example, after loading environment variables and forwarding retrieval:
+
+```bash
+python -m evals.browsecomp.run --agent decomposer_sft_1_2_0 \
+  --tasks TASK_ID_1 TASK_ID_2 --retrieval-url http://127.0.0.1:18082
+```
