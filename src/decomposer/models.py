@@ -105,6 +105,7 @@ def create_model(
     model_id: Literal[
         "vllm/qwen_3_5_4b_thinking",
         "vllm/qwen_3_5_4b_non_thinking",
+        "vllm/decomposer_manager_qwen35_4b_sft_1_0_0",
         "vllm/decomposer_manager_qwen35_4b_sft_1_2_0",
         "lmrouter/qwen_3_8_27b_medium_thinking",
         "vllm/qwen_3_8_flash_next_non_thinking",
@@ -139,12 +140,14 @@ def create_model(
             "vllm/qwen_3_5_4b_thinking" | "vllm/qwen_3_5_4b_non_thinking"
             | "lmrouter/qwen_3_5_4b_thinking" | "lmrouter/qwen_3_5_4b_non_thinking"
             | "temp/qwen_3_5_4b_thinking"
+            | "vllm/decomposer_manager_qwen35_4b_sft_1_0_0"
             | "vllm/decomposer_manager_qwen35_4b_sft_1_2_0"
         ):
-            sft = model_id == "vllm/decomposer_manager_qwen35_4b_sft_1_2_0"
+            sft = model_id.startswith("vllm/decomposer_manager_qwen35_4b_sft_")
+            early_sft = model_id == "vllm/decomposer_manager_qwen35_4b_sft_1_0_0"
             thinking = not sft and not model_id.endswith("_non_thinking")
             if model_id.startswith("vllm/"):
-                port = 18024 if sft else _QWEN_3_5_4B_PORT
+                port = 18025 if early_sft else 18024 if sft else _QWEN_3_5_4B_PORT
                 url = base_url or f"http://{os.environ.get('VLLM_HOST', '127.0.0.1')}:{port}/v1"
                 key = "EMPTY"
             elif model_id.startswith("lmrouter/"):
@@ -154,7 +157,8 @@ def create_model(
                 url = "https://135-106-142-250.sslip.io/v1"
                 key = os.environ.get("TEMP_LLM_PROXY_MASTER_KEY", "EMPTY")
             return ChatVLLM(
-                model="decomposer-manager-qwen35-4b-sft-1.2.0" if sft else "Qwen/Qwen3.5-4B",
+                model=("decomposer-manager-qwen35-4b-sft-1.0.0" if early_sft else
+                       "decomposer-manager-qwen35-4b-sft-1.2.0" if sft else "Qwen/Qwen3.5-4B"),
                 base_url=url,
                 api_key=key,
                 # https://huggingface.co/Qwen/Qwen3.5-4B#best-practices

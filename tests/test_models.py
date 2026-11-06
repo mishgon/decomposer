@@ -411,16 +411,17 @@ def test_non_vllm_address_override_is_rejected():
         create_model("lmrouter/qwen_3_8_flash_next_non_thinking", base_url="http://local/v1")
 
 
-def test_sft_1_2_0_reuses_base_non_thinking_sampling():
+@pytest.mark.parametrize("version, port", [("1_0_0", 18025), ("1_2_0", 18024)])
+def test_sft_reuses_base_non_thinking_sampling(version, port):
     base = create_model("lmrouter/qwen_3_5_4b_non_thinking")
-    sft = create_model("vllm/decomposer_manager_qwen35_4b_sft_1_2_0")
+    sft = create_model(f"vllm/decomposer_manager_qwen35_4b_sft_{version}")
     expected = base._get_request_payload("test")
     actual = sft._get_request_payload("test")
-    assert actual.pop("model") == "decomposer-manager-qwen35-4b-sft-1.2.0"
+    assert actual.pop("model") == "decomposer-manager-qwen35-4b-sft-" + version.replace("_", ".")
     expected.pop("model")
     assert actual == expected
     assert not sft.preserve_reasoning
-    assert sft.openai_api_base == "http://127.0.0.1:18024/v1"
+    assert sft.openai_api_base == f"http://127.0.0.1:{port}/v1"
 
 
 def test_qwen38_27b_thinking_uses_official_sampling():
