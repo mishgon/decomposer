@@ -1,0 +1,5 @@
+{
+  "dependencies": ["../.."],
+  "graphs": {"file_worker": "./worker.py:worker"},
+  "python_version": "3.12"
+}
