@@ -4,6 +4,7 @@ from collections import defaultdict
 from copy import deepcopy
 import hashlib
 from dataclasses import asdict
+from functools import partial
 import json
 from pathlib import Path
 import subprocess
@@ -47,7 +48,7 @@ def score(query, answer, directory):
     model = create_model(JUDGE_MODEL)
     calls = []
 
-    def completion(messages, model_config_name):
+    def completion(messages, model_config_name, *, expected_keys=None):
         response = model.invoke(messages)
         calls.append({"model": JUDGE_MODEL, "prompt": messages,
                       "response": response.model_dump(mode="json")})
@@ -55,9 +56,22 @@ def score(query, answer, directory):
         parsed = metric_utils.parse_markdown_json(response.content)
         if not isinstance(parsed, dict):
             raise ValueError("Judge returned no JSON object")
+        if expected_keys is not None:
+            if set(parsed) != expected_keys or any(type(v) not in (int, float) or v not in (0, 1)
+                                                  for v in parsed.values()):
+                raise ValueError("Judge must return one binary score for every requested item")
+        elif any(not isinstance(value, str) for value in parsed.values()):
+            raise ValueError("Judge alignment must map strings to strings")
         return response
 
-    with patch.object(metric_utils, "llm_completion", completion):
+    def judge_column(response, target, criterion, model_config_name):
+        grade = partial(completion, expected_keys={f"idx_{i}" for i in range(len(response))})
+        with patch.object(metric_utils, "llm_completion", grade):
+            return metric_utils.llm_judge_column(response, target, criterion, model_config_name)
+
+    with patch.object(metric_utils, "llm_completion", completion), patch(
+        "src.evaluation.evaluation.llm_judge_column", judge_column
+    ):
         result = evaluate_single_query(deepcopy(query), WideSearchResponse(query.instance_id, answer),
                                        str(directory / "cells.csv"), JUDGE_MODEL)
     value = asdict(result)
@@ -95,6 +109,8 @@ def main(args):
     directory = root / "evaluation"
     directory.mkdir(exist_ok=True)
     provenance = {"dataset_revision": REVISION,
+         "gold_sha256": {task: hashlib.sha256((args.source / "widesearch_gold" / f"{task}.csv").read_bytes()).hexdigest()
+                         for task in sorted(queries)},
          "source_sha256": hashlib.sha256((args.source / "widesearch.jsonl").read_bytes()).hexdigest(),
          "upstream_patch_sha256": hashlib.sha256(subprocess.check_output(["git", "diff", "HEAD"], cwd=UPSTREAM)).hexdigest(),
          "upstream_revision": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=UPSTREAM, text=True).strip(),

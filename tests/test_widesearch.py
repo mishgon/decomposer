@@ -93,3 +93,32 @@ def test_summary_keeps_missing_and_failed_attempts_in_denominator():
                for key in ["a-r001", "b-r001"]}
     summary = evaluation.summarize(manifest, results)
     assert summary["metrics"]["score"] == {"avg": 1/6, "max": .5}
+
+
+@pytest.mark.parametrize("scores", [{}, {"idx_0": 1}, {"idx_0": 1, "idx_1": .5},
+                                    {"idx_0": 1, "idx_1": "1"}, {"idx_0": 1, "idx_1": True}])
+def test_incomplete_or_nonbinary_judge_scores_are_unscored(monkeypatch, tmp_path, scores):
+    monkeypatch.setattr(evaluation, "create_model", lambda _: SimpleNamespace(
+        invoke=lambda _: AIMessage(content="```json\n" + json.dumps(scores) + "\n```")))
+    q = query()
+    q.evaluation["eval_pipeline"]["value"]["metric"] = ["llm_judge"]
+    value = evaluation.score(q, "|name|value|\n|---|---|\n|A|1|\n|B|2|", tmp_path)
+    assert value["status"] == "evaluation_error"
+    assert value["score"] is None
+
+
+def test_gold_changes_invalidate_cached_scores(monkeypatch, tmp_path):
+    source = tmp_path / "source"
+    (source / "widesearch_gold").mkdir(parents=True)
+    (source / "widesearch.jsonl").write_text("metadata")
+    gold = source / "widesearch_gold/test.csv"
+    gold.write_text("name,value\nA,1\n")
+    root = tmp_path / "run"
+    root.mkdir()
+    (root / "manifest.json").write_text(json.dumps({"tasks": ["test"], "repetitions": 1, "episodes": []}))
+    monkeypatch.setattr(evaluation, "load_queries", lambda _: {"test": query()})
+    args = SimpleNamespace(run=root, source=source)
+    evaluation.main(args)
+    gold.write_text("name,value\nA,2\n")
+    with pytest.raises(ValueError, match="provenance changed"):
+        evaluation.main(args)
