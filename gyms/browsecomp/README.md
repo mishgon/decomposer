@@ -19,7 +19,7 @@ private. The optional datasets dependency is needed only for preparation.
 
 Load model credentials as documented in the repository README. Model profiles
 are constants in `agents.py`: Qwen3.8 Flash Next non-thinking orchestrates
-Qwen3.5-4B unlooped thinking researchers. The standalone agent uses the same
+Qwen3.5-4B thinking researchers. The standalone agent uses the same
 researcher. Generation parameters come from `decomposer.models`; recursion is
 410 for both roles, and the default episode agent timeout is 45 minutes.
 
