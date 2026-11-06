@@ -113,22 +113,47 @@ async def main(args):
         raise ValueError("Choose --tasks or --all")
     if not tasks:
         raise ValueError("No tasks selected")
+    config = {k: str(v) if isinstance(v, Path) else v for k, v in vars(args).items()}
     await preflight(args.retrieval_url)
-    run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ-") + uuid4().hex[:8]
-    root = args.output_dir.resolve() / run_id
-    root.mkdir(parents=True)
-    manifest = {"run_id": run_id, "status": "running", "started_at": now(),
-                "revision": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=REPO_ROOT, text=True).strip(),
-                "assistant_id": args.agent, "tasks": [t["task_id"] for t in tasks],
-                "repetitions": args.repetitions, "episodes": [],
-                "config": {k: str(v) if isinstance(v, Path) else v for k, v in vars(args).items()}}
+    if args.resume:
+        root = args.resume.resolve()
+        manifest = json.loads((root / "manifest.json").read_text())
+        if manifest["status"] != "interrupted":
+            raise ValueError("Resume requires an interrupted run; stop its runner first")
+        if (manifest["tasks"] != [t["task_id"] for t in tasks]
+                or manifest["repetitions"] != args.repetitions
+                or manifest["assistant_id"] != args.agent
+                or any(manifest["config"][key] != config[key]
+                       for key in ("data", "retrieval_url", "timeout"))):
+            raise ValueError("Resume must keep the same tasks, repetitions, agent, data, retrieval and timeout")
+        manifest.setdefault("resumptions", []).append({
+            "started_at": now(), "concurrency": args.concurrency,
+            "revision": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=REPO_ROOT, text=True).strip(),
+        })
+        manifest["status"] = "running"
+        manifest.pop("finished_at", None)
+        manifest["config"]["concurrency"] = args.concurrency
+    else:
+        run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ-") + uuid4().hex[:8]
+        root = args.output_dir.resolve() / run_id
+        root.mkdir(parents=True)
+        manifest = {"run_id": run_id, "status": "running", "started_at": now(),
+                    "revision": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=REPO_ROOT, text=True).strip(),
+                    "assistant_id": args.agent, "tasks": [t["task_id"] for t in tasks],
+                    "repetitions": args.repetitions, "episodes": [],
+                    "config": config}
     save(root / "manifest.json", manifest)
     print(f"Artifacts: {root}", flush=True)
+    completed = {(row["task"], row["repetition"]) for row in manifest["episodes"]}
     semaphore = asyncio.Semaphore(args.concurrency)
 
     async def launch(task, repetition):
         async with semaphore:
             directory = root / "traces" / f"{task['task_id']}-r{repetition:03d}"
+            if directory.exists():
+                archived = root / "interrupted"
+                archived.mkdir(exist_ok=True)
+                directory.rename(archived / f"{directory.name}-{uuid4().hex[:8]}")
             directory.mkdir(parents=True)
             save(directory / "task.json", task)
             command = [sys.executable, "-m", "gyms.browsecomp.run", "--episode",
@@ -162,7 +187,8 @@ async def main(args):
             save(root / "manifest.json", manifest)
             print(f"{len(manifest['episodes'])}/{len(tasks) * args.repetitions} {task['task_id']}: {entry['status']}", flush=True)
 
-    jobs = [asyncio.create_task(launch(task, rep)) for task in tasks for rep in range(1, args.repetitions + 1)]
+    jobs = [asyncio.create_task(launch(task, rep)) for task in tasks for rep in range(1, args.repetitions + 1)
+            if (task["task_id"], rep) not in completed]
     try:
         await asyncio.gather(*jobs)
         manifest["status"] = "completed"
@@ -187,6 +213,7 @@ def parser():
     cli.add_argument("--data", type=Path, default=REPO_ROOT / "artifacts/gyms/browsecomp/tasks.jsonl")
     cli.add_argument("--output-dir", type=Path, default=REPO_ROOT / "artifacts/gyms/browsecomp")
     cli.add_argument("--retrieval-url", default="http://127.0.0.1:8000")
+    cli.add_argument("--resume", type=Path, help="Continue an interrupted run directory, keeping completed episodes")
     cli.add_argument("--concurrency", type=int, default=2)
     cli.add_argument("-n", "--repetitions", type=int, default=1)
     cli.add_argument("--timeout", type=float, default=2700)

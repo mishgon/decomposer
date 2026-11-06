@@ -62,7 +62,13 @@ optional `trace.html` (when the shared renderer has captured agent runs),
 `usage.json`, `result.json`, `runner.log` and append-only
 `model_calls.jsonl`. Judge requests and responses go into `judge.json` when needed.
 The shared capture helper cancels active agents before scoring timeout/error traces.
-Each invocation creates a new run directory; there is no gym-level resume policy.
+A fresh invocation creates a new run directory. To continue after stopping a runner,
+repeat its original arguments and add `--resume PATH_TO_RUN`. You may change
+`--concurrency`; keep the task selection, repetitions, agent, data path, retrieval
+URL and timeout unchanged. Completed episodes (including scored failures) are
+preserved. Partial episode directories move to `interrupted/` before retrying,
+so model logs from different attempts cannot mix. Resume accepts only a manifest
+marked `interrupted`; stop the old runner first.
 
 ## Scoring Changes
 
