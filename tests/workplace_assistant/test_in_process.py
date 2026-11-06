@@ -30,3 +30,28 @@ def test_screen_rejects_overlap_and_noop_tasks():
         row(1, ' SEEN   request ', action), row(2, 'Do nothing', []), row(3, 'Make a plot', action)])
     assert [r['id'] for r in accepted] == [3]
     assert rejected == {'overlap_or_duplicate': 1, 'no_action_passes': 1}
+
+
+def test_worker_exhaustion_and_infrastructure_failures_keep_distinct_meanings(monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    from gyms.workplace_assistant import in_process
+    from opd.policy import is_episode_failure
+
+    gym = SimpleNamespace(actions=[], tools=lambda: [], score=lambda _: False)
+    monkeypatch.setattr(in_process, 'Workplace', lambda: gym)
+    row = {'id': 1, 'environment_name': 'workplace_assistant', 'prompt': 'Task', 'ground_truth': []}
+    for error, expected in [('GraphRecursionError: budget exhausted', True),
+                            ('TimeoutError: run budget', True),
+                            ('APIConnectionError: offline', False)]:
+        workers = SimpleNamespace(records={'run': {'error': error}}, close=AsyncMock())
+        monkeypatch.setattr(in_process, 'LocalWorkers', lambda *a, **kw: workers)
+        agent = SimpleNamespace(ainvoke=AsyncMock(),
+                                aget_state=AsyncMock(return_value=SimpleNamespace(values={'messages': []})))
+        monkeypatch.setattr(in_process, 'create_agent', lambda *a, **kw: agent)
+        result = asyncio.run(in_process.episode(row, object(), object()))
+        assert result['error_type'] == 'WorkerError'
+        assert result['worker_errors'] == [error]
+        assert result['score'] == 0
+        assert is_episode_failure(result) is expected
+        workers.close.assert_awaited_once()
