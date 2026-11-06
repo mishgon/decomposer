@@ -1,0 +1,6 @@
+# Two updates with the same optimizer, validation and checkpoint settings.
+defaults:
+  - full
+  - _self_
+rollout:
+  total_rollout_steps: 16

@@ -1,5 +1,22 @@
 # WideSeek Evaluation
 
+`python -m evals.wideseek.paired --panel /path/to/frozen-opd-data
+--output /path/to/new-evaluation --worker-python /path/to/worker/python`
+compares hosted non-thinking Qwen3.5-4B unlooped and Flash Next coordinators on
+the same frozen 16 training and 8 held-out tasks, once each. Both use the same
+thinking Qwen4B researchers, native judge and sampling registry. No GPU is required
+for inference; the existing Wikipedia retrieval service must be available.
+
+The paper's normal 10-turn lead / 20-turn researcher paths map to recursion limits
+32 / 81 with our middleware. Boundary tests include the final graph termination
+check. These are graph-step budgets, not exact model-call caps: coordinator retry
+edges can skip tool nodes. Each researcher run retains its 60-second work budget
+and 60-second grace. The episode safety timeout remains 2,700 seconds, including
+judging. This does not reproduce the paper's parallel-tool or parallel-agent caps.
+Raw results remain under `student/` and `teacher/`; `summary.json` updates after
+each episode with separate train and held-out scores, times and token counts.
+Judge failures remain unscored. This evaluation does not change OPD settings.
+
 `run.py` reuses the raw Gym runner and adds aggregate native scores, episode
 timings, agent tokens and completion/error counts. Judge errors remain unscored;
 the explicitly named `mean_native_score_infra_zero` also counts them as zero.

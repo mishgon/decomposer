@@ -1,0 +1,4 @@
+- name: wideseek_decomposer
+  _target_: opd.wideseek.agent_loop.WideSeekAgentLoop
+- name: workplace_decomposer
+  _target_: opd.workplace_assistant.agent_loop.WorkplaceAgentLoop
