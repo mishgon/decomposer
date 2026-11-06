@@ -8,7 +8,7 @@ scheduling; it does not train a model or start an indefinite queue.
 Defaults use main's named registry profiles:
 
 - Teacher and judge: `lmrouter/qwen_3_8_flash_next_non_thinking`.
-- Subagents: `lmrouter/qwen_3_5_4b_unlooped_thinking`, with reasoning preserved.
+- Subagents: `lmrouter/qwen_3_5_4b_thinking`, with reasoning preserved.
 
 Sampling and provider settings come directly from `src/decomposer/models.py`.
 Model outputs, reasoning, tool calls, usage, subagent states and judge responses
@@ -83,3 +83,40 @@ Use `bash evals/wideseek/watch-wideseek.sh` to inspect the latest collection or
 evaluation. Fixed runs show whole-run ETA; adaptive runs show current-wave ETA
 and live coverage. Whole-collection ETA is unknown because later waves depend
 on scores. Index and coverage summaries refresh after each wave.
+
+### Service Outages
+
+WideSeek and DeepDive collection share an outage guard. Transient model connection
+errors, timeouts, rate limits, and server errors pause new episodes. One authenticated
+probe sequence checks the coordinator, researcher, and judge. Retries use exponential
+backoff with jitter (initially 2.5–5 seconds, capped at 150–300 seconds), indefinitely.
+The watcher shows the pause duration and next probe time.
+
+Already running episodes finish or reach their normal deadline; they are not suspended
+mid-execution. Infrastructure-interrupted executions retain their raw artifacts and an
+`infrastructure-result.json` inside their execution directory. They do not consume a
+task attempt or contribute a zero score. After recovery, collection retries the same
+attempt with a fresh execution directory and a fresh episode deadline.
+
+Task budget exhaustion and ordinary incorrect answers remain benchmark outcomes.
+Permanent service errors, invalid judge results, unclassified errors, and failed
+cleanup/export stop explicitly. The guard never retries while worker cleanup is unsafe.
+This behavior applies to SFT collection, not OPD. Existing runs still use their staged
+code; their manifests are not migrated automatically across harness revisions.
+
+## Hosted Coverage Benchmarks
+
+Use a separate, pinned task file excluding previously solved questions and the OPD
+held-out panel. Keep its provenance manifest beside it. Published HF traces with
+F1 > 0.75 establish prior coverage; validate task IDs against question text.
+
+For a one-off concurrency benchmark, pass `--data remaining.jsonl --limit 256
+--concurrency 128 -n 1 --success-threshold 0.75`.
+Collection retains full traces without a student sequence-length cutoff. Apply
+training-length filters separately when preparing SFT datasets.
+
+Concurrency changes are manual: inspect the 128 run, then try 512 if appropriate.
+Use a dedicated worker server with enough run slots; the default four slots will
+artificially constrain this benchmark. Do not share the OPD worker server.
+`evals/wideseek/watch-wideseek.sh` shows concurrency, throughput, qualified traces,
+and the most common episode errors. Raw provider failures remain in model logs.

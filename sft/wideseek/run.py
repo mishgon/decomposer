@@ -1,9 +1,11 @@
 """Collect off-policy WideSeek trajectories and index successful traces."""
+from functools import partial
 import json
 import time
 
-from gyms.wideseek.run import cli, create_parser, describe_run, run_jobs
+from gyms.wideseek.run import cli, create_parser, describe_run, episode, run_jobs
 from gyms.wideseek.runtime import save
+from sft.wideseek.outage import OutageGuard, collect_episode, probe_models
 from sft.wideseek.scheduler import new_state, plan_next_wave, qualifies, statistics
 
 
@@ -61,8 +63,10 @@ async def main(args):
     if args.max_waves is not None and args.max_waves < 1:
         raise ValueError("Wave limit must be positive")
     tasks, root = await prepare_collection(args)
+    guard = OutageGuard(root, partial(probe_models, args.agent))
+    runner = partial(collect_episode, guard, episode)
     if not args.adaptive:
-        await run_jobs(tasks, ((t["task_id"], n) for n in range(1, args.n + 1) for t in tasks), root, args)
+        await run_jobs(tasks, ((t["task_id"], n) for n in range(1, args.n + 1) for t in tasks), root, args, episode_runner=runner)
         update_index(root, args.mode, args.success_threshold, tasks, False)
         return
     path = root / "scheduler.json"
@@ -91,7 +95,7 @@ async def main(args):
             save(path, state)
             return
         save(path, state)  # Durable before any launch; completed results are never repeated.
-        await run_jobs(tasks, jobs, root, args)
+        await run_jobs(tasks, jobs, root, args, episode_runner=runner)
         waves += 1
 
 

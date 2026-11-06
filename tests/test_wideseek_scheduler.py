@@ -96,7 +96,7 @@ def test_collector_resume_counts_saved_traces_and_keeps_failures(tmp_path):
     from sft.wideseek.run import main, completed_results
     tasks = [{"task_id": "a"}, {"task_id": "b"}]
     args = SimpleNamespace(success_threshold=.9, target_successes=1, adaptive=True,
-                           n=1, max_waves=1, mode="decomposer")
+                           n=1, max_waves=1, mode="decomposer", agent="decomposer")
 
     def save_result(task, attempt, score):
         path = tmp_path / "decomposer" / task / f"attempt-{attempt:03d}"
@@ -109,7 +109,7 @@ def test_collector_resume_counts_saved_traces_and_keeps_failures(tmp_path):
     save_result("a", 1, .95)
     save_result("b", 1, .2)
     launches = []
-    async def run_jobs(tasks, jobs, root, args):
+    async def run_jobs(tasks, jobs, root, args, *, episode_runner=None):
         launches.extend(jobs)
         for task, attempt in jobs:
             save_result(task, attempt, .3 if attempt == 2 else .99)

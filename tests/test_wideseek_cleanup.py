@@ -110,6 +110,31 @@ def test_worker_still_running_after_cancel_is_not_deleted(tmp_path):
     client.threads.delete.assert_not_awaited()
 
 
+@pytest.mark.parametrize('final_status', ['success', 'running', 'missing'])
+def test_cancel_404_requires_confirmed_terminal_run(tmp_path, final_status):
+    runs = {'thread': [{'run_id': 'r', 'status': 'running'}]}
+    client = client_with_runs(runs)
+
+    async def cancel(*args, **kwargs):
+        if final_status == 'missing':
+            runs['thread'].clear()
+        else:
+            runs['thread'][0]['status'] = final_status
+        response = httpx.Response(404, request=httpx.Request('POST', 'http://worker/cancel'))
+        response.raise_for_status()
+
+    client.runs.cancel.side_effect = cancel
+    errors = asyncio.run(cleanup_workers(client, state_for('thread'), tmp_path))
+    if final_status == 'success':
+        assert errors == []
+        archived = json.loads((tmp_path / 'subagents/thread.json').read_text())
+        assert archived['runs'][0]['status'] == 'success'
+        client.threads.delete.assert_awaited_once_with('thread')
+    else:
+        assert len(errors) == 1 and 'HTTPStatusError' in errors[0]
+        client.threads.delete.assert_not_awaited()
+
+
 def test_shared_server_cleanup_does_not_touch_another_episode(tmp_path):
     runs = {'episode-a': [{'run_id': 'a', 'status': 'running'}],
             'episode-b': [{'run_id': 'b', 'status': 'running'}]}
@@ -149,6 +174,30 @@ def test_html_failure_preserves_result_and_resume_does_not_repeat(tmp_path):
     assert result['html_error'] == 'OSError: HTML failed'
     assert (tmp_path / result['trace_path']).is_file()
     graph.ainvoke.assert_awaited_once()
+
+
+def test_injected_training_policy_is_used_and_remains_open(tmp_path):
+    from langchain_core.messages import AIMessage
+    from gyms.wideseek import run
+
+    policy = SimpleNamespace(_llm_type='verl')
+    graph = MagicMock()
+    graph.ainvoke = AsyncMock(return_value={'messages': [AIMessage(content='Answer')]})
+    graph.aget_state = AsyncMock(return_value=SimpleNamespace(values={}))
+    args = SimpleNamespace(agent='decomposer', model_calls=None, output_tokens=None,
+                           worker_url='http://unused', episode_timeout=1)
+    with patch.object(run, 'model') as create, \
+            patch.object(run.agents, 'decomposer', return_value=graph) as build, \
+            patch.object(run, 'get_client', return_value=client_with_runs({})), \
+            patch.object(run, 'close_model', new=AsyncMock()) as close, \
+            patch.object(run, 'evaluate', new=AsyncMock(return_value={'status': 'scored', 'score': 1.})):
+        result = asyncio.run(episode({'task_id': 'task', 'question': 'Question', 'unique_columns': []},
+                                    'decomposer', 1, tmp_path, args, policy=policy))
+    create.assert_not_called()
+    close.assert_not_awaited()
+    assert build.call_args.args[0] is policy
+    assert json.loads(json.dumps(result)) == json.loads((tmp_path / 'decomposer/task/attempt-001/result.json').read_text())
+    assert result['evaluation']['score'] == 1.
 
 
 def test_snapshot_and_model_close_failures_still_archive_and_save(tmp_path):
