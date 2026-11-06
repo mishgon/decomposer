@@ -15,6 +15,8 @@ from langchain_openai import ChatOpenAI
 from langchain_openrouter import ChatOpenRouter
 from pydantic import BaseModel, Field
 
+from decomposer.lmrouter_transport import AsyncRecoveringTransport, RecoveringTransport
+
 
 _QWEN_3_5_4B_PORT = 8024
 _QWEN_3_8_FLASH_NEXT_PORT = 8025
@@ -124,14 +126,13 @@ def create_model(
         raise ValueError("base_url is supported only for vllm models")
     if not model_id.startswith("openrouter/"):
         socket = os.environ.get("LLM_PROXY_UNIX_SOCKET") if model_id.startswith("lmrouter/") else None
-        sync_client = httpx.Client(
-            transport=httpx.HTTPTransport(uds=socket) if socket else None,
-            trust_env=False,
-        )
-        client = httpx.AsyncClient(
-            transport=httpx.AsyncHTTPTransport(uds=socket) if socket else None,
-            trust_env=False,
-        )
+        transport = httpx.HTTPTransport(uds=socket, trust_env=False)
+        async_transport = httpx.AsyncHTTPTransport(uds=socket, trust_env=False)
+        if model_id.startswith("lmrouter/"):
+            transport = RecoveringTransport(transport)
+            async_transport = AsyncRecoveringTransport(async_transport)
+        sync_client = httpx.Client(transport=transport, trust_env=False)
+        client = httpx.AsyncClient(transport=async_transport, trust_env=False)
     match model_id:
         case "vllm/qwen_3_5_4b_thinking" | "vllm/qwen_3_5_4b_non_thinking":
             thinking = model_id == "vllm/qwen_3_5_4b_thinking"
@@ -151,7 +152,7 @@ def create_model(
                 },
                 preserve_reasoning=thinking,
                 timeout=600,
-                max_retries=2,
+                max_retries=0 if hosted else 2,
                 http_client=sync_client,
                 http_async_client=client,
                 disable_streaming=True,
@@ -189,7 +190,7 @@ def create_model(
                 extra_body={"top_k": 20, "chat_template_kwargs": {"enable_thinking": True}},
                 preserve_reasoning=True,
                 timeout=600,
-                max_retries=2,
+                max_retries=0,
                 http_client=sync_client,
                 http_async_client=client,
                 disable_streaming=True,
@@ -205,7 +206,7 @@ def create_model(
                 extra_body={"top_k": 20, "chat_template_kwargs": {"enable_thinking": False}},
                 preserve_reasoning=False,
                 timeout=600,
-                max_retries=2,
+                max_retries=0,
                 http_client=sync_client,
                 http_async_client=client,
                 disable_streaming=True,
@@ -228,7 +229,7 @@ def create_model(
                 },
                 preserve_reasoning=False,
                 timeout=600,
-                max_retries=2,
+                max_retries=0,
                 http_client=sync_client,
                 http_async_client=client,
                 disable_streaming=True,
@@ -258,7 +259,7 @@ def create_model(
                 },
                 preserve_reasoning=True,
                 timeout=600,
-                max_retries=2,
+                max_retries=0,
                 http_client=sync_client,
                 http_async_client=client,
                 disable_streaming=True,
