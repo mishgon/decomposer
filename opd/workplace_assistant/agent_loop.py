@@ -8,6 +8,7 @@ from verl.experimental.agent_loop.agent_loop import AgentLoopBase, AgentLoopOutp
 from decomposer.models import create_model
 from gyms.workplace_assistant.in_process import episode
 from opd.policy import PolicyTokens, VerlChatModel, is_episode_failure
+from opd.workplace_assistant.preflight import WORKER_MODEL
 
 
 @register('workplace_decomposer')
@@ -29,7 +30,7 @@ class WorkplaceAgentLoop(AgentLoopBase):
             prompt_budget=self.rollout_config.prompt_length,
             response_budget=self.rollout_config.response_length,
             log_path=directory / 'policy_calls.jsonl')
-        worker = create_model('lmrouter/qwen_3_5_4b_unlooped_non_thinking')
+        worker = create_model(WORKER_MODEL)
         try:
             result = await episode(task, VerlChatModel(tokens=tokens), worker)
         finally:

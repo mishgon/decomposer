@@ -103,6 +103,7 @@ def test_two_gpu_job_selects_separate_training_and_rollout(tmp_path, monkeypatch
     command = Mock()
     monkeypatch.setattr(run_job.subprocess, 'run', command)
     run_job.main()
+    run_job.preflight.assert_called_once_with(output, workplace_validation=True)
     train = command.call_args.args[0]
     assert train[train.index('--gpus') + 1:train.index('--gpus') + 3] == ['0', '1']
     assert '--gpu' not in train

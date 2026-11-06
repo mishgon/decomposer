@@ -23,7 +23,7 @@ def configure_network():
         print(f'{host}: {socket.getaddrinfo(host, 443)[0][4][0]}', flush=True)
 
 
-def preflight(output):
+def preflight(output, *, workplace_validation=False):
     import httpx
     from clearml.utilities.pyhocon import ConfigFactory
     from transformers import AutoTokenizer
@@ -49,6 +49,9 @@ def preflight(output):
                                        tokenize=True, return_dict=False, enable_thinking=False)
     asyncio.run(asyncio.wait_for(score(ids, tokenizer=tokenizer,
                                      output=output / 'teacher-preflight.json'), 90))
+    if workplace_validation:
+        from opd.workplace_assistant.preflight import check
+        asyncio.run(check())
     print('ClearML authentication and teacher token-logprob alignment passed', flush=True)
 
 
@@ -67,7 +70,7 @@ def main():
     subprocess.run(['nvidia-smi', '--query-gpu=name,memory.total', '--format=csv'], check=True)
     if not (MODEL / 'config.json').exists():
         raise RuntimeError(f'Missing model: {MODEL}')
-    preflight(output)
+    preflight(output, workplace_validation=args.mode == 'train')
     if args.mode == 'train':
         from opd.checkpoint_offload import check_access
         check_access(os.environ['OPD_CHECKPOINT_S3_URI'])
