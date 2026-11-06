@@ -424,12 +424,13 @@ def test_sft_1_2_0_reuses_base_non_thinking_sampling():
 
 
 def test_qwen38_27b_thinking_uses_official_sampling():
-    model = create_model("lmrouter/qwen_3_8_27b_thinking")
+    model = create_model("lmrouter/qwen_3_8_27b_medium_thinking")
     payload = model._get_request_payload("test")
     assert payload["model"] == "Qwen/Qwen3.8-27B-FP8"
     assert (payload["temperature"], payload["top_p"], payload["presence_penalty"]) == (1.0, .95, 0.0)
-    assert payload["reasoning_effort"] == "xhigh"
+    assert payload["reasoning_effort"] == "medium"
     assert payload["extra_body"] == {
+        "allowed_openai_params": ["reasoning_effort"],
         "top_k": 20, "min_p": 0.0, "repetition_penalty": 1.0,
         "chat_template_kwargs": {"enable_thinking": True, "preserve_thinking": True},
     }
