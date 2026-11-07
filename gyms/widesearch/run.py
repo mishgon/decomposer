@@ -5,7 +5,7 @@ from pathlib import Path
 from gyms.browsecomp import run as browsecomp
 from gyms.widesearch.dataset import TASKS
 
-AGENTS = ["researcher_4b_thinking", "researcher_27b_thinking",
+AGENTS = ["decomposer", "researcher_4b_thinking", "researcher_27b_thinking",
           "decomposer_4b_non_thinking", "decomposer_sft_1_2_0"]
 FINAL_FORMAT = "\n\nReturn the requested table in one fenced markdown block. Preserve the requested column names."
 

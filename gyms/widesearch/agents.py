@@ -2,7 +2,7 @@
 from pathlib import Path
 
 from gyms.browsecomp import agents
-from gyms.browsecomp.agents import decomposer_4b_non_thinking, decomposer_sft_1_2_0
+from gyms.browsecomp.agents import decomposer, decomposer_4b_non_thinking, decomposer_sft_1_2_0
 
 PROMPT = Path(agents.__file__).with_name("prompt.txt").read_text().split(
     "When asked for the final benchmark answer,"
