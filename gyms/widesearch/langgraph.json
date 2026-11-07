@@ -3,6 +3,7 @@
     "../.."
   ],
   "graphs": {
+    "decomposer": "./agents.py:decomposer",
     "researcher": "./agents.py:researcher",
     "researcher_4b_thinking": "./agents.py:researcher_4b_thinking",
     "researcher_27b_thinking": "./agents.py:researcher_27b_thinking",

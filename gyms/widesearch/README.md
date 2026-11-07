@@ -24,7 +24,8 @@ python -m evals.widesearch.run artifacts/evals/widesearch/<run-id>
 
 Other assistant IDs are `researcher_4b_thinking`, `researcher_27b_thinking`, and
 `decomposer_4b_non_thinking`. The 27B profile uses medium thinking. All sampling
-parameters come from `src/decomposer/models.py`. Both Decomposers use the same
+parameters come from `src/decomposer/models.py`. The `decomposer` assistant uses Qwen3.8 Flash Next non-thinking as manager.
+All Decomposers use the same
 4B thinking worker, agent type ID and description as BrowseComp.
 
 The harness reuses BrowseComp search/fetch, ten searches per worker, run budgets,
