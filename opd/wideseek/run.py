@@ -29,8 +29,12 @@ async def main(args, overrides):
     if baseline["status"] != "completed" or baseline["model"] != "vllm/qwen_3_5_4b_non_thinking":
         raise ValueError("Finish the starting-checkpoint baseline first")
     if len(args.gpus) not in (2, 3) or len(set(args.gpus)) != len(args.gpus) or min(args.gpus) < 0:
-        raise ValueError("Choose two or three distinct GPU indices: one trainer, then rollout GPUs")
-    overrides = [*overrides, f'rollout.n_gpus_per_node={len(args.gpus) - 1}']
+        raise ValueError("Choose two or three distinct GPU indices: training GPUs first, then rollout GPUs")
+    training_gpus = getattr(args, 'training_gpus', 1)
+    if not 1 <= training_gpus < len(args.gpus):
+        raise ValueError('Reserve at least one training GPU and one rollout GPU')
+    overrides = [*overrides, f'trainer.n_gpus_per_node={training_gpus}',
+                 f'rollout.n_gpus_per_node={len(args.gpus) - training_gpus}']
     model = args.model.resolve()
     if baseline.get("student_model") != str(model):
         raise ValueError("Baseline must use the selected starting checkpoint")
@@ -39,8 +43,9 @@ async def main(args, overrides):
         from opd.checkpoint_offload import MARKER
         if (checkpoint / MARKER).exists():
             raise ValueError(f'Checkpoint is offloaded to S3. Restore first: python -m opd.checkpoint_offload restore {checkpoint}')
-        for name in ('data.pt', 'actor/model_world_size_1_rank_0.pt',
-                     'actor/optim_world_size_1_rank_0.pt', 'actor/extra_state_world_size_1_rank_0.pt'):
+        names = ['data.pt'] + [f'actor/{kind}_world_size_{training_gpus}_rank_{rank}.pt'
+            for rank in range(training_gpus) for kind in ('model', 'optim', 'extra_state')]
+        for name in names:
             if not (checkpoint / name).is_file():
                 raise ValueError(f"Incomplete resume checkpoint: {checkpoint / name}")
         overrides = [*overrides, 'trainer.resume_mode=resume_path',
@@ -72,6 +77,8 @@ async def main(args, overrides):
                 "baseline": str(args.baseline.resolve()), "gpus": args.gpus,
                 "overrides": overrides, "pid": os.getpid()}
     manifest['config_name'] = config_name
+    manifest['training_gpus'] = training_gpus
+    manifest['rollout_gpus'] = len(args.gpus) - training_gpus
     if trainer_env is not None:
         manifest['fast_runtime'] = json.loads((Path(bundle) / 'manifest.json').read_text())
     if args.resume_from:
@@ -122,7 +129,8 @@ if __name__ == "__main__":
     parser.add_argument("--output", type=Path, required=True)
     gpu = parser.add_mutually_exclusive_group(required=True)
     gpu.add_argument("--gpus", nargs='+', type=int,
-                     help="One training GPU followed by one or two rollout GPUs")
+                     help="Training GPUs first, followed by rollout GPUs")
+    parser.add_argument("--training-gpus", type=int, default=1, help="Number of GPUs assigned to the trainer")
     parser.add_argument("--resume-from", type=Path, help="Restore full veRL checkpoint into a new output directory")
     parser.add_argument("--worker-python", type=Path, default=ROOT / ".venv-workers/bin/python")
     args, overrides = parser.parse_known_args()
