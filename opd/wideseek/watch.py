@@ -131,7 +131,7 @@ def show(root, run=None):
                 os.kill(local['pid'], 0)
             except ProcessLookupError:
                 status['status'] = 'stopped (process missing)'
-        submission.setdefault('commit', local['commit'])
+        submission.setdefault('commit', local.get('commit', 'unknown'))
         if local.get('code_dir'):
             submission.setdefault('payload', {}).setdefault('env_variables', {})['WORKDIR'] = local['code_dir']
     else:
