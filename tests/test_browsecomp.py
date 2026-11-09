@@ -19,17 +19,26 @@ def test_tools_isolate_url_access_and_preserve_state(monkeypatch):
     runtime = SimpleNamespace(state={}, tool_call_id="s1")
     update = asyncio.run(tools.search.coroutine("query", runtime)).update
     assert update["pages"] == {"https://page": "p1"}
-    assert update["searches"] == 1
     assert asyncio.run(tools.fetch.coroutine("https://page", runtime))["error"] == "url_not_in_session"
     request.assert_awaited_once()
     runtime.state = update
     request.return_value = {"content": "evidence"}
     assert asyncio.run(tools.fetch.coroutine("https://page", runtime)) == {"content": "evidence"}
     request.assert_awaited_with("/fetch", {"page_id": "p1"})
-    runtime.state["searches"] = 10
-    count = request.await_count
-    assert asyncio.run(tools.search.coroutine("query", runtime)).update["searches"] == 0
-    assert request.await_count == count
+
+
+def test_search_continues_beyond_ten_calls(monkeypatch):
+    request = AsyncMock(return_value={"results": [
+        {"url": "https://page", "page_id": "p1", "title": "Page", "snippet": "evidence"}]})
+    monkeypatch.setattr(tools, "request", request)
+    runtime = SimpleNamespace(state={}, tool_call_id="search")
+    async def search_repeatedly():
+        for i in range(12):
+            update = (await tools.search.coroutine(f"query {i}", runtime)).update
+            runtime.state.update(update)
+            assert json.loads(update["messages"][0].content)["results"][0]["url"] == "https://page"
+    asyncio.run(search_repeatedly())
+    assert request.await_count == 12
 
 
 def test_retrieval_contract(monkeypatch):
@@ -154,7 +163,6 @@ def test_compiled_researcher_search_fetch_and_fresh_thread(monkeypatch, tmp_path
     graph = agents.researcher()
     state = asyncio.run(graph.ainvoke({"messages": [{"role": "user", "content": "Q"}]}))
     assert state["pages"] == {"https://page": "p1"}
-    assert state["searches"] == 1
     assert evaluate.extract_answer(state["messages"][-1].content) == "A"
     records = [json.loads(line) for line in (tmp_path / "calls.jsonl").read_text().splitlines()]
     assert sum(r["status"] == "success" for r in records) == 3
@@ -229,7 +237,6 @@ def researcher():
         state, error = asyncio.run(smoke())
         assert error is None
         assert state["pages"] == {"https://page": "p1"}
-        assert state["searches"] == 1
         assert state["messages"][-1]["content"].endswith("```")
         assert (tmp_path / "model_calls.jsonl").exists()
     finally:

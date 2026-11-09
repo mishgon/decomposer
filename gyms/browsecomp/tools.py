@@ -1,6 +1,5 @@
 """Agentic-rag search/fetch with checkpointed, per-agent URL access."""
 import json
-import operator
 import os
 from typing import Annotated
 
@@ -17,7 +16,6 @@ def merge_pages(left, right):
 
 class ResearchState(AgentState):
     pages: Annotated[dict[str, str], merge_pages]
-    searches: Annotated[int, operator.add]
 
 
 async def request(endpoint, payload):
@@ -33,16 +31,10 @@ async def request(endpoint, payload):
 @tool
 async def search(query: str, runtime: ToolRuntime, limit: int = 5) -> Command:
     """Search the BrowseComp-Plus corpus. Returns URLs, titles and snippets."""
-    if runtime.state.get("searches", 0) >= 10:
-        content = {"error": "search_budget_exhausted"}
-        pages = {}
-        count = 0
-    else:
-        hits = (await request("/search", {"query": query, "limit": limit}))["results"]
-        pages = {hit["url"]: hit["page_id"] for hit in hits}
-        content = {"results": [{key: hit[key] for key in ("url", "title", "snippet")} for hit in hits]}
-        count = 1
-    return Command(update={"pages": pages, "searches": count, "messages": [
+    hits = (await request("/search", {"query": query, "limit": limit}))["results"]
+    pages = {hit["url"]: hit["page_id"] for hit in hits}
+    content = {"results": [{key: hit[key] for key in ("url", "title", "snippet")} for hit in hits]}
+    return Command(update={"pages": pages, "messages": [
         ToolMessage(content=json.dumps(content), tool_call_id=runtime.tool_call_id)
     ]})
 
