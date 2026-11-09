@@ -31,7 +31,7 @@ def test_researchers_share_upstream_prompt_tools_and_registry_models(monkeypatch
     agents.researcher_4b_thinking()
     agents.researcher_27b_thinking()
     agents.researcher()
-    assert calls[0][0] == "lmrouter/qwen_3_5_4b_thinking"
+    assert calls[0][0] == "vllm/qwen_3_5_4b_thinking"
     assert calls[1][0] == "lmrouter/qwen_3_8_27b_medium_thinking"
     for _, kwargs in calls:
         assert [t.name for t in kwargs["tools"]] == ["search_global", "text_browser_view"]
@@ -40,6 +40,8 @@ def test_researchers_share_upstream_prompt_tools_and_registry_models(monkeypatch
     assert calls[0][1]["system_prompt"] == calls[1][1]["system_prompt"] == agents.PROMPT
     assert agents.AGENT_SYSTEM_PROMPT in calls[2][1]["system_prompt"]
     assert agents.decomposer_sft_1_2_0 is browsecomp_agents.decomposer_sft_1_2_0
+    assert agents.decomposer_sft_1_4_0 is browsecomp_agents.decomposer_sft_1_4_0
+    assert "decomposer_sft_1_4_0" in run.AGENTS
 
 
 def test_episode_uses_widesearch_server_and_saves_raw_answer(monkeypatch, tmp_path):

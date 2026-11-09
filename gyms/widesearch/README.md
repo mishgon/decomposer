@@ -51,7 +51,7 @@ python -m evals.widesearch.run artifacts/evals/widesearch/<run-id>
 ```
 
 Other assistant IDs: `researcher_4b_thinking`, `decomposer` (Flash Next manager),
-`decomposer_4b_non_thinking`, `decomposer_sft_1_2_0`.
+`decomposer_4b_non_thinking`, `decomposer_sft_1_2_0`, `decomposer_sft_1_4_0`.
 All Decomposers use 4B thinking workers. All model sampling parameters come from
 `src/decomposer/models.py`; 27B uses `reasoning_effort="medium"`.
 

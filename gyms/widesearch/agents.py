@@ -2,7 +2,7 @@
 from langchain.agents import create_agent
 
 from gyms.browsecomp import agents
-from gyms.browsecomp.agents import decomposer, decomposer_4b_non_thinking, decomposer_sft_1_2_0
+from gyms.browsecomp.agents import decomposer, decomposer_4b_non_thinking, decomposer_sft_1_2_0, decomposer_sft_1_4_0
 from decomposer.models import create_model
 from decomposer.prompts import AGENT_SYSTEM_PROMPT
 from decomposer.run_budget import RunBudgetContext, RunBudgetMiddleware
