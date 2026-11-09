@@ -105,9 +105,24 @@ def test_cancellation_failure_retains_thread(tmp_path):
 def test_worker_still_running_after_cancel_is_not_deleted(tmp_path):
     client = client_with_runs({'thread': [{'run_id': 'active', 'status': 'running'}]})
     client.runs.cancel.side_effect = None
-    errors = asyncio.run(cleanup_workers(client, state_for('thread'), tmp_path))
+    with patch('gyms.wideseek.run.asyncio.sleep', new=AsyncMock()):
+        errors = asyncio.run(cleanup_workers(client, state_for('thread'), tmp_path))
     assert errors == ['thread: RuntimeError: Worker still active after cancellation']
     client.threads.delete.assert_not_awaited()
+
+
+def test_cancel_waits_for_terminal_status_to_be_visible(tmp_path):
+    client = client_with_runs({'thread': [{'run_id': 'active', 'status': 'running'}]})
+    client.runs.cancel.side_effect = None
+    client.runs.list.side_effect = [
+        [{'run_id': 'active', 'status': status}]
+        for status in ['running', 'running', 'running', 'interrupted']
+    ]
+    with patch('gyms.wideseek.run.asyncio.sleep', new=AsyncMock()):
+        assert asyncio.run(cleanup_workers(client, state_for('thread'), tmp_path)) == []
+    saved = json.loads((tmp_path/'subagents/thread.json').read_text())
+    assert saved['runs'][0]['status'] == 'interrupted'
+    client.threads.delete.assert_awaited_once_with('thread')
 
 
 @pytest.mark.parametrize('final_status', ['success', 'running', 'missing'])
