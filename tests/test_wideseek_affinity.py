@@ -3,11 +3,16 @@ from contextvars import ContextVar
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
 from langchain_core.messages import AIMessage, HumanMessage
+from gyms.wideseek import runtime
 from gyms.wideseek.runtime import ModelLog, init_budget
 
 
-def test_affinity_is_stable_and_isolated_between_concurrent_threads(tmp_path):
+@pytest.mark.parametrize('enabled', [False, True])
+def test_affinity_is_stable_and_isolated_between_concurrent_threads(tmp_path, monkeypatch, enabled):
+    assert runtime.SESSION_AFFINITY_ENABLED is False
+    monkeypatch.setattr(runtime, 'SESSION_AFFINITY_ENABLED', enabled)
     current = ContextVar('thread')
     init_budget(tmp_path/'episode')
     seen = []
@@ -32,5 +37,5 @@ def test_affinity_is_stable_and_isolated_between_concurrent_threads(tmp_path):
     assert len(seen) == 8
     for thread, headers in seen:
         assert headers['custom'] == 'keep'
-        assert headers.get('x-litellm-session-id') == (None if thread == 'local' else thread)
+        assert headers.get('x-litellm-session-id') == (thread if enabled and thread != 'local' else None)
     assert shared == {'extra_headers': {'custom': 'keep'}}
