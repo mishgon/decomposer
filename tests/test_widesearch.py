@@ -31,7 +31,7 @@ def test_researchers_share_upstream_prompt_tools_and_registry_models(monkeypatch
     agents.researcher_4b_thinking()
     agents.researcher_27b_thinking()
     agents.researcher()
-    assert calls[0][0] == "lmrouter/qwen_3_5_4b_thinking"
+    assert calls[0][0] == "vllm/qwen_3_5_4b_thinking"
     assert calls[1][0] == "lmrouter/qwen_3_8_27b_medium_thinking"
     for _, kwargs in calls:
         assert [t.name for t in kwargs["tools"]] == ["search_global", "text_browser_view"]
