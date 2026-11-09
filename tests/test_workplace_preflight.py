@@ -47,7 +47,8 @@ def test_synth_preflight_failure_happens_before_creating_training_output(tmp_pat
 
 
 @pytest.mark.parametrize('training_gpus', [1, 2])
-def test_wideseek_gpu_split_is_explicit(tmp_path, monkeypatch, training_gpus):
+@pytest.mark.parametrize('gpus', [[4, 5, 6], [4, 5, 6, 7]])
+def test_wideseek_gpu_split_is_explicit(tmp_path, monkeypatch, training_gpus, gpus):
     import json
     from opd.wideseek import run
     baseline = tmp_path / 'baseline'
@@ -58,7 +59,7 @@ def test_wideseek_gpu_split_is_explicit(tmp_path, monkeypatch, training_gpus):
     (baseline / 'manifest.json').write_text(json.dumps({'status': 'completed',
         'model': 'vllm/qwen_3_5_4b_non_thinking', 'student_model': str(model)}))
     args = SimpleNamespace(baseline=baseline, model=model, output=tmp_path/'output',
-        gpus=[4,6,7], training_gpus=training_gpus, resume_from=None, source=tmp_path/'source')
+        gpus=gpus, training_gpus=training_gpus, resume_from=None, source=tmp_path/'source')
     monkeypatch.delenv('OPD_FAST_RUNTIME', raising=False)
     monkeypatch.setattr(preflight, 'check', AsyncMock())
     monkeypatch.setattr(run.subprocess, 'run', Mock())
@@ -70,9 +71,9 @@ def test_wideseek_gpu_split_is_explicit(tmp_path, monkeypatch, training_gpus):
         asyncio.run(run.main(args, []))
     saved = json.loads((args.output/'run.json').read_text())
     assert f'trainer.n_gpus_per_node={training_gpus}' in saved['overrides']
-    assert f'rollout.n_gpus_per_node={3-training_gpus}' in saved['overrides']
+    assert f'rollout.n_gpus_per_node={len(gpus)-training_gpus}' in saved['overrides']
     # Check invalid rank counts before any service request.
-    args.training_gpus = 3
+    args.training_gpus = len(gpus)
     preflight.check.reset_mock()
     with pytest.raises(ValueError, match='at least one'):
         asyncio.run(run.main(args, []))
