@@ -20,6 +20,7 @@ DEFAULT_MODEL = "lmrouter/qwen_3_5_4b_thinking"
 DEFAULT_SUBAGENT = "lmrouter/qwen_3_5_4b_thinking"
 DEFAULT_TEACHER = "lmrouter/qwen_3_8_flash_next_non_thinking"
 MODEL_PROFILES = (DEFAULT_MODEL, DEFAULT_SUBAGENT, DEFAULT_TEACHER)
+SESSION_AFFINITY_ENABLED = False
 
 
 def model_metadata(policy):
@@ -99,7 +100,7 @@ class ModelLog(AgentMiddleware):
         await asyncio.to_thread(append_record, log, {**row, "status": "started"})
         try:
             settings = dict(request.model_settings)
-            if getattr(request.model, 'openai_api_base', None) == 'https://lmrouter.2a2i.org/v1':
+            if SESSION_AFFINITY_ENABLED and getattr(request.model, 'openai_api_base', None) == 'https://lmrouter.2a2i.org/v1':
                 settings['extra_headers'] = {**settings.get('extra_headers', {}),
                     'x-litellm-session-id': row['thread_id']}
             if limit is not None:
