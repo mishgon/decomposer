@@ -20,7 +20,7 @@ DEFAULT_MODEL = "lmrouter/qwen_3_5_4b_thinking"
 DEFAULT_SUBAGENT = "lmrouter/qwen_3_5_4b_thinking"
 DEFAULT_TEACHER = "lmrouter/qwen_3_8_flash_next_non_thinking"
 MODEL_PROFILES = (DEFAULT_MODEL, DEFAULT_SUBAGENT, DEFAULT_TEACHER)
-SESSION_AFFINITY_ENABLED = False
+SESSION_AFFINITY_ENABLED = True
 
 
 def model_metadata(policy):

@@ -11,7 +11,7 @@ from gyms.wideseek.runtime import ModelLog, init_budget
 
 @pytest.mark.parametrize('enabled', [False, True])
 def test_affinity_is_stable_and_isolated_between_concurrent_threads(tmp_path, monkeypatch, enabled):
-    assert runtime.SESSION_AFFINITY_ENABLED is False
+    assert runtime.SESSION_AFFINITY_ENABLED is True
     monkeypatch.setattr(runtime, 'SESSION_AFFINITY_ENABLED', enabled)
     current = ContextVar('thread')
     init_budget(tmp_path/'episode')
