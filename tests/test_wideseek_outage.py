@@ -97,7 +97,8 @@ def test_retry_same_attempt_and_preserve_raw_execution(tmp_path, monkeypatch, so
     (dict(status='error', error='ValueError: Decomposer requested tools instead of completing graceful shutdown'), False),
     (dict(status='error', cleanup_errors=['still active'], error='APIConnectionError'), True),
     (dict(status='error', error='AuthenticationError: invalid key'), True),
-    (dict(status='finished', evaluation=dict(status='judge_error', errors=['ValueError: invalid response'])), True),
+    (dict(status='finished', evaluation=dict(status='judge_error', score=None, errors=['ValueError: invalid response'])), False),
+    (dict(status='finished', evaluation=dict(status='evaluation_error', score=None)), True),
 ])
 def test_task_outcomes_complete_but_unsafe_failures_surface(tmp_path, row, raises):
     result_path = tmp_path/'decomposer/task/attempt-001/result.json'
@@ -184,6 +185,9 @@ def test_batch_keeps_task_failure_and_finishes_after_outage(tmp_path, monkeypatc
         if task_id == 'timeout':
             row.update(status='timeout', error='Episode exceeded 2700s',
                        evaluation=dict(status='timeout', score=None))
+        elif task_id == 'judge':
+            row['evaluation'] = dict(status='judge_error', score=None,
+                                     errors=['ValueError: invalid response'])
         elif calls.count((task_id, attempt)) == 1:
             row.update(status='error', error='APIConnectionError: offline',
                        evaluation=dict(status='scored', score=0))
@@ -191,14 +195,17 @@ def test_batch_keeps_task_failure_and_finishes_after_outage(tmp_path, monkeypatc
     async def run():
         save(tmp_path/'manifest.json', dict(status='running'))
         guard = OutageGuard(tmp_path, AsyncMock())
-        await run_jobs([dict(task_id='timeout'), dict(task_id='retry')],
-                       [('timeout', 1), ('retry', 1)], tmp_path,
+        await run_jobs([dict(task_id=t) for t in ('timeout', 'retry', 'judge')],
+                       [('timeout', 1), ('retry', 1), ('judge', 1)], tmp_path,
                        SimpleNamespace(mode='decomposer', concurrency=2),
                        episode_runner=partial(collect_episode, guard, episode))
     asyncio.run(run())
     manifest = json.loads((tmp_path/'manifest.json').read_text())
     assert manifest['status'] == 'completed'
-    assert len(manifest['episodes']) == 2
+    assert len(manifest['episodes']) == 3
     assert {row['status'] for row in manifest['episodes']} == {'timeout', 'finished'}
     assert calls.count(('timeout', 1)) == 1
     assert calls.count(('retry', 1)) == 2
+    judge = next(row for row in manifest['episodes'] if row['task_id'] == 'judge')
+    assert judge['evaluation']['status'] == 'judge_error'
+    assert judge['evaluation']['score'] is None
