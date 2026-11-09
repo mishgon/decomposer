@@ -99,6 +99,9 @@ class ModelLog(AgentMiddleware):
         await asyncio.to_thread(append_record, log, {**row, "status": "started"})
         try:
             settings = dict(request.model_settings)
+            if getattr(request.model, 'openai_api_base', None) == 'https://lmrouter.2a2i.org/v1':
+                settings['extra_headers'] = {**settings.get('extra_headers', {}),
+                    'x-litellm-session-id': row['thread_id']}
             if limit is not None:
                 settings["max_tokens"] = limit
             response = await handler(request.override(model_settings=settings))
