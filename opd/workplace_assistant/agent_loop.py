@@ -10,10 +10,15 @@ from gyms.workplace_assistant.in_process import episode
 from opd.policy import PolicyTokens, VerlChatModel, is_episode_failure
 from opd.workplace_assistant.preflight import WORKER_MODEL
 
+from opd.synth.retry import check_episode, retry_episode
+
 
 @register('workplace_decomposer')
 class WorkplaceAgentLoop(AgentLoopBase):
     async def run(self, sampling_params, **kwargs):
+        return await retry_episode(lambda: self._run_attempt(sampling_params, **kwargs))
+
+    async def _run_attempt(self, sampling_params, **kwargs):
         if kwargs['data_source'] != 'workplace-assistant/validation20':
             raise ValueError('Workplace panel is validation-only')
         task_id = int(kwargs['extra_info']['task_id'])
@@ -37,6 +42,7 @@ class WorkplaceAgentLoop(AgentLoopBase):
             worker.http_client.close()
             await worker.http_async_client.aclose()
         (directory / 'result.json').write_text(json.dumps(result, ensure_ascii=False))
+        check_episode(result, has_tokens=bool(tokens.response_ids and any(tokens.mask)))
         if result['error_type'] is not None and not is_episode_failure(result):
             raise RuntimeError(f'Workplace validation failure: {result["error"]}; see {directory}')
         if not tokens.response_ids or not any(tokens.mask):

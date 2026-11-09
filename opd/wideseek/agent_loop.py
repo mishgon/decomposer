@@ -11,7 +11,7 @@ from verl.experimental.agent_loop.agent_loop import AgentLoopBase, AgentLoopOutp
 from gyms.wideseek.run import episode
 from gyms.wideseek.runtime import save
 from opd.policy import PolicyTokens, VerlChatModel, is_episode_failure
-from opd.synth.retry import EpisodeTransportError, retry_episode
+from opd.synth.retry import check_episode, retry_episode
 
 
 @cache
@@ -45,13 +45,9 @@ class WideSeekAgentLoop(AgentLoopBase):
         try:
             result = await episode(task, 'decomposer', 1, directory, args, policy=VerlChatModel(tokens=tokens))
             save(directory / 'result.json', {**result, 'score': result['evaluation']['score']})
-            if result.get('cleanup_errors'):
-                raise RuntimeError('Subagent cleanup failed; see episode result')
+            check_episode(result, has_tokens=bool(tokens.response_ids and any(tokens.mask)))
             error_type = (result.get('error') or '').split(':', 1)[0]
             failure = {'error_type': error_type, 'error': result.get('error')}
-            if error_type in {'ReadError', 'WriteError', 'ConnectError', 'RemoteProtocolError',
-                              'ReadTimeout', 'ConnectTimeout'}:
-                raise EpisodeTransportError(f'{error_type}; saved episode: {directory}')
             if result['status'] == 'error' and not is_episode_failure(failure):
                 raise RuntimeError(f"Episode infrastructure failure: {result.get('error')}")
             if result['evaluation']['score'] is None:

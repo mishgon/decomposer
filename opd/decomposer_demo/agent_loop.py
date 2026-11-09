@@ -8,10 +8,15 @@ from verl.experimental.agent_loop.agent_loop import AgentLoopBase,AgentLoopOutpu
 from gyms.decomposer_demo.run import episode
 from opd.policy import PolicyTokens,VerlChatModel,is_episode_failure
 
+from opd.synth.retry import check_episode, retry_episode
+
 
 @register('demo_decomposer')
 class DemoAgentLoop(AgentLoopBase):
     async def run(self,sampling_params,**kwargs):
+        return await retry_episode(lambda: self._run_attempt(sampling_params, **kwargs))
+
+    async def _run_attempt(self,sampling_params,**kwargs):
         if kwargs['data_source'] not in {'decomposer-demo/en','decomposer-demo/ru'}:
             raise ValueError('Demo tasks are validation-only')
         info=kwargs['extra_info'];id=uuid4().hex
@@ -27,6 +32,7 @@ class DemoAgentLoop(AgentLoopBase):
         result=await episode(info['task_id'],VerlChatModel(tokens=tokens),
                              language=info['language'])
         (directory/'result.json').write_text(json.dumps(result,ensure_ascii=False,default=str))
+        check_episode(result, has_tokens=bool(tokens.response_ids and any(tokens.mask)))
         if result['error_type'] is not None and not is_episode_failure(result):
             raise RuntimeError(f'Demo validation infrastructure failure: {result["error_type"]}; see {directory}')
         if not tokens.response_ids or not any(tokens.mask):
