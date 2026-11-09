@@ -123,7 +123,7 @@ async def collect_episode(guard, run_episode, task, mode, attempt, root, args, *
             }
             if result.get('status') == 'error' and not stopping_failure:
                 raise RuntimeError(f"Unclassified episode error: {result_path}")
-            if result.get('evaluation', {}).get('status') in {'judge_error', 'evaluation_error'}:
+            if result.get('evaluation', {}).get('status') == 'evaluation_error':
                 raise RuntimeError(f"Invalid evaluation: {result_path}")
             return result
         # Keep the complete raw execution, but remove it from completed-attempt indexing.

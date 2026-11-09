@@ -217,6 +217,31 @@ class ScoreTests(unittest.IsolatedAsyncioTestCase):
         for text in ("Oops", "```json\n{}\n```", '```json\n{"idx_0": 0.5}\n```'):
             with self.assertRaises(ValueError): validate_judge(text, messages)
 
+    def test_bare_json_is_validated_and_normalized_for_native_reward(self):
+        messages = [{"content": "You are an expert in grading"},
+                    {"content": "Grade: {'idx_0': {'response': 'A', 'target': 'A'}}"}]
+        self.assertEqual(validate_judge('{"idx_0": 1}', messages), '```json\n{"idx_0": 1}\n```')
+        for text in ('{}', '{"idx_0": 0.5}', '{"idx_0": true}', '[]'):
+            with self.assertRaises(ValueError):
+                validate_judge(text, messages)
+
+    async def test_malformed_judge_retries_preserve_raw_responses(self):
+        import json
+        from langchain_core.messages import AIMessage
+        task = {"question": "Nationality?", "answer": "Australian", "unique_columns": []}
+        for replies, expected in [(["Sorry", "Correct"], ("scored", 1.)),
+                                  (["Sorry"] * 3, ("judge_error", None))]:
+            judge = SimpleNamespace(ainvoke=AsyncMock(side_effect=[AIMessage(content=s) for s in replies]))
+            with tempfile.TemporaryDirectory() as root, \
+                    patch("gyms.wideseek.evaluate.model", return_value=judge), \
+                    patch("gyms.wideseek.evaluate.close_model", new=AsyncMock()):
+                result = await evaluate(task, r"\boxed{Australian}", Path(root))
+                self.assertEqual((result["status"], result["score"]), expected)
+                self.assertEqual(judge.ainvoke.await_count, len(replies))
+                records = [json.loads(p.read_text()) for p in (Path(root) / "judge_calls").glob("*.json")]
+                self.assertEqual(len(records), len(replies))
+                self.assertEqual(sorted(r["attempt"] for r in records), list(range(1, len(replies) + 1)))
+
 
 if __name__ == "__main__": unittest.main()
 

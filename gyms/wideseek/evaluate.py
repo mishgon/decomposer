@@ -17,9 +17,7 @@ def validate_judge(text, messages):
             raise ValueError("QA judge must return Correct or Incorrect")
         return text
     matches = re.findall(r"```json\s*(\{.*?\})\s*```", text, re.DOTALL)
-    if not matches:
-        raise ValueError("Judge omitted fenced JSON")
-    result = json.loads(matches[-1])
+    result = json.loads(matches[-1] if matches else text.strip())
     if not isinstance(result, dict):
         raise ValueError("Judge response must be an object")
     if messages[0]["content"].startswith("You are an expert in grading"):
@@ -29,7 +27,7 @@ def validate_judge(text, messages):
             raise ValueError("Judge must score every cell exactly once with 0 or 1")
     elif any(not isinstance(v, str) for v in result.values()):
         raise ValueError("Judge alignment values must be strings")
-    return text
+    return "```json\n" + json.dumps(result) + "\n```"
 
 
 async def evaluate(task, answer, path, *, judge_model_id=None):
@@ -48,21 +46,29 @@ async def evaluate(task, answer, path, *, judge_model_id=None):
     errors = []
 
     async def judge(messages):
-        row = {"started_at": time.time(), "messages": messages, "model": judge_model_id,
-               "temperature": 0., "presence_penalty": 0., "thinking": False}
-        try:
-            async with semaphore:
-                response = await judge_model.ainvoke(messages, temperature=0., presence_penalty=0.)
-            row["response"] = response.model_dump(mode="json")
-            return validate_judge(response.content, messages)
-        except Exception as exc:
-            row["error"] = f"{type(exc).__name__}: {exc}"
-            errors.append(row["error"])
-            # Upstream swallows judge errors. Keep them externally and invalidate the score.
+        for attempt in range(3):
+            row = {"started_at": time.time(), "messages": messages, "model": judge_model_id,
+                   "temperature": 0., "presence_penalty": 0., "thinking": False,
+                   "attempt": attempt + 1}
+            try:
+                async with semaphore:
+                    response = await judge_model.ainvoke(messages, temperature=0., presence_penalty=0.)
+                row["response"] = response.model_dump(mode="json")
+                try:
+                    return validate_judge(response.content, messages)
+                except ValueError as exc:
+                    row["error"] = f"{type(exc).__name__}: {exc}"
+                    if attempt < 2:
+                        continue
+                    errors.append(row["error"])
+            except Exception as exc:
+                row["error"] = f"{type(exc).__name__}: {exc}"
+                errors.append(row["error"])
+            finally:
+                row["finished_at"] = time.time()
+                await asyncio.to_thread(save, path / "judge_calls" / f"{uuid4().hex}.json", row)
+            # Upstream swallows judge errors; invalidate the score after evaluation.
             return "```json\n{}\n```" if is_table else "Incorrect"
-        finally:
-            row["finished_at"] = time.time()
-            await asyncio.to_thread(save, path / "judge_calls" / f"{uuid4().hex}.json", row)
 
     try:
         if is_table:
