@@ -1,18 +1,14 @@
 """Launch DeepDive collection with dedicated local researcher workers."""
 from pathlib import Path
 
-from decomposer.agent_server import agent_server
 from gyms.deepdive import REPO_ROOT
 from gyms.wideseek.run import cli
 from sft.deepdive.run import create_collection_parser, main as collect
+from sft.wideseek.launch import run_with_workers
 
 
 async def main(args):
-    async with agent_server(REPO_ROOT / "gyms/deepdive/langgraph.json",
-                            port=args.worker_port, n_jobs_per_worker=args.worker_slots,
-                            startup_timeout=180, python_executable=args.worker_python) as url:
-        args.worker_url = url
-        await collect(args)
+    await run_with_workers(args, REPO_ROOT / "gyms/deepdive/langgraph.json", collect)
 
 
 def create_parser():
