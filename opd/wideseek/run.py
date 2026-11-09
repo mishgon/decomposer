@@ -28,8 +28,8 @@ async def main(args, overrides):
     baseline = json.loads((args.baseline / "manifest.json").read_text())
     if baseline["status"] != "completed" or baseline["model"] != "vllm/qwen_3_5_4b_non_thinking":
         raise ValueError("Finish the starting-checkpoint baseline first")
-    if len(args.gpus) not in (2, 3) or len(set(args.gpus)) != len(args.gpus) or min(args.gpus) < 0:
-        raise ValueError("Choose two or three distinct GPU indices: training GPUs first, then rollout GPUs")
+    if len(args.gpus) not in (2, 3, 4) or len(set(args.gpus)) != len(args.gpus) or min(args.gpus) < 0:
+        raise ValueError("Choose two to four distinct GPU indices: training GPUs first, then rollout GPUs")
     training_gpus = getattr(args, 'training_gpus', 1)
     if not 1 <= training_gpus < len(args.gpus):
         raise ValueError('Reserve at least one training GPU and one rollout GPU')
