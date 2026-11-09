@@ -13,6 +13,7 @@ algorithm:
   rollout_correction:
     bypass_mode: true
 data:
+  seed: 42
   train_files: ${oc.env:OPD_DATA}/train.parquet
   val_files: ${oc.env:OPD_DATA}/evaluation.parquet
   return_raw_chat: true
