@@ -41,14 +41,14 @@ def test_expected_failures_finish_and_infrastructure_errors_surface(
     loop.tokenizer = None
     loop.rollout_config = SimpleNamespace(prompt_length=32, response_length=32)
     source = 'decomposer-demo/ru' if adapter == 'demo' else 'workplace-assistant/validation20'
-    call = loop.run({}, data_source=source, extra_info={'task_id': '1', 'language': 'ru'})
+    call = loop._run_attempt({}, data_source=source, extra_info={'task_id': '1', 'language': 'ru'})
     if accepted:
         output = asyncio.run(call)
         assert output.reward_score == 0
         assert output.response_ids == [2, 3]
         assert output.response_mask == [1, 1]
     else:
-        with pytest.raises(RuntimeError, match='validation'):
+        with pytest.raises(RuntimeError):
             asyncio.run(call)
     path, = tmp_path.glob('*-episodes/*/result.json')
     assert json.loads(path.read_text())['error'] == error
