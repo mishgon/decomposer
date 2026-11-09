@@ -3,7 +3,7 @@ import asyncio
 
 from decomposer.models import create_model
 
-WORKER_MODEL = 'lmrouter/qwen_3_5_4b_unlooped_non_thinking'
+WORKER_MODEL = 'lmrouter/qwen_3_5_4b_non_thinking'
 
 
 async def check():
