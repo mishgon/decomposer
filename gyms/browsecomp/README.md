@@ -51,11 +51,11 @@ PYTHONPATH=src:. python -m gyms.browsecomp.run \
 ```
 
 Each episode has its own Agent Server and checkpointed researcher state. Agents
-can fetch only URLs they have searched; forks inherit that state. Search counts
-and URLs persist across successive runs of one agent. Each agent has a 10-search
-budget; concurrent searches started together may exceed the remaining budget.
-Fetch returns the server's page body, not a query-specific LLM summary. These
-details match the old HTTP adapter, with the prompt corrected to use native tools.
+can fetch only URLs they have searched; forks inherit that state. Found URLs persist across successive runs of one agent. There is no search-count
+limit. Decomposer workers retain the per-run time budget (60 seconds of work plus
+60 seconds to respond); standalone researchers use the episode timeout and
+recursion limit.
+Fetch returns the server's page body, not a query-specific LLM summary. The prompt uses native tools.
 
 Runs save `manifest.json`, then `traces/<task>-rNNN/` with `task.json`, `trace.json`,
 optional `trace.html` (when the shared renderer has captured agent runs),
