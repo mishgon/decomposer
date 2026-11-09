@@ -1,0 +1,59 @@
+import asyncio
+import json
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
+import httpx
+from langchain_core.messages import AIMessage
+import pytest
+
+from gyms.widesearch import tools, run
+
+
+def test_search_pages_and_preserves_links(monkeypatch):
+    request = AsyncMock(side_effect=[
+        {"organic": [{"title": "A", "link": "https://a.test", "snippet": "Fact A"}]},
+        {"organic": [{"title": "B", "link": "https://b.test", "snippet": "Fact B"}]},
+    ])
+    monkeypatch.setattr(tools, "request", request)
+    result = asyncio.run(tools.search_global("query", count=150, use_english=True))
+    assert "https://a.test" in result and "Fact B" in result
+    assert [c.args[1]["page"] for c in request.call_args_list] == [1, 2]
+
+
+def test_page_reader_uses_description_and_saves_raw_model_output(monkeypatch, tmp_path):
+    monkeypatch.setenv("BROWSECOMP_MODEL_LOG", str(tmp_path / "model_calls.jsonl"))
+    monkeypatch.setattr(tools, "request", AsyncMock(return_value={"markdown": "Source table"}))
+    model = SimpleNamespace(ainvoke=AsyncMock(return_value=AIMessage(content="Extracted fact")))
+    monkeypatch.setattr(tools, "create_model", lambda _: model)
+    result = asyncio.run(tools.text_browser_view("https://a.test", "Find fee"))
+    assert result == "Extracted fact"
+    prompt = model.ainvoke.call_args.args[0][-1]["content"]
+    assert "Find fee" in prompt and "Source table" in prompt
+    saved = json.loads((tmp_path / "web_calls.jsonl").read_text())
+    assert saved["reader_model"] == tools.READER_MODEL
+
+
+def test_tool_failure_is_visible_and_logged(monkeypatch, tmp_path):
+    monkeypatch.setenv("BROWSECOMP_MODEL_LOG", str(tmp_path / "model_calls.jsonl"))
+    monkeypatch.setattr(tools, "request", AsyncMock(side_effect=httpx.ReadTimeout("read timeout")))
+    result = asyncio.run(tools.tools()[0].ainvoke({"query": "test"}))
+    assert "ERROR: ReadTimeout" in result
+    assert "read timeout" in (tmp_path / "web_calls.jsonl").read_text()
+
+
+def test_web_runner_does_not_preflight_local_retrieval(monkeypatch):
+    monkeypatch.setenv("SERPER_API_KEY", "test-key")
+    main = AsyncMock()
+    monkeypatch.setattr(run.browsecomp, "main", main)
+    asyncio.run(run.main(SimpleNamespace(agent="researcher_27b_thinking", episode=False,
+                                         retrieval_url=run.BACKEND)))
+    assert main.call_args.kwargs["preflight_check"] is run.preflight
+    with pytest.raises(ValueError, match="cannot resume"):
+        asyncio.run(run.preflight("http://127.0.0.1:18082"))
+
+
+def test_missing_key_fails_before_launch(monkeypatch):
+    monkeypatch.delenv("SERPER_API_KEY", raising=False)
+    with pytest.raises(ValueError, match="SERPER_API_KEY"):
+        asyncio.run(run.preflight(run.BACKEND))

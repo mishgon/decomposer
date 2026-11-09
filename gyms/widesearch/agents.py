@@ -1,23 +1,33 @@
-"""Reuse BrowseComp agents, changing only the final answer format."""
-from pathlib import Path
+"""Use WideSearch's English instructions and live web tools for all researchers."""
+from langchain.agents import create_agent
 
 from gyms.browsecomp import agents
 from gyms.browsecomp.agents import decomposer, decomposer_4b_non_thinking, decomposer_sft_1_2_0
+from decomposer.models import create_model
+from decomposer.prompts import AGENT_SYSTEM_PROMPT
+from decomposer.run_budget import RunBudgetContext, RunBudgetMiddleware
+from external.WideSearch.src.agent.prompt import get_system_prompt
+from gyms.browsecomp.model_logging import log_model_call
+from gyms.widesearch.tools import tools
 
-PROMPT = Path(agents.__file__).with_name("prompt.txt").read_text().split(
-    "When asked for the final benchmark answer,"
-)[0] + """When asked for the final benchmark answer, return the requested Markdown table.
-When assigned a research subtask, report its findings and sources to the caller.
-"""
+PROMPT = get_system_prompt("en")
+
+
+def _researcher(model_id, *, subagent=False):
+    return create_agent(
+        create_model(model_id), tools=tools(), context_schema=RunBudgetContext,
+        system_prompt=PROMPT + ("\n\n" + AGENT_SYSTEM_PROMPT if subagent else ""),
+        middleware=[RunBudgetMiddleware(), log_model_call],
+    )
 
 
 def researcher():
-    return agents._researcher(agents.RESEARCHER_MODEL, prompt=PROMPT)
+    return _researcher(agents.RESEARCHER_MODEL, subagent=True)
 
 
 def researcher_4b_thinking():
-    return researcher()
+    return _researcher(agents.RESEARCHER_MODEL)
 
 
 def researcher_27b_thinking():
-    return agents._researcher("lmrouter/qwen_3_8_27b_medium_thinking", prompt=PROMPT)
+    return _researcher("lmrouter/qwen_3_8_27b_medium_thinking")
