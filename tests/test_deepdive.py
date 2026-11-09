@@ -102,7 +102,7 @@ def test_launcher_uses_deepdive_data_and_cleans_workers_on_failure(tmp_path, mon
         assert args.worker_url == "http://worker"
         raise RuntimeError("collection failed")
 
-    monkeypatch.setattr(launch, "agent_server", workers)
+    monkeypatch.setattr("sft.wideseek.launch.agent_server", workers)
     monkeypatch.setattr(launch, "collect", collect)
     with pytest.raises(RuntimeError, match="collection failed"):
         asyncio.run(launch.main(args))
