@@ -114,8 +114,8 @@ def main(args):
          "source_sha256": hashlib.sha256((args.source / "widesearch.jsonl").read_bytes()).hexdigest(),
          "upstream_patch_sha256": hashlib.sha256(subprocess.check_output(["git", "diff", "HEAD"], cwd=UPSTREAM)).hexdigest(),
          "upstream_revision": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=UPSTREAM, text=True).strip(),
-         "judge_model": JUDGE_MODEL, "corpus": "Tevatron/browsecomp-plus-corpus",
-         "harness": "BrowseComp"}
+         "judge_model": JUDGE_MODEL,
+         "backend": manifest["config"]["retrieval_url"], "harness": "WideSearch"}
     provenance_path = directory / "provenance.json"
     if provenance_path.exists() and json.loads(provenance_path.read_text()) != provenance:
         raise ValueError("Evaluation provenance changed; use a separate evaluation directory")

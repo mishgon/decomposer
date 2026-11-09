@@ -17,15 +17,16 @@ def test_researcher_graph_accepts_tool_coroutines():
     assert researcher_27b_thinking().get_graph()
 
 
-def test_search_pages_and_preserves_links(monkeypatch):
-    request = AsyncMock(side_effect=[
-        {"organic": [{"title": "A", "link": "https://a.test", "snippet": "Fact A"}]},
-        {"organic": [{"title": "B", "link": "https://b.test", "snippet": "Fact B"}]},
-    ])
+def test_search_preserves_excerpts_and_limits_results(monkeypatch):
+    request = AsyncMock(return_value={"results": [
+        {"title": "A", "url": "https://a.test", "excerpts": ["Fact A", "Fact B"]},
+        {"title": "B", "url": "https://b.test", "excerpts": ["Fact C"]},
+    ]})
     monkeypatch.setattr(tools, "request", request)
-    result = asyncio.run(tools.search_global("query", count=150, use_english=True))
+    result = asyncio.run(tools.search_global("query", count=1, use_english=True))
     assert "https://a.test" in result and "Fact B" in result
-    assert [c.args[1]["page"] for c in request.call_args_list] == [1, 2]
+    assert "https://b.test" not in result
+    assert request.call_args.args == ("web_search", {"objective": "query", "search_queries": ["query"]})
 
 
 def test_page_reader_uses_description_and_saves_raw_model_output(monkeypatch, tmp_path):
@@ -35,7 +36,7 @@ def test_page_reader_uses_description_and_saves_raw_model_output(monkeypatch, tm
         append(*args)
     monkeypatch.setattr(tools, "append_record", append_outside_event_loop)
     monkeypatch.setenv("BROWSECOMP_MODEL_LOG", str(tmp_path / "model_calls.jsonl"))
-    monkeypatch.setattr(tools, "request", AsyncMock(return_value={"markdown": "Source table"}))
+    monkeypatch.setattr(tools, "request", AsyncMock(return_value={"results": [{"excerpts": ["Source table"]}]}))
     model = SimpleNamespace(ainvoke=AsyncMock(return_value=AIMessage(content="Extracted fact")))
     monkeypatch.setattr(tools, "create_model", lambda _: model)
     result = asyncio.run(tools.text_browser_view("https://a.test", "Find fee"))
@@ -65,17 +66,16 @@ def test_web_runner_does_not_preflight_local_retrieval(monkeypatch):
         asyncio.run(run.preflight("http://127.0.0.1:18082"))
 
 
-def test_missing_key_fails_before_launch(monkeypatch):
+def test_free_backend_needs_no_search_key(monkeypatch):
     monkeypatch.delenv("SERPER_API_KEY", raising=False)
-    with pytest.raises(ValueError, match="SERPER_API_KEY"):
-        asyncio.run(run.preflight(run.BACKEND))
+    asyncio.run(run.preflight(run.BACKEND))
 
 
 def test_long_search_keeps_snippets_when_one_page_fails(monkeypatch, tmp_path):
     monkeypatch.setenv("BROWSECOMP_MODEL_LOG", str(tmp_path / "model_calls.jsonl"))
-    monkeypatch.setattr(tools, "request", AsyncMock(return_value={"organic": [
-        {"link": "https://a.test", "snippet": "First snippet"},
-        {"link": "https://b.test", "snippet": "Second snippet"},
+    monkeypatch.setattr(tools, "request", AsyncMock(return_value={"results": [
+        {"url": "https://a.test", "excerpts": ["First snippet"]},
+        {"url": "https://b.test", "excerpts": ["Second snippet"]},
     ]}))
     monkeypatch.setattr(tools, "read_page", AsyncMock(side_effect=[
         "Extracted first page", httpx.ReadTimeout("blocked page")]))
@@ -86,7 +86,7 @@ def test_long_search_keeps_snippets_when_one_page_fails(monkeypatch, tmp_path):
 
 def test_reader_generation_error_becomes_tool_result(monkeypatch, tmp_path):
     monkeypatch.setenv("BROWSECOMP_MODEL_LOG", str(tmp_path / "model_calls.jsonl"))
-    monkeypatch.setattr(tools, "request", AsyncMock(return_value={"text": "Page text"}))
+    monkeypatch.setattr(tools, "request", AsyncMock(return_value={"results": [{"content": "Page text"}]}))
     model = SimpleNamespace(ainvoke=AsyncMock(side_effect=RuntimeError("exhausted max_completion_tokens")))
     monkeypatch.setattr(tools, "create_model", lambda _: model)
     result = asyncio.run(tools.tools()[1].ainvoke({"url": "https://a.test", "description": "Find fee"}))
@@ -95,8 +95,8 @@ def test_reader_generation_error_becomes_tool_result(monkeypatch, tmp_path):
 
 
 def test_long_search_keeps_results_when_reader_deadline_expires(monkeypatch):
-    monkeypatch.setattr(tools, "request", AsyncMock(return_value={"organic": [
-        {"link": "https://a.test", "snippet": "Source snippet"},
+    monkeypatch.setattr(tools, "request", AsyncMock(return_value={"results": [
+        {"url": "https://a.test", "excerpts": ["Source snippet"]},
     ]}))
     @asynccontextmanager
     async def expired(deadline):
@@ -108,13 +108,34 @@ def test_long_search_keeps_results_when_reader_deadline_expires(monkeypatch):
     assert "Reader time budget exhausted" in result
 
 
-def test_provider_restriction_is_visible_without_logging_key(monkeypatch, tmp_path):
+@pytest.mark.parametrize("mcp_error", [False, True])
+def test_rate_limit_retries_and_logs_every_attempt(monkeypatch, tmp_path, mcp_error):
     monkeypatch.setenv("BROWSECOMP_MODEL_LOG", str(tmp_path / "model_calls.jsonl"))
-    monkeypatch.setenv("SERPER_API_KEY", "secret-test-key")
-    transport = httpx.MockTransport(lambda request: httpx.Response(
-        400, json={"message": "Query pattern not allowed for free accounts."}))
-    client = httpx.AsyncClient(transport=transport)
+    attempts = []
+    def respond(request):
+        assert "x-api-key" not in request.headers
+        attempts.append(json.loads(request.content))
+        if len(attempts) == 1:
+            if mcp_error:
+                return httpx.Response(200, json={"result": {"isError": True,
+                    "content": [{"type": "text", "text": "Rate limit exceeded"}]}})
+            return httpx.Response(429, headers={"Retry-After": "90"})
+        return httpx.Response(200, json={"result": {"content": [{"type": "text", "text":
+            json.dumps({"results": [{"url": "https://a.test", "excerpts": ["Fact"]}]})}]}})
+    client = httpx.AsyncClient(transport=httpx.MockTransport(respond))
     monkeypatch.setattr(tools.httpx, "AsyncClient", lambda **kwargs: client)
+    sleep = AsyncMock()
+    monkeypatch.setattr(tools.asyncio, "sleep", sleep)
     result = asyncio.run(tools.tools()[0].ainvoke({"query": "test"}))
-    assert "Query pattern not allowed for free accounts" in result
-    assert "secret-test-key" not in (tmp_path / "web_calls.jsonl").read_text()
+    assert "Fact" in result and len(attempts) == 2
+    assert (60 if mcp_error else 90) in [c.args[0] for c in sleep.call_args_list]
+    records = [json.loads(line) for line in (tmp_path / "web_calls.jsonl").read_text().splitlines()]
+    assert len([r for r in records if "status_code" in r]) == 2
+
+
+def test_page_extraction_failure_does_not_call_reader(monkeypatch, tmp_path):
+    monkeypatch.setenv("BROWSECOMP_MODEL_LOG", str(tmp_path / "model_calls.jsonl"))
+    monkeypatch.setattr(tools, "request", AsyncMock(return_value={"results": [], "errors": [
+        {"url": "https://a.test", "error_type": "FETCH_FAILED"}]}))
+    result = asyncio.run(tools.tools()[1].ainvoke({"url": "https://a.test", "description": "Fee"}))
+    assert "FETCH_FAILED" in result
