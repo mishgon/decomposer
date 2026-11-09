@@ -121,7 +121,8 @@ def test_gold_changes_invalidate_cached_scores(monkeypatch, tmp_path):
     gold.write_text("name,value\nA,1\n")
     root = tmp_path / "run"
     root.mkdir()
-    (root / "manifest.json").write_text(json.dumps({"tasks": ["test"], "repetitions": 1, "episodes": []}))
+    (root / "manifest.json").write_text(json.dumps({"tasks": ["test"], "repetitions": 1, "episodes": [],
+        "config": {"retrieval_url": run.BACKEND}}))
     monkeypatch.setattr(evaluation, "load_queries", lambda _: {"test": query()})
     args = SimpleNamespace(run=root, source=source)
     evaluation.main(args)
