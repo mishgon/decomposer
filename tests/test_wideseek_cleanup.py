@@ -270,3 +270,30 @@ def test_episode_deadline_cancels_each_stage_and_preserves_trace(tmp_path, stage
     assert cleanup.await_count == (2 if stage == 'cleanup' else 1)
     if stage != 'evaluation':
         evaluate.assert_not_awaited()
+
+
+def test_cleanup_can_resume_after_archived_thread_was_deleted(tmp_path):
+    client = client_with_runs({'gone': []})
+    save(tmp_path / 'subagents/gone.json', {'runs': [{'status': 'interrupted'}], 'values': {}})
+    response = httpx.Response(404, request=httpx.Request('GET', 'http://worker/threads/gone/runs'))
+    client.runs.list.side_effect = httpx.HTTPStatusError('gone', request=response.request, response=response)
+    assert asyncio.run(cleanup_workers(client, state_for('gone'), tmp_path)) == []
+    client.threads.delete.assert_not_awaited()
+    (tmp_path / 'subagents/gone.json').unlink()
+    assert asyncio.run(cleanup_workers(client, state_for('gone'), tmp_path))
+
+
+def test_cleanup_threads_progress_concurrently(tmp_path):
+    client = client_with_runs({'a': [], 'b': []})
+    async def run():
+        arrived = set()
+        both = asyncio.Event()
+        async def snapshot(thread):
+            arrived.add(thread)
+            if len(arrived) == 2:
+                both.set()
+            await asyncio.wait_for(both.wait(), 1)
+            return {'values': {}}
+        client.threads.get_state.side_effect = snapshot
+        assert await cleanup_workers(client, state_for('a', 'b'), tmp_path) == []
+    asyncio.run(run())

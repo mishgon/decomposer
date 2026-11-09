@@ -71,7 +71,8 @@ async def cleanup_workers(client, state, path):
 
     errors = []
     thread_ids = dict.fromkeys(s["thread_id"] for s in state.get("agents", {}).values())
-    for thread_id in thread_ids:
+    async def clean_thread(thread_id):
+        archive = path / "subagents" / f"{thread_id}.json"
         try:
             # A runs.create response can be lost before its ID reaches parent state.
             runs = await list_runs(thread_id)
@@ -92,11 +93,26 @@ async def cleanup_workers(client, state, path):
             if any(r["status"] in {"pending", "running"} for r in runs):
                 raise RuntimeError("Worker still active after cancellation")
             worker_state = await asyncio.wait_for(client.threads.get_state(thread_id), 30)
-            save(path / "subagents" / f"{thread_id}.json", {**worker_state, "runs": runs})
+            save(archive, {**worker_state, "runs": runs})
             # Never discard remote checkpoints unless the archive was saved successfully.
             await asyncio.wait_for(client.threads.delete(thread_id), 30)
         except Exception as exc:
+            status = getattr(getattr(exc, 'response', None), 'status_code', None)
+            if (status == 404 or type(exc).__name__ == 'NotFoundError') and archive.is_file():
+                saved = json.loads(archive.read_text())
+                if 'runs' in saved and all(r['status'] in {'success', 'error', 'interrupted', 'timeout'}
+                                           for r in saved['runs']):
+                    return  # A previous cleanup archived and deleted this thread.
             errors.append(f"{thread_id}: {type(exc).__name__}: {exc}")
+
+    async def bounded(thread_id):
+        try:
+            async with asyncio.timeout(60):
+                await clean_thread(thread_id)
+        except TimeoutError:
+            errors.append(f"{thread_id}: TimeoutError: Worker cleanup exceeded 60s")
+
+    await asyncio.gather(*(bounded(thread_id) for thread_id in thread_ids))
     return errors
 
 
@@ -183,10 +199,10 @@ async def episode(task, mode, attempt, root, args, *, middleware=(), policy=None
     finally:
         if not cleanup_finished:
             try:
-                async with asyncio.timeout(60):
+                async with asyncio.timeout(90):
                     await finish_agents()
             except TimeoutError:
-                result.setdefault("cleanup_errors", []).append("Episode cleanup exceeded 60s")
+                result.setdefault("cleanup_errors", []).append("Episode cleanup exceeded 90s")
 
     result.setdefault("agent_finished_at", time.time())
     messages = state.get("messages", [])
