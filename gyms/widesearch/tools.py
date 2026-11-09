@@ -1,6 +1,5 @@
 """WideSearch's tool interfaces backed by live Serper search and page reading."""
 import asyncio
-from functools import partial
 import os
 from pathlib import Path
 import time
@@ -77,13 +76,15 @@ async def text_browser_view(url: str, description: str):
     return await read_page(url, description)
 
 
-async def invoke(implementation, **kwargs):
-    try:
-        async with asyncio.timeout(120):
-            return await implementation(**kwargs)
-    except (httpx.HTTPError, TimeoutError, ValueError) as error:
-        record({"tool": implementation.__name__, "request": kwargs, "error": str(error)})
-        return f"ERROR: {type(error).__name__}: {error}"
+def with_errors(implementation):
+    async def invoke(**kwargs):
+        try:
+            async with asyncio.timeout(120):
+                return await implementation(**kwargs)
+        except (httpx.HTTPError, TimeoutError, ValueError) as error:
+            record({"tool": implementation.__name__, "request": kwargs, "error": str(error)})
+            return f"ERROR: {type(error).__name__}: {error}"
+    return invoke
 
 
 def tools():
@@ -92,7 +93,7 @@ def tools():
     for schema in get_tools_api_description("en", list(implementations)):
         function = schema["function"]
         result.append(StructuredTool.from_function(
-            coroutine=partial(invoke, implementations[function["name"]]), name=function["name"],
+            coroutine=with_errors(implementations[function["name"]]), name=function["name"],
             description=function["description"], args_schema=function["parameters"],
         ))
     return result

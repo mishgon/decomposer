@@ -10,6 +10,11 @@ import pytest
 from gyms.widesearch import tools, run
 
 
+def test_researcher_graph_accepts_tool_coroutines():
+    from gyms.widesearch.agents import researcher_27b_thinking
+    assert researcher_27b_thinking().get_graph()
+
+
 def test_search_pages_and_preserves_links(monkeypatch):
     request = AsyncMock(side_effect=[
         {"organic": [{"title": "A", "link": "https://a.test", "snippet": "Fact A"}]},
