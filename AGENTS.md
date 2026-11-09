@@ -1,5 +1,15 @@
 # AGENTS.md
 
+## Durable Work
+
+Keep worthwhile code and documentation recoverable from the Git remote. Review changes before committing, and push commits promptly without waiting for a separate request. Commit and push before launching experiments. Do not leave useful work only on the laptop or an experiment host. If a push fails, report it explicitly and retry when connectivity returns. Exclude credentials, caches, generated artifacts, and large datasets from code commits. Do not overwrite unrelated remote changes.
+
+## Network Workarounds
+
+SSH tunnels are banned in the user's organization. Do not propose, create, or use SSH tunnels (including local, remote, dynamic/SOCKS, or Unix-socket forwarding) as connectivity workarounds. This supersedes earlier instructions permitting tunnels with explicit user approval.
+
+Do not forward SSH agents or route traffic through another host without explicit authorization. A request to diagnose or fix connectivity does not authorize these actions. Do not introduce them through launcher transport settings. Use organization-approved networking solutions.
+
 ## Repo structure
 
 - `src/decomposer/`: core Decomposer package. This should stay benchmark- and training-agnostic.
