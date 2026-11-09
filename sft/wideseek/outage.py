@@ -24,6 +24,19 @@ def transient(error):
     return bool(_TRANSIENT.search(str(error))) and not _FATAL.search(str(error))
 
 
+class WorkerCleanupError(RuntimeError):
+    """The dedicated worker server must stop before collection can resume."""
+
+
+def recoverable_cleanup(result):
+    errors = result.get('cleanup_errors', [])
+    return (bool(errors)
+            and not any(result.get(k) for k in ('capture_error', 'trace_error', 'export_error'))
+            and all('TimeoutError:' in error or 'Worker still active after cancellation' in error
+                    or error == 'Episode cleanup exceeded 90s' or transient(error)
+                    for error in errors))
+
+
 def execution_errors(result, directory):
     errors = [result.get('error', '')]
     evaluation = result.get('evaluation', {})
@@ -94,6 +107,8 @@ async def collect_episode(guard, run_episode, task, mode, attempt, root, args, *
         await run_episode(task, mode, attempt, root, args, **kwargs)
         result = json.loads(result_path.read_text())
         directory = result_path.parent / result['execution_directory']
+        if recoverable_cleanup(result):
+            raise WorkerCleanupError(f'Worker server reset required: {result_path}')
         if any(result.get(key) for key in ('cleanup_errors', 'capture_error', 'trace_error', 'export_error')):
             raise RuntimeError(f"Unsafe episode cleanup/export: {result_path}")
         errors = execution_errors(result, directory)
@@ -101,7 +116,12 @@ async def collect_episode(guard, run_episode, task, mode, attempt, root, args, *
             raise RuntimeError(f"Permanent service error: {result_path}")
         retry = any(transient(error) for error in errors)
         if not retry:
-            if result.get('status') == 'error' and not str(result.get('error', '')).startswith('GraphRecursionError:'):
+            error = str(result.get('error', ''))
+            stopping_failure = error.startswith('GraphRecursionError:') or error in {
+                'ValueError: Decomposer requested tools instead of completing graceful shutdown',
+                'ValueError: Agent requested tools instead of returning its report',
+            }
+            if result.get('status') == 'error' and not stopping_failure:
                 raise RuntimeError(f"Unclassified episode error: {result_path}")
             if result.get('evaluation', {}).get('status') in {'judge_error', 'evaluation_error'}:
                 raise RuntimeError(f"Invalid evaluation: {result_path}")
