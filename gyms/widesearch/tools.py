@@ -5,6 +5,7 @@ from pathlib import Path
 import time
 
 import httpx
+from openai import OpenAIError
 from langchain_core.messages import message_to_dict
 from langchain_core.tools import StructuredTool
 
@@ -66,7 +67,8 @@ async def search_global(query: str, count: int = 10, summary_type: str = "short"
     for index, document in enumerate(documents):
         snippet = document.get("snippet", "")
         if summary_type == "long":
-            snippet = await read_page(document["link"], query)
+            extracted = await with_errors(read_page)(url=document["link"], description=query)
+            snippet += "\n[page] " + extracted
         sections.append(f"[index] {index}\n[title] {document.get('title', '')}\n"
                         f"[Url] {document['link']}\n[snippt] {snippet}")
     return "\n\n".join(sections) or "No search results found."
@@ -81,7 +83,7 @@ def with_errors(implementation):
         try:
             async with asyncio.timeout(120):
                 return await implementation(**kwargs)
-        except (httpx.HTTPError, TimeoutError, ValueError) as error:
+        except (httpx.HTTPError, OpenAIError, RuntimeError, TimeoutError, ValueError) as error:
             await record({"tool": implementation.__name__, "request": kwargs, "error": str(error)})
             return f"ERROR: {type(error).__name__}: {error}"
     return invoke

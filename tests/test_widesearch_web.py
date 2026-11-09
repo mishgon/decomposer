@@ -68,3 +68,26 @@ def test_missing_key_fails_before_launch(monkeypatch):
     monkeypatch.delenv("SERPER_API_KEY", raising=False)
     with pytest.raises(ValueError, match="SERPER_API_KEY"):
         asyncio.run(run.preflight(run.BACKEND))
+
+
+def test_long_search_keeps_snippets_when_one_page_fails(monkeypatch, tmp_path):
+    monkeypatch.setenv("BROWSECOMP_MODEL_LOG", str(tmp_path / "model_calls.jsonl"))
+    monkeypatch.setattr(tools, "request", AsyncMock(return_value={"organic": [
+        {"link": "https://a.test", "snippet": "First snippet"},
+        {"link": "https://b.test", "snippet": "Second snippet"},
+    ]}))
+    monkeypatch.setattr(tools, "read_page", AsyncMock(side_effect=[
+        "Extracted first page", httpx.ReadTimeout("blocked page")]))
+    result = asyncio.run(tools.tools()[0].ainvoke({"query": "test", "summary_type": "long"}))
+    for text in ["First snippet", "Second snippet", "https://b.test", "Extracted first page", "blocked page"]:
+        assert text in result
+
+
+def test_reader_generation_error_becomes_tool_result(monkeypatch, tmp_path):
+    monkeypatch.setenv("BROWSECOMP_MODEL_LOG", str(tmp_path / "model_calls.jsonl"))
+    monkeypatch.setattr(tools, "request", AsyncMock(return_value={"text": "Page text"}))
+    model = SimpleNamespace(ainvoke=AsyncMock(side_effect=RuntimeError("exhausted max_completion_tokens")))
+    monkeypatch.setattr(tools, "create_model", lambda _: model)
+    result = asyncio.run(tools.tools()[1].ainvoke({"url": "https://a.test", "description": "Find fee"}))
+    assert "ERROR: RuntimeError" in result
+    assert "max_completion_tokens" in (tmp_path / "web_calls.jsonl").read_text()
