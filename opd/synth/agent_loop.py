@@ -8,7 +8,7 @@ from verl.experimental.agent_loop.agent_loop import AgentLoopBase, AgentLoopOutp
 from gyms.synth.run import episode
 from gyms.synth.task import make_task
 from opd.policy import PolicyTokens, VerlChatModel, is_episode_failure
-from opd.synth.retry import EpisodeTransportError, retry_episode
+from opd.synth.retry import check_episode, retry_episode
 
 
 @register("synth_decomposer")
@@ -35,11 +35,7 @@ class SynthAgentLoop(AgentLoopBase):
         try:
             result = await episode(task, VerlChatModel(tokens=tokens), directory,
                                    self.config.synth.worker_url, timeout=180)
-            if result["cleanup_errors"]:
-                raise RuntimeError("Synthetic worker cleanup failed")
-            if result.get("error_type") in {"ReadError", "WriteError", "ConnectError",
-                                            "RemoteProtocolError", "ReadTimeout", "ConnectTimeout"}:
-                raise EpisodeTransportError(f"{result['error_type']}; saved episode: {directory}")
+            check_episode(result, has_tokens=bool(tokens.response_ids and any(tokens.mask)))
             if result["status"] == "error" and not is_episode_failure(result):
                 raise RuntimeError(f"Rollout infrastructure failure: {result['error']}")
             if not tokens.response_ids or not any(tokens.mask):
