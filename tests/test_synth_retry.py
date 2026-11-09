@@ -54,3 +54,31 @@ def test_mixed_permanent_error_is_fatal():
     from opd.synth.retry import check_episode
     with pytest.raises(RuntimeError, match='Mixed'):
         check_episode({'worker_errors': ['APIConnectionError: offline', 'AuthenticationError: bad key']}, has_tokens=True)
+
+
+@pytest.mark.parametrize('has_tokens', [False, True])
+def test_policy_request_timeout_retries_without_becoming_a_reward(monkeypatch, has_tokens):
+    from opd.synth.retry import check_episode
+    monkeypatch.setattr('opd.synth.retry.asyncio.sleep', AsyncMock())
+    attempts = []
+
+    async def run():
+        attempts.append(1)
+        if len(attempts) == 1:
+            check_episode({'status': 'error',
+                           'error': 'RuntimeError: Policy inference request timed out',
+                           'evaluation': {'status': 'scored', 'score': 0.}},
+                          has_tokens=has_tokens)
+            pytest.fail('An infrastructure timeout must not become a zero-reward trajectory')
+        return 'recovered'
+
+    assert asyncio.run(retry_episode(run)) == 'recovered'
+    assert len(attempts) == 2
+
+
+def test_policy_timeout_does_not_hide_invalid_alignment():
+    from opd.synth.retry import check_episode
+    with pytest.raises(RuntimeError, match='Mixed'):
+        check_episode({'error': 'RuntimeError: Policy inference request timed out',
+                       'worker_errors': ['ValueError: Invalid policy token/logprob alignment']},
+                      has_tokens=True)
