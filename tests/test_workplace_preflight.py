@@ -44,3 +44,36 @@ def test_synth_preflight_failure_happens_before_creating_training_output(tmp_pat
         asyncio.run(run.main(args, []))
     server.assert_not_called()
     assert not output.exists()
+
+
+@pytest.mark.parametrize('training_gpus', [1, 2])
+def test_wideseek_gpu_split_is_explicit(tmp_path, monkeypatch, training_gpus):
+    import json
+    from opd.wideseek import run
+    baseline = tmp_path / 'baseline'
+    baseline.mkdir()
+    model = tmp_path / 'model'
+    model.mkdir()
+    (model / 'config.json').write_text('{}')
+    (baseline / 'manifest.json').write_text(json.dumps({'status': 'completed',
+        'model': 'vllm/qwen_3_5_4b_non_thinking', 'student_model': str(model)}))
+    args = SimpleNamespace(baseline=baseline, model=model, output=tmp_path/'output',
+        gpus=[4,6,7], training_gpus=training_gpus, resume_from=None, source=tmp_path/'source')
+    monkeypatch.delenv('OPD_FAST_RUNTIME', raising=False)
+    monkeypatch.setattr(preflight, 'check', AsyncMock())
+    monkeypatch.setattr(run.subprocess, 'run', Mock())
+    monkeypatch.setattr(run, 'prepare', Mock(return_value={'source_sha256': None}))
+    import sys
+    monkeypatch.setitem(sys.modules, 'transformers', SimpleNamespace(
+        AutoTokenizer=SimpleNamespace(from_pretrained=Mock(side_effect=RuntimeError('stop before GPU startup')))))
+    with pytest.raises(RuntimeError, match='stop before GPU startup'):
+        asyncio.run(run.main(args, []))
+    saved = json.loads((args.output/'run.json').read_text())
+    assert f'trainer.n_gpus_per_node={training_gpus}' in saved['overrides']
+    assert f'rollout.n_gpus_per_node={3-training_gpus}' in saved['overrides']
+    # Check invalid rank counts before any service request.
+    args.training_gpus = 3
+    preflight.check.reset_mock()
+    with pytest.raises(ValueError, match='at least one'):
+        asyncio.run(run.main(args, []))
+    preflight.check.assert_not_awaited()
