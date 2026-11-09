@@ -24,23 +24,29 @@ def test_prepare_exports_only_english_questions(tmp_path):
     assert "secret" not in output.read_text()
 
 
-def test_researcher_preserves_harness_and_changes_only_answer_format(monkeypatch):
+def test_researchers_share_upstream_prompt_tools_and_registry_models(monkeypatch):
     calls = []
-    monkeypatch.setattr(browsecomp_agents, "_researcher", lambda model, **kwargs: calls.append((model, kwargs)))
+    monkeypatch.setattr(agents, "create_model", lambda model: model)
+    monkeypatch.setattr(agents, "create_agent", lambda model, **kwargs: calls.append((model, kwargs)))
     agents.researcher_4b_thinking()
     agents.researcher_27b_thinking()
+    agents.researcher()
     assert calls[0][0] == "lmrouter/qwen_3_5_4b_thinking"
     assert calls[1][0] == "lmrouter/qwen_3_8_27b_medium_thinking"
-    assert calls[0][1] == calls[1][1] == {"prompt": agents.PROMPT}
-    assert "at most 10 searches" in agents.PROMPT
-    assert "final_answer" not in agents.PROMPT
+    for _, kwargs in calls:
+        assert [t.name for t in kwargs["tools"]] == ["search_global", "text_browser_view"]
+        assert kwargs["system_prompt"].startswith(agents.PROMPT)
+        assert "BrowseComp" not in kwargs["system_prompt"]
+    assert calls[0][1]["system_prompt"] == calls[1][1]["system_prompt"] == agents.PROMPT
+    assert agents.AGENT_SYSTEM_PROMPT in calls[2][1]["system_prompt"]
     assert agents.decomposer_sft_1_2_0 is browsecomp_agents.decomposer_sft_1_2_0
 
 
 def test_episode_uses_widesearch_server_and_saves_raw_answer(monkeypatch, tmp_path):
     invoke = AsyncMock()
     monkeypatch.setattr(run.browsecomp, "episode", invoke)
-    args = SimpleNamespace(agent="researcher_4b_thinking", episode=True)
+    monkeypatch.setenv("SERPER_API_KEY", "test-key")
+    args = SimpleNamespace(agent="researcher_4b_thinking", episode=True, retrieval_url=run.BACKEND)
     asyncio.run(run.main(args))
     kwargs = invoke.call_args.kwargs
     assert kwargs["server_config"].parent.name == "widesearch"

@@ -100,7 +100,7 @@ async def preflight(url):
             raise RuntimeError(f"BrowseComp fetch preflight failed: {response.json()['error']}")
 
 
-async def main(args, *, episode_module="gyms.browsecomp.run"):
+async def main(args, *, episode_module="gyms.browsecomp.run", preflight_check=None):
     if args.concurrency < 1 or args.repetitions < 1 or args.timeout <= 0:
         raise ValueError("Concurrency, repetitions and timeout must be positive")
     tasks = [json.loads(line) for line in args.data.read_text().splitlines() if line.strip()]
@@ -114,7 +114,7 @@ async def main(args, *, episode_module="gyms.browsecomp.run"):
     if not tasks:
         raise ValueError("No tasks selected")
     config = {k: str(v) if isinstance(v, Path) else v for k, v in vars(args).items()}
-    await preflight(args.retrieval_url)
+    await (preflight_check or preflight)(args.retrieval_url)
     if args.resume:
         root = args.resume.resolve()
         manifest = json.loads((root / "manifest.json").read_text())
