@@ -90,6 +90,12 @@ async def cleanup_workers(client, state, path):
                                    for r in refreshed):
                             raise
             runs = await list_runs(thread_id)
+            # Cancellation can return before the worker's terminal status is visible.
+            for _ in range(20):
+                if not any(r["status"] in {"pending", "running"} for r in runs):
+                    break
+                await asyncio.sleep(0.5)
+                runs = await list_runs(thread_id)
             if any(r["status"] in {"pending", "running"} for r in runs):
                 raise RuntimeError("Worker still active after cancellation")
             worker_state = await asyncio.wait_for(client.threads.get_state(thread_id), 30)
