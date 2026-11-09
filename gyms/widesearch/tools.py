@@ -30,7 +30,11 @@ async def request(url, payload):
                                      headers={"X-API-KEY": os.environ["SERPER_API_KEY"]})
     await record({"endpoint": url, "request": payload, "status_code": response.status_code,
             "response": response.text, "duration_seconds": time.time() - started})
-    response.raise_for_status()
+    if response.is_error:
+        raise httpx.HTTPStatusError(
+            f"Serper HTTP {response.status_code}: {response.text[:1000]}",
+            request=response.request, response=response,
+        )
     return response.json()
 
 

@@ -106,3 +106,15 @@ def test_long_search_keeps_results_when_reader_deadline_expires(monkeypatch):
     result = asyncio.run(tools.search_global("test", summary_type="long"))
     assert "Source snippet" in result
     assert "Reader time budget exhausted" in result
+
+
+def test_provider_restriction_is_visible_without_logging_key(monkeypatch, tmp_path):
+    monkeypatch.setenv("BROWSECOMP_MODEL_LOG", str(tmp_path / "model_calls.jsonl"))
+    monkeypatch.setenv("SERPER_API_KEY", "secret-test-key")
+    transport = httpx.MockTransport(lambda request: httpx.Response(
+        400, json={"message": "Query pattern not allowed for free accounts."}))
+    client = httpx.AsyncClient(transport=transport)
+    monkeypatch.setattr(tools.httpx, "AsyncClient", lambda **kwargs: client)
+    result = asyncio.run(tools.tools()[0].ainvoke({"query": "test"}))
+    assert "Query pattern not allowed for free accounts" in result
+    assert "secret-test-key" not in (tmp_path / "web_calls.jsonl").read_text()

@@ -21,6 +21,9 @@ not an exact reproduction of that backend or of the upstream Runner.
   `description`. The reader sees at most 60,000 characters of a page and is told
   about this limit. This fixed reader is shared across all evaluated models.
   Website blocks, missing text and tool failures remain visible in the trace.
+  The live smoke test found that Serper rejects some query patterns on free
+  accounts and does not fully support PDF text extraction. These provider
+  restrictions are returned to the agent; there is no alternate-provider fallback.
 - Serper raw replies, reported credits, page-reader inputs and model outputs are
   saved in `web_calls.jsonl`, without authentication headers. Reader model usage
   is recorded there, separately from the agent's `usage.json`.
