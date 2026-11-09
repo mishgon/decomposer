@@ -37,6 +37,7 @@ async def agent_server(
             "--n-jobs-per-worker", str(n_jobs_per_worker),
         ]
         with socket.socket() as listener:
+            listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             listener.bind((host, port))
         process = await asyncio.create_subprocess_exec(
             *command, cwd=workdir, start_new_session=True,
