@@ -19,14 +19,23 @@
 
 ## Coding
 
-### Default workflow
+Follow [Google Engineering Practices](docs/google-eng-practices/README.md).
+A CL corresponds to a GitHub pull request (PR).
 
-Use this workflow by default:
+### Authoring changes
 
-- Start from the user's request. Ask questions to clarify missing requirements if needed.
-- Propose one small changelist (CL) at a time, following [Google's Small CLs guidance](https://google.github.io/eng-practices/review/developer/small-cls.html). Revise the proposal based on the user's feedback.
-- Wait for the user to approve the proposal before implementing it. Present the implementation for review. Address feedback and present the revised implementation for review again.
-- Proceed to the next CL only after the user approves the implementation. Repeat until all the user's requirements have been fulfilled.
+Read the [CL author's guide](docs/google-eng-practices/review/developer/index.md)
+and all three pages it lists. Follow it throughout implementation and review.
+
+Work in small, self-contained CLs, each on a branch and submitted as a PR.
+Wait for Codex Code Review, address findings, and obtain review of fixes before
+merging. Merge only after review is complete, blocking findings are resolved,
+and required checks pass.
+
+### Code Review Rules
+
+Read [How to do a code review](docs/google-eng-practices/review/reviewer/index.md)
+and all six pages it lists. Apply those guidelines when reviewing the PR.
 
 ### Code style
 
@@ -40,7 +49,7 @@ Keep changes limited to the task. Do not improve adjacent code, comments, or for
 
 ## LangChain Docs MCP
 
-Connect both LangChain documentation MCP servers to my coding agent so it can look up current LangChain, LangGraph, and LangSmith docs and API reference.
+Connect both LangChain documentation MCP servers so you can look up current LangChain, LangGraph, and LangSmith docs and API reference.
 
 Servers to add:
 
