@@ -58,6 +58,7 @@ async def search_global(query: str, count: int = 10, summary_type: str = "short"
     if not query or not 1 <= count <= 200 or summary_type not in {"short", "long"}:
         return "ERROR: supply a query, count between 1 and 200, and summary_type short or long."
     documents = []
+    reader_deadline = asyncio.get_running_loop().time() + 100
     for page in range(1, (count + 99) // 100 + 1):
         result = await request(SEARCH_URL, {"q": query, "num": min(count, 100),
                                             "page": page, "hl": "en", "gl": "us"})
@@ -67,7 +68,13 @@ async def search_global(query: str, count: int = 10, summary_type: str = "short"
     for index, document in enumerate(documents):
         snippet = document.get("snippet", "")
         if summary_type == "long":
-            extracted = await with_errors(read_page)(url=document["link"], description=query)
+            extracted = "Reader time budget exhausted; original snippet retained."
+            if asyncio.get_running_loop().time() < reader_deadline:
+                try:
+                    async with asyncio.timeout_at(reader_deadline):
+                        extracted = await with_errors(read_page)(url=document["link"], description=query)
+                except TimeoutError:
+                    pass
             snippet += "\n[page] " + extracted
         sections.append(f"[index] {index}\n[title] {document.get('title', '')}\n"
                         f"[Url] {document['link']}\n[snippt] {snippet}")

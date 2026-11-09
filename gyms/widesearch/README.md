@@ -14,6 +14,8 @@ not an exact reproduction of that backend or of the upstream Runner.
   The English-only gym uses `hl=en, gl=us` for both values of `use_english`.
   Counts above 100 use additional pages, up to the upstream limit of 200.
   `short` returns search snippets; `long` additionally reads each result page.
+  Long-search reading has a shared 100-second budget within the tool's 120-second
+  timeout. Failed or skipped extractions retain the original URL and snippet.
 - `text_browser_view`: Serper Scrape extracts Markdown/text, then the registry's
   `lmrouter/qwen_3_8_flash_next_non_thinking` summarizes it for the requested
   `description`. The reader sees at most 60,000 characters of a page and is told

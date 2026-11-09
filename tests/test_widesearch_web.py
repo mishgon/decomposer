@@ -1,6 +1,7 @@
 import asyncio
 import json
 import threading
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -91,3 +92,17 @@ def test_reader_generation_error_becomes_tool_result(monkeypatch, tmp_path):
     result = asyncio.run(tools.tools()[1].ainvoke({"url": "https://a.test", "description": "Find fee"}))
     assert "ERROR: RuntimeError" in result
     assert "max_completion_tokens" in (tmp_path / "web_calls.jsonl").read_text()
+
+
+def test_long_search_keeps_results_when_reader_deadline_expires(monkeypatch):
+    monkeypatch.setattr(tools, "request", AsyncMock(return_value={"organic": [
+        {"link": "https://a.test", "snippet": "Source snippet"},
+    ]}))
+    @asynccontextmanager
+    async def expired(deadline):
+        raise TimeoutError()
+        yield
+    monkeypatch.setattr(tools.asyncio, "timeout_at", expired)
+    result = asyncio.run(tools.search_global("test", summary_type="long"))
+    assert "Source snippet" in result
+    assert "Reader time budget exhausted" in result
