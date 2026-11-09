@@ -64,6 +64,10 @@ def decomposer_sft_1_2_0():
     return _decomposer("vllm/decomposer_manager_qwen35_4b_sft_1_2_0")
 
 
+def decomposer_sft_1_4_0():
+    return _decomposer("vllm/decomposer_manager_qwen35_4b_sft_1_4_0")
+
+
 # Model and harness recorded in traces, indexed by the LangGraph assistant ID.
 AGENTS = {
     "researcher": (RESEARCHER_MODEL, "react"),
@@ -73,4 +77,5 @@ AGENTS = {
     "decomposer_4b_non_thinking": ("lmrouter/qwen_3_5_4b_non_thinking", "decomposer"),
     "decomposer_sft_1_0_0": ("vllm/decomposer_manager_qwen35_4b_sft_1_0_0", "decomposer"),
     "decomposer_sft_1_2_0": ("vllm/decomposer_manager_qwen35_4b_sft_1_2_0", "decomposer"),
+    "decomposer_sft_1_4_0": ("vllm/decomposer_manager_qwen35_4b_sft_1_4_0", "decomposer"),
 }

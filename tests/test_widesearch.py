@@ -40,6 +40,8 @@ def test_researchers_share_upstream_prompt_tools_and_registry_models(monkeypatch
     assert calls[0][1]["system_prompt"] == calls[1][1]["system_prompt"] == agents.PROMPT
     assert agents.AGENT_SYSTEM_PROMPT in calls[2][1]["system_prompt"]
     assert agents.decomposer_sft_1_2_0 is browsecomp_agents.decomposer_sft_1_2_0
+    assert agents.decomposer_sft_1_4_0 is browsecomp_agents.decomposer_sft_1_4_0
+    assert "decomposer_sft_1_4_0" in run.AGENTS
 
 
 def test_episode_uses_widesearch_server_and_saves_raw_answer(monkeypatch, tmp_path):
