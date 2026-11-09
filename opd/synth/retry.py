@@ -11,7 +11,8 @@ log = logging.getLogger(__name__)
 _TRANSIENT = re.compile(
     r'\b(APIConnectionError|APITimeoutError|ConnectError|ConnectTimeout|ReadError|'
     r'WriteError|ReadTimeout|WriteTimeout|RemoteProtocolError|RateLimitError|InternalServerError)\b|'
-    r'\b(?:Error code: |HTTP(?:/\S+)?[ :]+|status code[ :]+)(?:408|429|500|502|503|504)\b')
+    r'\b(?:Error code: |HTTP(?:/\S+)?[ :]+|status code[ :]+)(?:408|429|500|502|503|504)\b|'
+    r'^RuntimeError: Policy inference request timed out$')
 
 
 class EpisodeTransportError(RuntimeError):
