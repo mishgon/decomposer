@@ -17,9 +17,9 @@ SEARCH_URL = "https://google.serper.dev/search"
 SCRAPE_URL = "https://scrape.serper.dev/"
 
 
-def record(value):
+async def record(value):
     path = Path(os.environ["BROWSECOMP_MODEL_LOG"]).with_name("web_calls.jsonl")
-    append_record(path, value)
+    await asyncio.to_thread(append_record, path, value)
 
 
 async def request(url, payload):
@@ -27,7 +27,7 @@ async def request(url, payload):
     async with httpx.AsyncClient(timeout=120, trust_env=False) as client:
         response = await client.post(url, json=payload,
                                      headers={"X-API-KEY": os.environ["SERPER_API_KEY"]})
-    record({"endpoint": url, "request": payload, "status_code": response.status_code,
+    await record({"endpoint": url, "request": payload, "status_code": response.status_code,
             "response": response.text, "duration_seconds": time.time() - started})
     response.raise_for_status()
     return response.json()
@@ -47,7 +47,7 @@ async def read_page(url, description):
         {"role": "user", "content": f"Request: {description}\nSource: {url}\nPage:\n{text[:60000]}"},
     ]
     response = await create_model(READER_MODEL).ainvoke(messages)
-    record({"reader_model": READER_MODEL, "request": messages,
+    await record({"reader_model": READER_MODEL, "request": messages,
             "response": message_to_dict(response), "source_characters": len(text)})
     return response.content
 
@@ -82,7 +82,7 @@ def with_errors(implementation):
             async with asyncio.timeout(120):
                 return await implementation(**kwargs)
         except (httpx.HTTPError, TimeoutError, ValueError) as error:
-            record({"tool": implementation.__name__, "request": kwargs, "error": str(error)})
+            await record({"tool": implementation.__name__, "request": kwargs, "error": str(error)})
             return f"ERROR: {type(error).__name__}: {error}"
     return invoke
 

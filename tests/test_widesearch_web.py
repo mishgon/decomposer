@@ -1,5 +1,6 @@
 import asyncio
 import json
+import threading
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -27,6 +28,11 @@ def test_search_pages_and_preserves_links(monkeypatch):
 
 
 def test_page_reader_uses_description_and_saves_raw_model_output(monkeypatch, tmp_path):
+    append = tools.append_record
+    def append_outside_event_loop(*args):
+        assert threading.current_thread() is not threading.main_thread()
+        append(*args)
+    monkeypatch.setattr(tools, "append_record", append_outside_event_loop)
     monkeypatch.setenv("BROWSECOMP_MODEL_LOG", str(tmp_path / "model_calls.jsonl"))
     monkeypatch.setattr(tools, "request", AsyncMock(return_value={"markdown": "Source table"}))
     model = SimpleNamespace(ainvoke=AsyncMock(return_value=AIMessage(content="Extracted fact")))
