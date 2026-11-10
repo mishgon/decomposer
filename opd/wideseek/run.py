@@ -52,6 +52,8 @@ async def main(args, overrides):
                      f'trainer.resume_from_path={checkpoint}']
     if not (model / "config.json").exists():
         raise ValueError("Student checkpoint does not exist")
+    from opd.workplace_assistant.preflight import check as check_workplace_worker
+    await check_workplace_worker()
     for patch in (ROOT / "opd/patches").glob("*.patch"):
         subprocess.run(["git", "-C", str(ROOT / "external/verl"), "apply", "--recount",
                         "--reverse", "--check", str(patch)], check=True, capture_output=True)
