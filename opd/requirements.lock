@@ -173,6 +173,8 @@ filelock==3.32.6
     #   torch
     #   virtualenv
     #   vllm
+flash-attn==2.8.3
+    # via -r opd/requirements.txt
 flashinfer-cubin==0.6.6
     # via vllm
 flashinfer-python==0.6.6
