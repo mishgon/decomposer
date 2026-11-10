@@ -79,7 +79,7 @@ async def cleanup_workers(client, state, path):
             for run in runs:
                 if run["status"] in {"pending", "running"}:
                     try:
-                        await asyncio.wait_for(client.runs.cancel(thread_id, run["run_id"], wait=True), 30)
+                        await asyncio.wait_for(client.runs.cancel(thread_id, run["run_id"], wait=True), 60)
                     except httpx.HTTPStatusError as exc:
                         if exc.response.status_code != 404:
                             raise
