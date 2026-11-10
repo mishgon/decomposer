@@ -1,4 +1,4 @@
-"""Optional OPD integration tests; standalone demo tests remain in its MR."""
+"""Optional OPD integration tests; standalone demo tests cover the gym separately."""
 import json
 import subprocess
 import sys

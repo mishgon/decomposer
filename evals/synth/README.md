@@ -18,13 +18,18 @@ For an already running policy server:
 
 ```bash
 PYTHONPATH=src:. python -m evals.synth.run --split eval --tasks 8 -n 4 \
+  --student-model "$HOME/models/Qwen3.5-4B" \
   --output artifacts/evals/synth/stock-qwen4b
 ```
 
 Use `--split train --tasks 16` to inspect training templates separately.
 `summary.json` reports native score, pass@1, pass@4, pass^4, correct-and-parallel
-rate and copies. `manifest.json` updates after each episode. Review baseline
-headroom before starting OPD; an already perfect baseline cannot demonstrate
+rate and copies. `manifest.json` updates after each episode and records the
+resolved checkpoint path.
+OPD requires that path to match its student checkpoint. Use immutable checkpoint
+directories; this path check does not hash model weights. Infrastructure or cleanup
+failures leave the baseline interrupted, while expected task failures retain their
+scores. Review baseline headroom before starting OPD; an already perfect baseline cannot demonstrate
 learning on this task. A script launching a known plan only checks the harness.
 
 For paired hosted evaluations on `occ-cds-1`, run `./watch-synth.sh` from your

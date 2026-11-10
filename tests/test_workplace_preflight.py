@@ -8,7 +8,7 @@ from opd.workplace_assistant import preflight
 
 
 @pytest.mark.parametrize('error', [None, TimeoutError('timeout'), RuntimeError('model missing')])
-def test_calibrated_worker_is_checked_and_closed(monkeypatch, error):
+def test_configured_worker_is_checked_and_closed(monkeypatch, error):
     worker = SimpleNamespace(ainvoke=AsyncMock(side_effect=error),
                              http_client=Mock(), http_async_client=SimpleNamespace(aclose=AsyncMock()))
     factory = Mock(return_value=worker)
@@ -30,7 +30,8 @@ def test_synth_preflight_failure_happens_before_creating_training_output(tmp_pat
     baseline = tmp_path / 'baseline'
     baseline.mkdir()
     (baseline / 'manifest.json').write_text(json.dumps({
-        'status': 'completed', 'model': 'vllm/qwen_3_5_4b_non_thinking'}))
+        'status': 'completed', 'model': 'vllm/qwen_3_5_4b_non_thinking',
+        'student_model': str(tmp_path / 'model')}))
     model = tmp_path / 'model'
     model.mkdir()
     (model / 'config.json').write_text('{}')

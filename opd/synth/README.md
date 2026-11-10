@@ -1,10 +1,9 @@
 # Synthetic OPD Experiment
 
-This branch tests the existing sampled-token, fully asynchronous veRL OPD
-pipeline on a simpler environment. It imports the shared policy bridge, hosted
-teacher client, pinned dependency lock and veRL patches from `we_opd_wideseek_r1`.
-The teacher registry key is updated to main's `lmrouter/` naming.
-There is no separate RL implementation and no task reward mixed into OPD loss.
+This experiment runs sampled-token, fully asynchronous veRL OPD on a deterministic
+file-swap environment. It uses the shared policy bridge, hosted teacher client,
+pinned dependency lock and veRL patches under `opd/`.
+Task rewards are measured separately and do not enter the distillation loss.
 
 ## Order
 
@@ -21,7 +20,8 @@ PYTHONPATH=src:. .venv-opd/bin/python -m opd.synth.run \
   --gpus 0 1
 ```
 
-The launcher requires a completed stock-model baseline. It checks the installed
+The launcher requires a completed stock-model baseline that records the same
+resolved checkpoint path. Keep checkpoint directories immutable. It checks the installed
 veRL patches and teacher prompt-logprob alignment before launching training.
 Hosted chat completion alone is insufficient: OPD needs compatible token IDs,
 decoded token meaning and prompt logprobs. A failed preflight aborts training.
@@ -78,10 +78,12 @@ and a new `--output` directory. veRL restores model, optimizer and dataloader
 state; previous artifacts remain untouched. Keep the model and training recipe
 unchanged when resuming.
 
-Worker transport errors retry the entire episode in a fresh workspace, at most
-twice. Failed attempts retain their traces and traceback but do not enter the
-training batch or validation average. Cleanup failures, model outcomes and
-exhausted retries are not silently converted into successful episodes.
+Known transient worker transport errors retry the episode in a fresh workspace
+with capped exponential backoff and jitter until recovery or cancellation. Failed
+attempts retain their traces and traceback but do not enter the training batch or
+validation average. Expected task failures retain their scores; unsafe cleanup and
+unclassified infrastructure errors stop the run. Hosted model requests use the
+shared [lmrouter outage recovery](../../docs/lmrouter-recovery.md).
 
 ## MLSpace Run
 
@@ -163,14 +165,16 @@ and 20 frozen Workplace tasks, reported under separate data sources.
 Workplace rewards never enter the training dataset or distillation objective.
 
 The Workplace coordinator uses current checkpoint weights through the veRL token
-bridge. Workers remain hosted Qwen3.5-4B-unlooped, non-thinking, with native Gym
+bridge. Workers use hosted Qwen3.5-4B, non-thinking, with native Gym
 tools and grading. The validation trajectory has the training runtime's 8192-token
 response budget and 300-second episode timeout. Stock GPU inference and token
 budgets differ from the hosted selection run; baseline validation measures this.
 
 `gyms/workplace_assistant/validation20.json` freezes the tasks; the adjacent
 selection file records provenance and measured teacher 20/20, student 2/20. Those
-are selection scores, not independent confirmation or guaranteed future scores.
+are historical selection scores using Qwen3.5-4B-unlooped workers. The current
+worker profile uses base Qwen3.5-4B because the unlooped endpoint was retired.
+Historical scores do not establish the current baseline or guarantee future scores.
 The panel contains native multi-record CRM/project-management tasks. The teacher
 used multiple worker runs on these tasks, while the student usually used one.
 They test target coverage and coordination, but do not reproduce synth's swap
@@ -213,42 +217,8 @@ verifies sizes and SHA-256 hashes when present, and replaces files atomically.
 It removes the marker only on success. Partially restored checkpoints remain marked.
 This follows team ADR 0008's NFS → S3 → verified offload convention, with
 automatic offload at the completed-checkpoint boundary for these MLSpace jobs.
-
-## Verified Run and Review Status
-
-The two-H100 job `lm-mpi-job-b68faccc-e6cb-4fb6-862e-198da877db85` runs the
-immutable source snapshot `aa4e0729ce29b05957e44224fbbac8fcc4f1a9e3`. On
-2026-11-02, direct checkpoint inspection confirmed a real first update:
-248 of 346 LoRA-B tensors were nonzero, all 692 saved model tensors were finite,
-and optimizer state recorded two steps, matching the two PPO epochs. The model
-payload was 312,239,659 bytes (297.8 MiB), with optimizer state saved separately.
-The next update also completed and synchronized to the rollout worker.
-
-The first checkpoint's S3 object sizes matched its saved payload. Local cleanup
-left only `OFFLOADED_TO_S3.json` in `global_step_1`; the checkpoint tracker advanced.
-This verifies save and offload on an actual training run. End-to-end training
-resume from an S3-restored checkpoint remains unverified. Offload verification
-checks file sizes, not content hashes.
-
-This run's step-zero rewards were 0.0625 on the synth train probe, 0.28125 on
-synth heldout tasks, and 0.50 on Workplace-20. These are the baseline for this
-run, not the hosted panel-selection scores. A successful optimizer update does
-not establish learning or generalisation. Compare subsequent Workplace-20
-validation against this run's own baseline; the small, selected panel and one
-sampled attempt per task limit what that comparison can establish.
-
-The final review ran the focused OPD, synth, checkpoint and Workplace suite:
-44 tests passed and five environment-dependent checks skipped. Running the
-policy suite with the cached Qwen tokenizer then passed all 11 tests, covering
-the four tokenizer skips. A separate real Agent Server smoke check passed with
-`.venv-workers`: six-copy swap, parallel delegation and clean worker shutdown.
-These checks used the provisioned runtime without modifying the training job.
-
-The demo gym and shared in-process workers are also included in
-[MR !18](https://gitlab.2a2i.org/optimal-cognitive-core/decomposer/-/merge_requests/18).
-Wait for that MR to merge, then rebase this branch onto main and review the
-remaining OPD diff before opening its MR. Keep the demo implementation from
-!18 when resolving overlap. No running job needs to be restarted for this cleanup.
+Full training resume from an S3-restored checkpoint still requires an end-to-end
+GPU check; the restore utility is covered by file-integrity tests.
 
 ## Shared Actor Optimization
 
@@ -258,31 +228,24 @@ loss. Activation checkpointing, microbatch size, and the existing linear-attenti
 fallback remain unchanged. The FLA overlay and disabling activation checkpointing
 remain experimental and are not part of this MR.
 
-The recorded isolated-head replay used 25.3 / 31.8 GiB at 8K / 16K instead of
-45.2 / 73.1 GiB, with gradient cosine >0.9998 and relative error <1.7%. Replay
-times of 9.76 / 20.09 seconds do not establish a speed gain over the baseline;
-the demonstrated gain is memory. Existing launched experiments keep their
-original staged configurations.
+The default validation uses synthetic probes and the selected Workplace-20 panel.
+Optional demo validation is documented under `opd/decomposer_demo/`. The demo gym
+itself is already on main and is unchanged by this feature.
 
-This branch is stacked on the frozen demo MR !18. Its demo gym, standalone
-evaluation, shared local workers, and demo tests are unchanged. Optional OPD demo
-adapter documentation and tests live under `opd/decomposer_demo/` and
-`tests/test_opd_demo_validation.py`. The default learning validation remains the
-synthetic probes and the selected Workplace-20 panel.
-
-## Review Hardening
+## Failure Handling and Checkpoint Integrity
 
 Workplace validation and optional OPD demo validation use the shared episode-failure
 classifier. Worker recursion, time, and model-call budgets are zero-reward task
-outcomes. Worker transport failures and invalid token alignment remain fatal, even
-when another worker or the coordinator also exhausted a budget. Raw worker errors
+outcomes. Known transient worker failures trigger the retry guard. Permanent
+infrastructure errors and invalid token alignment remain fatal, even when another
+worker or the coordinator also exhausted a budget. Raw worker errors
 remain in the saved result. The standalone demo gym and its scoring are unchanged.
 
-Before starting training, probe the exact Workplace worker profile used for panel
-calibration: `lmrouter/qwen_3_5_4b_unlooped_non_thinking`. The MLSpace entrypoint does
+Before starting training, probe the configured Workplace worker profile:
+`lmrouter/qwen_3_5_4b_non_thinking`. The MLSpace entrypoint does
 this before baseline inference; direct synth launches do it before creating the
-training output. An unavailable worker is an explicit preflight failure. Replacing
-that model requires a separately recorded calibration change.
+training output. An unavailable worker is an explicit preflight failure. Compare validation against
+the new run’s step-zero scores, using the same worker throughout the run.
 
 Checkpoint offload refuses any occupied destination unless the local offload marker
 already identifies the completed upload. This prevents same-sized old objects from

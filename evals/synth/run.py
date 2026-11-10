@@ -14,6 +14,7 @@ from decomposer.models import create_model
 from gyms.synth import ROOT
 from gyms.synth.run import episode
 from gyms.synth.task import make_task
+from opd.policy import is_episode_failure
 
 
 def summarize(rows, n):
@@ -41,6 +42,7 @@ async def main(args):
         sock.bind(("127.0.0.1", 0))
         port = sock.getsockname()[1]
     manifest = {"status": "running", "model": args.model, "split": args.split,
+                "student_model": str(args.student_model.resolve()) if args.student_model else None,
                 "tasks": args.tasks, "repetitions": args.repetitions, "concurrency": args.concurrency,
                 "started_at": time.time(), "episodes": []}
 
@@ -57,6 +59,8 @@ async def main(args):
             result = await episode(task, policy, root / f"{task['task_id']}-r{attempt}", worker_url)
             manifest["episodes"].append({**result, "attempt": attempt})
             save()
+            if result.get("cleanup_errors") or (result["status"] != "finished" and not is_episode_failure(result)):
+                raise RuntimeError(f"Baseline infrastructure failure: {result}")
             print(f"{len(manifest['episodes'])}/{args.tasks * args.repetitions}: "
                   f"{task['task_id']} score={result['score']} parallel={result['parallel']}", flush=True)
     try:
@@ -83,6 +87,7 @@ async def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model", default="vllm/qwen_3_5_4b_non_thinking")
+    parser.add_argument("--student-model", type=Path, help="Checkpoint served by the local policy server; required for OPD baselines")
     parser.add_argument("--worker-python", type=Path, default=ROOT / ".venv-workers/bin/python")
     parser.add_argument("--split", choices=["train", "eval"], default="eval")
     parser.add_argument("--tasks", type=int, default=8)

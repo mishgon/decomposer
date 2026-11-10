@@ -44,7 +44,7 @@ async def score(token_ids, *, tokenizer, output):
     started = time.time()
     record = {'model': model.model_name, 'started_at': started, 'request': payload, 'status': 'failed'}
     try:
-        # Reuse the registry's authenticated client, tunnel and two SDK retries.
+        # Reuse the registry's authenticated client and shared outage recovery.
         response = await model.root_async_client.completions.create(
             model=model.model_name, prompt=token_ids, max_tokens=1, temperature=1.0,
             extra_body={'prompt_logprobs': 0})

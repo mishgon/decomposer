@@ -44,5 +44,5 @@ for ((i=0; i<300; i++)); do
     sleep 2
 done
 (( ready == 1 )) || { echo "vLLM readiness timed out" >&2; exit 1; }
-python -u -m evals.synth.run --split eval --tasks 8 -n 4 --concurrency 8 --output "$output" \
+python -u -m evals.synth.run --split eval --tasks 8 -n 4 --concurrency 8 --student-model "$checkpoint" --output "$output" \
     > "${output}.logs/eval.log" 2>&1
