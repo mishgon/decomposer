@@ -14,6 +14,7 @@ from decomposer.agent_server import agent_server
 from gyms.wideseek import REPO_ROOT as ROOT
 from opd.wideseek.prepare import prepare
 from opd.teacher import score
+from opd.launch import add_gpu_arguments, gpu_overrides
 
 
 async def main(args, overrides):
@@ -28,13 +29,8 @@ async def main(args, overrides):
     baseline = json.loads((args.baseline / "manifest.json").read_text())
     if baseline["status"] != "completed" or baseline["model"] != "vllm/qwen_3_5_4b_non_thinking":
         raise ValueError("Finish the starting-checkpoint baseline first")
-    if len(args.gpus) not in (2, 3, 4) or len(set(args.gpus)) != len(args.gpus) or min(args.gpus) < 0:
-        raise ValueError("Choose two to four distinct GPU indices: training GPUs first, then rollout GPUs")
-    training_gpus = getattr(args, 'training_gpus', 1)
-    if not 1 <= training_gpus < len(args.gpus):
-        raise ValueError('Reserve at least one training GPU and one rollout GPU')
-    overrides = [*overrides, f'trainer.n_gpus_per_node={training_gpus}',
-                 f'rollout.n_gpus_per_node={len(args.gpus) - training_gpus}']
+    training_gpus = args.training_gpus
+    overrides = [*overrides, *gpu_overrides(args.gpus, training_gpus)]
     model = args.model.resolve()
     if baseline.get("student_model") != str(model):
         raise ValueError("Baseline must use the selected starting checkpoint")
@@ -80,7 +76,7 @@ async def main(args, overrides):
                 "overrides": overrides, "pid": os.getpid()}
     manifest['config_name'] = config_name
     manifest['training_gpus'] = training_gpus
-    manifest['rollout_gpus'] = len(args.gpus) - training_gpus
+    manifest['rollout_gpus'] = max(1, len(args.gpus) - training_gpus)
     if trainer_env is not None:
         manifest['fast_runtime'] = json.loads((Path(bundle) / 'manifest.json').read_text())
     if args.resume_from:
@@ -129,10 +125,7 @@ if __name__ == "__main__":
     parser.add_argument("--baseline", type=Path, required=True)
     parser.add_argument("--model", type=Path, default=Path.home() / "models/Qwen3.5-4B")
     parser.add_argument("--output", type=Path, required=True)
-    gpu = parser.add_mutually_exclusive_group(required=True)
-    gpu.add_argument("--gpus", nargs='+', type=int,
-                     help="Training GPUs first, followed by rollout GPUs")
-    parser.add_argument("--training-gpus", type=int, default=1, help="Number of GPUs assigned to the trainer")
+    add_gpu_arguments(parser)
     parser.add_argument("--resume-from", type=Path, help="Restore full veRL checkpoint into a new output directory")
     parser.add_argument("--worker-python", type=Path, default=ROOT / ".venv-workers/bin/python")
     args, overrides = parser.parse_known_args()
