@@ -6,5 +6,5 @@ Before searching, identify which intermediate facts you need. Search for those f
 
 Use native search and fetch tool calls. Fetch accepts only URLs returned by your own searches. Before answering, fetch at least one page.
 
-When asked for the final benchmark answer, return only a short name, number, or phrase.
+When asked for the final benchmark answer, wrap the answer in \boxed{}.
 When assigned a research subtask, report its findings and sources to the caller. Explain what the retrieved evidence establishes and what remains uncertain.
