@@ -1,0 +1,887 @@
+{
+  "title": "Practical ML Conf 2026",
+  "date": "2026-09-19",
+  "timezone": "Europe/Moscow",
+  "utcOffset": "+03:00",
+  "startHour": 11,
+  "source": "https://pmlconf.yandex.ru/2026/program",
+  "importedAt": "2026-09-11",
+  "status": "in progress",
+  "notes": [
+    "Published programme snapshot; gaps are left as published.",
+    "Repeated registration, breaks and afterparty entries are retained per hall.",
+    "Discussion room is not specified on the source page.",
+    "Descriptions are concise summaries; full talk abstracts and speaker biographies are available at the source links."
+  ],
+  "events": [
+    {
+      "id": "pml-2026-01",
+      "title": "Сбор участников",
+      "location": "Зал «Данные»",
+      "tags": [
+        "Данные",
+        "offline",
+        "programme"
+      ],
+      "start": "2026-09-19T11:00:00+03:00",
+      "end": "2026-09-19T12:00:00+03:00",
+      "url": "https://pmlconf.yandex.ru/2026/program",
+      "people": []
+    },
+    {
+      "id": "pml-2026-02",
+      "title": "World models для физического AI",
+      "location": "Зал «Данные»",
+      "tags": [
+        "Data Science",
+        "Данные",
+        "offline",
+        "keynote"
+      ],
+      "description": "World models, VLA, JEPA, Dreamer/RSSM и робототехническое управление.",
+      "start": "2026-09-19T12:40:00+03:00",
+      "end": "2026-09-19T13:15:00+03:00",
+      "url": "https://pmlconf.yandex.ru/2026/program",
+      "people": [
+        {
+          "name": "Николай Смолянский",
+          "organization": "Независимый исследователь",
+          "role": "speaker"
+        }
+      ]
+    },
+    {
+      "id": "pml-2026-03",
+      "title": "От рекомендательного стека к одной генеративной модели в Яндекс Музыке",
+      "location": "Зал «Данные»",
+      "tags": [
+        "RecSys",
+        "Данные",
+        "offline",
+        "talk"
+      ],
+      "description": "End-to-end генеративные рекомендации: замена многоступенчатого стека, офлайн-оценка, A/B-тесты.",
+      "start": "2026-09-19T13:20:00+03:00",
+      "end": "2026-09-19T13:55:00+03:00",
+      "url": "https://pmlconf.yandex.ru/2026/program",
+      "people": [
+        {
+          "name": "Николай Савушкин",
+          "organization": "Яндекс R&D",
+          "role": "speaker"
+        }
+      ]
+    },
+    {
+      "id": "pml-2026-04",
+      "title": "Как мы учим Alice AI LLM",
+      "location": "Зал «Данные»",
+      "tags": [
+        "NLP",
+        "Данные",
+        "offline",
+        "keynote"
+      ],
+      "description": "Обучение Alice AI LLM: данные, диагностика, алайнмент, reward hacking.",
+      "start": "2026-09-19T14:10:00+03:00",
+      "end": "2026-09-19T14:45:00+03:00",
+      "url": "https://pmlconf.yandex.ru/2026/program",
+      "people": [
+        {
+          "name": "Александр Боймель",
+          "organization": "Яндекс R&D",
+          "role": "speaker"
+        }
+      ]
+    },
+    {
+      "id": "pml-2026-05",
+      "title": "Как мы развивали трансформерный item-энкодер в рекомендательной модели",
+      "location": "Зал «Данные»",
+      "tags": [
+        "Data Science",
+        "RecSys",
+        "Данные",
+        "offline",
+        "talk"
+      ],
+      "description": "Трансформерный item-энкодер: DCN, torch.compile, Triton, стабильность обучения, A/B-тесты.",
+      "start": "2026-09-19T14:50:00+03:00",
+      "end": "2026-09-19T15:25:00+03:00",
+      "url": "https://pmlconf.yandex.ru/2026/program",
+      "people": [
+        {
+          "name": "Дмитрий Веснин",
+          "organization": "Авито",
+          "role": "speaker"
+        }
+      ]
+    },
+    {
+      "id": "pml-2026-06",
+      "title": "Agentic Vision: как научить VLM рассуждать и использовать инструменты",
+      "location": "Зал «Данные»",
+      "tags": [
+        "CV",
+        "NLP",
+        "Данные",
+        "offline",
+        "talk"
+      ],
+      "description": "Agentic Vision: планирование, OCR, детекторы, поиск, код, оценка качества.",
+      "start": "2026-09-19T15:30:00+03:00",
+      "end": "2026-09-19T16:05:00+03:00",
+      "url": "https://pmlconf.yandex.ru/2026/program",
+      "people": [
+        {
+          "name": "Данил Кашин",
+          "organization": "Яндекс R&D",
+          "role": "speaker"
+        }
+      ]
+    },
+    {
+      "id": "pml-2026-07",
+      "title": "Кофе-брейк",
+      "location": "Зал «Данные»",
+      "tags": [
+        "Данные",
+        "offline",
+        "programme"
+      ],
+      "start": "2026-09-19T16:10:00+03:00",
+      "end": "2026-09-19T17:10:00+03:00",
+      "url": "https://pmlconf.yandex.ru/2026/program",
+      "people": []
+    },
+    {
+      "id": "pml-2026-08",
+      "title": "Строим экономически эффективный инференс LLM для агентских (и не только) сценариев",
+      "location": "Зал «Данные»",
+      "tags": [
+        "MLOps",
+        "Данные",
+        "offline",
+        "talk"
+      ],
+      "description": "Инференс агентов: SLO, KV-кеш, маршрутизация, speculative decoding, prefill/decode.",
+      "start": "2026-09-19T17:10:00+03:00",
+      "end": "2026-09-19T17:45:00+03:00",
+      "url": "https://pmlconf.yandex.ru/2026/program",
+      "people": [
+        {
+          "name": "Владислав Носивской",
+          "organization": "Yandex Cloud",
+          "role": "speaker"
+        }
+      ]
+    },
+    {
+      "id": "pml-2026-09",
+      "title": "Эффективный Online RL для больших MoE LLM",
+      "location": "Зал «Данные»",
+      "tags": [
+        "NLP",
+        "Данные",
+        "offline",
+        "talk"
+      ],
+      "description": "Online RL: асинхронность, синхронизация весов, FP8, масштабирование MoE.",
+      "start": "2026-09-19T17:50:00+03:00",
+      "end": "2026-09-19T18:25:00+03:00",
+      "url": "https://pmlconf.yandex.ru/2026/program",
+      "people": [
+        {
+          "name": "Никита Ермолаев",
+          "organization": "Сбер",
+          "role": "speaker"
+        }
+      ]
+    },
+    {
+      "id": "pml-2026-10",
+      "title": "Alice AI Search: быстрые ответы Алисы на Поиске",
+      "location": "Зал «Данные»",
+      "tags": [
+        "NLP",
+        "Данные",
+        "offline",
+        "talk"
+      ],
+      "description": "Alice AI Search: encoder-decoder MoE, ускорение, поведенческий RLHF.",
+      "start": "2026-09-19T18:30:00+03:00",
+      "end": "2026-09-19T19:05:00+03:00",
+      "url": "https://pmlconf.yandex.ru/2026/program",
+      "people": [
+        {
+          "name": "Артур Петросян",
+          "organization": "Яндекс Поиск",
+          "role": "speaker"
+        }
+      ]
+    },
+    {
+      "id": "pml-2026-11",
+      "title": "Интеллектуальная игра «Слабое звено. ML Edition»",
+      "location": "Зал «Данные»",
+      "tags": [
+        "Данные",
+        "offline",
+        "programme"
+      ],
+      "start": "2026-09-19T19:10:00+03:00",
+      "end": "2026-09-19T20:00:00+03:00",
+      "url": "https://pmlconf.yandex.ru/2026/program",
+      "people": []
+    },
+    {
+      "id": "pml-2026-12",
+      "title": "Итоги главного розыгрыша",
+      "location": "Зал «Данные»",
+      "tags": [
+        "Данные",
+        "offline",
+        "programme"
+      ],
+      "description": "Розыгрыш для офлайн-участников; условия сообщат на регистрации.",
+      "start": "2026-09-19T20:00:00+03:00",
+      "end": "2026-09-19T20:20:00+03:00",
+      "url": "https://pmlconf.yandex.ru/2026/program",
+      "people": []
+    },
+    {
+      "id": "pml-2026-13",
+      "title": "Афтерпати и нетворк",
+      "location": "Зал «Данные»",
+      "tags": [
+        "Данные",
+        "offline",
+        "programme"
+      ],
+      "start": "2026-09-19T20:20:00+03:00",
+      "end": "2026-09-19T23:00:00+03:00",
+      "url": "https://pmlconf.yandex.ru/2026/program",
+      "people": []
+    },
+    {
+      "id": "pml-2026-14",
+      "title": "Сбор участников",
+      "location": "Зал «Код»",
+      "tags": [
+        "Код",
+        "offline",
+        "programme"
+      ],
+      "start": "2026-09-19T11:00:00+03:00",
+      "end": "2026-09-19T12:00:00+03:00",
+      "url": "https://pmlconf.yandex.ru/2026/program",
+      "people": []
+    },
+    {
+      "id": "pml-2026-15",
+      "title": "Пока вы говорите: как устроен стриминговый перевод речи",
+      "location": "Зал «Код»",
+      "tags": [
+        "Speech",
+        "NLP",
+        "Код",
+        "offline",
+        "talk"
+      ],
+      "description": "Потоковый перевод en–ru: ASR, LLM, сегментация, задержка и качество.",
+      "start": "2026-09-19T13:20:00+03:00",
+      "end": "2026-09-19T13:55:00+03:00",
+      "url": "https://pmlconf.yandex.ru/2026/program",
+      "people": [
+        {
+          "name": "Вилиана Девбунова",
+          "organization": "Яндекс R&D",
+          "role": "speaker"
+        }
+      ]
+    },
+    {
+      "id": "pml-2026-16",
+      "title": "RL meets Browser: как мы обучили VLM-агента работать в вебе за пользователя",
+      "location": "Зал «Код»",
+      "tags": [
+        "NLP",
+        "Код",
+        "offline",
+        "talk"
+      ],
+      "description": "Браузерный VLM-агент: multi-turn RL, награды, инфраструктура, генерация окружений.",
+      "start": "2026-09-19T14:50:00+03:00",
+      "end": "2026-09-19T15:25:00+03:00",
+      "url": "https://pmlconf.yandex.ru/2026/program",
+      "people": [
+        {
+          "name": "Артемий Голиков",
+          "organization": "Яндекс Алиса AI и Умные устройства",
+          "role": "speaker"
+        }
+      ]
+    },
+    {
+      "id": "pml-2026-17",
+      "title": "Диффузионный драфтинг в спекулятивном декодинге: DFlash и DSpark — от модели до вывода в продакшн",
+      "location": "Зал «Код»",
+      "tags": [
+        "NLP",
+        "Код",
+        "offline",
+        "talk"
+      ],
+      "description": "DFlash и DSpark: параллельный драфтинг, верификация, vLLM, Ascend.",
+      "start": "2026-09-19T15:30:00+03:00",
+      "end": "2026-09-19T16:05:00+03:00",
+      "url": "https://pmlconf.yandex.ru/2026/program",
+      "people": [
+        {
+          "name": "Станислав Илюшин",
+          "organization": "Huawei",
+          "role": "speaker"
+        }
+      ]
+    },
+    {
+      "id": "pml-2026-18",
+      "title": "Кофе-брейк",
+      "location": "Зал «Код»",
+      "tags": [
+        "Код",
+        "offline",
+        "programme"
+      ],
+      "start": "2026-09-19T16:10:00+03:00",
+      "end": "2026-09-19T17:10:00+03:00",
+      "url": "https://pmlconf.yandex.ru/2026/program",
+      "people": []
+    },
+    {
+      "id": "pml-2026-19",
+      "title": "Развитие рекомендательной системы в РСЯ: от нейроранжирования до улучшения аукциона",
+      "location": "Зал «Код»",
+      "tags": [
+        "RecSys",
+        "Код",
+        "offline",
+        "talk"
+      ],
+      "description": "РСЯ: нейроранжирование, DeepRanker, аукцион, HIMERA, генерация рекламных блоков.",
+      "start": "2026-09-19T17:10:00+03:00",
+      "end": "2026-09-19T17:45:00+03:00",
+      "url": "https://pmlconf.yandex.ru/2026/program",
+      "people": [
+        {
+          "name": "Маргарита Мишустина",
+          "organization": "Яндекс Рекламные технологии",
+          "role": "speaker"
+        }
+      ]
+    },
+    {
+      "id": "pml-2026-20",
+      "title": "Commodity LLM: как мы строим инфраструктуру и процессы для массового инференса LLM",
+      "location": "Зал «Код»",
+      "tags": [
+        "NLP",
+        "MLOps",
+        "Код",
+        "offline",
+        "talk"
+      ],
+      "description": "Корпоративный LLM-инференс: стоимость, инфраструктура, бенчмаркинг, оптимизация, деплой.",
+      "start": "2026-09-19T17:50:00+03:00",
+      "end": "2026-09-19T18:25:00+03:00",
+      "url": "https://pmlconf.yandex.ru/2026/program",
+      "people": [
+        {
+          "name": "Александр Мисевич",
+          "organization": "Т-Банк",
+          "role": "speaker"
+        }
+      ]
+    },
+    {
+      "id": "pml-2026-21",
+      "title": "Как мы реализовали конструктор видеоаналитик",
+      "location": "Зал «Код»",
+      "tags": [
+        "CV",
+        "Код",
+        "offline",
+        "talk"
+      ],
+      "description": "Luna Line: разметка, обучение CV-моделей, конструктор видеоаналитики, RTSP.",
+      "start": "2026-09-19T18:30:00+03:00",
+      "end": "2026-09-19T19:05:00+03:00",
+      "url": "https://pmlconf.yandex.ru/2026/program",
+      "people": [
+        {
+          "name": "Анастасия Белозерова",
+          "organization": "VisionLabs, Центральный университет",
+          "role": "speaker"
+        }
+      ]
+    },
+    {
+      "id": "pml-2026-22",
+      "title": "Афтерпати и нетворк",
+      "location": "Зал «Код»",
+      "tags": [
+        "Код",
+        "offline",
+        "programme"
+      ],
+      "start": "2026-09-19T20:20:00+03:00",
+      "end": "2026-09-19T23:00:00+03:00",
+      "url": "https://pmlconf.yandex.ru/2026/program",
+      "people": []
+    },
+    {
+      "id": "pml-2026-23",
+      "title": "ML News",
+      "location": "Зал «Сеть»",
+      "tags": [
+        "Сеть",
+        "online",
+        "programme"
+      ],
+      "description": "Обсуждение последних новостей ML и искусственного интеллекта.",
+      "start": "2026-09-19T12:00:00+03:00",
+      "end": "2026-09-19T12:40:00+03:00",
+      "url": "https://pmlconf.yandex.ru/2026/program",
+      "people": []
+    },
+    {
+      "id": "pml-2026-24",
+      "title": "Ouroboros: что внутри агента, обошедшего Codex, Claude Code и Cursor",
+      "location": "Зал «Сеть»",
+      "tags": [
+        "NLP",
+        "Data Science",
+        "Сеть",
+        "online",
+        "talk"
+      ],
+      "description": "Ouroboros: архитектура самоулучшающегося агента, память, конституция, риски деградации.",
+      "start": "2026-09-19T13:20:00+03:00",
+      "end": "2026-09-19T13:55:00+03:00",
+      "url": "https://pmlconf.yandex.ru/2026/program",
+      "people": [
+        {
+          "name": "Антон Разжигаев",
+          "organization": "AIRI",
+          "role": "speaker"
+        }
+      ]
+    },
+    {
+      "id": "pml-2026-25",
+      "title": "LLM-матрёшки: от исследовательского метода к рабочей технологии",
+      "location": "Зал «Сеть»",
+      "tags": [
+        "NLP",
+        "Data Science",
+        "Сеть",
+        "online",
+        "talk"
+      ],
+      "description": "LLM-матрёшки: семейства компактных моделей, оптимизация скорости, вычислительные бюджеты.",
+      "start": "2026-09-19T14:50:00+03:00",
+      "end": "2026-09-19T15:25:00+03:00",
+      "url": "https://pmlconf.yandex.ru/2026/program",
+      "people": [
+        {
+          "name": "Артём Федоров",
+          "organization": "Яндекс R&D",
+          "role": "speaker"
+        }
+      ]
+    },
+    {
+      "id": "pml-2026-26",
+      "title": "NEEDLE: открытый бенчмарк движков для веб-поиска",
+      "location": "Зал «Сеть»",
+      "tags": [
+        "NLP",
+        "Сеть",
+        "online",
+        "talk"
+      ],
+      "description": "NEEDLE: онлайн-бенчмарк поисковых API со свежими запросами.",
+      "start": "2026-09-19T17:10:00+03:00",
+      "end": "2026-09-19T17:45:00+03:00",
+      "url": "https://pmlconf.yandex.ru/2026/program",
+      "people": [
+        {
+          "name": "Илья Гусев",
+          "organization": "Keenable",
+          "role": "speaker"
+        }
+      ]
+    },
+    {
+      "id": "pml-2026-27",
+      "title": "От градиентного бустинга к Deep Ranker: опыт перехода в ранжировании без слёз",
+      "location": "Зал «Сеть»",
+      "tags": [
+        "RecSys",
+        "Data Science",
+        "Сеть",
+        "online",
+        "talk"
+      ],
+      "description": "Переход с бустинга на Deep Ranker: архитектура, смещения, бизнес-метрики.",
+      "start": "2026-09-19T18:30:00+03:00",
+      "end": "2026-09-19T19:05:00+03:00",
+      "url": "https://pmlconf.yandex.ru/2026/program",
+      "people": [
+        {
+          "name": "Андрей Белобородов",
+          "organization": "Яндекс Плюс Фантех",
+          "role": "speaker"
+        }
+      ]
+    },
+    {
+      "id": "pml-2026-28",
+      "title": "Итоги розыгрыша для зрителей трансляции",
+      "location": "Зал «Сеть»",
+      "tags": [
+        "Сеть",
+        "online",
+        "programme"
+      ],
+      "description": "Онлайн-розыгрыш; условия объявят 19 сентября в канале конференции.",
+      "start": "2026-09-19T19:05:00+03:00",
+      "end": "2026-09-19T19:25:00+03:00",
+      "url": "https://pmlconf.yandex.ru/2026/program",
+      "people": []
+    },
+    {
+      "id": "pml-2026-29",
+      "title": "Сбор участников",
+      "location": "Зал «Серверная»",
+      "tags": [
+        "Серверная",
+        "offline",
+        "programme"
+      ],
+      "start": "2026-09-19T11:00:00+03:00",
+      "end": "2026-09-19T12:00:00+03:00",
+      "url": "https://pmlconf.yandex.ru/2026/program",
+      "people": []
+    },
+    {
+      "id": "pml-2026-30",
+      "title": "Yet Another Closed-loop Teleoperation",
+      "location": "Зал «Серверная»",
+      "tags": [
+        "CV",
+        "Серверная",
+        "offline",
+        "talk"
+      ],
+      "description": "End-to-end управление телом гуманоида: движение, равновесие, взаимодействие с объектами.",
+      "start": "2026-09-19T13:20:00+03:00",
+      "end": "2026-09-19T13:55:00+03:00",
+      "url": "https://pmlconf.yandex.ru/2026/program",
+      "people": [
+        {
+          "name": "Андрей Маношин",
+          "organization": "Yandex Robotics",
+          "role": "speaker"
+        }
+      ]
+    },
+    {
+      "id": "pml-2026-31",
+      "title": "Дальше, точнее, быстрее: query-based-детекция для автономного транспорта",
+      "location": "Зал «Серверная»",
+      "tags": [
+        "CV",
+        "Серверная",
+        "offline",
+        "talk"
+      ],
+      "description": "Автономный транспорт: BEVFusion → MV2DFusion, дальность, точность, edge-инференс.",
+      "start": "2026-09-19T14:50:00+03:00",
+      "end": "2026-09-19T15:25:00+03:00",
+      "url": "https://pmlconf.yandex.ru/2026/program",
+      "people": [
+        {
+          "name": "Иван Лунев",
+          "organization": "Яндекс Автономный транспорт и роботы",
+          "role": "speaker"
+        }
+      ]
+    },
+    {
+      "id": "pml-2026-32",
+      "title": "Как мы научили GigaChat Audio ориентироваться во времени: temporal grounding для длинных аудиозаписей",
+      "location": "Зал «Серверная»",
+      "tags": [
+        "NLP",
+        "Speech",
+        "Серверная",
+        "offline",
+        "talk"
+      ],
+      "description": "Audio LLM: temporal grounding, синтетические данные, inter-timings, длинные записи.",
+      "start": "2026-09-19T15:30:00+03:00",
+      "end": "2026-09-19T16:05:00+03:00",
+      "url": "https://pmlconf.yandex.ru/2026/program",
+      "people": [
+        {
+          "name": "Александр Куцаков",
+          "organization": "Сбер",
+          "role": "speaker"
+        }
+      ]
+    },
+    {
+      "id": "pml-2026-33",
+      "title": "Кофе-брейк",
+      "location": "Зал «Серверная»",
+      "tags": [
+        "Серверная",
+        "offline",
+        "programme"
+      ],
+      "start": "2026-09-19T16:10:00+03:00",
+      "end": "2026-09-19T17:00:00+03:00",
+      "url": "https://pmlconf.yandex.ru/2026/program",
+      "people": []
+    },
+    {
+      "id": "pml-2026-34",
+      "title": "Дискуссия и награждение Yandex ML Prize",
+      "location": "Зал «Серверная»",
+      "tags": [
+        "Серверная",
+        "offline",
+        "programme"
+      ],
+      "description": "Награждение Yandex ML Prize и дискуссия об ML-образовании.",
+      "start": "2026-09-19T17:00:00+03:00",
+      "end": "2026-09-19T19:35:00+03:00",
+      "url": "https://pmlconf.yandex.ru/2026/program",
+      "people": []
+    },
+    {
+      "id": "pml-2026-35",
+      "title": "Афтерпати и нетворк",
+      "location": "Зал «Серверная»",
+      "tags": [
+        "Серверная",
+        "offline",
+        "programme"
+      ],
+      "start": "2026-09-19T20:20:00+03:00",
+      "end": "2026-09-19T23:00:00+03:00",
+      "url": "https://pmlconf.yandex.ru/2026/program",
+      "people": []
+    },
+    {
+      "id": "pml-2026-36",
+      "title": "От исследования к продукту и обратно: как связаны наука и разработка?",
+      "location": "Офлайн, зал не указан",
+      "tags": [
+        "Дискуссии",
+        "offline",
+        "discussion"
+      ],
+      "description": "Связь научных исследований, публикаций и продуктовой разработки.",
+      "start": "2026-09-19T14:50:00+03:00",
+      "end": "2026-09-19T15:30:00+03:00",
+      "url": "https://pmlconf.yandex.ru/2026/",
+      "people": [
+        {
+          "name": "Сергей Кастрюлин",
+          "organization": "Yandex Research",
+          "role": "speaker: Модератор"
+        },
+        {
+          "name": "Владислав Куренков",
+          "organization": "AIRI",
+          "role": "speaker"
+        },
+        {
+          "name": "Даниил Гаврилов",
+          "organization": "T-Bank AI Research",
+          "role": "speaker"
+        },
+        {
+          "name": "Кирилл Хрыльченко",
+          "organization": "НИУ ВШЭ",
+          "role": "speaker"
+        }
+      ]
+    },
+    {
+      "id": "pml-2026-37",
+      "title": "От демо к пользе: где AI-агенты действительно работают?",
+      "location": "Офлайн, зал не указан",
+      "tags": [
+        "Дискуссии",
+        "offline",
+        "discussion"
+      ],
+      "description": "Практическая польза AI-агентов и ограничения демонстрационных сценариев.",
+      "start": "2026-09-19T15:30:00+03:00",
+      "end": "2026-09-19T16:10:00+03:00",
+      "url": "https://pmlconf.yandex.ru/2026/",
+      "people": [
+        {
+          "name": "Владимир Платонов",
+          "organization": "Яндекс Алиса AI и Умные устройства",
+          "role": "speaker: Модератор"
+        },
+        {
+          "name": "Анастасия Рысьмятова",
+          "organization": "Авито",
+          "role": "speaker"
+        },
+        {
+          "name": "Даниил Цимерман",
+          "organization": "Т-Банк",
+          "role": "speaker"
+        },
+        {
+          "name": "Сергей Юдин",
+          "organization": "Яндекс Алиса AI B2B",
+          "role": "speaker"
+        }
+      ]
+    },
+    {
+      "id": "pml-2026-38",
+      "title": "От мощности к эффективности: как сделать AI дешевле и быстрее?",
+      "location": "Офлайн, зал не указан",
+      "tags": [
+        "Дискуссии",
+        "offline",
+        "discussion"
+      ],
+      "description": "Стоимость и задержки AI: модели, инференс, инфраструктура.",
+      "start": "2026-09-19T17:10:00+03:00",
+      "end": "2026-09-19T17:50:00+03:00",
+      "url": "https://pmlconf.yandex.ru/2026/",
+      "people": [
+        {
+          "name": "Василий Ершов",
+          "organization": "Yandex Cloud",
+          "role": "speaker: Модератор"
+        },
+        {
+          "name": "Роман Горб",
+          "organization": "Яндекс R&D",
+          "role": "speaker"
+        },
+        {
+          "name": "Никита Сушко",
+          "organization": "Сбер",
+          "role": "speaker"
+        },
+        {
+          "name": "Михаил Чебаков",
+          "organization": "Т-Банк",
+          "role": "speaker"
+        }
+      ]
+    },
+    {
+      "id": "pml-2026-39",
+      "title": "От метрики к доверию: как понять, что AI действительно работает?",
+      "location": "Офлайн, зал не указан",
+      "tags": [
+        "Дискуссии",
+        "offline",
+        "discussion"
+      ],
+      "description": "Оценка AI: бенчмарки, LLM-as-a-Judge и пользовательские метрики.",
+      "start": "2026-09-19T17:50:00+03:00",
+      "end": "2026-09-19T18:30:00+03:00",
+      "url": "https://pmlconf.yandex.ru/2026/",
+      "people": [
+        {
+          "name": "Иван Дёгтев",
+          "organization": "Яндекс R&D",
+          "role": "speaker: Модератор"
+        },
+        {
+          "name": "Алёна Феногенова",
+          "organization": "SberAI",
+          "role": "speaker"
+        },
+        {
+          "name": "Тимур Ионов",
+          "organization": "AIRI",
+          "role": "speaker"
+        },
+        {
+          "name": "Роман Куцев",
+          "organization": "LLM Arena",
+          "role": "speaker"
+        }
+      ]
+    },
+    {
+      "id": "pml-2026-40",
+      "title": "От запроса к диалогу: каким становится поиск в эпоху AI?",
+      "location": "Офлайн, зал не указан",
+      "tags": [
+        "Дискуссии",
+        "offline",
+        "discussion"
+      ],
+      "description": "Поиск с LLM, RAG и AI-ассистентами: пользовательский опыт.",
+      "start": "2026-09-19T18:30:00+03:00",
+      "end": "2026-09-19T19:10:00+03:00",
+      "url": "https://pmlconf.yandex.ru/2026/",
+      "people": [
+        {
+          "name": "Вадим Любаненко",
+          "organization": "Яндекс Поиск",
+          "role": "speaker: Модератор"
+        },
+        {
+          "name": "Игорь Кураленок",
+          "organization": "Ozon Tech",
+          "role": "speaker"
+        },
+        {
+          "name": "Александр Желубенков",
+          "organization": "Lamoda",
+          "role": "speaker"
+        },
+        {
+          "name": "Егор Антонов",
+          "organization": "Listee",
+          "role": "speaker"
+        },
+        {
+          "name": "Петр Попов",
+          "organization": "Независимый консультант",
+          "role": "speaker"
+        }
+      ]
+    }
+  ],
+  "announcements": [
+    {
+      "title": "Нетворкинг с номинантами Yandex ML Prize",
+      "location": "Зал «Серверная»",
+      "endTimePublished": false,
+      "from": "2026-09-19T17:00:00+03:00"
+    },
+    {
+      "title": "Обучение ML в эпоху ИИ: как и насколько сильно нейросети изменят высшее образование и работу инженеров",
+      "location": "Зал «Серверная»",
+      "endTimePublished": false,
+      "from": "2026-09-19T17:30:00+03:00"
+    }
+  ]
+}
