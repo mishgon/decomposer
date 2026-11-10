@@ -165,7 +165,7 @@ def main(args):
         save(directory / "summary.json", summarize(manifest, results))
         print(key, value["status"], value["score"], flush=True)
         consecutive_errors = consecutive_errors + 1 if value["status"] == "evaluation_error" else 0
-        if consecutive_errors >= 3 or classify(value.get("error")) == "credentials_or_quota":
+        if consecutive_errors >= 3 or classify(value.get("error") or value.get("msg")) == "credentials_or_quota":
             break
     summary = summarize(manifest, results)
     save(directory / "summary.json", summary)
