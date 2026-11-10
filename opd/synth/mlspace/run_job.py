@@ -8,29 +8,28 @@ import socket
 import subprocess
 import sys
 
-from .experiments import HOME, MODEL, SANITY_ROOT, collect_experiments
+from .experiments import collect_experiments
+from opd.launch import gpu_overrides
 
 
 HOSTS = ('lmrouter.2a2i.org', 'clearml.2a2i.org')
 
 
 def configure_network():
-    for key in list(os.environ):
-        if key.lower() in {'http_proxy', 'https_proxy', 'all_proxy'}:
-            del os.environ[key]
+    for key in ('HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'all_proxy'):
+        os.environ.pop(key, None)
     os.environ['NO_PROXY'] = os.environ['no_proxy'] = ','.join(('localhost', '127.0.0.1', *HOSTS))
     for host in HOSTS:
         print(f'{host}: {socket.getaddrinfo(host, 443)[0][4][0]}', flush=True)
 
 
-def preflight(output, *, workplace_validation=False):
+def preflight(output, model, key_file, config_path, *, workplace_validation=False):
     import httpx
     from clearml.utilities.pyhocon import ConfigFactory
     from transformers import AutoTokenizer
     from opd.teacher import score
 
-    os.environ['LLM_PROXY_MASTER_KEY'] = (HOME / '.config/decomposer/lmrouter.key').read_text().strip()
-    config_path = HOME / '.config/clearml/matrosov-cds.conf'
+    os.environ['LLM_PROXY_MASTER_KEY'] = key_file.read_text().strip()
     os.environ.update(CLEARML_CONFIG_FILE=str(config_path),
                       CLEARML_API_HOST='https://clearml.2a2i.org/api',
                       CLEARML_WEB_HOST='https://clearml.2a2i.org',
@@ -43,7 +42,7 @@ def preflight(output, *, workplace_validation=False):
                                json={'expiration_sec': 60})
         if response.status_code != 200 or not response.json().get('data', {}).get('token'):
             raise RuntimeError(f'ClearML authentication failed: HTTP {response.status_code}')
-    tokenizer = AutoTokenizer.from_pretrained(MODEL)
+    tokenizer = AutoTokenizer.from_pretrained(model)
     ids = tokenizer.apply_chat_template([{'role': 'user', 'content': 'Copy file A to B.'},
                                         {'role': 'assistant', 'content': 'I will delegate the copy.'}],
                                        tokenize=True, return_dict=False, enable_thinking=False)
@@ -55,33 +54,45 @@ def preflight(output, *, workplace_validation=False):
     print('ClearML authentication and teacher token-logprob alignment passed', flush=True)
 
 
+def add_runtime_arguments(parser):
+    parser.add_argument('--model', type=Path, required=True)
+    parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--lmrouter-key-file', type=Path, required=True)
+    parser.add_argument('--clearml-config', type=Path, required=True)
+    parser.add_argument('--num-gpus', type=int, required=True)
+    parser.add_argument('--training-gpus', type=int, required=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--experiment', required=True)
     parser.add_argument('--mode', choices=['baseline', 'train'], required=True)
+    add_runtime_arguments(parser)
     args = parser.parse_args()
+    gpu_overrides(list(range(args.num_gpus)), args.training_gpus)
     experiment = next(e for e in collect_experiments() if e.name == args.experiment)
-    output = SANITY_ROOT / experiment.name
+    output = args.output
     output.mkdir(parents=True, exist_ok=True)
     root = Path(__file__).resolve().parents[3]
     os.chdir(root)
     os.environ['PATH'] = str(root / '.venv-opd/bin') + ':' + os.environ['PATH']
     configure_network()
     subprocess.run(['nvidia-smi', '--query-gpu=name,memory.total', '--format=csv'], check=True)
-    if not (MODEL / 'config.json').exists():
-        raise RuntimeError(f'Missing model: {MODEL}')
-    preflight(output, workplace_validation=args.mode == 'train')
+    if not (args.model / 'config.json').exists():
+        raise RuntimeError(f'Missing model: {args.model}')
+    preflight(output, args.model, args.lmrouter_key_file, args.clearml_config,
+              workplace_validation=args.mode == 'train')
     if args.mode == 'train':
         from opd.checkpoint_offload import check_access
         check_access(os.environ['OPD_CHECKPOINT_S3_URI'])
     baseline = output / 'baseline'
     manifest = baseline / 'manifest.json'
     if not (manifest.exists() and json.loads(manifest.read_text())['status'] == 'completed'):
-        subprocess.run(['bash', 'evals/synth/baseline.sh', '0', str(MODEL), str(baseline)], check=True)
+        subprocess.run(['bash', 'evals/synth/baseline.sh', '0', str(args.model), str(baseline)], check=True)
     if args.mode == 'train':
-        gpu_args = ['--gpu', '0'] if experiment.num_gpus == 1 else ['--gpus', '0', '1']
+        gpu_args = ['--gpus', *map(str, range(args.num_gpus)), '--training-gpus', str(args.training_gpus)]
         subprocess.run([sys.executable, '-u', '-m', 'opd.synth.run', *gpu_args,
-                        '--baseline', str(baseline), '--model', str(MODEL),
+                        '--baseline', str(baseline), '--model', str(args.model),
                         '--output', str(output / 'train'),
                         '--workplace-validation',
                         'actor_rollout_ref.rollout.val_kwargs.n=1',

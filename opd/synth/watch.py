@@ -10,7 +10,6 @@ import subprocess
 import sys
 import time
 
-from opd.synth.mlspace.experiments import SANITY_ROOT
 
 
 def duration(seconds):
@@ -206,7 +205,7 @@ def show(root, run=None):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--root', type=Path, default=SANITY_ROOT)
+    parser.add_argument('--root', type=Path, default=Path(__file__).resolve().parents[3] / 'decomposer-artifacts/sanity')
     parser.add_argument('--run', help='Experiment directory name (default: latest submission)')
     parser.add_argument('--once', action='store_true')
     parser.add_argument('--interval', type=float, default=15)
