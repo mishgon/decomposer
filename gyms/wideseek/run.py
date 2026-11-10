@@ -111,12 +111,16 @@ async def cleanup_workers(client, state, path):
                     return  # A previous cleanup archived and deleted this thread.
             errors.append(f"{thread_id}: {type(exc).__name__}: {exc}")
 
+    # A model can create hundreds of unused threads. Keep cleanup below the
+    # SDK connection-pool limit; waiting for a slot is not worker cleanup time.
+    semaphore = asyncio.Semaphore(16)
     async def bounded(thread_id):
-        try:
-            async with asyncio.timeout(60):
-                await clean_thread(thread_id)
-        except TimeoutError:
-            errors.append(f"{thread_id}: TimeoutError: Worker cleanup exceeded 60s")
+        async with semaphore:
+            try:
+                async with asyncio.timeout(60):
+                    await clean_thread(thread_id)
+            except TimeoutError:
+                errors.append(f"{thread_id}: TimeoutError: Worker cleanup exceeded 60s")
 
     await asyncio.gather(*(bounded(thread_id) for thread_id in thread_ids))
     return errors

@@ -20,6 +20,7 @@ def client_with_runs(runs):
         next(r for r in runs[thread_id] if r['run_id'] == run_id)['status'] = 'interrupted'
 
     return SimpleNamespace(
+        http=SimpleNamespace(client=SimpleNamespace(aclose=AsyncMock())),
         runs=SimpleNamespace(list=AsyncMock(side_effect=list_runs), cancel=AsyncMock(side_effect=cancel)),
         threads=SimpleNamespace(get_state=AsyncMock(return_value={'values': {'messages': [
             {'type': 'ai', 'content': 'answer', 'additional_kwargs': {'reasoning_content': 'reasoning'}}]}}),
@@ -312,3 +313,27 @@ def test_cleanup_threads_progress_concurrently(tmp_path):
         client.threads.get_state.side_effect = snapshot
         assert await cleanup_workers(client, state_for('a', 'b'), tmp_path) == []
     asyncio.run(run())
+
+
+def test_hundreds_of_threads_do_not_exhaust_cleanup_connection_pool(tmp_path):
+    threads = [f'thread-{i}' for i in range(248)]
+    client = client_with_runs({thread: [] for thread in threads})
+    active = peak = 0
+
+    async def list_runs(thread, **kwargs):
+        nonlocal active, peak
+        active += 1
+        peak = max(peak, active)
+        try:
+            if active > 100:
+                raise httpx.PoolTimeout('cleanup pool exhausted')
+            await asyncio.sleep(0)
+            return []
+        finally:
+            active -= 1
+
+    client.runs.list.side_effect = list_runs
+    assert asyncio.run(cleanup_workers(client, state_for(*threads), tmp_path)) == []
+    assert 1 < peak < 100
+    assert client.threads.delete.await_count == len(threads)
+    assert len(list((tmp_path / 'subagents').glob('*.json'))) == len(threads)

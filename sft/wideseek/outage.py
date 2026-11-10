@@ -11,7 +11,7 @@ from gyms.wideseek.runtime import close_model, model, save
 
 _TRANSIENT = re.compile(
     r'\b(APIConnectionError|APITimeoutError|ConnectError|ConnectTimeout|ReadError|'
-    r'ReadTimeout|RemoteProtocolError|RateLimitError|InternalServerError)\b|'
+    r'ReadTimeout|PoolTimeout|RemoteProtocolError|RateLimitError|InternalServerError)\b|'
     r'\b(?:HTTPStatusError: |Error code: |HTTP(?:/\S+)?[ :]+|status code[ :]+|'
     r'''(?:Client|Server) error ['"])(?:408|429|500|502|503|504)\b''',
     re.IGNORECASE,

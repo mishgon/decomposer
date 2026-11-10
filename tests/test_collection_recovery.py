@@ -8,19 +8,20 @@ import pytest
 
 from gyms.wideseek.runtime import save
 from sft.wideseek import launch
-from sft.wideseek.outage import WorkerCleanupError, recoverable_cleanup
+from sft.wideseek.outage import collect_episode, recoverable_cleanup
 
 
 @pytest.mark.parametrize('error', ['thread: TimeoutError: ',
     'thread: RuntimeError: Worker still active after cancellation',
-    'Episode cleanup exceeded 90s', 'thread: ReadError: disconnected'])
+    'Episode cleanup exceeded 90s', 'thread: ReadError: disconnected', 'thread: PoolTimeout: '])
 def test_only_worker_stop_failures_are_recoverable(error):
     assert recoverable_cleanup({'cleanup_errors': [error]})
     assert not recoverable_cleanup({'cleanup_errors': [error], 'export_error': 'disk failure'})
     assert not recoverable_cleanup({'cleanup_errors': ['thread: OSError: disk full']})
 
 
-def test_restart_reaps_workers_before_requeue_and_preserves_results(tmp_path, monkeypatch):
+@pytest.mark.parametrize('cleanup_error', ['thread: TimeoutError: ', 'thread: PoolTimeout: '])
+def test_restart_reaps_workers_before_requeue_and_preserves_results(tmp_path, monkeypatch, cleanup_error):
     events = []
     unsafe = tmp_path/'decomposer/bad/attempt-001/result.json'
     completed = tmp_path/'decomposer/good/attempt-001/result.json'
@@ -41,8 +42,9 @@ def test_restart_reaps_workers_before_requeue_and_preserves_results(tmp_path, mo
     async def collect(args):
         if not args.resume:
             save(unsafe, {'execution_directory': 'execution-1',
-                         'cleanup_errors': ['thread: TimeoutError: ']})
-            raise WorkerCleanupError('stop workers')
+                         'cleanup_errors': [cleanup_error]})
+            await collect_episode(SimpleNamespace(wait=AsyncMock()), AsyncMock(),
+                                  {'task_id': 'bad'}, 'decomposer', 1, tmp_path, args)
         assert events == ['start', 'reaped', 'start']
         assert completed.exists()
         assert not unsafe.exists()
