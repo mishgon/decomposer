@@ -1,5 +1,6 @@
 """Run WideSearch with live web tools and save answers for offline scoring."""
 import asyncio
+import os
 from pathlib import Path
 
 from gyms.browsecomp import run as browsecomp
@@ -8,12 +9,14 @@ from gyms.widesearch.dataset import TASKS
 AGENTS = ["decomposer", "researcher_4b_thinking", "researcher_27b_thinking",
           "decomposer_4b_non_thinking", "decomposer_sft_1_2_0", "decomposer_sft_1_4_0"]
 FINAL_FORMAT = "\n\nReturn the requested table in one fenced markdown block. Preserve the requested column names."
-BACKEND = "parallel-free-web-v1"
+BACKEND = "keenable-pro-web-v1"
 
 
 async def preflight(backend):
     if backend != BACKEND:
         raise ValueError(f"WideSearch requires {BACKEND}; runs from other backends cannot resume here")
+    if not os.environ.get("KEENABLE_API_KEY"):
+        raise ValueError("KEENABLE_API_KEY is required for WideSearch")
 
 
 async def save_answer(task, output, root):

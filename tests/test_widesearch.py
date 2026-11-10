@@ -47,7 +47,7 @@ def test_researchers_share_upstream_prompt_tools_and_registry_models(monkeypatch
 def test_episode_uses_widesearch_server_and_saves_raw_answer(monkeypatch, tmp_path):
     invoke = AsyncMock()
     monkeypatch.setattr(run.browsecomp, "episode", invoke)
-    monkeypatch.setenv("SERPER_API_KEY", "test-key")
+    monkeypatch.setenv("KEENABLE_API_KEY", "test-key")
     args = SimpleNamespace(agent="researcher_4b_thinking", episode=True, retrieval_url=run.BACKEND)
     asyncio.run(run.main(args))
     kwargs = invoke.call_args.kwargs
