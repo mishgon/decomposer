@@ -131,3 +131,36 @@ def test_gold_changes_invalidate_cached_scores(monkeypatch, tmp_path):
     gold.write_text("name,value\nA,2\n")
     with pytest.raises(ValueError, match="provenance changed"):
         evaluation.main(args)
+
+
+@pytest.mark.parametrize("upstream_error", [False, True])
+def test_paused_scoring_preserves_later_cached_scores(monkeypatch, tmp_path, upstream_error):
+    source = tmp_path / 'source'
+    (source / 'widesearch_gold').mkdir(parents=True)
+    (source / 'widesearch.jsonl').write_text('metadata')
+    (source / 'widesearch_gold/test.csv').write_text('name,value\nA,1\n')
+    root = tmp_path / 'run'
+    root.mkdir()
+    episodes = [{'task': 'test', 'repetition': n, 'status': 'finished', 'directory': str(n)} for n in [1, 2, 3]]
+    evaluation.save(root / 'manifest.json', {'tasks': ['test'], 'repetitions': 3, 'episodes': episodes,
+        'status': 'completed', 'config': {'retrieval_url': run.BACKEND}})
+    for n in [1, 2, 3]:
+        (root / str(n)).mkdir()
+        (root / str(n) / 'answer.md').write_text('answer')
+    cached = {'status': 'evaluated', 'score': 1, 'f1_by_row': 1, 'f1_by_item': 1}
+    (root / 'evaluation/test-r002').mkdir(parents=True)
+    evaluation.save(root / 'evaluation/test-r002/result.json', cached)
+    monkeypatch.setattr(evaluation, 'load_queries', lambda _: {'test': query()})
+    calls = []
+    def fail(*args):
+        calls.append(args)
+        if upstream_error:
+            return {'status': 'evaluation_error', 'score': None, 'msg': 'evaluator error: 401 AuthenticationError'}
+        raise RuntimeError('AuthenticationError: 401')
+    monkeypatch.setattr(evaluation, 'score', fail)
+    evaluation.main(SimpleNamespace(run=root, source=source))
+    summary = json.loads((root / 'evaluation/summary.json').read_text())
+    assert summary['metrics']['score']['avg'] == pytest.approx(1 / 3)
+    assert len(calls) == 1
+    assert summary['evaluation_errors'] == 1
+    assert summary['status'] == 'needs_attention'

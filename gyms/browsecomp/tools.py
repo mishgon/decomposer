@@ -1,9 +1,12 @@
 """Agentic-rag search/fetch with checkpointed, per-agent URL access."""
+import asyncio
 import json
+from pathlib import Path
 import os
 from typing import Annotated
 
 import httpx
+from gyms.model_logging import append_record
 from langchain.agents import AgentState
 from langchain.tools import ToolRuntime, tool
 from langchain_core.messages import ToolMessage
@@ -19,13 +22,18 @@ class ResearchState(AgentState):
 
 
 async def request(endpoint, payload):
-    async with httpx.AsyncClient(timeout=120, trust_env=False) as client:
-        response = await client.post(
-            os.environ["BROWSECOMP_RETRIEVAL_URL"].rstrip("/") + endpoint,
-            json={**payload, "source": "browsecomp_plus"},
-        )
-        response.raise_for_status()
-        return response.json()
+    try:
+        async with httpx.AsyncClient(timeout=120, trust_env=False) as client:
+            response = await client.post(
+                os.environ["BROWSECOMP_RETRIEVAL_URL"].rstrip("/") + endpoint,
+                json={**payload, "source": "browsecomp_plus"},
+            )
+            response.raise_for_status()
+            return response.json()
+    except httpx.HTTPError as error:
+        path = Path(os.environ["BROWSECOMP_MODEL_LOG"]).with_name("web_calls.jsonl")
+        await asyncio.to_thread(append_record, path, {"endpoint": endpoint, "error": repr(error)})
+        raise
 
 
 @tool

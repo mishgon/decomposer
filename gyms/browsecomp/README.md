@@ -113,3 +113,12 @@ For example, after loading environment variables and forwarding retrieval:
 python -m evals.browsecomp.run --agent decomposer_sft_1_2_0 \
   --tasks TASK_ID_1 TASK_ID_2 --retrieval-url http://127.0.0.1:18082
 ```
+
+Queue recovery: infrastructure failures in model, worker and web logs are monitored
+while episodes run. Authentication/quota failures pause scheduling immediately;
+three consecutive infrastructure-failed episodes also pause it. Runs with remaining
+infrastructure or judging errors have `needs_attention` status. Resume preserves
+successful and model-limited attempts, archives infrastructure-failed attempts and
+retries their task/repetition pairs. Resume requires the same commit, input hash,
+backend, model and worker budgets. Judge failures can be rescored without generating
+another answer (BrowseComp via resume; WideSearch via its scoring command).

@@ -110,7 +110,7 @@ def with_errors(implementation):
             async with asyncio.timeout(TOOL_TIMEOUT):
                 return await implementation(**kwargs)
         except (httpx.HTTPError, OpenAIError, RuntimeError, TimeoutError, ValueError) as error:
-            await record({"tool": implementation.__name__, "request": kwargs, "error": str(error)})
+            await record({"tool": implementation.__name__, "request": kwargs, "error": repr(error)})
             return f"ERROR: {type(error).__name__}: {error}"
     return invoke
 
