@@ -1,11 +1,9 @@
-"""WideSearch's tool interfaces backed by free Parallel search and page reading."""
+"""WideSearch's tool interfaces backed by authenticated Keenable search and page reading."""
 import asyncio
-import json
 from email.utils import parsedate_to_datetime
 import os
 from pathlib import Path
 import time
-import uuid
 
 import httpx
 from openai import OpenAIError
@@ -17,10 +15,9 @@ from external.WideSearch.src.agent.prompt import get_tools_api_description
 from gyms.model_logging import append_record
 
 READER_MODEL = "lmrouter/qwen_3_8_flash_next_non_thinking"
-MCP_URL = "https://search.parallel.ai/mcp"
-SESSION_ID = str(uuid.uuid4())
+API_URL = "https://api.keenable.ai/v1"
 REQUEST_LOCK = asyncio.Lock()
-REQUEST_INTERVAL = 5
+REQUEST_INTERVAL = 0.2
 TOOL_TIMEOUT = 1800
 
 
@@ -29,57 +26,40 @@ async def record(value):
     await asyncio.to_thread(append_record, path, value)
 
 
-async def request(tool, arguments):
-    payload = {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
-               "params": {"name": tool, "arguments": {**arguments, "session_id": SESSION_ID}}}
+async def request(endpoint, arguments):
+    url = f"{API_URL}/{endpoint}"
     async with REQUEST_LOCK:
-        async with httpx.AsyncClient(timeout=120, trust_env=False) as client:
+        async with httpx.AsyncClient(timeout=120, trust_env=False, headers={
+            "X-API-Key": os.environ["KEENABLE_API_KEY"],
+        }) as client:
             for attempt in range(4):
                 await asyncio.sleep(REQUEST_INTERVAL)
                 started = time.time()
-                response = await client.post(MCP_URL, json=payload, headers={
-                    "Accept": "application/json, text/event-stream",
-                    "User-Agent": "decomposer-widesearch",
-                })
-                await record({"endpoint": MCP_URL, "request": payload, "attempt": attempt + 1,
+                if endpoint == "search":
+                    response = await client.post(url, json=arguments)
+                else:
+                    response = await client.get(url, params=arguments)
+                await record({"endpoint": url, "request": arguments, "attempt": attempt + 1,
                               "status_code": response.status_code, "response": response.text,
                               "duration_seconds": time.time() - started})
                 if response.status_code in {429, 502, 503, 504} and attempt < 3:
-                    delay = 60 * 2 ** attempt
+                    delay = 2 ** attempt
                     retry_after = response.headers.get("Retry-After")
                     if retry_after:
                         try:
                             delay = max(delay, float(retry_after))
                         except ValueError:
                             delay = max(delay, parsedate_to_datetime(retry_after).timestamp() - time.time())
-                    await record({"retry_seconds": delay, "tool": tool})
+                    await record({"retry_seconds": delay, "endpoint": url})
                     await asyncio.sleep(delay)
                     continue
                 response.raise_for_status()
-                envelope = response.json()
-                if envelope.get("error"):
-                    raise RuntimeError(f"Parallel MCP error: {envelope['error']}")
-                result = envelope["result"]
-                text = "\n".join(item["text"] for item in result.get("content", [])
-                                 if item.get("type", "text") == "text")
-                if result.get("isError"):
-                    if attempt < 3 and any(marker in text.lower() for marker in
-                                           ("rate limit", "rate_limit", "too many requests")):
-                        delay = 60 * 2 ** attempt
-                        await record({"retry_seconds": delay, "tool": tool})
-                        await asyncio.sleep(delay)
-                        continue
-                    raise RuntimeError(f"Parallel tool error: {text}")
-                return json.loads(text)
+                return response.json()
 
 
 async def read_page(url, description):
-    response = await request("web_fetch", {"urls": [url], "objective": "Full page content"})
-    if response.get("errors"):
-        raise RuntimeError(f"Parallel page extraction failed: {response['errors']}")
-    pages = response.get("results", [])
-    page = pages[0] if pages else {}
-    text = page.get("full_content") or page.get("content") or "\n\n".join(page.get("excerpts") or [])
+    page = await request("fetch", {"url": url})
+    text = page.get("content", "")
     if not text:
         return "Read url failed. No text found."
     messages = [
@@ -100,12 +80,12 @@ async def search_global(query: str, count: int = 10, summary_type: str = "short"
                         use_english: bool = False):
     if not query or not 1 <= count <= 200 or summary_type not in {"short", "long"}:
         return "ERROR: supply a query, count between 1 and 200, and summary_type short or long."
-    result = await request("web_search", {"objective": query, "search_queries": [query]})
+    result = await request("search", {"query": query, "max_results": min(count, 50), "mode": "pro"})
     documents = result.get("results", [])[:count]
     reader_deadline = asyncio.get_running_loop().time() + 900
     sections = []
     for index, document in enumerate(documents):
-        snippet = "\n".join(document.get("excerpts") or [])
+        snippet = document.get("snippet") or document.get("description") or ""
         if summary_type == "long":
             extracted = "Reader time budget exhausted; original snippet retained."
             if asyncio.get_running_loop().time() < reader_deadline:
