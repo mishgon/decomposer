@@ -1,5 +1,7 @@
 from pathlib import Path
 import subprocess
+from concurrent.futures import ThreadPoolExecutor
+from threading import Event
 
 import pytest
 
@@ -212,3 +214,122 @@ def test_storage_preflight_uses_and_removes_only_its_probe(remote):
     storage.check_access(URI)
     assert not remote[0]
     assert [call[0] for call in remote[1]] == ['ls', 'put', 'get', 'del']
+
+
+@pytest.fixture
+def blocked_upload(remote, monkeypatch):
+    started, release = Event(), Event()
+    command = storage.s3cmd
+
+    def blocked(*args, **kwargs):
+        if args[0] == 'sync':
+            started.set()
+            assert release.wait(10), 'Test did not release the upload'
+        return command(*args, **kwargs)
+
+    monkeypatch.setattr(storage, 's3cmd', blocked)
+    yield started, release
+    release.set()
+
+
+def test_background_upload_returns_before_cleanup_and_bounds_pending_work(checkpoint, blocked_upload):
+    started, release = blocked_upload
+    with storage.CheckpointOffloader(URI.rsplit('/', 1)[0]) as uploader:
+        try:
+            uploader.submit(checkpoint)
+            assert started.wait(5)
+            uploader.check()  # Training can continue while the upload is blocked.
+            assert (checkpoint / 'actor/model.pt').exists()
+            assert not (checkpoint / storage.MARKER).exists()
+            with pytest.raises(RuntimeError, match='previous offload'):
+                uploader.submit(checkpoint.parent / 'global_step_2')
+            assert not (checkpoint.parent / 'global_step_2').exists()
+        finally:
+            release.set()
+    assert not (checkpoint / 'actor/model.pt').exists()
+    assert (checkpoint / storage.MARKER).exists()
+    assert (checkpoint / 'evaluation/score.json').exists()
+
+
+@pytest.mark.parametrize('training_fails', [False, True])
+def test_trainer_exit_drains_upload_even_after_training_error(checkpoint, blocked_upload, training_fails):
+    started, release = blocked_upload
+    exiting = Event()
+
+    def train():
+        with storage.CheckpointOffloader(URI.rsplit('/', 1)[0]) as uploader:
+            uploader.submit(checkpoint)
+            assert started.wait(5)
+            exiting.set()
+            if training_fails:
+                raise ValueError('training failed')
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        training = executor.submit(train)
+        try:
+            assert exiting.wait(5)
+            assert not training.done()
+            assert (checkpoint / 'actor/model.pt').exists()
+        finally:
+            release.set()
+        if training_fails:
+            with pytest.raises(ValueError, match='training failed'):
+                training.result(timeout=5)
+        else:
+            training.result(timeout=5)
+    assert not (checkpoint / 'actor/model.pt').exists()
+    assert (checkpoint / storage.MARKER).exists()
+
+
+def test_wait_blocks_next_local_save_until_upload_finishes(checkpoint, blocked_upload):
+    started, release = blocked_upload
+    waiting, saved = Event(), Event()
+    with storage.CheckpointOffloader(URI.rsplit('/', 1)[0]) as uploader:
+        uploader.submit(checkpoint)
+
+        def next_save():
+            waiting.set()
+            uploader.wait()
+            saved.set()
+
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            next_checkpoint = executor.submit(next_save)
+            try:
+                assert started.wait(5) and waiting.wait(5)
+                assert not saved.is_set()
+            finally:
+                release.set()
+            next_checkpoint.result(timeout=5)
+        assert saved.is_set() and uploader.pending is None
+
+
+@pytest.mark.parametrize('boundary', ['check', 'wait', 'exit'])
+def test_background_failure_surfaces_and_preserves_checkpoint(checkpoint, monkeypatch, boundary):
+    def failed(*args, **kwargs):
+        if args[0] == 'ls':
+            return ''
+        raise subprocess.CalledProcessError(1, ['s3cmd', 'sync'])
+
+    monkeypatch.setattr(storage, 's3cmd', failed)
+    with pytest.raises(subprocess.CalledProcessError):
+        with storage.CheckpointOffloader(URI.rsplit('/', 1)[0]) as uploader:
+            uploader.submit(checkpoint)
+            assert uploader.pending.exception(timeout=5) is not None
+            if boundary != 'exit':
+                getattr(uploader, boundary)()
+    assert (checkpoint / 'actor/model.pt').exists()
+    assert (checkpoint / 'data.pt').exists()
+    assert not (checkpoint / storage.MARKER).exists()
+
+
+def test_disabled_background_offload_keeps_local_behavior(checkpoint, monkeypatch):
+    def unexpected(*args, **kwargs):
+        pytest.fail('Local-only runs must not start an offload executor')
+
+    monkeypatch.setattr(storage, 'ThreadPoolExecutor', unexpected)
+    with storage.CheckpointOffloader(None) as uploader:
+        uploader.check()
+        uploader.wait()
+        uploader.submit(checkpoint)
+    assert (checkpoint / 'actor/model.pt').exists()
+    assert not (checkpoint / storage.MARKER).exists()
