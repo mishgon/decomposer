@@ -96,6 +96,7 @@ def test_launcher_uses_deepdive_data_and_cleans_workers_on_failure(tmp_path, mon
         "--agent", "decomposer", "--output", str(tmp_path),
     ])
     assert "deepdive" in args.data.parts
+    assert args.data.parent.name == "all-qa"
     assert args.concurrency == 128
     assert args.limit is None and args.n == 1
     assert args.episode_timeout == 2700
@@ -128,3 +129,30 @@ def test_deepdive_worker_uses_wideseek_retrieval_agent():
     root = Path(__file__).resolve().parents[1]
     graphs = json.loads((root / "gyms/deepdive/langgraph.json").read_text())["graphs"]
     assert graphs == {"researcher": "gyms.wideseek.agents:researcher"}
+
+
+def test_collection_pool_mixes_both_qa_splits(tmp_path):
+    from random import Random
+    from sft.deepdive.prepare import DEFAULT_INPUTS, prepare
+
+    assert {p.parent.name for p in DEFAULT_INPUTS} == {"qa_rl", "qa_sft"}
+    paths, original = [], []
+    for split in ("qa_rl", "qa_sft"):
+        rows = [normalize({"id": i, "question": f"Question {i}", "answer": "Reference"}, split)
+                for i in range(10)]
+        path = tmp_path / f"{split}.jsonl"
+        path.write_text("".join(json.dumps(row) + "\n" for row in rows))
+        paths.append(path)
+        original.extend(rows)
+    manifest = prepare(paths, tmp_path / "pool")
+    actual = [json.loads(line) for line in (tmp_path / "pool/tasks.jsonl").read_text().splitlines()]
+    Random(42).shuffle(original)
+    assert actual == original
+    assert len({row["task_id"] for row in actual}) == 20
+    assert {row["metadata"]["split"] for row in actual[:5]} == {"qa_rl", "qa_sft"}
+    assert manifest["shuffle_seed"] == 42
+    assert manifest["sources"] == {"deepdive-qa_rl": 10, "deepdive-qa_sft": 10}
+    for row in actual:
+        assert "Reference" not in json.dumps(agent_input(row))
+    with pytest.raises(ValueError, match="unique task IDs"):
+        prepare([paths[0], paths[0]], tmp_path / "duplicate")

@@ -7,6 +7,9 @@ The shared retrieval service must remain alive for the duration of the job.
 From the repository root, with `LLM_PROXY_MASTER_KEY` supplied securely:
 
 ```bash
+python -m gyms.deepdive.prepare --split qa_rl
+python -m gyms.deepdive.prepare --split qa_sft
+python -m sft.deepdive.prepare
 source gyms/wideseek/env.sh
 python -m sft.deepdive.launch --agent decomposer \
   --output artifacts/sft/deepdive/runs/coverage-001
@@ -14,7 +17,11 @@ python -m sft.deepdive.launch --agent decomposer \
 
 The launcher starts dedicated researcher workers on port 18085 with 512 worker
 slots. Episode concurrency defaults to 128, independently of worker slots.
-It collects one attempt for every task in `qa_rl` and stops after that pass.
+It collects one attempt for each of the 3,250 tasks from `qa_rl` and `qa_sft`,
+shuffled together with seed 42, then stops. Preparation preserves split IDs and
+references, and records input and output checksums. The `trajectories_sft` split
+contains reference traces for SFT questions, so it adds no separate task pool.
+Reuse existing prepared split directories instead of preparing them again.
 Use `--limit 8 --concurrency 2` for a small smoke run, `--worker-port` to select
 another free port, or `--worker-python /path/to/python` when workers use a separate
 environment. It shuts down its workers when collection exits and never manages
