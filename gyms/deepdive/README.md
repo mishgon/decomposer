@@ -53,7 +53,7 @@ The gym reuses WideSeek's Decomposer/React agents and QA evaluator. The coordina
 and judge use hosted Qwen3.8 Flash Next; researchers use hosted base Qwen3.5-4B
 with thinking and preserved reasoning. The system prompt explicitly identifies
 the offline 2018 corpus. Existing defaults remain: recursion 410, a 45-minute
-episode deadline, and researcher budgets of 60 seconds plus 60 seconds shutdown
+episode deadline, and researcher budgets of 180 seconds plus 180 seconds shutdown
 grace. There is no cumulative 32K trace cap.
 
 The QA evaluator extracts the boxed final answer and asks the judge whether it
