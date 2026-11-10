@@ -109,13 +109,19 @@ def test_long_search_keeps_results_when_reader_deadline_expires(monkeypatch):
     assert "Reader time budget exhausted" in result
 
 
-def test_rate_limit_retries_and_logs_without_key(monkeypatch, tmp_path):
+@pytest.mark.parametrize("base_url", [None, "http://127.0.0.1:18084/v1/"])
+def test_rate_limit_retries_and_logs_without_key(monkeypatch, tmp_path, base_url):
+    if base_url:
+        monkeypatch.setenv("KEENABLE_API_URL", base_url)
+    else:
+        monkeypatch.delenv("KEENABLE_API_URL", raising=False)
     monkeypatch.setenv("BROWSECOMP_MODEL_LOG", str(tmp_path / "model_calls.jsonl"))
     monkeypatch.setenv("KEENABLE_API_KEY", "secret-test-key")
     attempts = []
     def respond(request):
         assert request.headers["x-api-key"] == "secret-test-key"
         assert request.method == "POST" and request.url.path == "/v1/search"
+        assert str(request.url) == (base_url or tools.API_URL).rstrip("/") + "/search"
         attempts.append(json.loads(request.content))
         if len(attempts) == 1:
             return httpx.Response(429, headers={"Retry-After": "3"})

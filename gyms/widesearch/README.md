@@ -74,6 +74,13 @@ marker, not an HTTP endpoint. Runs from Parallel, Serper or the local index cann
 resume under this backend. Preserve them as separate experiments. Interrupted
 Keenable runs can resume with `--resume <run-dir>`.
 
+For parallel episodes, `KEENABLE_API_URL=http://127.0.0.1:18084/v1` can route
+search and fetch requests through a trusted local reverse proxy with a shared
+rate limiter. The proxy must forward requests to Keenable, preserve the API-key
+header, and verify upstream TLS. The existing in-process lock does not limit
+requests across episode processes. Without this variable, requests go directly
+to `https://api.keenable.ai/v1`.
+
 Queue recovery: infrastructure failures in model, worker and web logs are monitored
 while episodes run. Authentication/quota failures pause scheduling immediately;
 three consecutive infrastructure-failed episodes also pause it. Runs with remaining

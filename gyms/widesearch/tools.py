@@ -27,7 +27,7 @@ async def record(value):
 
 
 async def request(endpoint, arguments):
-    url = f"{API_URL}/{endpoint}"
+    url = f"{os.environ.get('KEENABLE_API_URL', API_URL).rstrip('/')}/{endpoint}"
     async with REQUEST_LOCK:
         async with httpx.AsyncClient(timeout=120, trust_env=False, headers={
             "X-API-Key": os.environ["KEENABLE_API_KEY"],
