@@ -1,17 +1,40 @@
 diff --git a/verl/experimental/fully_async_policy/fully_async_trainer.py b/verl/experimental/fully_async_policy/fully_async_trainer.py
 --- a/verl/experimental/fully_async_policy/fully_async_trainer.py
 +++ b/verl/experimental/fully_async_policy/fully_async_trainer.py
-@@ -970,6 +970,13 @@
+@@ -496,6 +496,12 @@
+         self._init_models()
+
+     async def fit(self):
++        from opd.checkpoint_offload import CheckpointOffloader
++
++        with CheckpointOffloader(os.environ.get("OPD_CHECKPOINT_S3_URI")) as self.checkpoint_offloader:
++            await self._fit_with_checkpoint_offload()
++
++    async def _fit_with_checkpoint_offload(self):
+         """
+         The training loop of PPO.
+         The driver process only need to call the compute functions of the worker group through RPC
+@@ -519,6 +525,7 @@
+         # Use queue mode, no need for traditional dataloader iterator
+         # Initialize to get the first batch of data
+         while True:
++            self.checkpoint_offloader.check()
+             try:
+                 await self.fit_step()
+             except TrainingStopException:
+@@ -915,6 +922,7 @@
+             self.progress_bar.update(1)
+
+     def _save_checkpoint(self):
++        self.checkpoint_offloader.wait()
+         # Warning: Currently, to align the training process and metrics of colocate,
+         # we use current_param_version instead of global step.
+         # This can be logically aligned with the original self.global_steps of colocate
+@@ -970,6 +978,7 @@
+                 max_ckpt_to_keep=max_critic_ckpt_to_keep,
              )
          ray.get(self.rollouter.save_checkpoint.remote(local_global_step_folder))
-+        s3_root = os.environ.get("OPD_CHECKPOINT_S3_URI")
-+        if s3_root:
-+            from opd.checkpoint_offload import offload
-+
-+            offload(
-+                local_global_step_folder,
-+                s3_root.rstrip("/") + "/" + os.path.basename(local_global_step_folder),
-+            )
++        self.checkpoint_offloader.submit(local_global_step_folder)
          # latest checkpointed iteration tracker (for atomic usage)
          local_latest_checkpointed_iteration = os.path.join(
              self.config.trainer.default_local_dir, "latest_checkpointed_iteration.txt"

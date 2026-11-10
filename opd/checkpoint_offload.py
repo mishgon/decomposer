@@ -1,5 +1,6 @@
 """Verified S3 offload using the team's s3cmd and marker convention."""
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -10,6 +11,49 @@ import tempfile
 from uuid import uuid4
 
 MARKER = 'OFFLOADED_TO_S3.json'
+
+
+class CheckpointOffloader:
+    """One pending upload per trainer; wait before writing the next checkpoint."""
+
+    def __init__(self, uri):
+        self.uri = uri.rstrip('/') if uri else None
+        self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix='checkpoint-offload') if uri else None
+        self.pending = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        try:
+            self.wait()
+        finally:
+            if self.executor is not None:
+                self.executor.shutdown(wait=True)
+
+    def check(self):
+        """Surface completed upload failures without waiting for a running upload."""
+        if self.pending is not None and self.pending.done():
+            self.wait()
+
+    def wait(self):
+        """Drain before another local save or trainer shutdown; preserve failures."""
+        if self.pending is not None:
+            if not self.pending.done():
+                print('Waiting for pending checkpoint offload', flush=True)
+            try:
+                self.pending.result()
+            finally:
+                self.pending = None
+
+    def submit(self, directory):
+        if self.executor is None:
+            return
+        if self.pending is not None:
+            raise RuntimeError('Wait for the previous offload before saving another checkpoint')
+        directory = Path(directory)
+        self.pending = self.executor.submit(offload, directory, self.uri + '/' + directory.name)
+        print(f'Checkpoint offload queued: {directory}', flush=True)
 
 
 def s3cmd(*args, input=None):

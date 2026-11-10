@@ -197,13 +197,20 @@ MLSpace jobs set `OPD_CHECKPOINT_S3_URI` to
 keep their normal checkpoint behavior. Checkpoint payloads temporarily use the
 existing shared-NFS run directory, never the model cache under `/home/jovyan`.
 
-After all actor and rollout state is saved, the trainer runs the team's
-`s3cmd sync` workflow using the existing `~/.s3cfg`. Every payload file's size
-must match the S3 listing before deletion. Upload/verification failures stop
-training with local data intact. Successful offloads preserve `evaluation/` and
+After all actor and rollout state is saved locally, a background thread runs the
+team's `s3cmd sync` workflow using the existing `~/.s3cfg`. Training continues
+during hashing, upload, verification and cleanup. Only one checkpoint can await
+offload: before writing another checkpoint, the trainer waits for the previous
+upload to finish. Local saving and any such wait still block training.
+
+Every payload file's size must match the S3 listing before deletion.
+Upload/verification failures surface at the next training-step boundary, save,
+or shutdown, with local data intact. The trainer drains pending uploads on normal
+exit and Python exceptions; a forcibly killed process cannot finish an upload.
+Successful offloads preserve `evaluation/` and
 `OFFLOADED_TO_S3.json`, which records the URI, timestamp and removed-file manifest.
 The marker is written before deletion so interrupted cleanup remains explicit.
-S3 checkpoints are retained; local heavy files do not accumulate between updates.
+S3 checkpoints are retained; at most one completed checkpoint awaits offload locally.
 
 The job rejects an occupied experiment prefix and checks S3 write/read/delete
 access with a unique tiny probe before training. No credentials are included in the job description or environment.
