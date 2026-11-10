@@ -83,7 +83,7 @@ with capped exponential backoff and jitter until recovery or cancellation. Faile
 attempts retain their traces and traceback but do not enter the training batch or
 validation average. Expected task failures retain their scores; unsafe cleanup and
 unclassified infrastructure errors stop the run. Hosted model requests use the
-shared [lmrouter outage recovery](../../docs/lmrouter-recovery.md).
+shared lmrouter outage recovery.
 
 ## MLSpace Run
 
