@@ -1049,8 +1049,15 @@ def test_third_prompt_attempt_forces_final_response(monkeypatch, async_invocatio
     client.threads.create.assert_not_called()
     responses = {m.tool_call_id: m.content for m in result["messages"] if isinstance(m, ToolMessage)}
     assert responses["second"] == core.DUPLICATE_PROMPT_ERROR
-    assert responses["third"] == core.DECOMPOSER_GRACEFUL_SHUTDOWN_REQUEST
-    assert responses["cancelled_new"] == core.DECOMPOSER_GRACEFUL_SHUTDOWN_REQUEST
+    shutdown_message = (
+        core.DECOMPOSER_GRACEFUL_SHUTDOWN_REQUEST if active_run
+        else core.DECOMPOSER_FINAL_RESPONSE_REQUEST
+    )
+    assert responses["third"] == shutdown_message
+    assert responses["cancelled_new"] == shutdown_message
+    assert [m.content for m in result["messages"] if isinstance(m, HumanMessage)] == [
+        "Do the work", shutdown_message,
+    ]
     assert requests[-1].tools == []
     assert requests[-1].tool_choice is None
     assert requests[-1].response_format is None
@@ -1062,6 +1069,30 @@ def test_third_prompt_attempt_forces_final_response(monkeypatch, async_invocatio
     assert result["run_prompt_counts"] == {}
     assert result["shutdown_requested"] is False
     assert len(requests[-1].tools) == 4
+
+
+@pytest.mark.parametrize("runs,needs_wait", [
+    ({}, False),
+    ({"a": {"status": "running"}}, True),
+    ({"a": {"status": "responded"}}, True),
+    ({"a": {"status": "responded", "response_sequence_number": 0}}, False),
+    ({"a": {"status": "error", "response_sequence_number": 0}}, False),
+    ({"a": {"status": "responded", "response_sequence_number": 0},
+      "b": {"status": "error"}}, True),
+])
+def test_shutdown_message_matches_uncollected_results(runs, needs_wait):
+    middleware = DecomposerAgentMiddleware([AGENT_TYPE], 1)
+    message = AIMessage(content="", tool_calls=[
+        _call("run", "third", agent_id="a", prompt="same task"),
+    ])
+    state = {"messages": [message], "agent_runs": runs,
+             "run_prompt_counts": {"same task": 2}}
+    result = middleware.after_model(state, SimpleNamespace())
+    expected = (core.DECOMPOSER_GRACEFUL_SHUTDOWN_REQUEST if needs_wait
+                else core.DECOMPOSER_FINAL_RESPONSE_REQUEST)
+    assert all(m.content == expected for m in result["messages"])
+    assert ("`wait`" in expected) is needs_wait
+    assert "answer format requested by the user" in expected
 
 
 @pytest.mark.parametrize("async_invocation", [False, True])
