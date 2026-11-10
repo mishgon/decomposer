@@ -190,6 +190,14 @@ not supply that metadata to vLLM. Changing `lora.merge` alone is insufficient.
 Evidence: Hertz-2 `wideseek/benchmarks/sync-receiver-730b761-20261103/result.json`;
 benchmark code: `benchmark_sync.py` at commit `730b761`.
 
+Both `opd.wideseek.run` and `opd.wideseek.local` accept `--gpus` with any
+single-node GPU list and `--training-gpus` (default 1). For example,
+`--gpus 4 5 6 7 --training-gpus 2` assigns two GPUs to training and two to rollout.
+A single GPU alternates the two phases; that WideSeek layout has not been GPU-tested.
+Batch sizes and tensor parallelism must fit the selected split. MLSpace accepts
+`--num-gpus` and `--training-gpus`, with `--instance-type` for allocations outside
+the default mapping.
+
 ## MLSpace Wrapper
 
 MLSpace remains optional. Both launchers use the same allocation, model,
@@ -199,11 +207,15 @@ The retrieval URL must be reachable from inside the job; submission-host
 localhost is not shared with a GPU container.
 
 ```bash
-python -m opd.wideseek.mlspace.run_train_jobs --dry --search-url http://RETRIEVAL_HOST:18080
-python -m opd.wideseek.mlspace.run_eval --dry --search-url http://RETRIEVAL_HOST:18080
+python -m opd.wideseek.mlspace.run_train_jobs --dry \
+  --author-name YOUR_NAME --author-telegram YOUR_TELEGRAM \
+  --model /shared/models/Qwen3.5-4B \
+  --clearml-config ~/.config/clearml/clearml.conf \
+  --source /shared/data/wideseek/tasks.jsonl \
+  --search-url http://RETRIEVAL_HOST:18080
 ```
 
-The wrapper expects normalized data at
-`decomposer-synth-artifacts/wideseek/data/width/tasks.jsonl` under the configured
-alternate home. Dry runs submit nothing. The current work prioritizes Hertz-2;
-no WideSeek MLSpace job has been submitted.
+Use the same arguments with `opd.wideseek.mlspace.run_eval` for a baseline-only
+job. Paths, identity and storage options match the [synth launcher](../synth/README.md).
+Data and model paths must be visible inside the job. Dry runs submit nothing.
+No WideSeek MLSpace job has been submitted.

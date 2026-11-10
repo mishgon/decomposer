@@ -15,6 +15,7 @@ import time
 
 from gyms.wideseek import REPO_ROOT
 from gyms.wideseek.runtime import save
+from opd.launch import add_gpu_arguments, gpu_overrides
 
 
 def check_inputs(args):
@@ -98,8 +99,9 @@ def main():
     parser.add_argument('--source', type=Path, required=True)
     parser.add_argument('--model', type=Path, required=True)
     parser.add_argument('--baseline', type=Path, help='Reuse a completed starting-checkpoint baseline; training verifies its source hash')
-    parser.add_argument('--gpus', nargs='+', type=int, required=True)
+    add_gpu_arguments(parser)
     args = parser.parse_args()
+    gpu_overrides(args.gpus, args.training_gpus)
     def interrupt(*_):
         raise KeyboardInterrupt
     signal.signal(signal.SIGTERM, interrupt)
@@ -109,8 +111,6 @@ def main():
     if subprocess.check_output(['git', 'status', '--porcelain'], text=True).strip():
         raise RuntimeError('Review and commit changes before launching')
     check_inputs(args)
-    if len(args.gpus) not in (2, 3) or len(set(args.gpus)) != len(args.gpus) or min(args.gpus) < 0:
-        raise ValueError('Choose two or three distinct GPU indices: one trainer, then rollout GPUs')
     # Never reuse someone else's local service or inference server.
     for port in (16333, 16334, 18080, 8024):
         with socket.socket() as sock:
@@ -132,7 +132,7 @@ def main():
         os.environ['PATH'] = str(Path(sys.executable).parent) + ':' + os.environ['PATH']
         commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
         state = {'status': 'running', 'pid': os.getpid(), 'started_at': time.time(),
-                 'gpus': args.gpus, 'commit': commit, 'code_dir': str(REPO_ROOT)}
+                 'gpus': args.gpus, 'training_gpus': args.training_gpus, 'commit': commit, 'code_dir': str(REPO_ROOT)}
         save(args.root / 'local-run.json', state)
         try:
             stack.enter_context(service(['bash', 'gyms/wideseek/serve.sh', 'qdrant'],
@@ -145,7 +145,7 @@ def main():
                 run(['bash', 'opd/wideseek/baseline.sh', str(args.gpus[0]),
                                 str(args.model.resolve()), str(args.root / 'baseline')])
             run([sys.executable, '-u', '-m', 'opd.wideseek.run',
-                '--gpus', *map(str, args.gpus), '--source', str(args.source.resolve()),
+                '--gpus', *map(str, args.gpus), '--training-gpus', str(args.training_gpus), '--source', str(args.source.resolve()),
                 '--baseline', str(args.root / 'baseline'), '--model', str(args.model.resolve()),
                 '--output', str(args.root / 'train'),
                 f'trainer.experiment_name={args.root.name}'])

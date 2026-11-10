@@ -46,18 +46,18 @@ def configured_experiments(args, experiments):
         yield experiment
 
 
-def payload(experiment, mode, staged, region, args):
+def payload(experiment, mode, staged, region, args, *, gym='synth', extra_args=()):
     instance_type = args.instance_type or INSTANCE_TYPES_BY_NUM_GPUS.get(experiment.num_gpus)
     if not instance_type:
         raise ValueError('Pass --instance-type from mls job instance_types for this GPU count')
     gpu_overrides(list(range(experiment.num_gpus)), experiment.training_gpus)
     command = [str(staged / '.venv-opd/bin/python'), '-u', '-m',
-               'opd.synth.mlspace.run_job', '--experiment', experiment.name, '--mode', mode,
+               f'opd.{gym}.mlspace.run_job', '--experiment', experiment.name, '--mode', mode,
                '--model', str(args.model), '--output', str(args.artifacts_root / 'sanity' / experiment.name),
                '--lmrouter-key-file', str(args.lmrouter_key_file), '--clearml-config', str(args.clearml_config),
-               '--num-gpus', str(experiment.num_gpus), '--training-gpus', str(experiment.training_gpus)]
+               '--num-gpus', str(experiment.num_gpus), '--training-gpus', str(experiment.training_gpus), *extra_args]
     return {'script': f'cd {shlex.quote(str(staged))} && {shlex.join(command)}',
-            'job_desc': f"synth {mode} {experiment.name} #{args.author_name.lstrip('#')} @{args.author_telegram.lstrip('@')} #rnd #occ",
+            'job_desc': f"{gym} {mode} {experiment.name} #{args.author_name.lstrip('#')} @{args.author_telegram.lstrip('@')} #rnd #occ",
             'env_variables': {'WORKDIR': str(staged), 'RAY_USE_UVLOOP': '0',
                               'OPD_CHECKPOINT_S3_URI': f"{args.checkpoint_s3_root.rstrip('/')}/decomposer-{experiment.name}",
                               'OPD_S3_CONFIG': str(args.s3_config), 'UV_BIN': args.uv_bin,
