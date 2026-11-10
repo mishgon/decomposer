@@ -98,7 +98,8 @@ def test_episode_artifacts_and_partial_capture(monkeypatch, tmp_path, error, age
     assert (directory / "usage.json").exists()
     assert capture.call_args.kwargs["config"] == {"recursion_limit": 410}
     assert capture.call_args.args[2]["messages"][0]["content"] == (
-        "Q\n\nReturn only the final answer: a short name, number, or phrase.")
+        "Q\n\nIf you determine that no further external knowledge is required, "
+        "you have to wrap your final answer in \\boxed{}.")
 
 
 def test_pass_metrics_count_infra_failures():
@@ -354,3 +355,27 @@ def test_entire_final_text_is_sent_to_judge(monkeypatch, tmp_path, output, verdi
     messages = model.ainvoke.call_args.args[0]
     assert json.loads(messages[1]['content'])['generated'] == output
     assert json.loads((tmp_path / 'judge.json').read_text())['messages'] == messages
+    assert result['format_ok'] is False
+    assert result['answer'] == output
+
+
+@pytest.mark.parametrize('output,answer,format_ok', [
+    (r'Candidate Boston. \boxed{New York} More explanation.', 'New York', True),
+    (r'\boxed{Boston} Correction: \boxed{New York}', 'New York', True),
+    (r'Evidence. \boxed{fly\text{-}by} Caveat.', r'fly\text{-}by', True),
+    (r'<think>\boxed{Boston}</think>New York', 'New York', False),
+    (r'New York. \boxed{}', '', False),
+    (r'Incomplete \boxed{New York', r'Incomplete \boxed{New York', False),
+])
+def test_boxed_answer_selection(monkeypatch, tmp_path, output, answer, format_ok):
+    model = SimpleNamespace(bind=lambda **kwargs: model,
+                            ainvoke=AsyncMock(return_value=AIMessage(content='{"match": false}')))
+    monkeypatch.setattr(evaluate, 'create_model', lambda _: model)
+    result = asyncio.run(evaluate.evaluate({'question': 'Which?', 'answer': 'other'}, output, tmp_path))
+    assert result['answer'] == answer
+    assert result['format_ok'] is format_ok
+    if answer:
+        assert json.loads(model.ainvoke.call_args.args[0][1]['content'])['generated'] == answer
+    else:
+        assert result['reason'] == 'missing_final_answer'
+        model.ainvoke.assert_not_called()

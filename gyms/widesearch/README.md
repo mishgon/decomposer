@@ -65,6 +65,10 @@ Each episode saves `answer.md`, `trace.json`, `trace.html`, `model_calls.jsonl`,
 separate scoring command runs. Only questions enter the agent input, never gold
 tables. Dataset revision: `6531a7e5b497d44c8912407e0cb3dc95bd98cc09`.
 
+Answers use one table in a fenced block labeled `markdown`, matching WideSeek
+table tasks. The upstream evaluator extracts the table and ignores surrounding
+explanations; its F1 and strict metrics are unchanged.
+
 The shared scheduler records `retrieval_url="keenable-pro-web-v1"` as a backend
 marker, not an HTTP endpoint. Runs from Parallel, Serper or the local index cannot
 resume under this backend. Preserve them as separate experiments. Interrupted

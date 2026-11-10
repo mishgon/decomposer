@@ -72,10 +72,13 @@ marked `interrupted`; stop the old runner first.
 
 ## Scoring Changes
 
-Agents are asked for a short final answer in plain text. JSON and source fields
-are not required. The judge receives the entire final text and must distinguish
-an asserted answer from an ambiguous list of candidates or a tool-call representation.
-Only an empty final text is marked `missing_final_answer`.
+Agents are asked to wrap their final answer in `\boxed{}`, matching the WideSeek
+QA instruction. The evaluator uses WideSeek's balanced-brace parser to extract
+the last boxed answer, ignoring surrounding explanations. Without a box, it
+scores the full final text after any `</think>` marker and records `format_ok=false`.
+An empty answer, including an empty box, is marked `missing_final_answer`.
+The selected `answer` and `format_ok` are saved in the evaluation result; the raw
+response remains in the trace. JSON and source fields are not required.
 
 The old evaluator accepted bidirectional token inclusion, which could mark
 an underspecified answer correct. Only exact case-insensitive answers now bypass
