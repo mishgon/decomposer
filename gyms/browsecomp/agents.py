@@ -33,6 +33,7 @@ def _decomposer(model_id):
             "url": os.environ["BROWSECOMP_AGENT_URL"],
         }],
         agent_recursion_limit=410, middleware=[log_model_call],
+        agent_run_budget_seconds=180.0, agent_shutdown_grace_seconds=180.0,
     )
 
 
