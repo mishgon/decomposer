@@ -28,6 +28,9 @@ decoded token meaning and prompt logprobs. A failed preflight aborts training.
 The hosted teacher uses the model registry's authenticated connection. No
 OpenRouter fallback or automatic paid-provider substitution is implemented.
 
+For more GPUs, use `--gpus 0 1 2 3 --training-gpus 2` (two training and two rollout
+GPUs). These launchers target a single node.
+
 For one GPU, replace `--gpus 0 1` with `--gpu 0`. This selects
 `single_gpu.yaml`: veRL colocates rollout on the training GPU and alternates
 generation with optimizer updates. The teacher remains hosted. This mode uses
@@ -97,29 +100,43 @@ The selected instance bundles 24 CPU cores and 488 GB host RAM. These are
 allocation limits, not measured training requirements. Each Ray controller
 reserves one CPU, leaving capacity for GPU and agent workers.
 
-From a checkout on `occ-cds-1`, using its configured `mls` Python environment:
+From a checkout on shared storage, using its configured `mls` Python environment:
 
 ```bash
-python -m opd.synth.mlspace.run_train_jobs --dry
-python -m opd.synth.mlspace.run_eval --dry
+python -m opd.synth.mlspace.run_train_jobs --dry \
+  --author-name YOUR_NAME --author-telegram YOUR_TELEGRAM \
+  --model /shared/models/Qwen3.5-4B \
+  --clearml-config ~/.config/clearml/clearml.conf
 ```
 
-Review and commit changes before submission. Real submissions refuse a dirty
+Use the same arguments with `opd.synth.mlspace.run_eval` for a baseline-only job.
+Identity arguments are required. Only credential file paths enter the payload;
+the job reads their contents inside the container. `--lmrouter-key-file` defaults
+to `~/.config/decomposer/lmrouter.key`, and `--s3-config` to `~/.s3cfg`.
+Override these paths when the container and submission host have different homes.
+All supplied paths must be accessible inside the job.
+
+Artifacts default to `decomposer-artifacts` beside the checkout, resolved to an
+absolute path. Use `--artifacts-root` to select another shared-NFS directory outside
+Git. `code/<commit>` holds staged source and runtimes; `sanity/<experiment>` holds
+submission metadata, baseline traces and training artifacts; `cache/huggingface`
+holds the HF cache. The launcher does not override `HOME`.
+
+Set `num_gpus` and `training_gpus` in the experiment registry, or override them
+with `--num-gpus` and `--training-gpus`. For allocations beyond the existing
+one- and two-GPU mappings, pass `--instance-type` from `mls job instance_types`.
+The instance must provide the requested GPU count. One GPU alternates training
+and rollout; otherwise training GPUs come first and rollout uses the rest.
+Batch sizes and tensor parallelism must remain compatible with the chosen split.
+
+Review, commit and push changes before submission. Real submissions refuse a dirty
 checkout and stage the exact commit. Provision that staged checkout with
 `bash opd/setup.sh` before submitting without `--dry`. The OPD requirements
 lock and separate worker environment take precedence over the general repo
 `uv.lock`; do not reuse the shared vLLM 0.24 environment for this recipe.
-
-All paths are under
-`/mnt/shared_ru.ml.SZ-5_000264/matrosov/decomposer-synth-artifacts`:
-`code/<commit>` holds source and isolated runtimes; `sanity/<experiment>` holds
-submission metadata, preflight results, baseline traces and training artifacts.
 Completed and active jobs are skipped. Failed output directories are preserved;
 use a new committed experiment name for another attempt.
 
-The job reads `~/.config/decomposer/lmrouter.key` and
-`~/.config/clearml/matrosov-cds.conf` from the configured alternate home.
-Credentials are loaded inside the container, never placed in the job payload.
 The temporary B200 hostname workaround maps lmrouter and ClearML names to
 `176.108.242.226` through Python's `socket.getaddrinfo`. A job-local
 `sitecustomize.py` on `PYTHONPATH` applies it before SDK imports, including child
@@ -193,9 +210,9 @@ Prior failed runs and their baseline artifacts remain available.
 ## MLSpace Checkpoint Offload
 
 MLSpace jobs set `OPD_CHECKPOINT_S3_URI` to
-`s3://airi-occ-artifacts/training/artifacts/matrosov-<experiment>`. Other launches
+`s3://airi-occ-artifacts/training/artifacts/decomposer-<experiment>`. Other launches
 keep their normal checkpoint behavior. Checkpoint payloads temporarily use the
-existing shared-NFS run directory, never the model cache under `/home/jovyan`.
+shared-NFS run directory. Override the S3 parent with `--checkpoint-s3-root`.
 
 After all actor and rollout state is saved locally, a background thread runs the
 team's `s3cmd sync` workflow using the existing `~/.s3cfg`. Training continues
@@ -218,7 +235,7 @@ access with a unique tiny probe before training. No credentials are included in 
 Restore a checkpoint before passing it to `--resume-from`:
 
 ```bash
-UV_BIN=/home/jovyan/.local/bin/uv python -m opd.checkpoint_offload restore /absolute/path/to/global_step_8
+UV_BIN="$(command -v uv)" python -m opd.checkpoint_offload restore /absolute/path/to/global_step_8
 ```
 
 Restore fetches missing or mismatched payloads individually into temporary files,
