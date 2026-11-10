@@ -14,22 +14,23 @@ from decomposer.agent_server import agent_server
 from gyms.synth import ROOT
 from opd.synth.prepare import prepare
 from opd.teacher import score
+from opd.launch import add_gpu_arguments, gpu_overrides
 
 
 async def main(args, overrides):
     baseline = json.loads((args.baseline / "manifest.json").read_text())
     if baseline["status"] != "completed" or baseline["model"] != "vllm/qwen_3_5_4b_non_thinking":
         raise ValueError("Finish the stock Qwen3.5-4B baseline first")
-    if len(args.gpus) == 2 and len(set(args.gpus)) != 2:
-        raise ValueError("Choose distinct training and rollout GPUs")
+    overrides = [*overrides, *gpu_overrides(args.gpus, args.training_gpus)]
     model = args.model.resolve()
     if args.resume_from:
         checkpoint = args.resume_from.resolve()
         from opd.checkpoint_offload import MARKER
         if (checkpoint / MARKER).exists():
             raise ValueError(f'Checkpoint is offloaded to S3. Restore first: python -m opd.checkpoint_offload restore {checkpoint}')
-        for name in ('data.pt', 'actor/model_world_size_1_rank_0.pt',
-                     'actor/optim_world_size_1_rank_0.pt', 'actor/extra_state_world_size_1_rank_0.pt'):
+        names = ['data.pt'] + [f'actor/{kind}_world_size_{args.training_gpus}_rank_{rank}.pt'
+            for rank in range(args.training_gpus) for kind in ('model', 'optim', 'extra_state')]
+        for name in names:
             if not (checkpoint / name).is_file():
                 raise ValueError(f"Incomplete resume checkpoint: {checkpoint / name}")
         overrides = [*overrides, 'trainer.resume_mode=resume_path',
@@ -102,11 +103,7 @@ if __name__ == "__main__":
     parser.add_argument("--baseline", type=Path, required=True)
     parser.add_argument("--model", type=Path, default=Path.home() / "models/Qwen3.5-4B")
     parser.add_argument("--output", type=Path, required=True)
-    gpu = parser.add_mutually_exclusive_group(required=True)
-    gpu.add_argument("--gpu", dest="gpus", nargs=1, type=int,
-                     help="Colocate training and rollout on one GPU")
-    gpu.add_argument("--gpus", nargs=2, type=int,
-                     help="Separate training and rollout GPUs")
+    add_gpu_arguments(parser)
     parser.add_argument("--resume-from", type=Path, help="Restore full veRL checkpoint into a new output directory")
     parser.add_argument("--worker-python", type=Path, default=ROOT / ".venv-workers/bin/python")
     args, overrides = parser.parse_known_args()
