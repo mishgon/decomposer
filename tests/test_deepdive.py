@@ -26,6 +26,18 @@ def test_normalization_keeps_split_identity_and_hides_reference():
     assert "conversations" not in rl["metadata"]
 
 
+def test_depth_and_deepdive_share_answer_format():
+    from gyms.wideseek.prepare import normalize as normalize_wideseek
+
+    row = {"id": 7, "question": "Which city?", "answer": "Paris"}
+    depth = normalize_wideseek(row, "depth", 7)
+    deepdive = normalize(row, "qa_rl")
+    assert depth["unique_columns"] == deepdive["unique_columns"] == []
+    assert agent_input(depth) == agent_input(deepdive)
+    assert agent_input(depth)["messages"][0]["content"].endswith(
+        r"you have to wrap your final answer in \boxed{}.")
+
+
 def test_preparation_retains_duplicate_questions_and_pins_source(tmp_path, monkeypatch):
     import pyarrow as pa
     import pyarrow.parquet as pq
@@ -54,8 +66,9 @@ def test_preparation_retains_duplicate_questions_and_pins_source(tmp_path, monke
     assert (output / "source.parquet").read_bytes() == raw.read_bytes()
 
 
+@pytest.mark.parametrize("source", ["depth", "deepdive"])
 @pytest.mark.parametrize("failure", [False, True])
-def test_qa_judge_failure_stays_unscored(tmp_path, monkeypatch, failure):
+def test_qa_judge_failure_stays_unscored(tmp_path, monkeypatch, failure, source):
     from gyms.wideseek import evaluate
     from langchain_core.messages import AIMessage
 
@@ -66,7 +79,9 @@ def test_qa_judge_failure_stays_unscored(tmp_path, monkeypatch, failure):
         judge.ainvoke.return_value = AIMessage(content="Correct")
     monkeypatch.setattr(evaluate, "model", lambda _: judge)
     monkeypatch.setattr(evaluate, "close_model", AsyncMock())
-    task = normalize({"id": 1, "question": "Which city?", "answer": "Paris"}, "qa_rl")
+    row = {"id": 1, "question": "Which city?", "answer": "Paris"}
+    from gyms.wideseek.prepare import normalize as normalize_wideseek
+    task = normalize(row, "qa_rl") if source == "deepdive" else normalize_wideseek(row, "depth", 1)
     result = asyncio.run(evaluate.evaluate(task, r"\boxed{Paris}", tmp_path))
     assert result["metric"] == "qa_accuracy"
     assert result["score"] == (None if failure else 1.0)
