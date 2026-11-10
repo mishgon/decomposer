@@ -72,6 +72,11 @@ marked `interrupted`; stop the old runner first.
 
 ## Scoring Changes
 
+Agents are asked for a short final answer in plain text. JSON and source fields
+are not required. The judge receives the entire final text and must distinguish
+an asserted answer from an ambiguous list of candidates or a tool-call representation.
+Only an empty final text is marked `missing_final_answer`.
+
 The old evaluator accepted bidirectional token inclusion, which could mark
 an underspecified answer correct. Only exact case-insensitive answers now bypass
 the equivalence judge. Invalid judge responses and provider errors are unscored,
