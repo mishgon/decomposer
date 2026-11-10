@@ -3,6 +3,7 @@ import argparse
 import asyncio
 import fcntl
 import hashlib
+from importlib.metadata import distributions
 import json
 import os
 from pathlib import Path
@@ -145,7 +146,7 @@ def run(args):
                 pass
             else:
                 raise RuntimeError('Previous child is still alive; do not start a second runner')
-        (root / 'requirements-freeze.txt').write_text(subprocess.check_output([sys.executable, '-m', 'pip', 'freeze'], text=True))
+        save(root / 'installed-packages.json', {d.metadata['Name']: d.version for d in distributions()})
         child = None
         try:
             for job in schedule:

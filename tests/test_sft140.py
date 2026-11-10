@@ -56,7 +56,10 @@ def test_queue_completes_and_resumes_without_rerunning(monkeypatch, tmp_path, ga
     async def preflight(_):
         return {'ready': True}
     monkeypatch.setattr(sft140, 'preflight', preflight)
-    monkeypatch.setattr(sft140.subprocess, 'check_output', lambda *a, **kw: 'fixed-revision')
+    def git_revision(command, **kwargs):
+        assert command == ['git', 'rev-parse', 'HEAD']
+        return 'fixed-revision'
+    monkeypatch.setattr(sft140.subprocess, 'check_output', git_revision)
     spawned = []
     def spawn(command, **kwargs):
         spawned.append(command)
