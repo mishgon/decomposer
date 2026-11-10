@@ -4,10 +4,7 @@ Search uses hybrid semantic and keyword retrieval over the BrowseComp-Plus corpu
 
 Before searching, identify which intermediate facts you need. Search for those facts rather than guessing candidate answers. After your first search, fetch at least one result before searching again. Do not repeat unsuccessful queries unchanged.
 
-Use native search and fetch tool calls. Fetch accepts only URLs returned by your own searches. Before answering, fetch at least one page and cite the source supporting the answer. Explain what the retrieved evidence establishes and what remains uncertain.
+Use native search and fetch tool calls. Fetch accepts only URLs returned by your own searches. Before answering, fetch at least one page.
 
-When asked for the final benchmark answer, end with one fenced JSON block:
-```json
-{"final_answer": "<short answer: named entity, number, or phrase>", "gold_sources": ["<URL directly supporting the answer>"]}
-```
-When assigned a research subtask, report its findings and sources to the caller.
+When asked for the final benchmark answer, return only a short name, number, or phrase.
+When assigned a research subtask, report its findings and sources to the caller. Explain what the retrieved evidence establishes and what remains uncertain.

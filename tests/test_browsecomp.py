@@ -2,7 +2,7 @@ import asyncio
 from contextlib import asynccontextmanager
 import json
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import httpx
 from langchain_core.messages import AIMessage, message_to_dict
@@ -64,14 +64,13 @@ def test_judge_errors_are_unscored_and_inclusion_is_not_a_pass(monkeypatch, tmp_
                             ainvoke=AsyncMock(return_value=AIMessage(content='{"match": false}')))
     monkeypatch.setattr(evaluate, "create_model", lambda _: model)
     task = {"question": "Which city?", "answer": "New York"}
-    output = '```json\n{"final_answer":"York"}\n```'
+    output = 'York'
     result = asyncio.run(evaluate.evaluate(task, output, tmp_path))
     assert result["score"] == 0
     model.ainvoke.assert_awaited_once()
     model.ainvoke.return_value = AIMessage(content="not a verdict")
     assert asyncio.run(evaluate.evaluate(task, output, tmp_path))["score"] is None
     assert "error" in json.loads((tmp_path / "judge.json").read_text())
-    assert evaluate.extract_answer("plain text") == ""
 
 
 @pytest.mark.parametrize("agent", list(run.AGENTS))
@@ -84,7 +83,7 @@ def test_episode_artifacts_and_partial_capture(monkeypatch, tmp_path, error, age
     async def server(*args, **kwargs):
         yield "http://fake"
     capture = AsyncMock(return_value=({"messages": [message_to_dict(AIMessage(
-        content='```json\n{"final_answer":"A"}\n```'))]}, error))
+        content='A'))]}, error))
     monkeypatch.setattr(run, "agent_server", server)
     monkeypatch.setattr(run, "invoke_and_capture", capture)
     args = run.parser().parse_args(["--episode", "--output-dir", str(directory), "--agent", agent])
@@ -98,6 +97,8 @@ def test_episode_artifacts_and_partial_capture(monkeypatch, tmp_path, error, age
     assert ("react" in usage) == (run.AGENTS[agent][1] == "react")
     assert (directory / "usage.json").exists()
     assert capture.call_args.kwargs["config"] == {"recursion_limit": 410}
+    assert capture.call_args.args[2]["messages"][0]["content"] == (
+        "Q\n\nReturn only the final answer: a short name, number, or phrase.")
 
 
 def test_pass_metrics_count_infra_failures():
@@ -152,7 +153,7 @@ def test_compiled_researcher_search_fetch_and_fresh_thread(monkeypatch, tmp_path
     model = Model(responses=[
         AIMessage(content="", tool_calls=[{"id": "s", "name": "search", "args": {"query": "Q"}}]),
         AIMessage(content="", tool_calls=[{"id": "f", "name": "fetch", "args": {"url": "https://page"}}]),
-        AIMessage(content='```json\n{"final_answer":"A"}\n```'),
+        AIMessage(content='A'),
     ])
     monkeypatch.setattr(agents, "create_model", lambda _: model)
     monkeypatch.setenv("BROWSECOMP_MODEL_LOG", str(tmp_path / "calls.jsonl"))
@@ -163,7 +164,7 @@ def test_compiled_researcher_search_fetch_and_fresh_thread(monkeypatch, tmp_path
     graph = agents.researcher()
     state = asyncio.run(graph.ainvoke({"messages": [{"role": "user", "content": "Q"}]}))
     assert state["pages"] == {"https://page": "p1"}
-    assert evaluate.extract_answer(state["messages"][-1].content) == "A"
+    assert state["messages"][-1].content == "A"
     records = [json.loads(line) for line in (tmp_path / "calls.jsonl").read_text().splitlines()]
     assert sum(r["status"] == "success" for r in records) == 3
     # A separate invocation must not inherit URLs from the preceding episode.
@@ -214,7 +215,7 @@ def researcher():
     agents.create_model = lambda _: Model(responses=[
         AIMessage(content="", tool_calls=[{"id":"s", "name":"search", "args":{"query":"Q"}}]),
         AIMessage(content="", tool_calls=[{"id":"f", "name":"fetch", "args":{"url":"https://page"}}]),
-        AIMessage(content='```json\\n{"final_answer":"A"}\\n```'),
+        AIMessage(content='A'),
     ])
     return agents.researcher()
 ''')
@@ -237,7 +238,7 @@ def researcher():
         state, error = asyncio.run(smoke())
         assert error is None
         assert state["pages"] == {"https://page": "p1"}
-        assert state["messages"][-1]["content"].endswith("```")
+        assert state["messages"][-1]["content"] == "A"
         assert (tmp_path / "model_calls.jsonl").exists()
     finally:
         service.shutdown()
@@ -324,3 +325,32 @@ def test_resume_keeps_completed_episodes_and_archives_partial_logs(monkeypatch, 
     assert next((root / "interrupted").glob('*/model_calls.jsonl')).read_text() == 'interrupted request'
     assert result["resumptions"][-1]["concurrency"] == 8
     assert result["status"] == "needs_attention"
+
+
+@pytest.mark.parametrize('output,score,reason', [
+    ('  New York\n', 1, 'exact_match'),
+    ('\n  ', 0, 'missing_final_answer'),
+])
+def test_plain_answer_and_empty_response_need_no_judge(monkeypatch, tmp_path, output, score, reason):
+    factory = Mock()
+    monkeypatch.setattr(evaluate, 'create_model', factory)
+    result = asyncio.run(evaluate.evaluate({'question': 'Which city?', 'answer': 'New York'}, output, tmp_path))
+    assert result['score'] == score
+    assert result['reason'] == reason
+    factory.assert_not_called()
+
+
+@pytest.mark.parametrize('output,verdict', [
+    ('The answer is New York.', True),
+    ('New York or Boston; I cannot determine which.', False),
+    ('<tool_call><function=search>New York</function></tool_call>', False),
+])
+def test_entire_final_text_is_sent_to_judge(monkeypatch, tmp_path, output, verdict):
+    model = SimpleNamespace(bind=lambda **kwargs: model,
+                            ainvoke=AsyncMock(return_value=AIMessage(content=json.dumps({'match': verdict}))))
+    monkeypatch.setattr(evaluate, 'create_model', lambda _: model)
+    result = asyncio.run(evaluate.evaluate({'question': 'Which city?', 'answer': 'New York'}, output, tmp_path))
+    assert result['passed'] is verdict
+    messages = model.ainvoke.call_args.args[0]
+    assert json.loads(messages[1]['content'])['generated'] == output
+    assert json.loads((tmp_path / 'judge.json').read_text())['messages'] == messages
