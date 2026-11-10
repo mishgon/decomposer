@@ -128,6 +128,13 @@ def main(args):
         raise ValueError("Evaluation provenance changed; use a separate evaluation directory")
     save(provenance_path, provenance)
     results = {}
+    for entry in manifest["episodes"]:
+        if entry.get("infrastructure_errors") or entry["status"] != "finished":
+            continue
+        key = f"{entry['task']}-r{entry['repetition']:03d}"
+        result_path = directory / key / "result.json"
+        if result_path.exists():
+            results[key] = json.loads(result_path.read_text())
     consecutive_errors = 0
     for entry in manifest["episodes"]:
         if entry.get("infrastructure_errors") or entry["status"] != "finished":
