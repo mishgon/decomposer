@@ -48,6 +48,13 @@ web dependencies conflict with the pinned vLLM training environment. The common
 server launcher accepts an optional Python executable; the core orchestration
 loop is unchanged. `--worker-python` can select an existing compatible environment.
 
+Actor attention uses `flash_attention_2` with `flash-attn==2.8.3`, matching Timur's
+published OPD runtime. Setup installs Torch before FlashAttention so its extension
+builds against the training ABI. If no compatible wheel is available, set
+`CUDA_HOME` to a toolkit matching Torch's CUDA major version; source builds default
+to four parallel jobs (`MAX_JOBS`). Padded batches, the fused output head and the
+linear-attention implementation retain their existing settings.
+
 ## Fixed Recipe
 
 | Setting | Value |
