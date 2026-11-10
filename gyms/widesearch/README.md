@@ -33,8 +33,10 @@ API references: [Search](https://docs.keenable.ai/api-reference/search),
 [limits](https://docs.keenable.ai/rate-limits), and
 [credits](https://docs.keenable.ai/credits).
 
-The LangGraph runtime, Decomposer prompt, worker run budgets, recursion limit of
-410, model logging and trace export remain in use. The upstream Runner's default
+Decomposer workers have 180 seconds of work plus 180 seconds to finish the current
+step and respond, shared with BrowseComp through its Decomposer factories.
+The LangGraph runtime, Decomposer prompt, recursion limit of 410, model logging
+and trace export remain in use. The upstream Runner's default
 50-step loop is not used. Single-agent system instructions are the upstream
 English prompt; Decomposer workers additionally receive the existing run-budget
 instructions. The BrowseComp ten-search budget and local-index URL restrictions

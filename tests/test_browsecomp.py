@@ -261,6 +261,8 @@ def test_registered_factories_match_trace_models_and_worker_identity(monkeypatch
         assert config["tools"] == [tools.search, tools.fetch]
     else:
         assert config["decomposer_model"] == model
+        assert config["agent_run_budget_seconds"] == 180.0
+        assert config["agent_shutdown_grace_seconds"] == 180.0
         assert config["agent_types"] == [{
             "agent_type_id": "qwen_3_5_4b_thinking", "assistant_id": "researcher",
             "description": "Qwen3.5-4B thinking agent equipped with search and access tools.",
