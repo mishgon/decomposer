@@ -16,7 +16,7 @@ import httpx
 
 from decomposer.models import create_model
 from gyms.browsecomp import REPO_ROOT
-from gyms.browsecomp.agents import AGENTS, JUDGE_MODEL
+from gyms.browsecomp.agents import AGENTS, JUDGE_MODEL, WORKER_BUDGET_SECONDS, WORKER_GRACE_SECONDS
 from gyms.browsecomp.run import preflight as retrieval_preflight, save
 from gyms.widesearch.run import BACKEND
 
@@ -61,7 +61,9 @@ def remaining_jobs(data, gaia_tasks, completed_run):
     tasks = sorted(json.loads(line)['task_id'] for line in data.read_text().split('\n') if line)
     if (manifest['status'] != 'completed' or manifest['assistant_id'] != MODELS[0]
             or sorted(manifest['tasks']) != tasks or manifest['repetitions'] != 3
-            or len(manifest['episodes']) != len(tasks) * 3):
+            or len(manifest['episodes']) != len(tasks) * 3
+            or manifest.get('provenance', {}).get('worker_budget_seconds') != WORKER_BUDGET_SECONDS
+            or manifest.get('provenance', {}).get('worker_grace_seconds') != WORKER_GRACE_SECONDS):
         raise ValueError('Expected completed SFT BrowseComp on the fixed 100 tasks, three repeats')
     schedule = [job for job in jobs(data, gaia_tasks) if job['name'].startswith('full/')
                 and not (job['benchmark'] == 'browsecomp' and job['agent'] == MODELS[0])]

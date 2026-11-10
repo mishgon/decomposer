@@ -120,7 +120,8 @@ def test_pilot_counts_recorded_timeout_status(tmp_path):
     assert report['new_180_180']['worker_timeouts'] == 1
 
 
-@pytest.mark.parametrize('invalid', [None, 'status', 'assistant_id', 'tasks', 'repetitions', 'episodes'])
+@pytest.mark.parametrize('invalid', [None, 'status', 'assistant_id', 'tasks', 'repetitions', 'episodes',
+                                     'worker_budget_seconds', 'worker_grace_seconds', 'provenance'])
 def test_remaining_campaign_keeps_completed_sft_and_skips_pilots(tmp_path, invalid):
     from evals.sft140 import remaining_jobs
     tasks = [f'browsecomp-{i:04d}' for i in range(100)]
@@ -129,10 +130,13 @@ def test_remaining_campaign_keeps_completed_sft_and_skips_pilots(tmp_path, inval
     prior = tmp_path / 'prior'
     prior.mkdir()
     manifest = {'status': 'completed', 'assistant_id': MODELS[0], 'tasks': tasks,
-                'repetitions': 3, 'episodes': [{}] * 300}
-    if invalid:
+                'repetitions': 3, 'episodes': [{}] * 300,
+                'provenance': {'worker_budget_seconds': 180, 'worker_grace_seconds': 180}}
+    if invalid in {'worker_budget_seconds', 'worker_grace_seconds'}:
+        manifest['provenance'][invalid] = 60
+    elif invalid:
         manifest[invalid] = {'status': 'running', 'assistant_id': 'decomposer',
-                             'tasks': [], 'repetitions': 1, 'episodes': []}[invalid]
+                             'tasks': [], 'repetitions': 1, 'episodes': [], 'provenance': {}}[invalid]
     (prior / 'manifest.json').write_text(json.dumps(manifest))
     if invalid:
         with pytest.raises(ValueError, match='completed SFT BrowseComp'):
