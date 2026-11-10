@@ -69,3 +69,12 @@ The shared scheduler records `retrieval_url="keenable-pro-web-v1"` as a backend
 marker, not an HTTP endpoint. Runs from Parallel, Serper or the local index cannot
 resume under this backend. Preserve them as separate experiments. Interrupted
 Keenable runs can resume with `--resume <run-dir>`.
+
+Queue recovery: infrastructure failures in model, worker and web logs are monitored
+while episodes run. Authentication/quota failures pause scheduling immediately;
+three consecutive infrastructure-failed episodes also pause it. Runs with remaining
+infrastructure or judging errors have `needs_attention` status. Resume preserves
+successful and model-limited attempts, archives infrastructure-failed attempts and
+retries their task/repetition pairs. Resume requires the same commit, input hash,
+backend, model and worker budgets. Judge failures can be rescored without generating
+another answer (BrowseComp via resume; WideSearch via its scoring command).

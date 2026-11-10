@@ -287,7 +287,11 @@ def test_resume_keeps_completed_episodes_and_archives_partial_logs(monkeypatch, 
     config["concurrency"] = 2
     manifest = {"run_id": "run", "status": "interrupted", "started_at": run.now(),
         "finished_at": run.now(), "assistant_id": "researcher", "tasks": ["a"],
-        "repetitions": 3, "config": config, "episodes": [{"task": "a", "repetition": 1,
+        "repetitions": 3, "config": config, "provenance": {
+            "revision": run.subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=run.REPO_ROOT, text=True).strip(),
+            "data_sha256": run.hashlib.sha256(data.read_bytes()).hexdigest(), "backend": args.retrieval_url,
+            "model": run.AGENTS[args.agent][0], "worker_model": None, "worker_budget_seconds": None, "worker_grace_seconds": None,
+        }, "episodes": [{"task": "a", "repetition": 1,
             "status": "finished", "evaluation": {"score": 1, "passed": True}}]}
     if mismatch == "agent":
         manifest["assistant_id"] = "decomposer"
@@ -319,4 +323,4 @@ def test_resume_keeps_completed_episodes_and_archives_partial_logs(monkeypatch, 
     assert (complete / "trace.json").read_text() == 'original trace'
     assert next((root / "interrupted").glob('*/model_calls.jsonl')).read_text() == 'interrupted request'
     assert result["resumptions"][-1]["concurrency"] == 8
-    assert result["status"] == "completed"
+    assert result["status"] == "needs_attention"

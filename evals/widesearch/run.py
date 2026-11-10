@@ -9,11 +9,13 @@ import json
 from pathlib import Path
 import subprocess
 import sys
+from uuid import uuid4
 from unittest.mock import patch
 
 import pandas as pd
 
 from decomposer.models import create_model
+from gyms.infrastructure import classify
 from gyms.browsecomp import REPO_ROOT
 from gyms.browsecomp.agents import JUDGE_MODEL
 from gyms.browsecomp.run import save
@@ -87,7 +89,7 @@ def summarize(manifest, results):
     for entry in manifest["episodes"]:
         key = f"{entry['task']}-r{entry['repetition']:03d}"
         value = results.get(key, {})
-        groups[entry["task"]].append(value if entry["status"] == "finished" else {})
+        groups[entry["task"]].append(value if entry["status"] == "finished" and not entry.get("infrastructure_errors") else {})
     n = manifest["repetitions"]
     total = len(manifest["tasks"]) * n
     metrics = {}
@@ -97,6 +99,11 @@ def summarize(manifest, results):
                           "max": sum(max(rows, default=0) for rows in values) / len(values)}
     return {"tasks": len(manifest["tasks"]), "repetitions": n, "scheduled_attempts": total,
             "ended_attempts": len(manifest["episodes"]), "scored_attempts": len(results),
+            "status": "completed" if manifest.get("status") == "completed" and all(
+                entry["status"] != "finished" or results.get(f"{entry['task']}-r{entry['repetition']:03d}", {}).get("status") == "evaluated"
+                for entry in manifest["episodes"]
+            ) else "needs_attention",
+            "infrastructure_errors": sum(bool(e.get("infrastructure_errors")) for e in manifest["episodes"]),
             "evaluation_errors": sum(v["status"] == "evaluation_error" for v in results.values()),
             "denominator": "all scheduled attempts; missing and failed episodes count as zero",
             "metrics": metrics}
@@ -121,7 +128,10 @@ def main(args):
         raise ValueError("Evaluation provenance changed; use a separate evaluation directory")
     save(provenance_path, provenance)
     results = {}
+    consecutive_errors = 0
     for entry in manifest["episodes"]:
+        if entry.get("infrastructure_errors") or entry["status"] != "finished":
+            continue
         key = f"{entry['task']}-r{entry['repetition']:03d}"
         destination = directory / key
         destination.mkdir(exist_ok=True)
@@ -131,6 +141,10 @@ def main(args):
             if value["status"] == "evaluated":
                 results[key] = value
                 continue
+            archive = directory / "retries"
+            archive.mkdir(exist_ok=True)
+            destination.rename(archive / f"{key}-{uuid4().hex[:8]}")
+            destination.mkdir()
         answer_path = root / entry["directory"] / "answer.md"
         if not answer_path.exists():
             continue
@@ -143,6 +157,9 @@ def main(args):
         results[key] = value
         save(directory / "summary.json", summarize(manifest, results))
         print(key, value["status"], value["score"], flush=True)
+        consecutive_errors = consecutive_errors + 1 if value["status"] == "evaluation_error" else 0
+        if consecutive_errors >= 3 or classify(value.get("error")) == "credentials_or_quota":
+            break
     summary = summarize(manifest, results)
     save(directory / "summary.json", summary)
     print(json.dumps(summary, indent=2))
