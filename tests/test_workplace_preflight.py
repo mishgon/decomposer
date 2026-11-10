@@ -24,13 +24,17 @@ def test_calibrated_worker_is_checked_and_closed(monkeypatch, error):
     worker.http_async_client.aclose.assert_awaited_once()
 
 
-def test_synth_preflight_failure_happens_before_creating_training_output(tmp_path, monkeypatch):
+@pytest.mark.parametrize('gym', ['synth', 'wideseek'])
+def test_preflight_failure_happens_before_creating_training_output(tmp_path, monkeypatch, gym):
+    import importlib
     import json
-    from opd.synth import run
+    run = importlib.import_module(f'opd.{gym}.run')
+    monkeypatch.delenv('OPD_FAST_RUNTIME', raising=False)
     baseline = tmp_path / 'baseline'
     baseline.mkdir()
     (baseline / 'manifest.json').write_text(json.dumps({
-        'status': 'completed', 'model': 'vllm/qwen_3_5_4b_non_thinking'}))
+        'status': 'completed', 'model': 'vllm/qwen_3_5_4b_non_thinking',
+        'student_model': str(tmp_path / 'model')}))
     model = tmp_path / 'model'
     model.mkdir()
     (model / 'config.json').write_text('{}')

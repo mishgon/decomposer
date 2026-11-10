@@ -25,7 +25,7 @@ def main():
     subprocess.run(['nvidia-smi', '--query-gpu=name,memory.total', '--format=csv'], check=True)
     if not (MODEL / 'config.json').exists():
         raise RuntimeError(f'Missing model: {MODEL}')
-    preflight(output)
+    preflight(output, workplace_validation=args.mode == 'train')
     import httpx
     with httpx.Client(trust_env=False, timeout=30) as client:
         response = client.post(os.environ["WS_SEARCH_URL"].rstrip("/") + "/retrieve",
