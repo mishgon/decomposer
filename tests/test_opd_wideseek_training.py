@@ -38,6 +38,8 @@ def test_smoke_is_two_updates_with_same_loss_and_optimizer():
     assert full.data.max_prompt_length + full.data.max_response_length == 32768
     assert full.rollout.total_rollout_steps == 512
     assert full.data.shuffle is True
+    assert full.data.seed == 42
+    assert full.actor_rollout_ref.model.override_config.attn_implementation == "flash_attention_2"
     assert smoke.trainer.val_before_train
     assert smoke.trainer.test_freq == 8
     assert smoke.trainer.save_freq == 1
@@ -96,7 +98,7 @@ def test_adapter_uses_shared_gym_and_preserves_tokens(tmp_path, monkeypatch, cle
     with patch('opd.wideseek.agent_loop.PolicyTokens', return_value=tokens), \
             patch('opd.wideseek.agent_loop.episode', new=AsyncMock(return_value=result)) as run:
         if cleanup_error:
-            with pytest.raises(RuntimeError, match='cleanup failed'):
+            with pytest.raises(RuntimeError, match='cleanup/capture/export failed'):
                 asyncio.run(loop.run({}, extra_info={'task_id': 'a'}))
         else:
             output = asyncio.run(loop.run({}, extra_info={'task_id': 'a'}))
@@ -107,7 +109,7 @@ def test_adapter_uses_shared_gym_and_preserves_tokens(tmp_path, monkeypatch, cle
     assert trace['response_mask'] == [1, 0, 1]
 
 
-def test_effective_recipe_matches_final_synth_except_gym_and_fused_head():
+def test_effective_recipe_matches_final_synth_except_gym():
     wide = config('full')
     with patch.dict(os.environ, {'OPD_ROOT': str(ROOT), 'OPD_DATA': '/tmp/data',
                                  'OPD_ARTIFACTS': '/tmp/run', 'MODEL_PATH': '/tmp/student',
@@ -121,8 +123,7 @@ def test_effective_recipe_matches_final_synth_except_gym_and_fused_head():
     a, b = OmegaConf.to_container(wide), OmegaConf.to_container(synth)
     for section in ('model', 'actor'):
         assert a['actor_rollout_ref'][section]['use_fused_kernels'] is True
-        assert b['actor_rollout_ref'][section]['use_fused_kernels'] is False
-        b['actor_rollout_ref'][section]['use_fused_kernels'] = True
+        assert b['actor_rollout_ref'][section]['use_fused_kernels'] is True
     assert a['actor_rollout_ref']['model']['enable_gradient_checkpointing'] is True
     a.pop('wideseek'); b.pop('synth')
     for c in (a, b):
@@ -131,3 +132,18 @@ def test_effective_recipe_matches_final_synth_except_gym_and_fused_head():
         c['actor_rollout_ref']['rollout']['agent'].pop('agent_loop_config_path')
         c['actor_rollout_ref']['rollout']['agent'].pop('default_agent_loop')
     assert a == b
+
+
+def test_seeded_rotation_consumes_pool_before_repeating():
+    from verl.trainer.ppo.utils import create_rl_sampler
+
+    data = config('full').data
+    tasks = list(range(1000))
+    sampler = create_rl_sampler(data, tasks)
+    first, second = list(sampler), list(sampler)
+    assert len(first) == len(set(first)) == len(tasks)
+    assert set(first) == set(second) == set(tasks)
+    assert first != second
+    replay = create_rl_sampler(data, tasks)
+    assert list(replay) == first
+    assert list(replay) == second

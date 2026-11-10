@@ -2,7 +2,8 @@
 
 This port carries the finalized synth OPD pipeline into WideSeek. The shared
 policy bridge, hosted teacher, veRL patches and dependency lock come from
-`syntch-opd` at `8e75b76`. Configuration parity and native gym lifecycle checks pass. The launcher also
+`syntch-opd`, including native FlashAttention2, pinned Workplace validation data,
+and policy-timeout recovery. The launcher also
 requires live retrieval, worker and teacher preflight before training.
 
 ## Recipe
@@ -11,7 +12,8 @@ requires live retrieval, worker and teacher preflight before training.
 - One training GPU and one rollout GPU; controller CPU reservations of one each.
 - LoRA rank 32, alpha 64, all linear layers; learning rate 1.5e-5.
 - Full deduplicated WideSeek source pool, excluding the frozen holdout, shuffled
-  with one row per training question. Cap: 512 rollouts / 64 batches of eight
+  with seed 42 and one row per training question. Tasks rotate without replacement
+  until the pool wraps. Cap: 512 rollouts / 64 batches of eight
   episodes, two PPO epochs per batch.
 - Eight concurrent rollouts, two agent-loop workers, staleness threshold one.
 - A 32,768-token total sequence budget (8,192 prompt + 24,576 response tokens) and a 900-second (15-minute) episode budget.
@@ -26,10 +28,15 @@ Qwen3.5-4B researchers, fixed Wiki-2018 search/access tools and native scorer.
 Workplace continues using its fixed non-thinking workers. Neither task reward
 nor Workplace reward enters the distillation objective.
 
-Preparation freezes the original four train probes and eight held-out questions
-in `validation_panel.json`, checking both task IDs and question hashes. All other
+Preparation accepts one source split per run. It uses `validation_panel.json`
+for width and `validation_panel_depth.json` for depth, checking both task IDs and
+question hashes. Each panel freezes four train probes and eight held-out questions.
+The depth panel was selected from the unique source questions with seed 42, without
+filtering by observed scores. All other
 unique questions enter the training pool. References stay in the task store for
-judging; they never enter the coordinator prompt. The default source is width.
+judging; they never enter the coordinator prompt. Select depth with `--source artifacts/gyms/wideseek/data/depth/tasks.jsonl`.
+Workplace preparation resolves the same 20 IDs from the pinned Hugging Face
+validation dataset and embeds complete grading tasks in the evaluation Parquet.
 The small validation panels are diagnostic, not representative benchmarks.
 
 ## SFT Initialization

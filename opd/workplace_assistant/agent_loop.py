@@ -22,9 +22,7 @@ class WorkplaceAgentLoop(AgentLoopBase):
         if kwargs['data_source'] != 'workplace-assistant/validation20':
             raise ValueError('Workplace panel is validation-only')
         task_id = int(kwargs['extra_info']['task_id'])
-        panel = json.loads((Path(os.environ['OPD_ROOT']) /
-                            'gyms/workplace_assistant/validation20.json').read_text())
-        task = next(row for row in panel if row['id'] == task_id)
+        task = json.loads(kwargs['extra_info']['task'])
         episode_id = uuid4().hex
         directory = Path(os.environ['OPD_ARTIFACTS']) / 'workplace-episodes' / episode_id
         directory.mkdir(parents=True)

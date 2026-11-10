@@ -34,14 +34,8 @@ def prepare(directory, demo_validation=False, workplace_validation=False):
                     'reward_model': {'style': 'rule', 'ground_truth': task_id},
                     'extra_info': {'task_id': task_id, 'language': language}})
     if workplace_validation:
-        panel = json.loads((Path(__file__).resolve().parents[2] /
-                            'gyms/workplace_assistant/validation20.json').read_text())
-        for task in panel:
-            validation.append({'data_source': 'workplace-assistant/validation20',
-                'agent_name': 'workplace_decomposer',
-                'prompt': [{'role': 'user', 'content': task['prompt']}],
-                'reward_model': {'style': 'rule', 'ground_truth': str(task['id'])},
-                'extra_info': {'task_id': str(task['id'])}})
+        from opd.workplace_assistant.prepare import validation_rows
+        validation.extend(validation_rows())
     pd.DataFrame(validation).to_parquet(directory / "evaluation.parquet", index=False)
     (directory / "manifest.json").write_text(json.dumps({"version": "synth-swap-v1",
         "train_tasks": 16, "heldout_tasks": 8, "train_probe_tasks": 4,
