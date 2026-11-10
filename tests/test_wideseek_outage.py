@@ -209,3 +209,34 @@ def test_batch_keeps_task_failure_and_finishes_after_outage(tmp_path, monkeypatc
     judge = next(row for row in manifest['episodes'] if row['task_id'] == 'judge')
     assert judge['evaluation']['status'] == 'judge_error'
     assert judge['evaluation']['score'] is None
+
+
+@pytest.mark.parametrize('fatal', [None, 'BadRequestError: Error code: 400',
+                                  'AuthenticationError: Error code: 401'])
+def test_researcher_context_overflow_preserved_without_hiding_service_errors(tmp_path, fatal):
+    overflow = ('OpenAIContextOverflowError: Error code: 400 - '
+                'litellm.ContextWindowExceededError: litellm.BadRequestError: '
+                'Max Input Tokens=131072, Got=131676')
+    async def episode(task, mode, attempt, root, args, **kwargs):
+        directory = root/mode/task['task_id']/'attempt-001/execution-1'
+        save(directory/'trace.json', {'messages': []})
+        errors = [overflow] if task['task_id'] == 'limited' else []
+        if fatal:
+            errors.append(fatal)
+        (directory/'model_calls.jsonl').write_text(''.join(json.dumps({'error': e})+'\n' for e in errors))
+        save(directory.parent/'result.json', dict(execution_directory='execution-1',
+             status='timeout' if errors else 'finished',
+             evaluation=dict(status='timeout' if errors else 'scored', score=None if errors else 1)))
+    async def run():
+        guard = OutageGuard(tmp_path, AsyncMock())
+        results = await asyncio.gather(*(collect_episode(guard, episode, dict(task_id=t),
+                         'decomposer', 1, tmp_path, SimpleNamespace()) for t in ('limited', 'healthy')))
+        assert guard.since is None
+        assert results[0]['evaluation']['score'] is None
+        assert results[1]['evaluation']['score'] == 1
+    if fatal:
+        with pytest.raises(RuntimeError, match='Permanent service error'):
+            asyncio.run(run())
+    else:
+        asyncio.run(run())
+    assert overflow in (tmp_path/'decomposer/limited/attempt-001/execution-1/model_calls.jsonl').read_text()

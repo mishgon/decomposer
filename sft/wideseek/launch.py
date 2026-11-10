@@ -2,6 +2,7 @@
 import asyncio
 import json
 import random
+import resource
 import time
 from pathlib import Path
 
@@ -14,6 +15,10 @@ from sft.wideseek.run import create_collection_parser, main as collect
 
 
 async def run_with_workers(args, config, collection):
+    soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+    limit = 65536 if hard == resource.RLIM_INFINITY else min(65536, hard)
+    if soft < limit:
+        resource.setrlimit(resource.RLIMIT_NOFILE, (limit, hard))
     resets = 0
     while True:
         try:

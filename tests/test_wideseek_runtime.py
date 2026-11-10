@@ -65,6 +65,8 @@ class ScoreTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(saved["evaluation"]["score"], .5)
 
     async def test_cancelled_execution_is_not_reused_on_retry(self):
+        from langgraph_sdk import get_client
+        clients = [get_client(url="http://unused") for _ in range(2)]
         graph = MagicMock()
         graph.ainvoke = AsyncMock(side_effect=[asyncio.CancelledError(), {}])
         graph.aget_state = AsyncMock(return_value=SimpleNamespace(values={}))
@@ -74,7 +76,8 @@ class ScoreTests(unittest.IsolatedAsyncioTestCase):
         task = {"task_id": "test", "question": "Question", "answer": "Answer", "unique_columns": []}
         with tempfile.TemporaryDirectory() as folder, patch("gyms.wideseek.run.model", return_value=policy), \
                 patch("gyms.wideseek.run.agents.react", return_value=graph), \
-                patch("gyms.wideseek.run.evaluate", new=AsyncMock(return_value={"score": 0.})):
+                patch("gyms.wideseek.run.evaluate", new=AsyncMock(return_value={"score": 0.})), \
+                patch("gyms.wideseek.run.get_client", side_effect=clients):
             root = Path(folder)
             with self.assertRaises(asyncio.CancelledError):
                 await episode(task, "simple", 1, root, args)
@@ -87,6 +90,7 @@ class ScoreTests(unittest.IsolatedAsyncioTestCase):
             import json
             result = json.loads((parent / "result.json").read_text())
             self.assertNotEqual(result["execution_directory"], old.name)
+            self.assertTrue(all(client.http.client.is_closed for client in clients))
 
     async def test_context_overflow_saves_partial_trace_and_other_attempt_continues(self):
         import json

@@ -64,3 +64,24 @@ def test_unrelated_failures_are_not_restarted(tmp_path, monkeypatch):
     args = SimpleNamespace(output=tmp_path, worker_port=1, worker_slots=2, worker_python=None)
     with pytest.raises(ValueError, match='invalid data'):
         asyncio.run(launch.run_with_workers(args, 'config', collect))
+
+
+@pytest.mark.parametrize('soft,hard,expected', [
+    (1024, 1048576, 65536), (1024, 4096, 4096),
+    (1024, launch.resource.RLIM_INFINITY, 65536), (131072, 1048576, None),
+])
+def test_descriptor_limit_is_set_before_starting_workers(monkeypatch, soft, hard, expected):
+    from unittest.mock import Mock
+    set_limit = Mock()
+    monkeypatch.setattr(launch.resource, 'getrlimit', lambda _: (soft, hard))
+    monkeypatch.setattr(launch.resource, 'setrlimit', set_limit)
+    @asynccontextmanager
+    async def server(*args, **kwargs):
+        if expected is None:
+            set_limit.assert_not_called()
+        else:
+            set_limit.assert_called_once_with(launch.resource.RLIMIT_NOFILE, (expected, hard))
+        yield 'http://worker'
+    monkeypatch.setattr(launch, 'agent_server', server)
+    args = SimpleNamespace(worker_port=1, worker_slots=512, worker_python=None)
+    asyncio.run(launch.run_with_workers(args, 'config', AsyncMock()))

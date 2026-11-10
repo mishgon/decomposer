@@ -18,6 +18,7 @@ _TRANSIENT = re.compile(
 )
 _FATAL = re.compile(r'\b(AuthenticationError|PermissionDeniedError|NotFoundError|BadRequestError)\b|'
                     r'''\b(?:HTTPStatusError: |Error code: |Client error ['"])(?:400|401|403|404)\b''')
+_CONTEXT_OVERFLOW = re.compile(r'\b(OpenAIContextOverflowError|ContextWindowExceededError|context_length_exceeded)\b')
 
 
 def transient(error):
@@ -111,13 +112,14 @@ async def collect_episode(guard, run_episode, task, mode, attempt, root, args, *
             raise WorkerCleanupError(f'Worker server reset required: {result_path}')
         if any(result.get(key) for key in ('cleanup_errors', 'capture_error', 'trace_error', 'export_error')):
             raise RuntimeError(f"Unsafe episode cleanup/export: {result_path}")
-        errors = execution_errors(result, directory)
+        errors = [error for error in execution_errors(result, directory)
+                  if not _CONTEXT_OVERFLOW.search(error)]
         if any(_FATAL.search(error) for error in errors):
             raise RuntimeError(f"Permanent service error: {result_path}")
         retry = any(transient(error) for error in errors)
         if not retry:
             error = str(result.get('error', ''))
-            stopping_failure = error.startswith('GraphRecursionError:') or error in {
+            stopping_failure = bool(_CONTEXT_OVERFLOW.search(error)) or error.startswith('GraphRecursionError:') or error in {
                 'ValueError: Decomposer requested tools instead of completing graceful shutdown',
                 'ValueError: Agent requested tools instead of returning its report',
             }

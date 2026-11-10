@@ -209,6 +209,10 @@ async def episode(task, mode, attempt, root, args, *, middleware=(), policy=None
                     await finish_agents()
             except TimeoutError:
                 result.setdefault("cleanup_errors", []).append("Episode cleanup exceeded 90s")
+        try:
+            await client.http.client.aclose()
+        except Exception as exc:
+            result.setdefault("cleanup_errors", []).append(f"Worker client cleanup: {type(exc).__name__}: {exc}")
 
     result.setdefault("agent_finished_at", time.time())
     messages = state.get("messages", [])
