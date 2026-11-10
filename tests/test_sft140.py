@@ -151,10 +151,9 @@ def test_remaining_campaign_keeps_completed_sft_and_skips_pilots(tmp_path, inval
         command = job['command'][2:]
         if job['benchmark'] == 'gaia2':
             args = build_parser(evaluation=True).parse_args(command)
-            assert args.num_repeats == 3 and args.concurrency == 8
+            assert args.num_repeats == 3 and args.concurrency == 32
         else:
             parser = browsecomp_parser() if job['benchmark'] == 'browsecomp' else widesearch_parser()
             args = parser.parse_args(command)
             assert args.all and args.repetitions == 3
-            assert args.concurrency == (4 if job['benchmark'] == 'widesearch' else
-                96 if job['agent'] in {'researcher_4b_thinking', 'decomposer_4b_non_thinking'} else 16)
+            assert args.concurrency == 32
