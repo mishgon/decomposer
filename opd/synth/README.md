@@ -170,11 +170,13 @@ tools and grading. The validation trajectory has the training runtime's 8192-tok
 response budget and 300-second episode timeout. Stock GPU inference and token
 budgets differ from the hosted selection run; baseline validation measures this.
 
-`gyms/workplace_assistant/validation20.json` freezes the tasks; the adjacent
-selection file records provenance and measured teacher 20/20, student 2/20. Those
-are historical selection scores using Qwen3.5-4B-unlooped workers. The current
-worker profile uses base Qwen3.5-4B because the unlooped endpoint was retired.
-Historical scores do not establish the current baseline or guarantee future scores.
+`gyms/workplace_assistant/validation20.json` contains only the 20 task IDs.
+Preparation resolves them from the validation split of
+`nvidia/Nemotron-RL-agent-workplace_assistant`, pinned to revision
+`f674d9bba17820d90f14eefe9156fdc018a0db60`, and embeds the prompts and grading
+references in `evaluation.parquet`. Preparation needs Hugging Face access or a
+cached dataset; validation workers use the prepared rows without downloading data.
+Compare rewards against each run's step-zero validation.
 The panel contains native multi-record CRM/project-management tasks. The teacher
 used multiple worker runs on these tasks, while the student usually used one.
 They test target coverage and coordination, but do not reproduce synth's swap
