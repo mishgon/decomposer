@@ -168,7 +168,14 @@ DUPLICATE_PROMPT_ERROR = """Run not started: you cannot assign the exact same pr
 
 DECOMPOSER_GRACEFUL_SHUTDOWN_REQUEST = """You attempted to assign the exact same task three times. Stop assigning tasks now. No tool calls in the triggering batch were executed.
 
-If any runs remain active, use only `wait` to collect their results. Once all run summaries have been received, respond to the user with the available results. Explain what remains incomplete and the reported obstacles. Do not assume those obstacles will disappear on their own, and do not claim completion beyond what the agents’ results support."""
+Some run results have not yet been collected. Use only `wait` to collect them. Do not start any new work. Once all run results have been collected, provide your final answer using the available results and following the answer format requested by the user. Explain any remaining uncertainty or incomplete work where the requested format allows it. Do not claim completion beyond what the results support."""
+
+
+DECOMPOSER_FINAL_RESPONSE_REQUEST = """You attempted to assign the exact same task three times. Stop assigning tasks now. No tool calls in the triggering batch were executed.
+
+All run results have been collected. No runs remain active. Tools are now disabled.
+
+Provide your final answer now, using the available results and following the answer format requested by the user. Explain any remaining uncertainty or incomplete work where the requested format allows it. Do not claim completion beyond what the results support."""
 
 
 UNKNOWN_AGENT_ERROR = "Unknown agent ID `{agent_id}`."

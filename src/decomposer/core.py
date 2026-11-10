@@ -40,6 +40,7 @@ from .prompts import (
     EMPTY_PROMPT_ERROR,
     DUPLICATE_PROMPT_ERROR,
     DECOMPOSER_GRACEFUL_SHUTDOWN_REQUEST,
+    DECOMPOSER_FINAL_RESPONSE_REQUEST,
     EMPTY_AGENT_RESPONSE_ERROR,
     EMPTY_RESPONSE_ERROR,
     FAILED_RUN_ERROR,
@@ -1160,16 +1161,24 @@ class DecomposerAgentMiddleware(AgentMiddleware[DecomposerAgentState, ContextT, 
         if not state.get("shutdown_requested", False) and any(
             prompt.strip() and run_prompt_counts[prompt] >= 3 for prompt in prompt_counts
         ):
+            shutdown_message = (
+                DECOMPOSER_GRACEFUL_SHUTDOWN_REQUEST
+                if any(
+                    "response_sequence_number" not in run
+                    for run in state["agent_runs"].values()
+                )
+                else DECOMPOSER_FINAL_RESPONSE_REQUEST
+            )
             return {
                 "run_prompt_counts": dict(run_prompt_counts),
                 "shutdown_requested": True,
                 "messages": [
                     ToolMessage(
-                        content=DECOMPOSER_GRACEFUL_SHUTDOWN_REQUEST,
+                        content=shutdown_message,
                         tool_call_id=call["id"], name=call["name"],
                     )
                     for call in tool_calls
-                ] + [HumanMessage(content=DECOMPOSER_GRACEFUL_SHUTDOWN_REQUEST)],
+                ] + [HumanMessage(content=shutdown_message)],
                 "jump_to": "model",
             }
         forked_agent_ids = {
