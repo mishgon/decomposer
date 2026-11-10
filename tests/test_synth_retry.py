@@ -57,7 +57,11 @@ def test_mixed_permanent_error_is_fatal():
 
 
 @pytest.mark.parametrize('has_tokens', [False, True])
-def test_policy_request_timeout_retries_without_becoming_a_reward(monkeypatch, has_tokens):
+@pytest.mark.parametrize('error', [
+    'RuntimeError: Policy inference request timed out',
+    repr(RuntimeError('Policy inference request timed out')),
+])
+def test_policy_request_timeout_retries_without_becoming_a_reward(monkeypatch, has_tokens, error):
     from opd.synth.retry import check_episode
     monkeypatch.setattr('opd.synth.retry.asyncio.sleep', AsyncMock())
     attempts = []
@@ -66,7 +70,7 @@ def test_policy_request_timeout_retries_without_becoming_a_reward(monkeypatch, h
         attempts.append(1)
         if len(attempts) == 1:
             check_episode({'status': 'error',
-                           'error': 'RuntimeError: Policy inference request timed out',
+                           'error': error,
                            'evaluation': {'status': 'scored', 'score': 0.}},
                           has_tokens=has_tokens)
             pytest.fail('An infrastructure timeout must not become a zero-reward trajectory')

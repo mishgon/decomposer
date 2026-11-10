@@ -24,10 +24,6 @@ def test_expected_failures_finish_and_infrastructure_errors_surface(
         tmp_path, monkeypatch, adapter, error_type, error, worker_errors, accepted):
     module, cls = (demo, demo.DemoAgentLoop) if adapter == 'demo' else (workplace, workplace.WorkplaceAgentLoop)
     monkeypatch.setenv('OPD_ARTIFACTS', str(tmp_path))
-    monkeypatch.setenv('OPD_ROOT', str(tmp_path))
-    panel = tmp_path / 'gyms/workplace_assistant/validation20.json'
-    panel.parent.mkdir(parents=True)
-    panel.write_text(json.dumps([{'id': 1}]))
     worker = SimpleNamespace(http_client=Mock(), http_async_client=SimpleNamespace(aclose=AsyncMock()))
     if adapter == 'workplace':
         monkeypatch.setattr(module, 'create_model', lambda _: worker)
@@ -41,7 +37,7 @@ def test_expected_failures_finish_and_infrastructure_errors_surface(
     loop.tokenizer = None
     loop.rollout_config = SimpleNamespace(prompt_length=32, response_length=32)
     source = 'decomposer-demo/ru' if adapter == 'demo' else 'workplace-assistant/validation20'
-    call = loop._run_attempt({}, data_source=source, extra_info={'task_id': '1', 'language': 'ru'})
+    call = loop._run_attempt({}, data_source=source, extra_info={'task_id': '1', 'language': 'ru', 'task': json.dumps({'id': 1})})
     if accepted:
         output = asyncio.run(call)
         assert output.reward_score == 0

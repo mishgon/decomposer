@@ -15,10 +15,15 @@ for patch_file in "$PWD"/opd/patches/*.patch; do
     fi
 done
 test -d .venv-opd || "$uv_bin" venv --python 3.12 .venv-opd
-"$uv_bin" pip install --python .venv-opd/bin/python --override opd/overrides.txt -r opd/requirements.lock
+# FlashAttention's build imports Torch. Install the locked runtime first, then
+# build against that exact Torch ABI (CUDA_HOME must point to a matching toolkit).
+"$uv_bin" pip install --python .venv-opd/bin/python --override opd/overrides.txt \
+    -r <(sed '/^flash-attn==/d' opd/requirements.lock)
+MAX_JOBS="${MAX_JOBS:-4}" "$uv_bin" pip install --python .venv-opd/bin/python \
+    --no-build-isolation --no-deps -r <(sed -n '/^flash-attn==/p' opd/requirements.lock)
 "$uv_bin" pip install --python .venv-opd/bin/python --no-deps -e external/verl -e .
 PYTHONPATH="$PWD:$PWD/src:$PWD/external/verl" .venv-opd/bin/python -c \
-    'import torch, vllm, verl; print(torch.__version__, vllm.__version__, verl.__version__)'
+    'import torch, vllm, verl, flash_attn; print(torch.__version__, vllm.__version__, verl.__version__, flash_attn.__version__)'
 # Agent Server and vLLM have incompatible web-stack pins. Keep the CPU workers separate.
 test -d .venv-workers || "$uv_bin" venv --python 3.12 .venv-workers
 "$uv_bin" pip install --python .venv-workers/bin/python -e . 'langgraph-cli[inmem]>=0.4.31'
