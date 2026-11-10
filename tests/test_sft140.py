@@ -39,7 +39,8 @@ def test_campaign_rejects_wrong_selection(tmp_path):
         jobs(data, {})
 
 
-def test_queue_completes_and_resumes_without_rerunning(monkeypatch, tmp_path):
+@pytest.mark.parametrize("gaia_error", [None, "TimeoutError", "GraphRecursionError", "APITimeoutError", "ReadTimeout", "ConnectTimeout"])
+def test_queue_completes_and_resumes_without_rerunning(monkeypatch, tmp_path, gaia_error):
     from types import SimpleNamespace
     from evals import sft140
     from gyms.gaia2 import run as gaia
@@ -65,7 +66,7 @@ def test_queue_completes_and_resumes_without_rerunning(monkeypatch, tmp_path):
             assert json.loads((prior / 'manifest.json').read_text())['status'] == 'interrupted'
         if 'evals.gaia2.run' in command:
             target = directory / 'search/eval_metrics.json'
-            value = {'gym_metrics': {'exception_types': {}}}
+            value = {'gym_metrics': {'exception_types': {gaia_error: 1} if gaia_error else {}}}
         else:
             target = directory / 'run/manifest.json'
             value = {'status': 'completed'}
@@ -74,6 +75,13 @@ def test_queue_completes_and_resumes_without_rerunning(monkeypatch, tmp_path):
         return SimpleNamespace(pid=123, returncode=0, poll=lambda: 0)
     monkeypatch.setattr(sft140.subprocess, 'Popen', spawn)
     args = SimpleNamespace(output_dir=tmp_path / 'results', browsecomp_data=data, old_browsecomp_run=tmp_path)
+    if gaia_error in {'APITimeoutError', 'ReadTimeout', 'ConnectTimeout'}:
+        with pytest.raises(RuntimeError, match='infrastructure errors'):
+            sft140.run(args)
+        state = json.loads((args.output_dir / 'queue.json').read_text())
+        assert state['status'] == 'needs_attention'
+        assert 'full/gaia2/test' not in state['completed']
+        return
     sft140.run(args)
     sft140.run(args)
     state = json.loads((args.output_dir / 'queue.json').read_text())
@@ -90,3 +98,19 @@ def test_queue_completes_and_resumes_without_rerunning(monkeypatch, tmp_path):
     sft140.run(args)
     assert len(spawned) == 3
     assert '--resume' in spawned[-1]
+
+
+def test_pilot_counts_recorded_timeout_status(tmp_path):
+    from evals.sft140 import pilot_report
+    old = tmp_path / 'old'
+    new = tmp_path / 'pilot/browsecomp/decomposer_sft_1_4_0/new'
+    for path in [old, new]:
+        (path / 'trace').mkdir(parents=True)
+        (path / 'manifest.json').write_text(json.dumps({'tasks': ['a'], 'episodes': [
+            {'task': 'a', 'directory': 'trace', 'evaluation': {'passed': False}}]}))
+        (path / 'trace/trace.json').write_text(json.dumps({'agent_runs': {
+            'worker': {'status': 'timeout', 'error': None}}}))
+    pilot_report(tmp_path, old)
+    report = json.loads((tmp_path / 'pilot-comparison.json').read_text())
+    assert report['old_60_60']['worker_timeouts'] == 1
+    assert report['new_180_180']['worker_timeouts'] == 1

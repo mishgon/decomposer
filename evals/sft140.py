@@ -113,7 +113,7 @@ def pilot_report(root, old_run):
             runs.extend(trace.get('agent_runs', {}).values())
             duplicates += bool(trace.get('shutdown_requested'))
         reports[name] = {'episodes': len(episodes), 'correct': sum(e['evaluation'].get('passed', False) for e in episodes),
-            'worker_runs': len(runs), 'worker_timeouts': sum('TimeoutError' in str(r.get('error')) for r in runs),
+            'worker_runs': len(runs), 'worker_timeouts': sum(r.get('status') == 'timeout' or 'TimeoutError' in str(r.get('error')) for r in runs),
             'worker_reports': sum(r.get('status') == 'responded' for r in runs), 'duplicate_shutdowns': duplicates,
             'missing_final_answer': sum(e['evaluation'].get('reason') == 'missing_final_answer' for e in episodes)}
     save(root / 'pilot-comparison.json', reports)
@@ -191,7 +191,7 @@ def run(args):
                 if job['benchmark'] == 'gaia2':
                     metrics = json.loads((directory / 'results' / job['domain'] / 'eval_metrics.json').read_text())
                     errors = metrics['gym_metrics']['exception_types']
-                    if any('Timeout' not in e and 'GraphRecursion' not in e for e in errors):
+                    if any(e not in {'TimeoutError', 'GraphRecursionError'} for e in errors):
                         raise RuntimeError(f'Gaia2 infrastructure errors: {errors}')
                 else:
                     manifest_path = next(directory.glob('*/manifest.json'));manifest = json.loads(manifest_path.read_text())
