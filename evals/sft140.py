@@ -56,6 +56,22 @@ def jobs(data, gaia_tasks):
     return result
 
 
+def remaining_jobs(data, gaia_tasks, completed_run):
+    manifest = json.loads((completed_run / 'manifest.json').read_text())
+    tasks = sorted(json.loads(line)['task_id'] for line in data.read_text().split('\n') if line)
+    if (manifest['status'] != 'completed' or manifest['assistant_id'] != MODELS[0]
+            or sorted(manifest['tasks']) != tasks or manifest['repetitions'] != 3
+            or len(manifest['episodes']) != len(tasks) * 3):
+        raise ValueError('Expected completed SFT BrowseComp on the fixed 100 tasks, three repeats')
+    schedule = [job for job in jobs(data, gaia_tasks) if job['name'].startswith('full/')
+                and not (job['benchmark'] == 'browsecomp' and job['agent'] == MODELS[0])]
+    for job in schedule:
+        concurrency = 4 if job['benchmark'] == 'widesearch' else 8 if job['benchmark'] == 'gaia2' else (
+            96 if job['agent'] in {'researcher_4b_thinking', 'decomposer_4b_non_thinking'} else 16)
+        job['command'][job['command'].index('--concurrency') + 1] = str(concurrency)
+    return schedule
+
+
 async def preflight(job):
     evidence = {}
     model_ids = [AGENTS[job['agent']][0], JUDGE_MODEL]
@@ -133,9 +149,14 @@ def run(args):
             if len(scenarios) != 160:
                 raise ValueError(f'Expected 160 Gaia2 {domain} tasks')
             gaia_tasks[domain] = sorted(x['scenario_id'] for x in scenarios)[0]
-        schedule = jobs(args.browsecomp_data.resolve(), gaia_tasks)
+        completed_run = args.completed_browsecomp_run
+        schedule = (remaining_jobs(args.browsecomp_data.resolve(), gaia_tasks, completed_run)
+                    if completed_run else jobs(args.browsecomp_data.resolve(), gaia_tasks))
         state_file = root / 'queue.json'
         identity = {'revision': revision, 'data_sha256': hashlib.sha256(args.browsecomp_data.read_bytes()).hexdigest(), 'jobs': schedule}
+        if completed_run:
+            identity['completed_browsecomp_run'] = str(completed_run.resolve())
+            identity['completed_browsecomp_sha256'] = hashlib.sha256((completed_run / 'manifest.json').read_bytes()).hexdigest()
         state = json.loads(state_file.read_text()) if state_file.exists() else {**identity, 'completed': []}
         if any(state.get(k) != v for k, v in identity.items()):
             raise ValueError('Queue code, data or schedule changed; use a new output directory')
@@ -228,6 +249,8 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output-dir', type=Path, required=True)
     parser.add_argument('--browsecomp-data', type=Path, required=True)
-    parser.add_argument('--old-browsecomp-run', type=Path, required=True)
+    previous = parser.add_mutually_exclusive_group(required=True)
+    previous.add_argument('--old-browsecomp-run', type=Path)
+    previous.add_argument('--completed-browsecomp-run', type=Path)
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
     run(parser.parse_args())

@@ -77,7 +77,8 @@ def test_queue_completes_and_resumes_without_rerunning(monkeypatch, tmp_path, ga
         target.write_text(json.dumps(value))
         return SimpleNamespace(pid=123, returncode=0, poll=lambda: 0)
     monkeypatch.setattr(sft140.subprocess, 'Popen', spawn)
-    args = SimpleNamespace(output_dir=tmp_path / 'results', browsecomp_data=data, old_browsecomp_run=tmp_path)
+    args = SimpleNamespace(output_dir=tmp_path / 'results', browsecomp_data=data,
+                           old_browsecomp_run=tmp_path, completed_browsecomp_run=None)
     if gaia_error in {'APITimeoutError', 'ReadTimeout', 'ConnectTimeout'}:
         with pytest.raises(RuntimeError, match='infrastructure errors'):
             sft140.run(args)
@@ -117,3 +118,39 @@ def test_pilot_counts_recorded_timeout_status(tmp_path):
     report = json.loads((tmp_path / 'pilot-comparison.json').read_text())
     assert report['old_60_60']['worker_timeouts'] == 1
     assert report['new_180_180']['worker_timeouts'] == 1
+
+
+@pytest.mark.parametrize('invalid', [None, 'status', 'assistant_id', 'tasks', 'repetitions', 'episodes'])
+def test_remaining_campaign_keeps_completed_sft_and_skips_pilots(tmp_path, invalid):
+    from evals.sft140 import remaining_jobs
+    tasks = [f'browsecomp-{i:04d}' for i in range(100)]
+    data = tmp_path / 'tasks.jsonl'
+    data.write_text('\n'.join(json.dumps({'task_id': t}) for t in tasks))
+    prior = tmp_path / 'prior'
+    prior.mkdir()
+    manifest = {'status': 'completed', 'assistant_id': MODELS[0], 'tasks': tasks,
+                'repetitions': 3, 'episodes': [{}] * 300}
+    if invalid:
+        manifest[invalid] = {'status': 'running', 'assistant_id': 'decomposer',
+                             'tasks': [], 'repetitions': 1, 'episodes': []}[invalid]
+    (prior / 'manifest.json').write_text(json.dumps(manifest))
+    if invalid:
+        with pytest.raises(ValueError, match='completed SFT BrowseComp'):
+            remaining_jobs(data, {}, prior)
+        return
+    schedule = remaining_jobs(data, {'execution': 'e', 'search': 's'}, prior)
+    assert len(schedule) == 11
+    assert all(job['name'].startswith('full/') for job in schedule)
+    assert [j['agent'] for j in schedule if j['benchmark'] == 'browsecomp'] == MODELS[1:]
+    assert [j['agent'] for j in schedule if j['benchmark'] == 'widesearch'] == MODELS
+    for job in schedule:
+        command = job['command'][2:]
+        if job['benchmark'] == 'gaia2':
+            args = build_parser(evaluation=True).parse_args(command)
+            assert args.num_repeats == 3 and args.concurrency == 8
+        else:
+            parser = browsecomp_parser() if job['benchmark'] == 'browsecomp' else widesearch_parser()
+            args = parser.parse_args(command)
+            assert args.all and args.repetitions == 3
+            assert args.concurrency == (4 if job['benchmark'] == 'widesearch' else
+                96 if job['agent'] in {'researcher_4b_thinking', 'decomposer_4b_non_thinking'} else 16)
