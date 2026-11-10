@@ -229,13 +229,11 @@ async def main(args, *, episode_module="gyms.browsecomp.run", preflight_check=No
                 detected.append({"kind": "interrupted_by_queue", "source": "runner", "error": "Queue stopped after infrastructure failure"})
             if detected:
                 entry["infrastructure_errors"] = detected
-                consecutive_errors += 1
-                if consecutive_errors >= 3 or any(e["kind"] == "credentials_or_quota" for e in detected):
-                    stop.set()
-            else:
-                consecutive_errors = 0
-            evaluation_error = entry.get("evaluation", {}).get("error")
-            if evaluation_error and classify(evaluation_error) == "credentials_or_quota":
+            judge_failure = classify(entry.get("evaluation", {}).get("error"))
+            consecutive_errors = consecutive_errors + 1 if detected or judge_failure else 0
+            if consecutive_errors >= 3 or judge_failure == "credentials_or_quota" or any(
+                e["kind"] == "credentials_or_quota" for e in detected
+            ):
                 stop.set()
             manifest["episodes"].append(entry)
             save(root / "manifest.json", manifest)

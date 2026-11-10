@@ -45,6 +45,8 @@ async def main(args):
             last = trace["messages"][-1] if trace["messages"] else {}
             last = last.get("data", last)
             output = last.get("content", "") if last.get("type") == "ai" and not last.get("tool_calls") else ""
+            if not isinstance(output, str):
+                output = "\n".join(block.get("text", "") for block in output if isinstance(block, dict))
             try:
                 entry["evaluation"] = await asyncio.wait_for(evaluate(json.loads((directory / "task.json").read_text()), output, directory), 180)
             except Exception as error:

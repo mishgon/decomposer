@@ -90,3 +90,48 @@ def test_live_auth_failure_stops_current_process(monkeypatch, tmp_path):
     assert len(processes) == 1 and processes[0].returncode == 1
     assert manifest['status'] == 'needs_attention'
     assert (root / manifest['episodes'][0]['directory'] / 'model_calls.jsonl').exists()
+
+
+def test_widesearch_preserves_connection_error_type(monkeypatch, tmp_path):
+    import httpx
+    from gyms.widesearch import tools
+    monkeypatch.setenv('BROWSECOMP_MODEL_LOG', str(tmp_path / 'model_calls.jsonl'))
+    async def failing_search():
+        raise httpx.ConnectError('All connection attempts failed')
+    asyncio.run(tools.with_errors(failing_search)())
+    assert failures(tmp_path)[0]['kind'] == 'service_unavailable'
+
+
+def test_judge_outage_pauses_without_invalidating_answers(monkeypatch, tmp_path):
+    data = tmp_path / 'tasks.jsonl'
+    data.write_text(json.dumps({'task_id': 'a', 'question': 'Q'}) + '\n')
+    args = run.parser().parse_args(['--data', str(data), '--all', '-n', '5', '--concurrency', '1',
+                                  '--agent', 'researcher', '--output-dir', str(tmp_path / 'runs')])
+    monkeypatch.setattr(run, 'preflight', AsyncMock())
+    async def spawn(*command, **kwargs):
+        directory = run.Path(command[command.index('--output-dir') + 1])
+        run.save(directory / 'result.json', {'status': 'finished', 'evaluation': {
+            'status': 'evaluation_error', 'error': 'APIConnectionError()', 'score': None, 'passed': False}})
+        return SimpleNamespace(returncode=0, wait=AsyncMock(return_value=0))
+    monkeypatch.setattr(asyncio, 'create_subprocess_exec', spawn)
+    root = asyncio.run(run.main(args))
+    manifest = json.loads((root / 'manifest.json').read_text())
+    assert manifest['status'] == 'needs_attention' and len(manifest['episodes']) == 3
+    assert all(not e.get('infrastructure_errors') for e in manifest['episodes'])
+
+
+def test_judge_retry_normalizes_content_blocks(monkeypatch, tmp_path):
+    from evals.browsecomp import run as evaluation
+    directory = tmp_path / 'traces/a-r001'
+    directory.mkdir(parents=True)
+    run.save(directory / 'trace.json', {'messages': [{'type': 'ai', 'content': [{'type': 'text', 'text': 'answer'}]}]})
+    run.save(directory / 'task.json', {'task_id': 'a', 'question': 'Q'})
+    run.save(tmp_path / 'manifest.json', {'status': 'needs_attention', 'tasks': ['a'], 'repetitions': 1,
+        'episodes': [{'task': 'a', 'repetition': 1, 'directory': 'traces/a-r001', 'status': 'finished',
+                      'evaluation': {'status': 'evaluation_error', 'score': None, 'passed': False}}]})
+    monkeypatch.setattr(evaluation, 'run_episodes', AsyncMock(return_value=tmp_path))
+    judge = AsyncMock(return_value={'status': 'scored', 'score': 1, 'passed': True})
+    monkeypatch.setattr(evaluation, 'evaluate', judge)
+    asyncio.run(evaluation.main(SimpleNamespace(resume=tmp_path)))
+    assert judge.call_args.args[1] == 'answer'
+    assert json.loads((tmp_path / 'manifest.json').read_text())['status'] == 'completed'
