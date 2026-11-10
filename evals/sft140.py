@@ -138,7 +138,7 @@ def run(args):
         state = json.loads(state_file.read_text()) if state_file.exists() else {**identity, 'completed': []}
         if any(state.get(k) != v for k, v in identity.items()):
             raise ValueError('Queue code, data or schedule changed; use a new output directory')
-        if state.get('status') == 'running' and state.get('child_pid'):
+        if state.get('child_pid'):
             try:
                 os.kill(state['child_pid'], 0)
             except ProcessLookupError:
@@ -166,6 +166,9 @@ def run(args):
                         raise RuntimeError(f'Partial Gaia2 run preserved at {directory}; inspect before retrying')
                 if manifests:
                     manifest = json.loads(manifests[0].read_text())
+                    if manifest['status'] == 'running':
+                        manifest['status'] = 'interrupted'
+                        save(manifests[0], manifest)
                     if manifest['status'] != 'completed':
                         command += ['--resume', str(manifests[0].parent)]
                     else:
@@ -192,6 +195,9 @@ def run(args):
                         raise RuntimeError(f'Gaia2 infrastructure errors: {errors}')
                 else:
                     manifest_path = next(directory.glob('*/manifest.json'));manifest = json.loads(manifest_path.read_text())
+                    if manifest['status'] == 'running':
+                        manifest['status'] = 'interrupted'
+                        save(manifests[0], manifest)
                     if manifest['status'] != 'completed':
                         raise RuntimeError(f'{job["name"]}: {manifest["status"]}')
                     if job['benchmark'] == 'widesearch':

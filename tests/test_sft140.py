@@ -59,14 +59,17 @@ def test_queue_completes_and_resumes_without_rerunning(monkeypatch, tmp_path):
     spawned = []
     def spawn(command, **kwargs):
         spawned.append(command)
-        directory = sft140.Path(command[-1])
+        directory = sft140.Path(command[command.index('--output-dir') + 1])
+        if '--resume' in command:
+            prior = sft140.Path(command[command.index('--resume') + 1])
+            assert json.loads((prior / 'manifest.json').read_text())['status'] == 'interrupted'
         if 'evals.gaia2.run' in command:
             target = directory / 'search/eval_metrics.json'
             value = {'gym_metrics': {'exception_types': {}}}
         else:
             target = directory / 'run/manifest.json'
             value = {'status': 'completed'}
-        target.parent.mkdir(parents=True)
+        target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(json.dumps(value))
         return SimpleNamespace(pid=123, returncode=0, poll=lambda: 0)
     monkeypatch.setattr(sft140.subprocess, 'Popen', spawn)
@@ -76,3 +79,14 @@ def test_queue_completes_and_resumes_without_rerunning(monkeypatch, tmp_path):
     state = json.loads((args.output_dir / 'queue.json').read_text())
     assert state['status'] == 'completed'
     assert len(spawned) == len(state['completed']) == 2
+
+    state.update(status='running', child_pid=99999999, completed=['full/gaia2/test'])
+    (args.output_dir / 'queue.json').write_text(json.dumps(state))
+    stale = args.output_dir / 'full/browsecomp/test/run/manifest.json'
+    stale.write_text(json.dumps({'status': 'running'}))
+    def dead_pid(*args):
+        raise ProcessLookupError()
+    monkeypatch.setattr(sft140.os, 'kill', dead_pid)
+    sft140.run(args)
+    assert len(spawned) == 3
+    assert '--resume' in spawned[-1]
