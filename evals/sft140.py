@@ -68,9 +68,7 @@ def remaining_jobs(data, gaia_tasks, completed_run):
     schedule = [job for job in jobs(data, gaia_tasks) if job['name'].startswith('full/')
                 and not (job['benchmark'] == 'browsecomp' and job['agent'] == MODELS[0])]
     for job in schedule:
-        concurrency = 4 if job['benchmark'] == 'widesearch' else 8 if job['benchmark'] == 'gaia2' else (
-            96 if job['agent'] in {'researcher_4b_thinking', 'decomposer_4b_non_thinking'} else 16)
-        job['command'][job['command'].index('--concurrency') + 1] = str(concurrency)
+        job['command'][job['command'].index('--concurrency') + 1] = '32'
     return schedule
 
 

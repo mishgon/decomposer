@@ -18,8 +18,7 @@ BrowseComp run on the fixed 100 tasks with three repeats and current worker
 budgets (180+180 seconds). The queue records its path and manifest hash, skips
 smoke/pilot jobs and does not rerun that SFT evaluation.
 
-The remaining schedule uses concurrency 96 for local BrowseComp baselines, 16
-for lmrouter BrowseComp baselines, 4 for WideSearch, and 8 for Gaia2. The five
+The remaining schedule uses concurrency 32 for every benchmark and model. The five
 WideSearch configurations each run 100 English tasks three times. Gaia2 runs
 SFT on all 160 tasks in each domain, three times, retaining its 60+60-second
 worker budgets. Model servers are reused; the queue does not allocate GPUs.
