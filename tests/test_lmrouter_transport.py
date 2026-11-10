@@ -191,3 +191,18 @@ def test_transient_status_retries(status, delays):
             httpx.MockTransport(lambda request: httpx.Response(next(statuses), json={})))) as client:
         assert client.post('https://lmrouter.2a2i.org/v1/completions', json={}).status_code == 200
     assert delays == [5]
+
+
+@pytest.mark.parametrize('thinking', [False, True])
+def test_hosted_base_qwen_keeps_stock_sampling_and_recovery(thinking):
+    model = create_model('lmrouter/qwen_3_5_4b_' + ('thinking' if thinking else 'non_thinking'))
+    try:
+        assert model.model_name == 'Qwen/Qwen3.5-4B'
+        assert model.temperature == (1.0 if thinking else 0.7)
+        assert model.top_p == (0.95 if thinking else 0.8)
+        assert model.presence_penalty == 1.5
+        assert model.extra_body['chat_template_kwargs'] == {'enable_thinking': thinking}
+        assert model.max_retries == 0
+    finally:
+        model.http_client.close()
+        asyncio.run(model.http_async_client.aclose())

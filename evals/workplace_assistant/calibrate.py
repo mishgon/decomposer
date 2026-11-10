@@ -13,9 +13,9 @@ async def main(args):
     rows = json.loads(args.tasks.read_text())
     args.output.mkdir(parents=True, exist_ok=False)
     policy = create_model(args.model)
-    worker = create_model('lmrouter/qwen_3_5_4b_unlooped_non_thinking')
+    worker = create_model('lmrouter/qwen_3_5_4b_non_thinking')
     manifest = {'benchmark': 'workplace-assistant-calibration', 'status': 'running',
-                'model': args.model, 'worker_model': 'lmrouter/qwen_3_5_4b_unlooped_non_thinking',
+                'model': args.model, 'worker_model': 'lmrouter/qwen_3_5_4b_non_thinking',
                 'tasks': len(rows), 'repetitions': args.repetitions, 'concurrency': args.concurrency,
                 'started_at': time.time(), 'episodes': []}
     def save():

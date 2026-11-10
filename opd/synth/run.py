@@ -23,6 +23,8 @@ async def main(args, overrides):
     if len(args.gpus) == 2 and len(set(args.gpus)) != 2:
         raise ValueError("Choose distinct training and rollout GPUs")
     model = args.model.resolve()
+    if baseline.get("student_model") != str(model):
+        raise ValueError("Baseline must record the same student checkpoint path; rerun the baseline for this model")
     if args.resume_from:
         checkpoint = args.resume_from.resolve()
         from opd.checkpoint_offload import MARKER

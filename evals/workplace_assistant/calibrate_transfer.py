@@ -22,7 +22,7 @@ async def main(args):
     args.output.mkdir(exist_ok=False)
     manifest = {'benchmark': 'workplace-assistant-calibration', 'status': 'running',
                 'model': 'lmrouter/qwen_3_8_flash_next_non_thinking',
-                'worker_model': 'lmrouter/qwen_3_5_4b_unlooped_non_thinking',
+                'worker_model': 'lmrouter/qwen_3_5_4b_non_thinking',
                 'tasks': len(remaining), 'repetitions': 1, 'concurrency': 8,
                 'started_at': time.time(), 'episodes': [], 'reused_teacher_tasks': len(teacher)}
     def save():
