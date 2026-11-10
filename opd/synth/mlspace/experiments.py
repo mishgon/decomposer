@@ -14,4 +14,4 @@ class ExperimentConfig:
 
 
 def collect_experiments():
-    return [ExperimentConfig('stock-qwen4b-synth-workplace20', num_gpus=2)]
+    return [ExperimentConfig('stock-qwen4b-synth-workplace20-fa2-20261110', num_gpus=2)]
