@@ -5,7 +5,7 @@ import re
 
 def classify(error):
     text = str(error)
-    if any(name in text for name in ("AuthenticationError", "PermissionDeniedError", "insufficient_credits")) or re.search(r"\b(401|402)\b", text):
+    if any(name in text for name in ("AuthenticationError", "PermissionDeniedError", "insufficient_credits", "insufficient_quota")) or re.search(r"\b(401|402)\b", text):
         return "credentials_or_quota"
     if any(name in text for name in ("APIConnectionError", "OpenAIConnectionError", "APITimeoutError", "ConnectError", "ConnectTimeout", "ReadTimeout", "RemoteProtocolError", "RateLimitError", "InternalServerError")) or re.search(r"\b(429|500|502|503|504)\b", text):
         return "service_unavailable"

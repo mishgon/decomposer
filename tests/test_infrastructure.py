@@ -135,3 +135,8 @@ def test_judge_retry_normalizes_content_blocks(monkeypatch, tmp_path):
     asyncio.run(evaluation.main(SimpleNamespace(resume=tmp_path)))
     assert judge.call_args.args[1] == 'answer'
     assert json.loads((tmp_path / 'manifest.json').read_text())['status'] == 'completed'
+
+
+def test_exhausted_quota_stops_before_transient_rate_limits():
+    assert classify("RateLimitError: 429 insufficient_quota") == "credentials_or_quota"
+    assert classify("RateLimitError: 429 too many requests") == "service_unavailable"
