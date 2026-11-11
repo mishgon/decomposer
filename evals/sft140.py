@@ -48,7 +48,7 @@ def jobs(data, gaia_tasks):
                     else:
                         command = ['-m', f'evals.{benchmark}.run' if benchmark == 'browsecomp' else 'gyms.widesearch.run',
                             '--agent', agent, '-n', str(n), '--concurrency', str(concurrency), '--timeout', '2700' if benchmark == 'browsecomp' else '7200',
-                            '--retrieval-url', 'http://127.0.0.1:18082' if benchmark == 'browsecomp' else BACKEND]
+                            '--retrieval-url', 'http://127.0.0.1:18080' if benchmark == 'browsecomp' else BACKEND]
                         if benchmark == 'browsecomp':
                             command += ['--data', str(data)]
                         command += ['--tasks', *(tasks[:5] if phase == 'pilot' else [tasks[0] if benchmark == 'browsecomp' else 'ws_en_001'])] if phase != 'full' else ['--all']
@@ -90,21 +90,8 @@ async def preflight(job):
         finally:
             model.http_client.close()
             await model.http_async_client.aclose()
-    if job['benchmark'] == 'browsecomp':
-        await retrieval_preflight('http://127.0.0.1:18082')
-    elif job['benchmark'] == 'widesearch':
-        async with httpx.AsyncClient(timeout=60, trust_env=False, headers={'X-API-Key': os.environ['KEENABLE_API_KEY']}) as client:
-            response = await client.post('https://api.keenable.ai/v1/search', json={'query': 'Python official documentation', 'max_results': 1, 'mode': 'pro'})
-            response.raise_for_status()
-            evidence['search'] = response.json()
-            hits = response.json()['results']
-            if not hits:
-                raise RuntimeError('Keenable preflight returned no results')
-            response = await client.get('https://api.keenable.ai/v1/fetch', params={'url': hits[0]['url']})
-            response.raise_for_status()
-            evidence['fetch'] = response.json()
-            if not response.json().get('content'):
-                raise RuntimeError('Keenable preflight returned no page content')
+    if job['benchmark'] in {'browsecomp', 'widesearch'}:
+        await retrieval_preflight('http://127.0.0.1:18080')
     else:
         from gyms.gaia2.run import validate_preparation
         validate_preparation(domain=job['domain'])
