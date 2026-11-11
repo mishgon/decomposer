@@ -37,7 +37,7 @@ def test_synth_preflight_failure_happens_before_creating_training_output(tmp_pat
     (model / 'config.json').write_text('{}')
     output = tmp_path / 'train'
     args = SimpleNamespace(baseline=baseline, model=model, output=output,
-                           gpus=[0, 1], resume_from=None, workplace_validation=True)
+                           gpus=[0, 1], training_gpus=1, resume_from=None, workplace_validation=True)
     monkeypatch.setattr(preflight, 'check', AsyncMock(side_effect=RuntimeError('worker unavailable')))
     server = Mock()
     monkeypatch.setattr(run, 'agent_server', server)
