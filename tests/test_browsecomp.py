@@ -84,8 +84,10 @@ def test_episode_artifacts_and_partial_capture(monkeypatch, tmp_path, error, age
         content='A'))]}, error))
     monkeypatch.setattr(run, "agent_server", server)
     monkeypatch.setattr(run, "invoke_and_capture", capture)
-    args = run.parser().parse_args(["--episode", "--output-dir", str(directory), "--agent", agent])
+    args = run.parser().parse_args(["--episode", "--output-dir", str(directory), "--agent", agent,
+                                  "--retrieval-url", "http://retrieval/"])
     asyncio.run(run.episode(args))
+    assert run.os.environ["WS_SEARCH_URL"] == "http://retrieval"
     result = json.loads((directory / "result.json").read_text())
     assert result["status"] == ("timeout" if error else "finished")
     assert result["evaluation"]["score"] == 1

@@ -40,7 +40,7 @@ async def episode(args, *, server_config=None, final_format=FINAL_FORMAT, evalua
     model_id, harness = AGENTS[args.agent]
     root = args.output_dir.resolve()
     task = json.loads((root / "task.json").read_text())
-    os.environ["WS_SEARCH_URL"] = args.retrieval_url
+    os.environ["WS_SEARCH_URL"] = args.retrieval_url.rstrip("/")
     runtime_directory = root / "runtime"
     init_budget(runtime_directory)
     os.environ["BROWSECOMP_MODEL_LOG"] = str(root / "model_calls.jsonl")
