@@ -5,6 +5,15 @@ after running agents with `gyms.widesearch.run`. The default source is
 `artifacts/data/widesearch/source`. Scoring can be repeated without model-agent
 calls; successfully evaluated episodes are reused and evaluator errors retried.
 
+Add `--watch` to score completed episodes while generation continues. The scorer
+reloads the manifest between passes and polls every 60 seconds when caught up.
+Each answer gets at most three scoring attempts per watcher invocation; errors
+remain visible after retries are exhausted. Credential or quota errors stop the
+watcher immediately. A per-run file lock serializes watchers and final scoring,
+so they share cached results without evaluating the same episode concurrently.
+Generation does not wait for the scorer. A backlog can delay newly finished
+episodes because each scorer processes one answer at a time.
+
 We reuse the pinned upstream Markdown parser, key alignment prompts, per-column
 criteria, row/item F1 and table success calculation. The only model adapter sends
 upstream judge prompts through the repository's Flash Next non-thinking profile

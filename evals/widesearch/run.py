@@ -1,5 +1,6 @@
 """Score saved WideSearch answers with the pinned upstream evaluator."""
 import argparse
+import fcntl
 from collections import defaultdict
 from copy import deepcopy
 import hashlib
@@ -9,6 +10,7 @@ import json
 from pathlib import Path
 import subprocess
 import sys
+import time
 from uuid import uuid4
 from unittest.mock import patch
 
@@ -109,7 +111,7 @@ def summarize(manifest, results):
             "metrics": metrics}
 
 
-def main(args):
+def score_pass(args, attempts):
     root = args.run.resolve()
     manifest = json.loads((root / "manifest.json").read_text())
     queries = load_queries(args.source)
@@ -136,10 +138,13 @@ def main(args):
         if result_path.exists():
             results[key] = json.loads(result_path.read_text())
     consecutive_errors = 0
+    blocked = False
     for entry in manifest["episodes"]:
         if entry.get("infrastructure_errors") or entry["status"] != "finished":
             continue
         key = f"{entry['task']}-r{entry['repetition']:03d}"
+        if attempts.get(key, 0) >= 3:
+            continue
         destination = directory / key
         destination.mkdir(exist_ok=True)
         result_path = destination / "result.json"
@@ -153,9 +158,8 @@ def main(args):
             destination.rename(archive / f"{key}-{uuid4().hex[:8]}")
             destination.mkdir()
         answer_path = root / entry["directory"] / "answer.md"
-        if not answer_path.exists():
-            continue
         try:
+            attempts[key] = attempts.get(key, 0) + 1
             value = score(queries[entry["task"]], answer_path.read_text(), destination)
         except Exception as exc:
             value = {"status": "evaluation_error", "score": None, "f1_by_row": None,
@@ -165,15 +169,39 @@ def main(args):
         save(directory / "summary.json", summarize(manifest, results))
         print(key, value["status"], value["score"], flush=True)
         consecutive_errors = consecutive_errors + 1 if value["status"] == "evaluation_error" else 0
-        if consecutive_errors >= 3 or classify(value.get("error") or value.get("msg")) == "credentials_or_quota":
+        blocked = classify(value.get("error") or value.get("msg")) == "credentials_or_quota"
+        if consecutive_errors >= 3 or blocked:
             break
     summary = summarize(manifest, results)
     save(directory / "summary.json", summary)
     print(json.dumps(summary, indent=2))
+    pending = any(
+        entry["status"] == "finished" and not entry.get("infrastructure_errors")
+        and results.get(f"{entry['task']}-r{entry['repetition']:03d}", {}).get("status") != "evaluated"
+        and attempts.get(f"{entry['task']}-r{entry['repetition']:03d}", 0) < 3
+        for entry in manifest["episodes"]
+    )
+    return manifest.get("status"), blocked, pending
+
+
+def main(args):
+    # The final scorer may start while a watcher is still draining its backlog.
+    with (args.run / ".evaluation.lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        attempts = {}
+        while True:
+            status, blocked, pending = score_pass(args, attempts)
+            if not getattr(args, "watch", False) or blocked:
+                return
+            if status != "running" and not pending:
+                return
+            time.sleep(60)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("run", type=Path)
     parser.add_argument("--source", type=Path, default=SOURCE)
+    parser.add_argument("--watch", action="store_true",
+                        help="Score new episodes every minute until generation stops; try each answer up to three times")
     main(parser.parse_args())
