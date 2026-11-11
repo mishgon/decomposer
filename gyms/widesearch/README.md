@@ -1,8 +1,10 @@
 # WideSearch With Keenable Web Search
 
 The gym uses the 100 English WideSearch questions with the authenticated Keenable
-Search and Fetch APIs. Export `KEENABLE_API_KEY` and `LLM_PROXY_MASTER_KEY` in the
-launch environment; the CLI does not load `.env` itself.
+Search and Fetch APIs. Export `KEENABLE_API_KEY_1`, `KEENABLE_API_KEY_2`, and any
+additional numbered keys, plus `LLM_PROXY_MASTER_KEY`, in the launch environment.
+The single-key `KEENABLE_API_KEY` remains supported; duplicate values are used once.
+The CLI does not load `.env` itself.
 
 Researchers retain the upstream English system prompt and `search_global` /
 `text_browser_view` JSON schemas. Single agents and Decomposer workers share the
@@ -17,15 +19,20 @@ not an exact reproduction of its search results or Runner.
 - `text_browser_view` calls `GET /v1/fetch`. Page content goes through the existing
   `lmrouter/qwen_3_8_flash_next_non_thinking` reader with the requested description
   and a 60,000-character input cap. Reader inference still costs model tokens.
-- Requests are serialized per episode process, with a 0.2-second pause before
-  each request. HTTP 429/502/503/504 retry at most three times with 1/2/4-second
-  waits, respecting a longer `Retry-After`. Other errors, including exhausted
-  credits (402), are not retried. The total tool timeout remains 1,800 seconds.
+- Requests rotate across available keys within each episode process, with a
+  0.2-second pause before each attempt. HTTP 401/402/403 disables that key for
+  the process and tries another. HTTP 429 puts the key on cooldown, respecting
+  `Retry-After`, while other keys remain available. If all keys are cooling down,
+  the request waits for the earliest one. HTTP 502/503/504 use exponential backoff
+  capped at 8 seconds, or a longer `Retry-After`. Each request has at most four
+  attempts per configured unique key in total. If all keys fail, the error is
+  reported to the queue. The total tool timeout remains 1,800 seconds.
   Start with `--concurrency 1`; the provider's account limit is shared across
   processes. Queueing and retries count toward the existing worker run budget.
 - Raw requests, replies (including provider credit usage), retry waits and reader
   inputs/outputs are saved in `web_calls.jsonl`; authentication headers are not
-  logged. Reader usage remains separate from the agent's `usage.json`. Failed
+  logged. Each attempt records only the environment variable name in `key_name`.
+  Reader usage remains separate from the agent's `usage.json`. Failed
   calls are visible to the agent. There is no provider or local-index fallback.
 
 API references: [Search](https://docs.keenable.ai/api-reference/search),

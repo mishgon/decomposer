@@ -19,6 +19,9 @@ API_URL = "https://api.keenable.ai/v1"
 REQUEST_LOCK = asyncio.Lock()
 REQUEST_INTERVAL = 0.2
 TOOL_TIMEOUT = 1800
+KEY_INDEX = os.getpid()
+DISABLED_KEYS = set()
+KEY_COOLDOWNS = {}
 
 
 async def record(value):
@@ -26,13 +29,41 @@ async def record(value):
     await asyncio.to_thread(append_record, path, value)
 
 
+def api_keys():
+    keys = {}
+    for name in sorted(os.environ):
+        if name == "KEENABLE_API_KEY" or (name.startswith("KEENABLE_API_KEY_")
+                                           and name.removeprefix("KEENABLE_API_KEY_").isdigit()):
+            value = os.environ[name].strip()
+            if value:
+                keys.setdefault(value, name)
+    if not keys:
+        raise ValueError("KEENABLE_API_KEY or numbered KEENABLE_API_KEY_1, _2, ... is required")
+    return [(name, value) for value, name in keys.items()]
+
+
 async def request(endpoint, arguments):
+    global KEY_INDEX
     url = f"{os.environ.get('KEENABLE_API_URL', API_URL).rstrip('/')}/{endpoint}"
     async with REQUEST_LOCK:
-        async with httpx.AsyncClient(timeout=120, trust_env=False, headers={
-            "X-API-Key": os.environ["KEENABLE_API_KEY"],
-        }) as client:
-            for attempt in range(4):
+        keys = api_keys()
+        response = None
+        async with httpx.AsyncClient(timeout=120, trust_env=False, headers={}) as client:
+            for attempt in range(4 * len(keys)):
+                available = [(name, key) for name, key in keys if key not in DISABLED_KEYS]
+                if not available:
+                    if response is not None:
+                        response.raise_for_status()
+                    raise RuntimeError("Keenable insufficient_quota or AuthenticationError: all API keys unavailable")
+                ready = [(name, key) for name, key in available
+                         if KEY_COOLDOWNS.get(key, 0) <= time.monotonic()]
+                if not ready:
+                    next_ready = min(KEY_COOLDOWNS[key] for _, key in available)
+                    await asyncio.sleep(max(0, next_ready - time.monotonic()))
+                    ready = [(name, key) for name, key in available if KEY_COOLDOWNS[key] <= next_ready]
+                name, key = ready[KEY_INDEX % len(ready)]
+                KEY_INDEX += 1
+                client.headers["X-API-Key"] = key
                 await asyncio.sleep(REQUEST_INTERVAL)
                 started = time.time()
                 if endpoint == "search":
@@ -40,21 +71,29 @@ async def request(endpoint, arguments):
                 else:
                     response = await client.get(url, params=arguments)
                 await record({"endpoint": url, "request": arguments, "attempt": attempt + 1,
-                              "status_code": response.status_code, "response": response.text,
+                              "key_name": name, "status_code": response.status_code, "response": response.text,
                               "duration_seconds": time.time() - started})
-                if response.status_code in {429, 502, 503, 504} and attempt < 3:
-                    delay = 2 ** attempt
+                if response.status_code in {401, 402, 403}:
+                    DISABLED_KEYS.add(key)
+                    if any(value not in DISABLED_KEYS for _, value in keys):
+                        continue
+                if response.status_code in {429, 502, 503, 504} and attempt < 4 * len(keys) - 1:
+                    delay = 2 ** min(attempt, 3)
                     retry_after = response.headers.get("Retry-After")
                     if retry_after:
                         try:
                             delay = max(delay, float(retry_after))
                         except ValueError:
                             delay = max(delay, parsedate_to_datetime(retry_after).timestamp() - time.time())
-                    await record({"retry_seconds": delay, "endpoint": url})
-                    await asyncio.sleep(delay)
+                    await record({"retry_seconds": delay, "endpoint": url, "key_name": name})
+                    if response.status_code == 429:
+                        KEY_COOLDOWNS[key] = time.monotonic() + delay
+                    else:
+                        await asyncio.sleep(delay)
                     continue
                 response.raise_for_status()
                 return response.json()
+            response.raise_for_status()
 
 
 async def read_page(url, description):

@@ -12,6 +12,16 @@ import pytest
 from gyms.widesearch import tools, run
 
 
+@pytest.fixture(autouse=True)
+def isolated_keys(monkeypatch):
+    for name in list(tools.os.environ):
+        if name.startswith("KEENABLE_API_KEY"):
+            monkeypatch.delenv(name)
+    monkeypatch.setattr(tools, "DISABLED_KEYS", set())
+    monkeypatch.setattr(tools, "KEY_COOLDOWNS", {})
+    monkeypatch.setattr(tools, "KEY_INDEX", 0)
+
+
 def test_researcher_graph_accepts_tool_coroutines():
     from gyms.widesearch.agents import researcher_27b_thinking
     assert researcher_27b_thinking().get_graph()
@@ -138,7 +148,7 @@ def test_rate_limit_retries_and_logs_without_key(monkeypatch, tmp_path, base_url
     result = asyncio.run(tools.tools()[0].ainvoke({"query": "test", "count": 200}))
     assert "Fact" in result and len(attempts) == 2
     assert attempts[0]["max_results"] == 50
-    assert 3 in [c.args[0] for c in sleep.call_args_list]
+    assert any(2.9 <= c.args[0] <= 3 for c in sleep.call_args_list)
     raw = (tmp_path / "web_calls.jsonl").read_text()
     assert "secret-test-key" not in raw
     records = [json.loads(line) for line in raw.split("\n") if line]
@@ -206,3 +216,87 @@ def test_researchers_use_upstream_web_tools(monkeypatch, factory):
     assert captured["system_prompt"].startswith(agents.PROMPT)
     assert agents.agents.WORKER_BUDGET_SECONDS == 180
     assert agents.agents.WORKER_GRACE_SECONDS == 180
+
+
+def test_numbered_keys_rotate_without_exposing_values(monkeypatch, tmp_path):
+    monkeypatch.setenv("BROWSECOMP_MODEL_LOG", str(tmp_path / "model_calls.jsonl"))
+    for i in range(1, 4):
+        monkeypatch.setenv(f"KEENABLE_API_KEY_{i}", f"secret-{i}")
+    monkeypatch.setenv("KEENABLE_API_KEY", "secret-1")
+    used = []
+    def respond(request):
+        used.append(request.headers["x-api-key"])
+        return httpx.Response(200, json={"results": []})
+    real_client = httpx.AsyncClient
+    monkeypatch.setattr(tools.httpx, "AsyncClient", lambda **kw: real_client(transport=httpx.MockTransport(respond), **kw))
+    monkeypatch.setattr(tools.asyncio, "sleep", AsyncMock())
+    async def exercise():
+        await run.preflight(run.BACKEND)
+        for _ in range(6):
+            await tools.request("search", {"query": "test"})
+    asyncio.run(exercise())
+    assert used == ["secret-1", "secret-2", "secret-3"] * 2
+    raw = (tmp_path / "web_calls.jsonl").read_text()
+    assert "secret-" not in raw and "key_name" in raw
+
+
+@pytest.mark.parametrize("status", [401, 402, 403, 429])
+def test_key_failure_switches_to_another_key(monkeypatch, tmp_path, status):
+    monkeypatch.setenv("BROWSECOMP_MODEL_LOG", str(tmp_path / "model_calls.jsonl"))
+    monkeypatch.setenv("KEENABLE_API_KEY_1", "secret-1")
+    monkeypatch.setenv("KEENABLE_API_KEY_2", "secret-2")
+    used = []
+    def respond(request):
+        key = request.headers["x-api-key"]
+        used.append(key)
+        return httpx.Response(status if key == "secret-1" else 200,
+                              headers={"Retry-After": "60"}, json={"results": []})
+    real_client = httpx.AsyncClient
+    monkeypatch.setattr(tools.httpx, "AsyncClient", lambda **kw: real_client(transport=httpx.MockTransport(respond), **kw))
+    sleep = AsyncMock()
+    monkeypatch.setattr(tools.asyncio, "sleep", sleep)
+    async def exercise():
+        for _ in range(2):
+            await tools.request("search", {"query": "test"})
+    asyncio.run(exercise())
+    assert used == ["secret-1", "secret-2", "secret-2"]
+    assert all(c.args[0] == tools.REQUEST_INTERVAL for c in sleep.call_args_list)
+    from gyms.infrastructure import failures
+    assert not failures(tmp_path)
+
+
+def test_all_keys_exhausted_is_visible_to_queue(monkeypatch, tmp_path):
+    monkeypatch.setenv("BROWSECOMP_MODEL_LOG", str(tmp_path / "model_calls.jsonl"))
+    monkeypatch.setenv("KEENABLE_API_KEY_1", "secret-1")
+    monkeypatch.setenv("KEENABLE_API_KEY_2", "secret-2")
+    used = []
+    def respond(request):
+        used.append(request.headers["x-api-key"])
+        return httpx.Response(402, json={"code": "insufficient_credits"})
+    real_client = httpx.AsyncClient
+    monkeypatch.setattr(tools.httpx, "AsyncClient", lambda **kw: real_client(transport=httpx.MockTransport(respond), **kw))
+    monkeypatch.setattr(tools.asyncio, "sleep", AsyncMock())
+    result = asyncio.run(tools.tools()[0].ainvoke({"query": "test"}))
+    assert "402" in result and used == ["secret-1", "secret-2"]
+    from gyms.infrastructure import failures
+    assert failures(tmp_path)[0]["kind"] == "credentials_or_quota"
+
+
+def test_all_keys_cooling_down_waits_for_earliest(monkeypatch, tmp_path):
+    monkeypatch.setenv("BROWSECOMP_MODEL_LOG", str(tmp_path / "model_calls.jsonl"))
+    monkeypatch.setenv("KEENABLE_API_KEY_1", "secret-1")
+    monkeypatch.setenv("KEENABLE_API_KEY_2", "secret-2")
+    now = tools.time.monotonic()
+    tools.KEY_COOLDOWNS.update({"secret-1": now + 60, "secret-2": now + 120})
+    monkeypatch.setattr(tools, "KEY_INDEX", 1)
+    used = []
+    def respond(request):
+        used.append(request.headers["x-api-key"])
+        return httpx.Response(200, json={"results": []})
+    real_client = httpx.AsyncClient
+    monkeypatch.setattr(tools.httpx, "AsyncClient", lambda **kw: real_client(transport=httpx.MockTransport(respond), **kw))
+    sleep = AsyncMock()
+    monkeypatch.setattr(tools.asyncio, "sleep", sleep)
+    asyncio.run(tools.request("search", {"query": "test"}))
+    assert used == ["secret-1"]
+    assert 59 <= sleep.call_args_list[0].args[0] <= 60
