@@ -58,7 +58,18 @@ async def request(endpoint, arguments):
 
 
 async def read_page(url, description):
-    page = await request("fetch", {"url": url})
+    try:
+        page = await request("fetch", {"url": url})
+    except httpx.HTTPStatusError as error:
+        try:
+            detail = error.response.json()
+        except ValueError:
+            raise error
+        if error.response.status_code == 502 and isinstance(detail, dict) and (
+            detail.get("type") == "target_error" and detail.get("code") == "target_unreachable"
+        ):
+            return "Read url failed. The target page could not be reached after retries. Try another URL."
+        raise
     text = page.get("content", "")
     if not text:
         return "Read url failed. No text found."

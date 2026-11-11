@@ -162,3 +162,31 @@ def test_fetch_failure_does_not_retry_or_call_reader(monkeypatch, tmp_path, stat
     assert "HTTPStatusError" in result and str(status) in result
     assert len(calls) == 1
     model.ainvoke.assert_not_called()
+
+
+@pytest.mark.parametrize("status,body,is_target_error", [
+    (502, {"type": "target_error", "code": "target_unreachable"}, True),
+    (502, {"type": "service_error", "code": "unavailable"}, False),
+    (502, "Bad gateway", False),
+    (401, {"type": "target_error", "code": "target_unreachable"}, False),
+])
+def test_target_page_failure_does_not_stop_queue(monkeypatch, tmp_path, status, body, is_target_error):
+    from gyms.infrastructure import failures
+    monkeypatch.setenv("BROWSECOMP_MODEL_LOG", str(tmp_path / "model_calls.jsonl"))
+    monkeypatch.setenv("KEENABLE_API_KEY", "test-key")
+    attempts = []
+    def respond(request):
+        attempts.append(request)
+        return httpx.Response(status, json=body) if isinstance(body, dict) else httpx.Response(status, text=body)
+    client = httpx.AsyncClient(transport=httpx.MockTransport(respond))
+    monkeypatch.setattr(tools.httpx, "AsyncClient", lambda **kwargs: client)
+    monkeypatch.setattr(tools.asyncio, "sleep", AsyncMock())
+    model = SimpleNamespace(ainvoke=AsyncMock())
+    monkeypatch.setattr(tools, "create_model", lambda _: model)
+    result = asyncio.run(tools.tools()[1].ainvoke({"url": "https://a.test", "description": "Find facts"}))
+    assert len(attempts) == (4 if status == 502 else 1)
+    assert ("Try another URL" in result) is is_target_error
+    assert bool(failures(tmp_path)) is not is_target_error
+    model.ainvoke.assert_not_awaited()
+    records = [json.loads(line) for line in (tmp_path / "web_calls.jsonl").read_text().split("\n") if line]
+    assert len([row for row in records if row.get("status_code") == status]) == len(attempts)
