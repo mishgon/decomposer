@@ -27,3 +27,5 @@ PYTHONPATH="$PWD:$PWD/src:$PWD/external/verl" .venv-opd/bin/python -c \
 # Agent Server and vLLM have incompatible web-stack pins. Keep the CPU workers separate.
 test -d .venv-workers || "$uv_bin" venv --python 3.12 .venv-workers
 "$uv_bin" pip install --python .venv-workers/bin/python -e . 'langgraph-cli[inmem]>=0.4.31'
+# Cache the isolated report environment before training, while packages are reachable.
+"$uv_bin" run --no-project --script scripts/pdf-report.py --help >/dev/null
