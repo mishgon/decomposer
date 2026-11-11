@@ -388,3 +388,7 @@ def test_preflight_rejects_another_corpus_before_search(monkeypatch):
     with pytest.raises(ValueError, match="Wiki-2018"):
         asyncio.run(run.preflight("http://retrieval"))
     assert calls == ["/health"]
+
+
+def test_default_retrieval_is_wideseek():
+    assert run.parser().parse_args([]).retrieval_url == "http://127.0.0.1:18080"

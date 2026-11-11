@@ -275,7 +275,7 @@ def parser():
     select.add_argument("--all", action="store_true")
     cli.add_argument("--data", type=Path, default=REPO_ROOT / "artifacts/gyms/browsecomp/tasks.jsonl")
     cli.add_argument("--output-dir", type=Path, default=REPO_ROOT / "artifacts/gyms/browsecomp")
-    cli.add_argument("--retrieval-url", default="http://127.0.0.1:8000")
+    cli.add_argument("--retrieval-url", default="http://127.0.0.1:18080")
     cli.add_argument("--resume", type=Path, help="Continue an interrupted run directory, keeping completed episodes")
     cli.add_argument("--concurrency", type=int, default=2)
     cli.add_argument("-n", "--repetitions", type=int, default=1)
