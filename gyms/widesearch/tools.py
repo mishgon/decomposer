@@ -42,6 +42,16 @@ def api_keys():
     return [(name, value) for value, name in keys.items()]
 
 
+def target_blocked(response):
+    if response.status_code != 403:
+        return False
+    try:
+        detail = response.json()
+    except ValueError:
+        return False
+    return isinstance(detail, dict) and detail.get("type") == "target_error" and detail.get("code") == "target_blocked"
+
+
 async def request(endpoint, arguments):
     global KEY_INDEX
     url = f"{os.environ.get('KEENABLE_API_URL', API_URL).rstrip('/')}/{endpoint}"
@@ -74,6 +84,8 @@ async def request(endpoint, arguments):
                 await record({"endpoint": url, "request": arguments, "attempt": attempt + 1,
                               "key_name": name, "status_code": response.status_code, "response": response.text,
                               "duration_seconds": time.time() - started})
+                if target_blocked(response):
+                    response.raise_for_status()
                 if response.status_code in {401, 402, 403}:
                     DISABLED_KEYS.add(key)
                     if any(value not in DISABLED_KEYS for _, value in keys):
@@ -109,6 +121,8 @@ async def read_page(url, description):
     try:
         page = await request("fetch", {"url": url})
     except httpx.HTTPStatusError as error:
+        if target_blocked(error.response):
+            return "Read url failed. The target site blocked access to this page. Try another URL."
         try:
             detail = error.response.json()
         except ValueError:

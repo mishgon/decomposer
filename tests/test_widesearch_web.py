@@ -177,6 +177,9 @@ def test_fetch_failure_does_not_retry_or_call_reader(monkeypatch, tmp_path, stat
 
 @pytest.mark.parametrize("status,body,is_target_error", [
     (502, {"type": "target_error", "code": "target_unreachable"}, True),
+    (403, {"type": "target_error", "code": "target_blocked"}, True),
+    (403, {"type": "authentication_error", "code": "denied"}, False),
+    (403, "Forbidden", False),
     (502, {"type": "service_error", "code": "unavailable"}, False),
     (502, "Bad gateway", False),
     (401, {"type": "target_error", "code": "target_unreachable"}, False),
@@ -340,3 +343,28 @@ def test_last_rate_limit_preserves_cooldown_for_next_request(monkeypatch, tmp_pa
         await tools.request("search", {"query": "test"})
     asyncio.run(exercise())
     assert len(sent) == 5 and sent[4] - sent[3] >= 60
+
+
+def test_blocked_page_keeps_all_keys_available_for_search(monkeypatch, tmp_path):
+    from gyms.infrastructure import failures
+    monkeypatch.setenv("BROWSECOMP_MODEL_LOG", str(tmp_path / "model_calls.jsonl"))
+    for i in range(1, 5):
+        monkeypatch.setenv(f"KEENABLE_API_KEY_{i}", f"secret-{i}")
+    used = []
+    def respond(request):
+        used.append((request.url.path, request.headers["x-api-key"]))
+        if request.url.path.endswith("/fetch"):
+            return httpx.Response(403, json={"type": "target_error", "code": "target_blocked"})
+        return httpx.Response(200, json={"results": []})
+    real_client = httpx.AsyncClient
+    monkeypatch.setattr(tools.httpx, "AsyncClient", lambda **kw: real_client(transport=httpx.MockTransport(respond), **kw))
+    monkeypatch.setattr(tools.asyncio, "sleep", AsyncMock())
+    async def exercise():
+        result = await tools.tools()[1].ainvoke({"url": "https://blocked.test", "description": "Find facts"})
+        assert "Try another URL" in result
+        assert len(used) == 1 and not tools.DISABLED_KEYS
+        for _ in range(4):
+            await tools.search_global("another source")
+    asyncio.run(exercise())
+    assert [key for _, key in used[1:]] == ["secret-2", "secret-3", "secret-4", "secret-1"]
+    assert not failures(tmp_path)
