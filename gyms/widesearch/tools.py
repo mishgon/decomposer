@@ -48,6 +48,7 @@ async def request(endpoint, arguments):
     async with REQUEST_LOCK:
         keys = api_keys()
         response = None
+        service_retries = 0
         async with httpx.AsyncClient(timeout=120, trust_env=False, headers={}) as client:
             for attempt in range(4 * len(keys)):
                 available = [(name, key) for name, key in keys if key not in DISABLED_KEYS]
@@ -77,8 +78,14 @@ async def request(endpoint, arguments):
                     DISABLED_KEYS.add(key)
                     if any(value not in DISABLED_KEYS for _, value in keys):
                         continue
+                    if response.status_code == 403:
+                        raise RuntimeError("AuthenticationError: all Keenable API keys unavailable (HTTP 403)")
                 if response.status_code in {429, 502, 503, 504} and attempt < 4 * len(keys) - 1:
-                    delay = 2 ** min(attempt, 3)
+                    if response.status_code != 429:
+                        if service_retries >= 3:
+                            response.raise_for_status()
+                        service_retries += 1
+                    delay = 2 ** (min(attempt, 3) if response.status_code == 429 else service_retries - 1)
                     retry_after = response.headers.get("Retry-After")
                     if retry_after:
                         try:

@@ -23,8 +23,8 @@ not an exact reproduction of its search results or Runner.
   0.2-second pause before each attempt. HTTP 401/402/403 disables that key for
   the process and tries another. HTTP 429 puts the key on cooldown, respecting
   `Retry-After`, while other keys remain available. If all keys are cooling down,
-  the request waits for the earliest one. HTTP 502/503/504 use exponential backoff
-  capped at 8 seconds, or a longer `Retry-After`. Each request has at most four
+  the request waits for the earliest one. HTTP 502/503/504 still retry at most
+  three times with 1/2/4-second waits, or a longer `Retry-After`. Each request has at most four
   attempts per configured unique key in total. If all keys fail, the error is
   reported to the queue. The total tool timeout remains 1,800 seconds.
   Start with `--concurrency 1`; the provider's account limit is shared across

@@ -265,19 +265,20 @@ def test_key_failure_switches_to_another_key(monkeypatch, tmp_path, status):
     assert not failures(tmp_path)
 
 
-def test_all_keys_exhausted_is_visible_to_queue(monkeypatch, tmp_path):
+@pytest.mark.parametrize("status", [402, 403])
+def test_all_keys_exhausted_is_visible_to_queue(monkeypatch, tmp_path, status):
     monkeypatch.setenv("BROWSECOMP_MODEL_LOG", str(tmp_path / "model_calls.jsonl"))
     monkeypatch.setenv("KEENABLE_API_KEY_1", "secret-1")
     monkeypatch.setenv("KEENABLE_API_KEY_2", "secret-2")
     used = []
     def respond(request):
         used.append(request.headers["x-api-key"])
-        return httpx.Response(402, json={"code": "insufficient_credits"})
+        return httpx.Response(status, json={"code": "denied"})
     real_client = httpx.AsyncClient
     monkeypatch.setattr(tools.httpx, "AsyncClient", lambda **kw: real_client(transport=httpx.MockTransport(respond), **kw))
     monkeypatch.setattr(tools.asyncio, "sleep", AsyncMock())
     result = asyncio.run(tools.tools()[0].ainvoke({"query": "test"}))
-    assert "402" in result and used == ["secret-1", "secret-2"]
+    assert str(status) in result and used == ["secret-1", "secret-2"]
     from gyms.infrastructure import failures
     assert failures(tmp_path)[0]["kind"] == "credentials_or_quota"
 
@@ -300,3 +301,19 @@ def test_all_keys_cooling_down_waits_for_earliest(monkeypatch, tmp_path):
     asyncio.run(tools.request("search", {"query": "test"}))
     assert used == ["secret-1"]
     assert 59 <= sleep.call_args_list[0].args[0] <= 60
+
+
+def test_extra_keys_do_not_multiply_service_retries(monkeypatch, tmp_path):
+    monkeypatch.setenv("BROWSECOMP_MODEL_LOG", str(tmp_path / "model_calls.jsonl"))
+    for i in range(1, 4):
+        monkeypatch.setenv(f"KEENABLE_API_KEY_{i}", f"secret-{i}")
+    used = []
+    def respond(request):
+        used.append(request.headers["x-api-key"])
+        return httpx.Response(503, json={"code": "unavailable"})
+    real_client = httpx.AsyncClient
+    monkeypatch.setattr(tools.httpx, "AsyncClient", lambda **kw: real_client(transport=httpx.MockTransport(respond), **kw))
+    monkeypatch.setattr(tools.asyncio, "sleep", AsyncMock())
+    with pytest.raises(httpx.HTTPStatusError):
+        asyncio.run(tools.request("search", {"query": "test"}))
+    assert len(used) == 4
