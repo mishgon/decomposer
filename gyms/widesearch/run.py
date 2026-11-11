@@ -4,15 +4,18 @@ from pathlib import Path
 
 from gyms.browsecomp import run as browsecomp
 from gyms.widesearch.dataset import TASKS
+from gyms.widesearch.tools import api_keys
 
 AGENTS = ["decomposer", "researcher_4b_thinking", "researcher_27b_thinking",
           "decomposer_4b_non_thinking", "decomposer_sft_1_2_0", "decomposer_sft_1_4_0"]
 FINAL_FORMAT = "\n\nReturn the requested table in one fenced block labeled markdown (```markdown). Preserve the requested column names."
-BACKEND = "http://127.0.0.1:18080"
+BACKEND = "keenable-pro-web-v1"
 
 
 async def preflight(backend):
-    await browsecomp.preflight(backend)
+    if backend != BACKEND:
+        raise ValueError(f"WideSearch requires {BACKEND}; runs from other backends cannot resume here")
+    api_keys()
 
 
 async def save_answer(task, output, root):
@@ -28,7 +31,8 @@ async def main(args):
         await browsecomp.episode(args, server_config=Path(__file__).with_name("langgraph.json"),
                                  final_format=FINAL_FORMAT, evaluator=save_answer)
     else:
-        return await browsecomp.main(args, episode_module="gyms.widesearch.run", preflight_check=preflight)
+        return await browsecomp.main(args, episode_module="gyms.widesearch.run", preflight_check=preflight,
+                                     corpus_revision=None)
 
 
 def parser():

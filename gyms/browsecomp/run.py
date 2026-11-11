@@ -110,7 +110,8 @@ async def preflight(url):
             raise RuntimeError("Wiki-2018 preflight could not access its search result")
 
 
-async def main(args, *, episode_module="gyms.browsecomp.run", preflight_check=None):
+async def main(args, *, episode_module="gyms.browsecomp.run", preflight_check=None,
+               corpus_revision=CORPUS_REVISION):
     if args.concurrency < 1 or args.repetitions < 1 or args.timeout <= 0:
         raise ValueError("Concurrency, repetitions and timeout must be positive")
     tasks = [json.loads(line) for line in args.data.read_text().splitlines() if line.strip()]
@@ -126,7 +127,7 @@ async def main(args, *, episode_module="gyms.browsecomp.run", preflight_check=No
     config = {k: str(v) if isinstance(v, Path) else v for k, v in vars(args).items()}
     revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=REPO_ROOT, text=True).strip()
     provenance = {"revision": revision, "data_sha256": hashlib.sha256(args.data.read_bytes()).hexdigest(),
-                  "backend": args.retrieval_url, "corpus_revision": CORPUS_REVISION, "model": AGENTS[args.agent][0],
+                  "backend": args.retrieval_url, "corpus_revision": corpus_revision, "model": AGENTS[args.agent][0],
                   "worker_model": RESEARCHER_MODEL if AGENTS[args.agent][1] == "decomposer" else None,
                   "worker_budget_seconds": WORKER_BUDGET_SECONDS if AGENTS[args.agent][1] == "decomposer" else None,
                   "worker_grace_seconds": WORKER_GRACE_SECONDS if AGENTS[args.agent][1] == "decomposer" else None}

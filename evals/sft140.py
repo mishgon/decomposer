@@ -18,7 +18,7 @@ from decomposer.models import create_model
 from gyms.browsecomp import REPO_ROOT
 from gyms.browsecomp.agents import AGENTS, JUDGE_MODEL, WORKER_BUDGET_SECONDS, WORKER_GRACE_SECONDS
 from gyms.browsecomp.run import preflight as retrieval_preflight, save
-from gyms.widesearch.run import BACKEND
+from gyms.widesearch.run import BACKEND, preflight as web_preflight
 from gyms.wideseek.assets import CORPUS_REVISION
 
 MODELS = ['decomposer_sft_1_4_0', 'researcher_4b_thinking', 'researcher_27b_thinking',
@@ -92,8 +92,10 @@ async def preflight(job):
         finally:
             model.http_client.close()
             await model.http_async_client.aclose()
-    if job['benchmark'] in {'browsecomp', 'widesearch'}:
+    if job['benchmark'] == 'browsecomp':
         await retrieval_preflight('http://127.0.0.1:18080')
+    elif job['benchmark'] == 'widesearch':
+        await web_preflight(BACKEND)
     else:
         from gyms.gaia2.run import validate_preparation
         validate_preparation(domain=job['domain'])
