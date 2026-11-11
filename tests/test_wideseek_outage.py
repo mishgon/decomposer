@@ -240,3 +240,31 @@ def test_researcher_context_overflow_preserved_without_hiding_service_errors(tmp
     else:
         asyncio.run(run())
     assert overflow in (tmp_path/'decomposer/limited/attempt-001/execution-1/model_calls.jsonl').read_text()
+
+
+def test_outage_reader_waits_for_complete_model_log_record(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+    import fcntl
+    from sft.wideseek.outage import execution_errors
+
+    payload = json.dumps({'error': 'APIConnectionError: connection failed'}) + '\n'
+    with (tmp_path/'model_calls.jsonl').open('w') as writer, ThreadPoolExecutor() as pool:
+        fcntl.flock(writer.fileno(), fcntl.LOCK_EX)
+        writer.write(payload[:20])
+        writer.flush()
+        future = pool.submit(execution_errors, {}, tmp_path)
+        try:
+            with pytest.raises(TimeoutError):
+                future.result(timeout=.1)
+        finally:
+            writer.write(payload[20:])
+            writer.flush()
+            fcntl.flock(writer.fileno(), fcntl.LOCK_UN)
+        assert future.result(timeout=2) == ['APIConnectionError: connection failed']
+
+
+def test_outage_reader_does_not_hide_persistently_corrupt_log(tmp_path):
+    from sft.wideseek.outage import execution_errors
+    (tmp_path/'model_calls.jsonl').write_text('{"error": "truncated')
+    with pytest.raises(json.JSONDecodeError):
+        execution_errors({}, tmp_path)

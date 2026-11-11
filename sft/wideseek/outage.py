@@ -1,5 +1,6 @@
 """Pause collection on transient service outages without spending task attempts."""
 import asyncio
+import fcntl
 import json
 import random
 import re
@@ -45,7 +46,10 @@ def execution_errors(result, directory):
     errors.append(evaluation.get('error', ''))
     log = directory / 'model_calls.jsonl'
     if log.exists():
-        errors.extend(json.loads(line).get('error', '') for line in log.read_text().splitlines())
+        # append_record holds LOCK_EX until the complete JSONL record is flushed.
+        with log.open() as stream:
+            fcntl.flock(stream.fileno(), fcntl.LOCK_SH)
+            errors.extend(json.loads(line).get('error', '') for line in stream)
     return [error for error in errors if error]
 
 
