@@ -1,17 +1,46 @@
-# WideSearch With the WideSeek-R1 Wiki-2018 Harness
+# WideSearch With Keenable Web Search
 
-The gym uses WideSearch's 100 English questions and upstream scorer with the same
-researcher implementation as WideSeek-R1. Researchers reuse its system prompt,
-`search` and `access` tools, fixed Wikipedia-2018 corpus, truncation rules and
-raw tool logging. There is no web API, Flash Next page reader or search-count cap.
-Keenable credentials are not required for these runs.
+The gym uses the 100 English WideSearch questions with the authenticated Keenable
+Search and Fetch APIs. Export `KEENABLE_API_KEY` and `LLM_PROXY_MASTER_KEY` in the
+launch environment; the CLI does not load `.env` itself.
 
-Set up the index using [WideSeek setup](../wideseek/README.md#setup). The default
-retrieval endpoint is `http://127.0.0.1:18080`; `--retrieval-url` selects its address.
-Preflight verifies the pinned corpus revision and both retrieval operations.
-Decomposer workers retain 180 seconds of work plus 180 seconds to finish; recursion
-remains 410. Optional WideSeek model-call/token budgets are initialized without
-limits. Single agents and workers share the same prompt and tools.
+Researchers retain the upstream English system prompt and `search_global` /
+`text_browser_view` JSON schemas. Single agents and Decomposer workers share the
+same tools. Upstream's private backend is unavailable, so this is an adapter,
+not an exact reproduction of its search results or Runner.
+
+- `search_global` calls Keenable `POST /v1/search` in `pro` mode and returns
+  titles, URLs and snippets. `count` is an upper bound, capped at the provider's
+  maximum of 50 results. `use_english` does not change provider settings; queries
+  are sent as written. `long` additionally reads pages with a shared 900-second
+  reader budget; failed or skipped reads retain search snippets.
+- `text_browser_view` calls `GET /v1/fetch`. Page content goes through the existing
+  `lmrouter/qwen_3_8_flash_next_non_thinking` reader with the requested description
+  and a 60,000-character input cap. Reader inference still costs model tokens.
+- Requests are serialized per episode process, with a 0.2-second pause before
+  each request. HTTP 429/502/503/504 retry at most three times with 1/2/4-second
+  waits, respecting a longer `Retry-After`. Other errors, including exhausted
+  credits (402), are not retried. The total tool timeout remains 1,800 seconds.
+  Start with `--concurrency 1`; the provider's account limit is shared across
+  processes. Queueing and retries count toward the existing worker run budget.
+- Raw requests, replies (including provider credit usage), retry waits and reader
+  inputs/outputs are saved in `web_calls.jsonl`; authentication headers are not
+  logged. Reader usage remains separate from the agent's `usage.json`. Failed
+  calls are visible to the agent. There is no provider or local-index fallback.
+
+API references: [Search](https://docs.keenable.ai/api-reference/search),
+[Fetch](https://docs.keenable.ai/api-reference/fetch),
+[limits](https://docs.keenable.ai/rate-limits), and
+[credits](https://docs.keenable.ai/credits).
+
+Decomposer workers have 180 seconds of work plus 180 seconds to finish the current
+step and respond, shared with BrowseComp through its Decomposer factories.
+The LangGraph runtime, Decomposer prompt, recursion limit of 410, model logging
+and trace export remain in use. The upstream Runner's default
+50-step loop is not used. Single-agent system instructions are the upstream
+English prompt; Decomposer workers additionally receive the existing run-budget
+instructions. The BrowseComp ten-search budget and local-index URL restrictions
+are removed. There is no fallback to the local corpus.
 
 Initialize `external/WideSearch` with `git submodule update --init external/WideSearch`.
 Apply the existing empty-row scoring fix with
@@ -32,7 +61,7 @@ All Decomposers use 4B thinking workers. All model sampling parameters come from
 `src/decomposer/models.py`; 27B uses `reasoning_effort="medium"`.
 
 Each episode saves `answer.md`, `trace.json`, `trace.html`, `model_calls.jsonl`,
-`runtime/model_calls.jsonl`, `runtime/tool_calls/*.json`, `usage.json` and `result.json`. Evaluation is pending until the
+`web_calls.jsonl`, `usage.json` and `result.json`. Evaluation is pending until the
 separate scoring command runs. Only questions enter the agent input, never gold
 tables. Dataset revision: `6531a7e5b497d44c8912407e0cb3dc95bd98cc09`.
 
@@ -40,11 +69,19 @@ Answers use one table in a fenced block labeled `markdown`, matching WideSeek
 table tasks. The upstream evaluator extracts the table and ignores surrounding
 explanations; its F1 and strict metrics are unchanged.
 
-Manifests record the Wiki-2018 corpus revision and retrieval address. Historical
-Keenable/Serper/BrowseComp-index runs cannot resume under this harness; use a new
-run directory. Their legacy web tools remain in `tools.py` for reference, but the
-registered researchers do not call them. This restricted-corpus experiment does
-not reproduce the original WideSearch web-search setting.
+The shared scheduler records `retrieval_url="keenable-pro-web-v1"` as a backend
+marker, not an HTTP endpoint. Runs from Parallel, Serper or the local index cannot
+resume under this backend. Preserve them as separate experiments. Interrupted
+Keenable runs can resume with `--resume <run-dir>` when their recorded code revision
+also matches. Wiki-2018 attempts remain separate. BrowseComp continues to use the
+WideSeek-R1 Wiki-2018 harness; this change applies only to WideSearch.
+
+For parallel episodes, `KEENABLE_API_URL=http://127.0.0.1:18784/v1` can route
+search and fetch requests through a trusted local reverse proxy with a shared
+rate limiter. The proxy must forward requests to Keenable, preserve the API-key
+header, and verify upstream TLS. The existing in-process lock does not limit
+requests across episode processes. Without this variable, requests go directly
+to `https://api.keenable.ai/v1`.
 
 Queue recovery: infrastructure failures in model, worker and web logs are monitored
 while episodes run. Authentication/quota failures pause scheduling immediately;
