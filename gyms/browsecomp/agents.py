@@ -1,10 +1,13 @@
 import os
+from pathlib import Path
 
+from langchain.agents import create_agent
 from decomposer.core import create_decomposer_agent
 from decomposer.models import create_model
+from decomposer.prompts import AGENT_SYSTEM_PROMPT
+from decomposer.run_budget import RunBudgetContext, RunBudgetMiddleware
 from gyms.browsecomp.model_logging import log_model_call
-from gyms.wideseek.agents import react
-from gyms.wideseek.runtime import Context
+from gyms.browsecomp.tools import ResearchState, search, fetch
 
 RESEARCHER_MODEL = "vllm/qwen_3_5_4b_thinking"
 DECOMPOSER_MODEL = "lmrouter/qwen_3_8_flash_next_non_thinking"
@@ -14,7 +17,13 @@ JUDGE_MODEL = "lmrouter/qwen_3_8_flash_next_non_thinking"
 
 
 def _researcher(model_id):
-    return react(create_model(model_id), None, middleware=[log_model_call])
+    return create_agent(
+        create_model(model_id), tools=[search, fetch],
+        state_schema=ResearchState,
+        context_schema=RunBudgetContext,
+        system_prompt=Path(__file__).with_name("prompt.txt").read_text() + "\n\n" + AGENT_SYSTEM_PROMPT,
+        middleware=[RunBudgetMiddleware(), log_model_call],
+    )
 
 
 def _decomposer(model_id):
@@ -25,7 +34,7 @@ def _decomposer(model_id):
             "description": "Qwen3.5-4B thinking agent equipped with search and access tools.",
             "url": os.environ["BROWSECOMP_AGENT_URL"],
         }],
-        agent_recursion_limit=410, context_schema=Context, middleware=[log_model_call],
+        agent_recursion_limit=410, middleware=[log_model_call],
         agent_run_budget_seconds=WORKER_BUDGET_SECONDS, agent_shutdown_grace_seconds=WORKER_GRACE_SECONDS,
     )
 

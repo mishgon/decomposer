@@ -21,8 +21,6 @@ from decomposer.visualization import write_trace_html
 from gyms.browsecomp import REPO_ROOT
 from gyms.browsecomp.agents import AGENTS, RESEARCHER_MODEL, WORKER_BUDGET_SECONDS, WORKER_GRACE_SECONDS
 from gyms.browsecomp.evaluate import FINAL_FORMAT, evaluate
-from gyms.wideseek.runtime import init_budget
-from gyms.wideseek.assets import CORPUS_REVISION
 
 
 def save(path, value):
@@ -40,9 +38,7 @@ async def episode(args, *, server_config=None, final_format=FINAL_FORMAT, evalua
     model_id, harness = AGENTS[args.agent]
     root = args.output_dir.resolve()
     task = json.loads((root / "task.json").read_text())
-    os.environ["WS_SEARCH_URL"] = args.retrieval_url.rstrip("/")
-    runtime_directory = root / "runtime"
-    init_budget(runtime_directory)
+    os.environ["BROWSECOMP_RETRIEVAL_URL"] = args.retrieval_url
     os.environ["BROWSECOMP_MODEL_LOG"] = str(root / "model_calls.jsonl")
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
@@ -58,7 +54,6 @@ async def episode(args, *, server_config=None, final_format=FINAL_FORMAT, evalua
                 os.environ["BROWSECOMP_AGENT_URL"], args.agent,
                 {"messages": [{"role": "user", "content": task["question"] + final_format}]},
                 timeout=args.timeout, config={"recursion_limit": 410},
-                context={"directory": str(runtime_directory)},
             )
     except Exception as exc:
         error = exc
@@ -92,26 +87,22 @@ async def episode(args, *, server_config=None, final_format=FINAL_FORMAT, evalua
 
 
 async def preflight(url):
-    """Require the same pinned Wiki-2018 corpus used by WideSeek-R1."""
-    async with httpx.AsyncClient(timeout=120, trust_env=False) as client:
-        response = await client.get(url.rstrip("/") + "/health")
+    """Require the correct retrieval corpus before scheduling model calls."""
+    async with httpx.AsyncClient(timeout=20, trust_env=False) as client:
+        response = await client.post(url.rstrip("/") + "/search", json={
+            "query": "Albert Einstein", "limit": 1, "source": "browsecomp_plus"})
         response.raise_for_status()
-        if response.json().get("corpus_revision") != CORPUS_REVISION:
-            raise ValueError("Expected the pinned WideSeek-R1 Wiki-2018 corpus")
-        response = await client.post(url.rstrip("/") + "/retrieve",
-                                    json={"queries": ["Albert Einstein"], "topk": 1})
-        response.raise_for_status()
-        hits = response.json()["result"][0]
+        hits = response.json()["results"]
         if not hits:
-            raise RuntimeError("Wiki-2018 preflight returned no documents")
-        response = await client.post(url.rstrip("/") + "/access", json={"urls": [hits[0]["url"]]})
+            raise RuntimeError("BrowseComp retrieval preflight returned no documents")
+        response = await client.post(url.rstrip("/") + "/fetch",
+                                    json={"page_id": hits[0]["page_id"], "source": "browsecomp_plus"})
         response.raise_for_status()
-        if not response.json()["result"][0]:
-            raise RuntimeError("Wiki-2018 preflight could not access its search result")
+        if response.json().get("error"):
+            raise RuntimeError(f"BrowseComp fetch preflight failed: {response.json()['error']}")
 
 
-async def main(args, *, episode_module="gyms.browsecomp.run", preflight_check=None,
-               corpus_revision=CORPUS_REVISION):
+async def main(args, *, episode_module="gyms.browsecomp.run", preflight_check=None):
     if args.concurrency < 1 or args.repetitions < 1 or args.timeout <= 0:
         raise ValueError("Concurrency, repetitions and timeout must be positive")
     tasks = [json.loads(line) for line in args.data.read_text().splitlines() if line.strip()]
@@ -127,7 +118,7 @@ async def main(args, *, episode_module="gyms.browsecomp.run", preflight_check=No
     config = {k: str(v) if isinstance(v, Path) else v for k, v in vars(args).items()}
     revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=REPO_ROOT, text=True).strip()
     provenance = {"revision": revision, "data_sha256": hashlib.sha256(args.data.read_bytes()).hexdigest(),
-                  "backend": args.retrieval_url, "corpus_revision": corpus_revision, "model": AGENTS[args.agent][0],
+                  "backend": args.retrieval_url, "model": AGENTS[args.agent][0],
                   "worker_model": RESEARCHER_MODEL if AGENTS[args.agent][1] == "decomposer" else None,
                   "worker_budget_seconds": WORKER_BUDGET_SECONDS if AGENTS[args.agent][1] == "decomposer" else None,
                   "worker_grace_seconds": WORKER_GRACE_SECONDS if AGENTS[args.agent][1] == "decomposer" else None}
@@ -276,7 +267,7 @@ def parser():
     select.add_argument("--all", action="store_true")
     cli.add_argument("--data", type=Path, default=REPO_ROOT / "artifacts/gyms/browsecomp/tasks.jsonl")
     cli.add_argument("--output-dir", type=Path, default=REPO_ROOT / "artifacts/gyms/browsecomp")
-    cli.add_argument("--retrieval-url", default="http://127.0.0.1:18080")
+    cli.add_argument("--retrieval-url", default="http://127.0.0.1:18082")
     cli.add_argument("--resume", type=Path, help="Continue an interrupted run directory, keeping completed episodes")
     cli.add_argument("--concurrency", type=int, default=2)
     cli.add_argument("-n", "--repetitions", type=int, default=1)
