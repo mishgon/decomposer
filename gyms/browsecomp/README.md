@@ -1,8 +1,9 @@
 # BrowseComp-Plus
 
-This gym migrates the `browse-bench-2` evaluation. It uses the **BrowseComp-Plus**
-fixed corpus through agentic-rag's `/search` and `/fetch`, not live-web BrowseComp
-or WideSeek's Wiki-2018 service. No corpus is downloaded or indexed by the runner.
+This gym evaluates BrowseComp questions using WideSeek-R1's pinned Wiki-2018
+corpus, researcher prompt and unchanged `search`/`access` implementations.
+This is a Wiki-2018 experiment, not the historical BrowseComp-Plus retrieval setup.
+The runner does not download or index the corpus.
 
 ## Setup
 
@@ -25,37 +26,30 @@ researcher. Generation parameters come from `decomposer.models`; recursion is
 
 ## Retrieval Connection
 
-Supply an HTTP endpoint for the existing agentic-rag deployment. It must have
-the `browsecomp_plus` source loaded. An SSH-forwarded loopback address also works:
-
-```bash
-# RAG_HOST must already be a working SSH alias for the retrieval machine.
-ssh -N -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 \
-  -L 127.0.0.1:18000:127.0.0.1:8000 RAG_HOST
-```
-
-Run this on the machine executing the gym and pass
-`--retrieval-url http://127.0.0.1:18000`. Keep SSH host-key checking enabled.
-The deployment host and Hertz-2 route still need live verification. The runner
-tests both search and fetch before starting any episodes or paid model calls.
-It does not start or restart the remote retrieval service.
+Prepare and serve the index using [WideSeek setup](../wideseek/README.md#setup).
+The default retrieval endpoint is `http://127.0.0.1:18080`. The runner checks the
+pinned corpus revision and exercises `/retrieve` and `/access` before scheduling.
+Run the service on the evaluation machine; no inter-server tunnel is required.
 
 ## Run
 
 ```bash
 PYTHONPATH=src:. python -m gyms.browsecomp.run \
-  --agent researcher --tasks browsecomp-0001 --retrieval-url http://127.0.0.1:18000
+  --agent researcher --tasks browsecomp-0001 --retrieval-url http://127.0.0.1:18080
 
 PYTHONPATH=src:. python -m gyms.browsecomp.run \
   --agent decomposer --tasks browsecomp-0001 browsecomp-0002 --concurrency 2
 ```
 
-Each episode has its own Agent Server and checkpointed researcher state. Agents
-can fetch only URLs they have searched; forks inherit that state. Found URLs persist across successive runs of one agent. There is no search-count
-limit. Decomposer workers retain the per-run time budget (180 seconds of work plus
-180 seconds to finish the current step and respond); standalone researchers use the episode timeout and
-recursion limit.
-Fetch returns the server's page body, not a query-specific LLM summary. The prompt uses native tools.
+Each episode has its own Agent Server. Researchers reuse `gyms.wideseek.agents.react`,
+including its prompt and tool implementations. `search` returns 1–10 passages
+(default 3), truncated to 5,000 characters each. `access` reads a corpus URL with
+a 1–20,000-character limit (default 5,000), without a prior-search requirement.
+There is no search-count cap or LLM page reader. Decomposer workers have 180
+seconds of work plus 180 seconds to finish and respond; recursion remains 410.
+The optional WideSeek model-call/token budget is initialized without limits.
+Raw WideSeek model/tool logs and its budget database live under each episode's
+`runtime/` directory; existing root-level model logs remain available.
 
 Runs save `manifest.json`, then `traces/<task>-rNNN/` with `task.json`, `trace.json`,
 optional `trace.html` (when the shared renderer has captured agent runs),
@@ -100,7 +94,7 @@ Choose a Python factory with `--agent`:
 | `decomposer_sft_1_2_0` | Decomposer manager SFT 1.2.0 | Decomposer |
 
 All Decomposer variants use the `researcher` graph, a Qwen3.5-4B thinking
-subagent with the same search and fetch tools as the standalone researcher.
+subagent with the same search and access tools as the standalone researcher.
 The existing `researcher` and `decomposer` factories remain available;
 `decomposer` uses the Flash Next manager.
 
@@ -119,7 +113,7 @@ For example, after loading environment variables and forwarding retrieval:
 
 ```bash
 python -m evals.browsecomp.run --agent decomposer_sft_1_2_0 \
-  --tasks TASK_ID_1 TASK_ID_2 --retrieval-url http://127.0.0.1:18082
+  --tasks TASK_ID_1 TASK_ID_2 --retrieval-url http://127.0.0.1:18080
 ```
 
 Queue recovery: infrastructure failures in model, worker and web logs are monitored
@@ -130,3 +124,7 @@ successful and model-limited attempts, archives infrastructure-failed attempts a
 retries their task/repetition pairs. Resume requires the same commit, input hash,
 backend, model and worker budgets. Judge failures can be rescored without generating
 another answer (BrowseComp via resume; WideSearch via its scoring command).
+
+Existing BrowseComp-Plus runs must remain separate; their provenance cannot resume
+under Wiki-2018. The legacy tools.py and prompt.txt remain for historical reference
+and are no longer used by the registered researcher factories.

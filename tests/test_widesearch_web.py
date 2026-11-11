@@ -55,21 +55,18 @@ def test_tool_failure_is_visible_and_logged(monkeypatch, tmp_path):
     assert "read timeout" in (tmp_path / "web_calls.jsonl").read_text()
 
 
-def test_web_runner_does_not_preflight_local_retrieval(monkeypatch):
-    monkeypatch.setenv("KEENABLE_API_KEY", "test-key")
-    main = AsyncMock()
-    monkeypatch.setattr(run.browsecomp, "main", main)
-    asyncio.run(run.main(SimpleNamespace(agent="researcher_27b_thinking", episode=False,
-                                         retrieval_url=run.BACKEND)))
-    assert main.call_args.kwargs["preflight_check"] is run.preflight
-    with pytest.raises(ValueError, match="cannot resume"):
-        asyncio.run(run.preflight("http://127.0.0.1:18082"))
+def test_widesearch_uses_shared_wiki_preflight(monkeypatch):
+    preflight = AsyncMock()
+    monkeypatch.setattr(run.browsecomp, "preflight", preflight)
+    asyncio.run(run.preflight(run.BACKEND))
+    preflight.assert_awaited_once_with("http://127.0.0.1:18080")
 
 
-def test_backend_requires_search_key(monkeypatch):
-    monkeypatch.delenv("KEENABLE_API_KEY", raising=False)
-    with pytest.raises(ValueError, match="KEENABLE_API_KEY"):
-        asyncio.run(run.preflight(run.BACKEND))
+def test_widesearch_reuses_browsecomp_researchers():
+    from gyms.widesearch import agents
+    from gyms.browsecomp import agents as browsecomp
+    for name in ["researcher", "researcher_4b_thinking", "researcher_27b_thinking"]:
+        assert getattr(agents, name) is getattr(browsecomp, name)
 
 
 def test_long_search_keeps_snippets_when_one_page_fails(monkeypatch, tmp_path):

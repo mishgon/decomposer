@@ -121,9 +121,10 @@ def test_pilot_counts_recorded_timeout_status(tmp_path):
 
 
 @pytest.mark.parametrize('invalid', [None, 'status', 'assistant_id', 'tasks', 'repetitions', 'episodes',
-                                     'worker_budget_seconds', 'worker_grace_seconds', 'provenance'])
+                                     'worker_budget_seconds', 'worker_grace_seconds', 'provenance', 'corpus_revision', 'wrong_corpus'])
 def test_remaining_campaign_keeps_completed_sft_and_skips_pilots(tmp_path, invalid):
     from evals.sft140 import remaining_jobs
+    from gyms.wideseek.assets import CORPUS_REVISION
     tasks = [f'browsecomp-{i:04d}' for i in range(100)]
     data = tmp_path / 'tasks.jsonl'
     data.write_text('\n'.join(json.dumps({'task_id': t}) for t in tasks))
@@ -131,8 +132,13 @@ def test_remaining_campaign_keeps_completed_sft_and_skips_pilots(tmp_path, inval
     prior.mkdir()
     manifest = {'status': 'completed', 'assistant_id': MODELS[0], 'tasks': tasks,
                 'repetitions': 3, 'episodes': [{}] * 300,
-                'provenance': {'worker_budget_seconds': 180, 'worker_grace_seconds': 180}}
-    if invalid in {'worker_budget_seconds', 'worker_grace_seconds'}:
+                'provenance': {'worker_budget_seconds': 180, 'worker_grace_seconds': 180,
+                               'corpus_revision': CORPUS_REVISION}}
+    if invalid == 'corpus_revision':
+        manifest['provenance'].pop('corpus_revision')
+    elif invalid == 'wrong_corpus':
+        manifest['provenance']['corpus_revision'] = 'another-corpus'
+    elif invalid in {'worker_budget_seconds', 'worker_grace_seconds'}:
         manifest['provenance'][invalid] = 60
     elif invalid:
         manifest[invalid] = {'status': 'running', 'assistant_id': 'decomposer',
