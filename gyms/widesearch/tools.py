@@ -80,7 +80,7 @@ async def request(endpoint, arguments):
                         continue
                     if response.status_code == 403:
                         raise RuntimeError("AuthenticationError: all Keenable API keys unavailable (HTTP 403)")
-                if response.status_code in {429, 502, 503, 504} and attempt < 4 * len(keys) - 1:
+                if response.status_code in {429, 502, 503, 504}:
                     if response.status_code != 429:
                         if service_retries >= 3:
                             response.raise_for_status()
@@ -95,7 +95,9 @@ async def request(endpoint, arguments):
                     await record({"retry_seconds": delay, "endpoint": url, "key_name": name})
                     if response.status_code == 429:
                         KEY_COOLDOWNS[key] = time.monotonic() + delay
-                    else:
+                    if attempt == 4 * len(keys) - 1:
+                        response.raise_for_status()
+                    if response.status_code != 429:
                         await asyncio.sleep(delay)
                     continue
                 response.raise_for_status()

@@ -317,3 +317,26 @@ def test_extra_keys_do_not_multiply_service_retries(monkeypatch, tmp_path):
     with pytest.raises(httpx.HTTPStatusError):
         asyncio.run(tools.request("search", {"query": "test"}))
     assert len(used) == 4
+
+
+def test_last_rate_limit_preserves_cooldown_for_next_request(monkeypatch, tmp_path):
+    monkeypatch.setenv("BROWSECOMP_MODEL_LOG", str(tmp_path / "model_calls.jsonl"))
+    monkeypatch.setenv("KEENABLE_API_KEY", "secret-1")
+    clock = [1000.0]
+    monkeypatch.setattr(tools.time, "monotonic", lambda: clock[0])
+    async def sleep(delay):
+        clock[0] += delay
+    monkeypatch.setattr(tools.asyncio, "sleep", sleep)
+    sent = []
+    def respond(request):
+        sent.append(clock[0])
+        return httpx.Response(429 if len(sent) <= 4 else 200,
+                              headers={"Retry-After": "60"}, json={"results": []})
+    real_client = httpx.AsyncClient
+    monkeypatch.setattr(tools.httpx, "AsyncClient", lambda **kw: real_client(transport=httpx.MockTransport(respond), **kw))
+    async def exercise():
+        with pytest.raises(httpx.HTTPStatusError):
+            await tools.request("search", {"query": "test"})
+        await tools.request("search", {"query": "test"})
+    asyncio.run(exercise())
+    assert len(sent) == 5 and sent[4] - sent[3] >= 60
