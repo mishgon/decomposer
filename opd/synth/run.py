@@ -15,6 +15,7 @@ from gyms.synth import ROOT
 from opd.synth.prepare import prepare
 from opd.teacher import score
 from opd.launch import add_gpu_arguments, gpu_overrides
+from opd.report import save_report
 
 
 async def main(args, overrides):
@@ -94,6 +95,7 @@ async def main(args, overrides):
     finally:
         manifest["finished_at"] = time.time()
         (output / "run.json").write_text(json.dumps(manifest, indent=2))
+    save_report(output)
 
 
 if __name__ == "__main__":
