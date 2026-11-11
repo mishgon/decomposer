@@ -6,7 +6,7 @@
 #   "tensorboard==2.20.0", "PyYAML==6.0.3",
 # ]
 # ///
-"""Render the standard three-page OPD report from a local run directory.
+"""Render the standard four-page OPD report from a local run directory.
 
 Usage: ./scripts/pdf-report.py /path/to/run [--output /path/to/report.pdf]
 Defaults to RUN/opd-report.pdf. Run on the experiment host or on a copied run;
@@ -208,6 +208,18 @@ def render_report(d, output):
         pdf.setFont(font, size)
         line = ""
         for word in text.split():
+            if pdf.stringWidth(word, font, size) > width:
+                if line:
+                    pdf.drawString(x, y, line)
+                    y -= 11
+                    line = ""
+                for character in word:
+                    if line and pdf.stringWidth(line + character, font, size) > width:
+                        pdf.drawString(x, y, line)
+                        y -= 11
+                        line = ""
+                    line += character
+                continue
             candidate = f"{line} {word}".strip()
             if line and pdf.stringWidth(candidate, font, size) > width:
                 pdf.drawString(x, y, line)
@@ -315,7 +327,7 @@ def render_report(d, output):
             y = fit_text(t, "Inter-Regular", 8.5, 30, y)
         pdf.setFillColor(HexColor("#909393"))
         fit_text(f"{d['run']} | {when}", "Inter-Regular", 8.5, 30, 15, W - 90)
-        pdf.drawRightString(W - 30, 15, f"{n} / 3")
+        pdf.drawRightString(W - 30, 15, f"{n} / 4")
 
     def place(fig, col, row):
         width = (W - 70) / 2
@@ -609,6 +621,122 @@ def render_report(d, output):
         )
     a.set_ylim(0, max([z for z in v if math.isfinite(z)] + [10]) * 1.25)
     place(f, 1, 1)
+    pdf.showPage()
+
+    # Read an explicit allowlist from the saved config, never the current defaults
+    # or process environment. Hydra environment interpolations stay unresolved.
+    missing = object()
+
+    def raw(path):
+        value = d["config"]
+        for key in path.split("."):
+            if not isinstance(value, dict) or key not in value:
+                return missing
+            value = value[key]
+        if isinstance(value, str) and "${" in value:
+            return missing
+        return value
+
+    def display(value):
+        if value is missing:
+            return "Not recorded"
+        if value is None:
+            return "None"
+        if isinstance(value, bool):
+            return "Enabled" if value else "Disabled"
+        if isinstance(value, float):
+            return f"{value:g}"
+        if isinstance(value, list):
+            return ", ".join(display(item) for item in value)
+        return str(value)
+
+    def values(*paths):
+        recorded = [raw(path) for path in paths]
+        return "Not recorded" if all(value is missing for value in recorded) else " / ".join(display(value) for value in recorded)
+
+    def gpu_count(role):
+        nodes, per_node = raw(f"{role}.nnodes"), raw(f"{role}.n_gpus_per_node")
+        return str(nodes * per_node) if isinstance(nodes, int) and isinstance(per_node, int) else "Not recorded"
+
+    m = "actor_rollout_ref.model"
+    a = "actor_rollout_ref.actor"
+    r = "actor_rollout_ref.rollout"
+    loss = "distillation.distillation_loss"
+    teacher = raw("distillation.teacher_models.teacher_model.model_path")
+    student = metadata.get("model", raw(f"{m}.path"))
+    sections = [
+        [
+            ("Model and adapters", [
+                ("Student", Path(student).name if isinstance(student, str) else display(student)),
+                ("Teacher", display(teacher)),
+                ("LoRA rank / alpha", values(f"{m}.lora_rank", f"{m}.lora_alpha")),
+                ("LoRA target modules", values(f"{m}.target_modules")),
+                ("Attention", values(f"{m}.override_config.attn_implementation")),
+                ("Activation checkpointing", values(f"{m}.enable_gradient_checkpointing")),
+            ]),
+            ("Optimizer", [
+                ("Learning rate", values(f"{a}.optim.lr")),
+                ("Schedule / weight decay", values(f"{a}.optim.lr_scheduler_type", f"{a}.optim.weight_decay")),
+                ("Warmup steps / ratio", values(f"{a}.optim.lr_warmup_steps", f"{a}.optim.lr_warmup_steps_ratio")),
+                ("Gradient norm clip", values(f"{a}.grad_clip")),
+                ("PPO epochs per minibatch", values(f"{a}.ppo_epochs")),
+                ("Loss aggregation", values(f"{a}.loss_agg_mode")),
+            ]),
+            ("Objective and clipping", [
+                ("Distillation loss / policy gradient", values(f"{loss}.loss_mode", f"{loss}.use_policy_gradient")),
+                ("Task rewards in objective", values(f"{loss}.use_task_rewards")),
+                ("PPO clip lower / upper", values(f"{a}.clip_ratio_low", f"{a}.clip_ratio_high")),
+                ("Dual clip parameter", values(f"{a}.clip_ratio_c")),
+                ("Loss max / log-prob min clamp", values(f"{loss}.loss_max_clamp", f"{loss}.log_prob_min_clamp")),
+                ("Entropy coefficient / KL loss", values(f"{a}.entropy_coeff", f"{a}.use_kl_loss")),
+            ]),
+        ],
+        [
+            ("Batching and sampling", [
+                ("PPO minibatch / microbatch per GPU", values(f"{a}.ppo_mini_batch_size", f"{a}.ppo_micro_batch_size_per_gpu")),
+                ("Dynamic batching", values(f"{a}.use_dynamic_bsz")),
+                ("Required batches / sync interval", values("async_training.require_batches", "async_training.trigger_parameter_sync_step")),
+                ("Concurrent samples per replica", values("async_training.concurrent_samples_per_replica")),
+                ("Generation batch / samples per prompt", values("data.gen_batch_size", f"{r}.n")),
+                ("Train temperature / top-p / top-k", values(f"{r}.temperature", f"{r}.top_p", f"{r}.top_k")),
+                ("Eval temperature / top-p / top-k", values(f"{r}.val_kwargs.temperature", f"{r}.val_kwargs.top_p", f"{r}.val_kwargs.top_k")),
+            ]),
+            ("Budgets and reproducibility", [
+                ("Prompt / response token limits", values("data.max_prompt_length", "data.max_response_length")),
+                ("Episode timeout, seconds", values(f"{gym}.timeout")),
+                ("Data seed", values("data.seed")),
+                ("Rollout groups / dataset epochs", values("rollout.total_rollout_steps", "trainer.total_epochs")),
+                ("Validation / save interval", values("trainer.test_freq", "trainer.save_freq")),
+                ("Save LoRA only", values(f"{a}.checkpoint.save_lora_only")),
+            ]),
+            ("Execution", [
+                ("Trainer / rollout GPUs", f"{gpu_count('trainer')} / {gpu_count('rollout')}"),
+                ("Training strategy / rollout backend", values(f"{a}.strategy", f"{r}.name")),
+                ("Rollout tensor parallelism", values(f"{r}.tensor_model_parallel_size")),
+                ("Fused kernels", values(f"{m}.use_fused_kernels")),
+                ("Async staleness threshold", values("async_training.staleness_threshold")),
+            ]),
+        ],
+    ]
+    page(4, "Training hyperparameters", "Saved settings for this run", [
+        "Source: saved Hydra config and run metadata. Missing or unresolved values are marked as not recorded; current defaults are never substituted.",
+        "Batch sizes count samples. Microbatch is per GPU. Intervals count trainer iterations; PPO epochs repeat minibatches.",
+        "Some configured parameters may be inactive for the selected objective. Top-k = -1 disables filtering; warmup steps = -1 uses the warmup ratio.",
+    ])
+    column_width = (W - 78) / 2
+    for col, groups in enumerate(sections):
+        x, y = 30 + col * (column_width + 18), H - 92
+        for title, rows in groups:
+            pdf.setFillColor(HexColor("#000000"))
+            fit_text(title, "Inter-Medium", 14, x, y, column_width)
+            y -= 21
+            for label, value in rows:
+                # Wrap long labels and values instead of shrinking the type.
+                label_width = column_width * 0.55
+                label_end = fit_text(label, "Inter-Regular", 8.5, x, y, label_width - 8)
+                value_end = fit_text(value, "Inter-Regular", 8.5, x + label_width, y, column_width - label_width)
+                y = min(label_end, value_end) - 3
+            y -= 13
     pdf.save()
 
 
