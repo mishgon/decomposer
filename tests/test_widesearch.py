@@ -173,3 +173,48 @@ def test_widesearch_shares_budget_free_browsecomp_harness():
     assert agents.decomposer_sft_1_4_0 is browsecomp.decomposer_sft_1_4_0
     assert run.preflight is run.browsecomp.preflight
     assert run.parser().get_default("retrieval_url") == "http://127.0.0.1:18082"
+
+
+@pytest.mark.parametrize('failure', [None, 'transient', 'permanent', 'credentials'])
+def test_watch_scores_new_episodes_reuses_results_and_bounds_retries(monkeypatch, tmp_path, failure):
+    import fcntl
+
+    source = tmp_path / 'source'
+    (source / 'widesearch_gold').mkdir(parents=True)
+    (source / 'widesearch.jsonl').write_text('metadata')
+    (source / 'widesearch_gold/test.csv').write_text('name,value\nA,1\n')
+    root = tmp_path / 'run'
+    root.mkdir()
+    episodes = [{'task': 'test', 'repetition': n, 'status': 'finished', 'directory': str(n)} for n in [1, 2]]
+    manifest = {'tasks': ['test'], 'repetitions': 2, 'episodes': episodes[:1],
+                'status': 'running', 'config': {'retrieval_url': run.BACKEND}}
+    evaluation.save(root / 'manifest.json', manifest)
+    for n in [1, 2]:
+        (root / str(n)).mkdir()
+        (root / str(n) / 'answer.md').write_text(str(n))
+    monkeypatch.setattr(evaluation, 'load_queries', lambda _: {'test': query()})
+    calls = []
+
+    def score(query, answer, destination):
+        with (root / '.evaluation.lock').open('a') as lock:
+            with pytest.raises(BlockingIOError):
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        calls.append(answer)
+        if failure == 'credentials':
+            raise RuntimeError('AuthenticationError: 401')
+        if answer == '1' and (failure == 'permanent' or failure == 'transient' and calls.count('1') == 1):
+            raise RuntimeError('temporary judge error')
+        return {'status': 'evaluated', 'score': 1, 'f1_by_row': 1, 'f1_by_item': 1}
+
+    def finish_generation(seconds):
+        assert seconds == 60
+        manifest.update(status='completed', episodes=episodes)
+        evaluation.save(root / 'manifest.json', manifest)
+
+    monkeypatch.setattr(evaluation, 'score', score)
+    monkeypatch.setattr(evaluation.time, 'sleep', finish_generation)
+    evaluation.main(SimpleNamespace(run=root, source=source, watch=True))
+    assert calls.count('1') == {None: 1, 'transient': 2, 'permanent': 3, 'credentials': 1}[failure]
+    assert calls.count('2') == (0 if failure == 'credentials' else 1)
+    summary = json.loads((root / 'evaluation/summary.json').read_text())
+    assert summary['status'] == ('needs_attention' if failure in ['permanent', 'credentials'] else 'completed')
