@@ -28,6 +28,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib import font_manager
+from matplotlib.text import Text
 import numpy as np
 from reportlab.lib.colors import HexColor
 from reportlab.lib.pagesizes import A4, landscape
@@ -204,9 +205,18 @@ def render_report(d, output):
 
     def fit_text(text, font, size, x, y, width=None):
         width = width or W - 60
-        measured = pdf.stringWidth(text, font, size)
-        pdf.setFont(font, min(size, size * width / max(measured, 1)))
-        pdf.drawString(x, y, text)
+        pdf.setFont(font, size)
+        line = ""
+        for word in text.split():
+            candidate = f"{line} {word}".strip()
+            if line and pdf.stringWidth(candidate, font, size) > width:
+                pdf.drawString(x, y, line)
+                y -= 11
+                line = word
+            else:
+                line = candidate
+        pdf.drawString(x, y, line)
+        return y - 11
 
     # AIJ 2026: Inter typography and the AIRI palette supplied with the demo guide.
     assets = Path(__file__).resolve().parent / "report-assets"
@@ -224,12 +234,14 @@ def render_report(d, output):
     plt.rcParams.update(
         {
             "font.family": "Inter",
-            "font.size": 10,
-            "axes.titlesize": 12,
-            "axes.labelsize": 9,
-            "xtick.labelsize": 9,
-            "ytick.labelsize": 9,
-            "legend.fontsize": 8,
+            "font.size": 8.5,
+            "axes.titlesize": 14,
+            "axes.labelsize": 8.5,
+            "xtick.labelsize": 8.5,
+            "ytick.labelsize": 8.5,
+            "legend.fontsize": 8.5,
+            "legend.edgecolor": "white",
+            "legend.framealpha": 0.95,
             "axes.spines.top": False,
             "axes.spines.right": False,
             "text.color": "black",
@@ -269,6 +281,16 @@ def render_report(d, output):
                 transform=fig.axes[0].transAxes,
                 color=C["gray"],
             )
+        # Three styles throughout: Medium 14pt black; Regular 8.5pt black or gray.
+        # Match the placed image's physical size so chart text keeps those sizes.
+        fig.set_size_inches((W - 70) / 2 / 72, 200 / 72)
+        for text in fig.findobj(Text):
+            text.set_fontsize(8.5)
+            text.set_fontweight("normal")
+            text.set_color(C["gray"] if text.get_color() == C["gray"] else "black")
+        for ax in fig.axes:
+            ax.title.set_fontsize(14)
+            ax.title.set_fontweight("medium")
         fig.tight_layout(pad=1.0)
         b = io.BytesIO()
         fig.savefig(b, format="png", dpi=210)
@@ -283,25 +305,21 @@ def render_report(d, output):
     when = datetime.fromtimestamp(d["captured_at"], timezone.utc).strftime("%d %b %Y, %H:%M UTC")
 
     def page(n, title, subtitle, notes):
-        pdf.setFillColor(HexColor("#2FBEAD"))
-        pdf.rect(30, H - 19, 32, 3, fill=1, stroke=0)
         pdf.setFillColor(HexColor("#000000"))
-        fit_text(title, "Inter-Medium", 22, 30, H - 42, W - 178)
-        fit_text(subtitle, "Inter-Regular", 10, 30, H - 61, W - 178)
+        fit_text(title, "Inter-Medium", 14, 30, H - 38, W - 178)
+        fit_text(subtitle, "Inter-Regular", 8.5, 30, H - 57, W - 178)
         pdf.drawImage(str(assets / "airi-logo.png"), W - 125, H - 65,
                       width=95, height=48, preserveAspectRatio=True, mask="auto")
-        pdf.setStrokeColor(HexColor("#84E0D5"))
-        pdf.line(30, 66, W - 30, 66)
-        pdf.setFont("Inter-Regular", 8)
-        for i, t in enumerate(notes):
-            fit_text(t, "Inter-Regular", 8, 30, 53 - i * 11)
+        y = 84
+        for t in notes:
+            y = fit_text(t, "Inter-Regular", 8.5, 30, y)
         pdf.setFillColor(HexColor("#909393"))
-        fit_text(f"{d['run']} | latest event {when}", "Inter-Regular", 7, 30, 15, W - 90)
+        fit_text(f"{d['run']} | {when}", "Inter-Regular", 8.5, 30, 15, W - 90)
         pdf.drawRightString(W - 30, 15, f"{n} / 3")
 
     def place(fig, col, row):
         width = (W - 70) / 2
-        height = 211
+        height = 200
         pdf.drawImage(
             img(fig),
             30 + col * (width + 10),
@@ -352,11 +370,11 @@ def render_report(d, output):
         f"{name} OPD: validation through step {latest_val}",
         subtitle,
         [
-            f"{name} uses {reward_kind}; Workplace uses binary task success. Curves use the logged native validation means.",
-            held_note + " Training rollouts use changing tasks; fixed-panel scores are reported separately.",
-            "Latest validation traces (last attempt/task): "
+            f"{name}: {reward_kind}. Workplace: binary success. Fixed panels use logged means; training tasks change between batches.",
+            held_note,
+            "Latest validation (last attempt/task): "
             + "; ".join(validation_notes)
-            + ". Timeouts are included in logged rewards.",
+            + ". Timeouts count toward reward.",
         ],
     )
     f, a = base("Fixed-panel validation", "Mean reward / success rate", "Validation step")
@@ -373,7 +391,6 @@ def render_report(d, output):
                 xytext=(5, -10 if "train_probe" in tag else 8),
                 textcoords="offset points",
                 color="black",
-                fontsize=9,
             )
     a.set_ylim(-0.04, 1.04)
     a.set_xlim(-1, latest_val + 8)
@@ -403,7 +420,6 @@ def render_report(d, output):
                 v + (0.035 if v >= 0 else -0.07),
                 f"{v:+.3f}",
                 ha="center",
-                weight="semibold",
             )
     place(f, 1, 0)
     f, a = base("Training rollout reward", "Native batch mean reward")
@@ -450,11 +466,11 @@ def render_report(d, output):
     page(
         2,
         "How the policy is changing",
-        f"{model}; loss and surprisal describe updates, not task-solving quality.",
+        f"{model} | Task-solving quality is shown on page 1.",
         [
-            "Signed and absolute distillation metrics are shown below. Task rewards are reported separately on page 1.",
-            f"Proxy uses {sum(r['episodes'] for r in proxy['rows'])} train rollouts; mixed-version episodes excluded: {proxy['excluded_mixed_version_episodes']}. KL compares rollout/update policies, not teacher quality.",
-            "Entropy proxy: token-weighted -log p of sampled student tokens; excludes observations. Sampling filters/temperature prevent treating it as full entropy.",
+            "KL compares the rollout and updated policies. Signed and absolute distillation losses are logged separately.",
+            f"Surprisal uses {sum(r['episodes'] for r in proxy['rows'])} train rollouts; excluded mixed-version episodes: {proxy['excluded_mixed_version_episodes']}.",
+            "Surprisal is token-weighted -log p of sampled student tokens, excluding observations. It is not full-distribution entropy.",
         ],
     )
     f, a = base("Distillation objective", "Reported loss")
@@ -501,7 +517,6 @@ def render_report(d, output):
         if rows
         else "Student token logprobs / versions not recorded.",
         transform=a.transAxes,
-        fontsize=8,
         color=C["gray"],
     )
     place(f, 1, 1)
@@ -517,7 +532,7 @@ def render_report(d, output):
         "Where wall-clock time goes",
         f"{status.capitalize()} | {minutes // 60}h {minutes % 60:02d}m since recorded launch, including initialization and validation.",
         [
-            "Observed cadence uses consecutive log wall times; asynchronous components can overlap. X axes use event steps unless specified.",
+            "Cadence uses consecutive log times. Asynchronous components can overlap. X axes use event steps unless specified.",
             f"{len(points)} optimizer counters logged: {points[0]['value']:g}-{points[-1]['value']:g}; event steps {points[0]['step']}-{points[-1]['step']}. Latest saved checkpoint: {checkpoint if checkpoint is not None else 'unknown'}.",
             "Observed maxima: "
             + "; ".join(
@@ -543,7 +558,7 @@ def render_report(d, output):
     )
     line(a, "timing_s/update_actor", "Actor update", C["blue"], lw=1.3)
     line(a, "timing_s/save_checkpoint", "Checkpoint save", C["sand"], lw=1.3)
-    a.legend(fontsize=7)
+    a.legend()
     a.set_ylim(bottom=0)
     place(f, 0, 0)
     f, a = base(
@@ -589,9 +604,8 @@ def render_report(d, output):
         a.text(
             i,
             z + 3 if math.isfinite(z) else 3,
-            f"{z:.0f}s" if math.isfinite(z) else "N/A",
+            f"{z:.0f}s" if math.isfinite(z) else "Not recorded",
             ha="center",
-            weight="semibold",
         )
     a.set_ylim(0, max([z for z in v if math.isfinite(z)] + [10]) * 1.25)
     place(f, 1, 1)
