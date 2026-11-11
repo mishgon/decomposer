@@ -19,7 +19,6 @@ from gyms.browsecomp import REPO_ROOT
 from gyms.browsecomp.agents import AGENTS, JUDGE_MODEL, WORKER_BUDGET_SECONDS, WORKER_GRACE_SECONDS
 from gyms.browsecomp.run import preflight as retrieval_preflight, save
 from gyms.widesearch.run import BACKEND, preflight as web_preflight
-from gyms.wideseek.assets import CORPUS_REVISION
 
 MODELS = ['decomposer_sft_1_4_0', 'researcher_4b_thinking', 'researcher_27b_thinking',
           'decomposer_4b_non_thinking', 'decomposer']
@@ -49,7 +48,7 @@ def jobs(data, gaia_tasks):
                     else:
                         command = ['-m', f'evals.{benchmark}.run' if benchmark == 'browsecomp' else 'gyms.widesearch.run',
                             '--agent', agent, '-n', str(n), '--concurrency', str(concurrency), '--timeout', '2700' if benchmark == 'browsecomp' else '7200',
-                            '--retrieval-url', 'http://127.0.0.1:18080' if benchmark == 'browsecomp' else BACKEND]
+                            '--retrieval-url', 'http://127.0.0.1:18082' if benchmark == 'browsecomp' else BACKEND]
                         if benchmark == 'browsecomp':
                             command += ['--data', str(data)]
                         command += ['--tasks', *(tasks[:5] if phase == 'pilot' else [tasks[0] if benchmark == 'browsecomp' else 'ws_en_001'])] if phase != 'full' else ['--all']
@@ -63,7 +62,7 @@ def remaining_jobs(data, gaia_tasks, completed_run):
     if (manifest['status'] != 'completed' or manifest['assistant_id'] != MODELS[0]
             or sorted(manifest['tasks']) != tasks or manifest['repetitions'] != 3
             or len(manifest['episodes']) != len(tasks) * 3
-            or manifest.get('provenance', {}).get('corpus_revision') != CORPUS_REVISION
+            or manifest.get('provenance', {}).get('backend') != 'http://127.0.0.1:18082'
             or manifest.get('provenance', {}).get('worker_budget_seconds') != WORKER_BUDGET_SECONDS
             or manifest.get('provenance', {}).get('worker_grace_seconds') != WORKER_GRACE_SECONDS):
         raise ValueError('Expected completed SFT BrowseComp on the fixed 100 tasks, three repeats')
@@ -93,7 +92,7 @@ async def preflight(job):
             model.http_client.close()
             await model.http_async_client.aclose()
     if job['benchmark'] == 'browsecomp':
-        await retrieval_preflight('http://127.0.0.1:18080')
+        await retrieval_preflight('http://127.0.0.1:18082')
     elif job['benchmark'] == 'widesearch':
         await web_preflight(BACKEND)
     else:

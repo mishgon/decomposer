@@ -24,21 +24,20 @@ def test_prepare_exports_only_english_questions(tmp_path):
     assert "secret" not in output.read_text()
 
 
-def test_researchers_share_upstream_prompt_tools_and_registry_models(monkeypatch):
+def test_researchers_share_browsecomp_prompt_tools_and_registry_models(monkeypatch):
     calls = []
-    monkeypatch.setattr(agents, "create_model", lambda model: model)
-    monkeypatch.setattr(agents, "create_agent", lambda model, **kwargs: calls.append((model, kwargs)))
+    monkeypatch.setattr(browsecomp_agents, "create_model", lambda model: model)
+    monkeypatch.setattr(browsecomp_agents, "create_agent", lambda model, **kwargs: calls.append((model, kwargs)))
     agents.researcher_4b_thinking()
     agents.researcher_27b_thinking()
     agents.researcher()
     assert calls[0][0] == "vllm/qwen_3_5_4b_thinking"
     assert calls[1][0] == "lmrouter/qwen_3_8_27b_medium_thinking"
     for _, kwargs in calls:
-        assert [t.name for t in kwargs["tools"]] == ["search_global", "text_browser_view"]
-        assert kwargs["system_prompt"].startswith(agents.PROMPT)
-        assert "BrowseComp" not in kwargs["system_prompt"]
-    assert calls[0][1]["system_prompt"] == calls[1][1]["system_prompt"] == agents.PROMPT
-    assert agents.AGENT_SYSTEM_PROMPT in calls[2][1]["system_prompt"]
+        assert [t.name for t in kwargs["tools"]] == ["search", "fetch"]
+        assert "BrowseComp-Plus" in kwargs["system_prompt"]
+    assert calls[0][1]["system_prompt"] == calls[1][1]["system_prompt"] == calls[2][1]["system_prompt"]
+    assert browsecomp_agents.AGENT_SYSTEM_PROMPT in calls[2][1]["system_prompt"]
     assert agents.decomposer_sft_1_2_0 is browsecomp_agents.decomposer_sft_1_2_0
     assert agents.decomposer_sft_1_4_0 is browsecomp_agents.decomposer_sft_1_4_0
     assert "decomposer_sft_1_4_0" in run.AGENTS
@@ -47,7 +46,7 @@ def test_researchers_share_upstream_prompt_tools_and_registry_models(monkeypatch
 def test_episode_uses_widesearch_server_and_saves_raw_answer(monkeypatch, tmp_path):
     invoke = AsyncMock()
     monkeypatch.setattr(run.browsecomp, "episode", invoke)
-    monkeypatch.setenv("KEENABLE_API_KEY", "test-key")
+    monkeypatch.setattr(run, "preflight", AsyncMock())
     args = SimpleNamespace(agent="researcher_4b_thinking", episode=True, retrieval_url=run.BACKEND)
     asyncio.run(run.main(args))
     kwargs = invoke.call_args.kwargs
@@ -164,3 +163,13 @@ def test_paused_scoring_preserves_later_cached_scores(monkeypatch, tmp_path, ups
     assert len(calls) == 1
     assert summary['evaluation_errors'] == 1
     assert summary['status'] == 'needs_attention'
+
+
+def test_widesearch_shares_budget_free_browsecomp_harness():
+    from gyms.widesearch import agents
+    from gyms.browsecomp import agents as browsecomp
+    assert agents.researcher is browsecomp.researcher
+    assert agents.researcher_4b_thinking is browsecomp.researcher_4b_thinking
+    assert agents.decomposer_sft_1_4_0 is browsecomp.decomposer_sft_1_4_0
+    assert run.preflight is run.browsecomp.preflight
+    assert run.parser().get_default("retrieval_url") == "http://127.0.0.1:18082"
