@@ -16,12 +16,12 @@ WORKER_GRACE_SECONDS = 180.0
 JUDGE_MODEL = "lmrouter/qwen_3_8_flash_next_non_thinking"
 
 
-def _researcher(model_id, *, prompt=None):
+def _researcher(model_id):
     return create_agent(
         create_model(model_id), tools=[search, fetch],
         state_schema=ResearchState,
         context_schema=RunBudgetContext,
-        system_prompt=(prompt if prompt is not None else Path(__file__).with_name("prompt.txt").read_text()) + "\n\n" + AGENT_SYSTEM_PROMPT,
+        system_prompt=Path(__file__).with_name("prompt.txt").read_text() + "\n\n" + AGENT_SYSTEM_PROMPT,
         middleware=[RunBudgetMiddleware(), log_model_call],
     )
 
