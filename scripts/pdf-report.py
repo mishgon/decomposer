@@ -11,6 +11,7 @@
 Usage: ./scripts/pdf-report.py /path/to/run [--output /path/to/report.pdf]
 Defaults to RUN/opd-report.pdf. Run on the experiment host or on a copied run;
 no ClearML credentials, GPU, repository imports or network API calls are needed.
+Keep the bundled scripts/report-assets directory beside this script.
 The first uv invocation installs the pinned plotting dependencies.
 """
 
@@ -26,9 +27,13 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from matplotlib import font_manager
 import numpy as np
+from reportlab.lib.colors import HexColor
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.utils import ImageReader
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen import canvas
 from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
 import yaml
@@ -203,16 +208,22 @@ def render_report(d, output):
         pdf.setFont(font, min(size, size * width / max(measured, 1)))
         pdf.drawString(x, y, text)
 
+    # AIJ 2026: Inter typography and the AIRI palette supplied with the demo guide.
+    assets = Path(__file__).resolve().parent / "report-assets"
+    for weight in ("Regular", "Medium", "SemiBold"):
+        font = assets / f"Inter-{weight}.ttf"
+        font_manager.fontManager.addfont(str(font))
+        pdfmetrics.registerFont(TTFont(f"Inter-{weight}", str(font)))
     C = {
-        "blue": "#2463A6",
-        "green": "#16856B",
-        "red": "#C24750",
-        "gray": "#697887",
-        "gold": "#BE842C",
+        "blue": "#1394C1",
+        "green": "#005A60",
+        "brown": "#8E5F44",
+        "gray": "#909393",
+        "sand": "#D1A684",
     }
     plt.rcParams.update(
         {
-            "font.family": "DejaVu Sans",
+            "font.family": "Inter",
             "font.size": 10,
             "axes.titlesize": 12,
             "axes.labelsize": 9,
@@ -221,9 +232,12 @@ def render_report(d, output):
             "legend.fontsize": 8,
             "axes.spines.top": False,
             "axes.spines.right": False,
-            "axes.edgecolor": "#B5BEC8",
-            "grid.color": "#E3E8ED",
-            "axes.titleweight": "bold",
+            "text.color": "black",
+            "axes.labelcolor": "black",
+            "axes.edgecolor": "#909393",
+            "grid.color": "#EFF0EF",
+            "axes.titleweight": "medium",
+            "font.weight": "normal",
             "savefig.facecolor": "white",
         }
     )
@@ -269,16 +283,20 @@ def render_report(d, output):
     when = datetime.fromtimestamp(d["captured_at"], timezone.utc).strftime("%d %b %Y, %H:%M UTC")
 
     def page(n, title, subtitle, notes):
-        pdf.setFillColorRGB(0.08, 0.14, 0.22)
-        fit_text(title, "Helvetica-Bold", 22, 30, H - 38)
-        pdf.setFillColorRGB(0.30, 0.36, 0.42)
-        fit_text(subtitle, "Helvetica", 10, 30, H - 57)
-        pdf.setStrokeColorRGB(0.83, 0.87, 0.90)
+        pdf.setFillColor(HexColor("#2FBEAD"))
+        pdf.rect(30, H - 19, 32, 3, fill=1, stroke=0)
+        pdf.setFillColor(HexColor("#000000"))
+        fit_text(title, "Inter-Medium", 22, 30, H - 42, W - 178)
+        fit_text(subtitle, "Inter-Regular", 10, 30, H - 61, W - 178)
+        pdf.drawImage(str(assets / "airi-logo.png"), W - 125, H - 65,
+                      width=95, height=48, preserveAspectRatio=True, mask="auto")
+        pdf.setStrokeColor(HexColor("#84E0D5"))
         pdf.line(30, 66, W - 30, 66)
-        pdf.setFont("Helvetica", 8)
+        pdf.setFont("Inter-Regular", 8)
         for i, t in enumerate(notes):
-            fit_text(t, "Helvetica", 8, 30, 53 - i * 11)
-        fit_text(f"{d['run']} | latest event {when}", "Helvetica", 7, 30, 15, W - 90)
+            fit_text(t, "Inter-Regular", 8, 30, 53 - i * 11)
+        pdf.setFillColor(HexColor("#909393"))
+        fit_text(f"{d['run']} | latest event {when}", "Inter-Regular", 7, 30, 15, W - 90)
         pdf.drawRightString(W - 30, 15, f"{n} / 3")
 
     def place(fig, col, row):
@@ -345,7 +363,7 @@ def render_report(d, output):
     for tag, label, col in zip(
         tags,
         ["Train probes", "Held-out", "Workplace OOD"],
-        [C["blue"], C["green"], C["red"]],
+        [C["blue"], C["green"], C["brown"]],
     ):
         x, y = line(a, tag, label, col, marker="o", lw=2)
         if len(y):
@@ -354,7 +372,7 @@ def render_report(d, output):
                 (x[-1], y[-1]),
                 xytext=(5, -10 if "train_probe" in tag else 8),
                 textcoords="offset points",
-                color=col,
+                color="black",
                 fontsize=9,
             )
     a.set_ylim(-0.04, 1.04)
@@ -374,7 +392,7 @@ def render_report(d, output):
         a.bar(
             ["Train probes", "Held-out", "Workplace OOD"],
             delta,
-            color=[C["blue"], C["green"], C["red"]],
+            color=[C["blue"], C["green"], C["brown"]],
             width=0.55,
         )
         a.axhline(0, color=C["gray"], lw=0.8)
@@ -385,7 +403,7 @@ def render_report(d, output):
                 v + (0.035 if v >= 0 else -0.07),
                 f"{v:+.3f}",
                 ha="center",
-                weight="bold",
+                weight="semibold",
             )
     place(f, 1, 0)
     f, a = base("Training rollout reward", "Native batch mean reward")
@@ -420,7 +438,7 @@ def render_report(d, output):
     if response_budget is not None and prompt_budget is not None:
         a.axhline(
             response_budget,
-            color=C["red"],
+            color=C["brown"],
             ls="--",
             lw=1,
             label=f"{response_budget:,} response budget ({total_budget:,} total)",
@@ -441,7 +459,7 @@ def render_report(d, output):
     )
     f, a = base("Distillation objective", "Reported loss")
     line(a, "actor/distillation/loss", "Signed distillation loss", C["blue"], lw=1.6)
-    line(a, "actor/distillation/abs_loss", "Absolute-loss metric", C["gold"], lw=1.4)
+    line(a, "actor/distillation/abs_loss", "Absolute-loss metric", C["sand"], lw=1.4)
     a.axhline(0, color=C["gray"], lw=0.7)
     a.legend()
     place(f, 0, 0)
@@ -455,7 +473,7 @@ def render_report(d, output):
         a,
         "actor/distillation/pg_clipfrac",
         "Distillation clipped fraction",
-        C["red"],
+        C["brown"],
         lw=1.4,
     )
     a.axhline(0, color=C["gray"], lw=0.7)
@@ -470,7 +488,7 @@ def render_report(d, output):
     a.plot(
         [r["version"] for r in rows],
         [r["mean_nll"] for r in rows],
-        color=C["gold"],
+        color=C["sand"],
         lw=1.7,
         marker=".",
         ms=4,
@@ -524,7 +542,7 @@ def render_report(d, output):
         label="Observed log-to-log interval",
     )
     line(a, "timing_s/update_actor", "Actor update", C["blue"], lw=1.3)
-    line(a, "timing_s/save_checkpoint", "Checkpoint save", C["gold"], lw=1.3)
+    line(a, "timing_s/save_checkpoint", "Checkpoint save", C["sand"], lw=1.3)
     a.legend(fontsize=7)
     a.set_ylim(bottom=0)
     place(f, 0, 0)
@@ -533,7 +551,7 @@ def render_report(d, output):
         "Fraction of interval",
         xlabel="Logged step / rollout version",
     )
-    line(a, "fully_async/rollouter/idle_ratio", "Rollouter idle", C["red"], lw=1.4)
+    line(a, "fully_async/rollouter/idle_ratio", "Rollouter idle", C["brown"], lw=1.4)
     line(a, "fully_async/trainer/idle_ratio", "Trainer idle", C["blue"], lw=1.4)
     a.set_ylim(-0.02, 1.02)
     a.legend()
@@ -564,7 +582,7 @@ def render_report(d, output):
     a.bar(
         ["Actor update", "Parameter sync", "Checkpoint"],
         v,
-        color=[C["blue"], C["green"], C["gold"]],
+        color=[C["blue"], C["green"], C["sand"]],
         width=0.55,
     )
     for i, z in enumerate(v):
@@ -573,7 +591,7 @@ def render_report(d, output):
             z + 3 if math.isfinite(z) else 3,
             f"{z:.0f}s" if math.isfinite(z) else "N/A",
             ha="center",
-            weight="bold",
+            weight="semibold",
         )
     a.set_ylim(0, max([z for z in v if math.isfinite(z)] + [10]) * 1.25)
     place(f, 1, 1)
