@@ -142,6 +142,7 @@ def create_model(
             | "lmrouter/qwen_3_5_4b_thinking" | "lmrouter/qwen_3_5_4b_non_thinking"
             | "temp/qwen_3_5_4b_thinking"
             | "vllm/decomposer_manager_qwen35_4b_sft_1_0_0"
+            | "vllm/decomposer_manager_qwen35_4b_sft_1_1_0"
             | "vllm/decomposer_manager_qwen35_4b_sft_1_2_0"
             | "vllm/decomposer_manager_qwen35_4b_sft_1_4_0"
         ):
