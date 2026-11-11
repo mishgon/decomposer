@@ -28,7 +28,7 @@ class SynthAgentLoop(AgentLoopBase):
             return await self.server_manager.generate(request_id=episode_id, prompt_ids=ids, sampling_params=params)
 
         tokens = PolicyTokens(self.tokenizer, generate,
-            {**sampling_params, "presence_penalty": 1.5, "min_p": 0., "repetition_penalty": 1.},
+            {**sampling_params, "presence_penalty": 0.0, "min_p": 0., "repetition_penalty": 1.},
             prompt_budget=self.rollout_config.prompt_length,
             response_budget=self.rollout_config.response_length, log_path=directory / "policy_calls.jsonl")
         result = None
