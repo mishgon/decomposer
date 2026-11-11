@@ -63,9 +63,9 @@ actor_rollout_ref:
       enable: true
     checkpoint_engine:
       backend: nccl
-    temperature: 0.7
-    top_p: 0.8
-    top_k: 20
+    temperature: 1.0
+    top_p: 1.0
+    top_k: -1
     calculate_log_probs: true
     log_prob_micro_batch_size_per_gpu: 1
     enforce_eager: true
@@ -83,9 +83,9 @@ actor_rollout_ref:
     val_kwargs:
       n: 4
       do_sample: true
-      temperature: 0.7
-      top_p: 0.8
-      top_k: 20
+      temperature: 1.0
+      top_p: 1.0
+      top_k: -1
 trainer:
   use_v1: true
   n_gpus_per_node: 1
