@@ -145,6 +145,7 @@ def create_model(
             | "vllm/decomposer_manager_qwen35_4b_sft_1_1_0"
             | "vllm/decomposer_manager_qwen35_4b_sft_1_2_0"
             | "vllm/decomposer_manager_qwen35_4b_sft_1_4_0"
+            | "vllm/decomposer_manager_qwen35_4b_sft_1_5_0"
         ):
             sft = model_id.startswith("vllm/decomposer_manager_qwen35_4b_sft_")
             early_sft = model_id == "vllm/decomposer_manager_qwen35_4b_sft_1_0_0"

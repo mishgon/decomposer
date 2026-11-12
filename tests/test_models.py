@@ -411,7 +411,7 @@ def test_non_vllm_address_override_is_rejected():
         create_model("lmrouter/qwen_3_8_flash_next_non_thinking", base_url="http://local/v1")
 
 
-@pytest.mark.parametrize("version, port", [("1_0_0", 18025), ("1_1_0", 18024), ("1_2_0", 18024), ("1_4_0", 18024)])
+@pytest.mark.parametrize("version, port", [("1_0_0", 18025), ("1_1_0", 18024), ("1_2_0", 18024), ("1_4_0", 18024), ("1_5_0", 18024)])
 def test_sft_reuses_base_non_thinking_sampling(version, port):
     base = create_model("lmrouter/qwen_3_5_4b_non_thinking")
     sft = create_model(f"vllm/decomposer_manager_qwen35_4b_sft_{version}")

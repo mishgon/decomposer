@@ -11,7 +11,8 @@
     "decomposer_sft_1_0_0": "./agents.py:decomposer_sft_1_0_0",
     "decomposer_sft_1_1_0": "./agents.py:decomposer_sft_1_1_0",
     "decomposer_sft_1_2_0": "./agents.py:decomposer_sft_1_2_0",
-    "decomposer_sft_1_4_0": "./agents.py:decomposer_sft_1_4_0"
+    "decomposer_sft_1_4_0": "./agents.py:decomposer_sft_1_4_0",
+    "decomposer_sft_1_5_0": "./agents.py:decomposer_sft_1_5_0"
   },
   "python_version": "3.12"
 }

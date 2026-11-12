@@ -6,7 +6,7 @@ from gyms.browsecomp import run as browsecomp
 from gyms.widesearch.dataset import TASKS
 
 AGENTS = ["decomposer", "researcher_4b_thinking", "researcher_27b_thinking",
-          "decomposer_4b_non_thinking", "decomposer_sft_1_1_0", "decomposer_sft_1_2_0", "decomposer_sft_1_4_0"]
+          "decomposer_4b_non_thinking", "decomposer_sft_1_1_0", "decomposer_sft_1_2_0", "decomposer_sft_1_4_0", "decomposer_sft_1_5_0"]
 FINAL_FORMAT = "\n\nReturn the requested table in one fenced block labeled markdown (```markdown). Preserve the requested column names."
 BACKEND = "http://127.0.0.1:18082"
 
