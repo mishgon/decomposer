@@ -32,6 +32,11 @@ def now():
     return datetime.now(timezone.utc).isoformat()
 
 
+def interrupted(result):
+    error = result.get("error") or ""
+    return error in {"CancelledError()", "RuntimeError('Agent run interrupted')"} or "UserInterrupt:" in error
+
+
 async def episode(args):
     root = args.output_dir.resolve()
     task = json.loads((root / "task.json").read_text())
@@ -127,7 +132,9 @@ async def main(args):
         previous.setdefault("resumptions", []).append({
             "started_at": now(), "code_revision": manifest["code_revision"],
             "previous_concurrency": previous["concurrency"], "concurrency": args.concurrency,
+            "interrupted_results": [row for row in previous["episodes"] if interrupted(row)],
         })
+        previous["episodes"] = [row for row in previous["episodes"] if not interrupted(row)]
         manifest = previous
         manifest.update(status="running", concurrency=args.concurrency)
         manifest.pop("finished_at", None)
@@ -146,7 +153,7 @@ async def main(args):
                 result_path = directory / "result.json"
                 if result_path.exists():
                     entry = json.loads(result_path.read_text())
-                    if entry.get("error") != "CancelledError()":
+                    if not interrupted(entry):
                         entry["directory"] = str(directory.relative_to(root))
                         manifest["episodes"].append(entry)
                         save(root / "manifest.json", manifest)

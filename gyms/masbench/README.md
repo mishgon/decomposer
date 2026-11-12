@@ -51,6 +51,8 @@ wait for it to exit, then repeat the command with `--resume` and the new
 `--concurrency`. Keep the same output directory, data, agents, repetitions,
 endpoints and timeout. Completed attempts, including failures, are preserved.
 Unfinished attempts are archived under `interrupted/` before they are retried.
+Cancellation responses from asyncio or the Agent Server are treated as
+unfinished attempts, even if a coordinator already recorded them in the manifest.
 The manifest records each resumption and its code revision and concurrency.
 Full runs default to one sample per task and configuration (13,749 episodes).
 `--repetitions 8` measures average correctness over eight attempts, not pass@8.
