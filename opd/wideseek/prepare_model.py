@@ -12,7 +12,7 @@ REVISION = '70f7732e58f25be7787d7ff75761ef85fe90c98e'
 
 def main(args):
     from huggingface_hub import snapshot_download
-    token = (Path.home() / '.config/huggingface/token').read_text().strip()
+    token = os.environ.get('HF_TOKEN') or (Path.home() / '.config/huggingface/token').read_text().strip()
     if args.output.exists():
         raise FileExistsError(args.output)
     source = Path(snapshot_download(REPO, revision=REVISION, token=token,
