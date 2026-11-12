@@ -501,7 +501,7 @@ def build_parser(*, evaluation: bool = False) -> argparse.ArgumentParser:
         description="Evaluate existing model endpoints on GAIA2."
     )
     parser.add_argument(
-        "--agent", choices=("decomposer", "qwen_3_5_4b_thinking"), default="decomposer"
+        "--agent", choices=("decomposer", "qwen_3_5_4b_thinking", "timur_4b_non_thinking"), default="decomposer"
     )
     parser.add_argument(
         "--decomposer-model-id", default="vllm/qwen_3_8_flash_next_non_thinking"

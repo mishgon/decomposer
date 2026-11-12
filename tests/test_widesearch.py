@@ -43,6 +43,11 @@ def test_researchers_share_browsecomp_prompt_tools_and_registry_models(monkeypat
     assert "decomposer_sft_1_4_0" in run.AGENTS
     assert agents.decomposer_sft_1_5_0 is browsecomp_agents.decomposer_sft_1_5_0
     assert "decomposer_sft_1_5_0" in run.AGENTS
+    for name in ("decomposer_sft_1_5_0_timur", "researcher_timur_non_thinking"):
+        assert getattr(agents, name) is getattr(browsecomp_agents, name)
+        assert name in run.AGENTS
+        graphs = json.loads(run.Path(agents.__file__).with_name("langgraph.json").read_text())["graphs"]
+        assert graphs[name] == f"./agents.py:{name}"
 
 
 def test_episode_uses_widesearch_server_and_saves_raw_answer(monkeypatch, tmp_path):

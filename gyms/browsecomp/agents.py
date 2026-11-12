@@ -10,6 +10,7 @@ from gyms.browsecomp.model_logging import log_model_call
 from gyms.browsecomp.tools import ResearchState, search, fetch
 
 RESEARCHER_MODEL = "vllm/qwen_3_5_4b_thinking"
+TIMUR_MODEL = "vllm/timur_4b_non_thinking"
 DECOMPOSER_MODEL = "lmrouter/qwen_3_8_flash_next_non_thinking"
 WORKER_BUDGET_SECONDS = 180.0
 WORKER_GRACE_SECONDS = 180.0
@@ -26,12 +27,14 @@ def _researcher(model_id):
     )
 
 
-def _decomposer(model_id):
+def _decomposer(model_id, *, timur_workers=False):
     return create_decomposer_agent(
         decomposer_model=create_model(model_id),
         agent_types=[{
-            "agent_type_id": "qwen_3_5_4b_thinking", "assistant_id": "researcher",
-            "description": "Qwen3.5-4B thinking agent equipped with search and access tools.",
+            "agent_type_id": "timur_4b_non_thinking" if timur_workers else "qwen_3_5_4b_thinking",
+            "assistant_id": "researcher_timur_non_thinking" if timur_workers else "researcher",
+            "description": ("Timur Qwen3.5-4B non-thinking agent equipped with search and access tools."
+                            if timur_workers else "Qwen3.5-4B thinking agent equipped with search and access tools."),
             "url": os.environ["BROWSECOMP_AGENT_URL"],
         }],
         agent_recursion_limit=410, middleware=[log_model_call],
@@ -79,6 +82,18 @@ def decomposer_sft_1_5_0():
     return _decomposer("vllm/decomposer_manager_qwen35_4b_sft_1_5_0")
 
 
+def researcher_timur_non_thinking():
+    return _researcher(TIMUR_MODEL)
+
+
+def decomposer_sft_1_5_0_timur():
+    return _decomposer("vllm/decomposer_manager_qwen35_4b_sft_1_5_0", timur_workers=True)
+
+
+def worker_model(agent):
+    return TIMUR_MODEL if agent == "decomposer_sft_1_5_0_timur" else RESEARCHER_MODEL
+
+
 # Model and harness recorded in traces, indexed by the LangGraph assistant ID.
 AGENTS = {
     "researcher": (RESEARCHER_MODEL, "react"),
@@ -91,4 +106,6 @@ AGENTS = {
     "decomposer_sft_1_2_0": ("vllm/decomposer_manager_qwen35_4b_sft_1_2_0", "decomposer"),
     "decomposer_sft_1_4_0": ("vllm/decomposer_manager_qwen35_4b_sft_1_4_0", "decomposer"),
     "decomposer_sft_1_5_0": ("vllm/decomposer_manager_qwen35_4b_sft_1_5_0", "decomposer"),
+    "researcher_timur_non_thinking": (TIMUR_MODEL, "react"),
+    "decomposer_sft_1_5_0_timur": ("vllm/decomposer_manager_qwen35_4b_sft_1_5_0", "decomposer"),
 }

@@ -424,6 +424,18 @@ def test_sft_reuses_base_non_thinking_sampling(version, port):
     assert sft.openai_api_base == f"http://127.0.0.1:{port}/v1"
 
 
+def test_timur_reuses_base_non_thinking_sampling():
+    base = create_model("vllm/qwen_3_5_4b_non_thinking")
+    timur = create_model("vllm/timur_4b_non_thinking")
+    expected = base._get_request_payload("test")
+    actual = timur._get_request_payload("test")
+    assert actual.pop("model") == "timur-qwen35-4b"
+    expected.pop("model")
+    assert actual == expected
+    assert not timur.preserve_reasoning
+    assert timur.openai_api_base == "http://127.0.0.1:18036/v1"
+
+
 def test_qwen38_27b_thinking_uses_official_sampling():
     model = create_model("lmrouter/qwen_3_8_27b_medium_thinking")
     payload = model._get_request_payload("test")

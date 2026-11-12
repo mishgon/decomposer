@@ -16,7 +16,7 @@ import httpx
 
 from decomposer.models import create_model
 from gyms.browsecomp import REPO_ROOT
-from gyms.browsecomp.agents import AGENTS, JUDGE_MODEL, WORKER_BUDGET_SECONDS, WORKER_GRACE_SECONDS
+from gyms.browsecomp.agents import AGENTS, JUDGE_MODEL, WORKER_BUDGET_SECONDS, WORKER_GRACE_SECONDS, worker_model
 from gyms.browsecomp.run import preflight as retrieval_preflight, save
 from gyms.widesearch.run import BACKEND, preflight as web_preflight
 
@@ -77,7 +77,7 @@ async def preflight(job):
     evidence = {}
     model_ids = [AGENTS[job['agent']][0], JUDGE_MODEL]
     if AGENTS[job['agent']][1] == 'decomposer':
-        model_ids.append('vllm/qwen_3_5_4b_thinking')
+        model_ids.append(worker_model(job['agent']))
     schema = {'type': 'function', 'function': {'name': 'search', 'description': 'Search',
               'parameters': {'type': 'object', 'properties': {'query': {'type': 'string'}}, 'required': ['query']}}}
     for model_id in dict.fromkeys(model_ids):
