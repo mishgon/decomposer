@@ -39,13 +39,16 @@ mkdir -p "$state/code" "$state/cache" "$state/tmp"
 export UV_CACHE_DIR="$state/cache/uv" UV_PYTHON_INSTALL_DIR="$state/cache/python"
 export HF_HOME="$state/cache/huggingface" XDG_CACHE_HOME="$state/cache"
 export TMPDIR="$state/tmp"
-if [[ ! -d "$code/.git" ]]; then git -c safe.directory="$source_root" clone --no-hardlinks "$source_root" "$code"; fi
+if [[ ! -d "$code/.git" ]]; then
+    git -c safe.directory="$source_root" -c safe.directory="$source_root/.git" \
+        clone --no-hardlinks "$source_root" "$code"
+fi
 cd "$code"
 git checkout --detach "$commit"
 gym_commit="$(git ls-tree HEAD external/Gym | awk '{print $3}')"
 test "$(git -c safe.directory="$gym" -C "$gym" rev-parse HEAD)" = "$gym_commit"
 if [[ ! -d external/Gym/.git ]]; then
-    git -c safe.directory="$gym" clone --no-hardlinks "$gym" external/Gym
+    git -c safe.directory="$gym" -c safe.directory="$gym/.git" clone --no-hardlinks "$gym" external/Gym
 fi
 git -C external/Gym checkout --detach "$gym_commit"
 export MAX_JOBS=8 TORCH_CUDA_ARCH_LIST=9.0 FLASH_ATTN_CUDA_ARCHS=90
