@@ -265,11 +265,21 @@ def test_registered_factories_match_trace_models_and_worker_identity(monkeypatch
         assert config["decomposer_model"] == model
         assert config["agent_run_budget_seconds"] == 180.0
         assert config["agent_shutdown_grace_seconds"] == 180.0
-        assert config["agent_types"] == [{
+        expected_worker = {
             "agent_type_id": "qwen_3_5_4b_thinking", "assistant_id": "researcher",
             "description": "Qwen3.5-4B thinking agent equipped with search and access tools.",
             "url": "http://worker",
-        }]
+        }
+        if name == "decomposer_sft_1_5_0_timur":
+            expected_worker.update(
+                agent_type_id="timur_4b_non_thinking", assistant_id="researcher_timur_non_thinking",
+                description="Timur Qwen3.5-4B non-thinking agent equipped with search and access tools.",
+            )
+            assert agents.worker_model(name) == "vllm/timur_4b_non_thinking"
+            assert agents.researcher_timur_non_thinking()["model"] == agents.worker_model(name)
+        else:
+            assert agents.worker_model(name) == "vllm/qwen_3_5_4b_thinking"
+        assert config["agent_types"] == [expected_worker]
 
 
 @pytest.mark.parametrize("mismatch", [None, "agent", "timeout", "running"])
