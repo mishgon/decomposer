@@ -98,6 +98,7 @@ def main():
     parser.add_argument('--assets', type=Path, required=True)
     parser.add_argument('--source', type=Path, required=True)
     parser.add_argument('--model', type=Path, required=True)
+    parser.add_argument('--search-url', help='Reuse an existing retrieval service; leave its lifecycle to its owner')
     parser.add_argument('--baseline', type=Path, help='Reuse a completed starting-checkpoint baseline; training verifies its source hash')
     add_gpu_arguments(parser)
     args = parser.parse_args()
@@ -111,10 +112,21 @@ def main():
     if subprocess.check_output(['git', 'status', '--porcelain'], text=True).strip():
         raise RuntimeError('Review and commit changes before launching')
     check_inputs(args)
-    # Never reuse someone else's local service or inference server.
-    for port in (16333, 16334, 18080, 8024):
+    # Only reserve ports for services this launch will start.
+    ports = [] if args.search_url else [16333, 16334, 18080]
+    if not args.baseline:
+        ports.append(8024)
+    for port in ports:
         with socket.socket() as sock:
             sock.bind(('127.0.0.1', port))
+    if args.search_url:
+        import httpx
+        with httpx.Client(trust_env=False, timeout=30) as client:
+            response = client.post(args.search_url.rstrip('/') + '/retrieve',
+                                   json={'queries': ['Paris'], 'topk': 1})
+            response.raise_for_status()
+            if not response.json()['result'][0]:
+                raise RuntimeError('Existing retrieval service returned no results')
     with ExitStack() as stack:
         args.root.parent.mkdir(parents=True, exist_ok=True)
         for gpu in sorted(args.gpus):
@@ -127,18 +139,20 @@ def main():
         args.root = args.root.resolve()
         args.root.mkdir(exist_ok=False)
         os.environ.update(WS_ASSETS=str(args.assets.resolve()), WS_TASK_SOURCE=str(args.source.resolve()),
-                          WS_SEARCH_URL='http://127.0.0.1:18080', RAY_USE_UVLOOP='0')
+                          WS_SEARCH_URL=args.search_url or 'http://127.0.0.1:18080', RAY_USE_UVLOOP='0')
         os.environ['PYTHONPATH'] = f"{REPO_ROOT / 'opd/wideseek/dns'}:{REPO_ROOT}:{os.environ.get('PYTHONPATH', '')}"
         os.environ['PATH'] = str(Path(sys.executable).parent) + ':' + os.environ['PATH']
         commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
         state = {'status': 'running', 'pid': os.getpid(), 'started_at': time.time(),
-                 'gpus': args.gpus, 'training_gpus': args.training_gpus, 'commit': commit, 'code_dir': str(REPO_ROOT)}
+                 'gpus': args.gpus, 'training_gpus': args.training_gpus, 'commit': commit, 'code_dir': str(REPO_ROOT),
+                 'search_url': os.environ['WS_SEARCH_URL'], 'owns_retrieval': not bool(args.search_url)}
         save(args.root / 'local-run.json', state)
         try:
-            stack.enter_context(service(['bash', 'gyms/wideseek/serve.sh', 'qdrant'],
-                args.root / 'qdrant.log', 'http://127.0.0.1:16333/healthz'))
-            stack.enter_context(service(['bash', 'gyms/wideseek/serve.sh', 'retrieval'],
-                args.root / 'retrieval.log', 'http://127.0.0.1:18080/health'))
+            if not args.search_url:
+                stack.enter_context(service(['bash', 'gyms/wideseek/serve.sh', 'qdrant'],
+                    args.root / 'qdrant.log', 'http://127.0.0.1:16333/healthz'))
+                stack.enter_context(service(['bash', 'gyms/wideseek/serve.sh', 'retrieval'],
+                    args.root / 'retrieval.log', 'http://127.0.0.1:18080/health'))
             if args.baseline:
                 (args.root / 'baseline').symlink_to(args.baseline.resolve(), target_is_directory=True)
             else:
