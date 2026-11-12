@@ -1,0 +1,9 @@
+{
+  "dependencies": ["../.."],
+  "graphs": {
+    "single": "./agents.py:single",
+    "base_manager": "./agents.py:base_manager",
+    "sft_manager": "./agents.py:sft_manager"
+  },
+  "python_version": "3.12"
+}
