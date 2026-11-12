@@ -114,8 +114,6 @@ def main():
     check_inputs(args)
     # Only reserve ports for services this launch will start.
     ports = [] if args.search_url else [16333, 16334, 18080]
-    if not args.baseline:
-        ports.append(8024)
     for port in ports:
         with socket.socket() as sock:
             sock.bind(('127.0.0.1', port))
