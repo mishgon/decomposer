@@ -32,7 +32,7 @@ async def main(args):
                 'tasks': 8, 'repetitions': 4, 'concurrency': 8, 'episodes': [],
                 'source_sha256': panel['source_sha256'], 'started_at': time.time()}
     save(root / 'manifest.json', manifest)
-    policy = create_model(manifest['model'])
+    policy = create_model(manifest['model'], base_url=args.base_url)
     semaphore = asyncio.Semaphore(8)
 
     async def run(task, attempt, url):
@@ -77,5 +77,6 @@ if __name__ == '__main__':
     parser.add_argument('--model', type=Path, required=True)
     parser.add_argument('--source', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--base-url', help='Starting-checkpoint inference server URL')
     parser.add_argument('--worker-python', type=Path, default=REPO_ROOT / '.venv-workers/bin/python')
     asyncio.run(main(parser.parse_args()))
