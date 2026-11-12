@@ -90,7 +90,11 @@ def test_episode_preserves_raw_output_but_does_not_pass_timeout(monkeypatch, tmp
     assert (tmp_path / "usage.json").exists()
 
 
-def test_queue_stops_after_repeated_crashes_and_records_failed_attempts(monkeypatch, tmp_path):
+@pytest.mark.parametrize("interrupt_error", [
+    "CancelledError()", "Exception('UserInterrupt: User interrupted the run')",
+    "RuntimeError('Agent run interrupted')",
+])
+def test_queue_stops_after_repeated_crashes_and_records_failed_attempts(monkeypatch, tmp_path, interrupt_error):
     data = tmp_path / "tasks.jsonl"
     data.write_text("\n".join(json.dumps({
         "task_id": f"depth-{index:04d}", "axis": "depth", "value": "2",
@@ -119,10 +123,13 @@ def test_queue_stops_after_repeated_crashes_and_records_failed_attempts(monkeypa
                 "status": "error" if error else "finished",
                 "evaluation": {"passed": error is None, "score": int(error is None)}}
 
-    for index, error in ((3, None), (4, "CancelledError()")):
+    for index, error in ((3, None), (4, interrupt_error)):
         directory = output / "single" / f"depth-{index:04d}-r001"
         directory.mkdir()
         (directory / "result.json").write_text(json.dumps(result(index, error)))
+    # A coordinator may already have recorded the SDK's interruption response.
+    manifest["episodes"].append(result(4, interrupt_error))
+    (output / "manifest.json").write_text(json.dumps(manifest))
 
     args.resume = True
     args.timeout += 1
@@ -149,4 +156,5 @@ def test_queue_stops_after_repeated_crashes_and_records_failed_attempts(monkeypa
     assert manifest["resumptions"][0]["concurrency"] == 2
     archived = list((output / "interrupted/single").glob("*/result.json"))
     assert len(archived) == 1
-    assert json.loads(archived[0].read_text())["error"] == "CancelledError()"
+    assert json.loads(archived[0].read_text())["error"] == interrupt_error
+    assert manifest["resumptions"][0]["interrupted_results"][0]["error"] == interrupt_error
