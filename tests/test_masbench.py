@@ -110,3 +110,43 @@ def test_queue_stops_after_repeated_crashes_and_records_failed_attempts(monkeypa
     assert manifest["status"] == "needs_attention"
     assert len(manifest["episodes"]) == 3
     assert all(row["evaluation"]["score"] == 0 for row in manifest["episodes"])
+
+    # Recover a finished result not yet checkpointed by the coordinator; retry
+    # an interrupted attempt, without retrying any of the three recorded errors.
+    def result(index, error=None):
+        return {"task_id": f"depth-{index:04d}", "axis": "depth", "value": "2",
+                "agent": "single", "repetition": 1, "error": error,
+                "status": "error" if error else "finished",
+                "evaluation": {"passed": error is None, "score": int(error is None)}}
+
+    for index, error in ((3, None), (4, "CancelledError()")):
+        directory = output / "single" / f"depth-{index:04d}-r001"
+        directory.mkdir()
+        (directory / "result.json").write_text(json.dumps(result(index, error)))
+
+    args.resume = True
+    args.timeout += 1
+    with pytest.raises(ValueError, match="timeout_seconds"):
+        asyncio.run(run.main(args))
+    args.timeout -= 1
+
+    async def spawn(*command, **kwargs):
+        directory = run.Path(command[command.index("--output-dir") + 1])
+        assert directory.name == "depth-0004-r001"
+        (directory / "result.json").write_text(json.dumps(result(4)))
+        return SimpleNamespace(returncode=0, wait=AsyncMock(return_value=0))
+
+    mock_spawn = AsyncMock(side_effect=spawn)
+    monkeypatch.setattr(run.asyncio, "create_subprocess_exec", mock_spawn)
+    args.concurrency = 2
+    with pytest.raises(RuntimeError, match="needs_attention"):
+        asyncio.run(run.main(args))
+    mock_spawn.assert_awaited_once()
+    manifest = json.loads((output / "manifest.json").read_text())
+    assert len(manifest["episodes"]) == 5
+    assert sum(row["status"] == "error" for row in manifest["episodes"]) == 3
+    assert manifest["resumptions"][0]["previous_concurrency"] == 1
+    assert manifest["resumptions"][0]["concurrency"] == 2
+    archived = list((output / "interrupted/single").glob("*/result.json"))
+    assert len(archived) == 1
+    assert json.loads(archived[0].read_text())["error"] == "CancelledError()"

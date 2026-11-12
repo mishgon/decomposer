@@ -46,6 +46,12 @@ export MASBENCH_SFT_URL=http://127.0.0.1:18024/v1
 ```
 
 The output directory must be new. Smoke runs select the first task in each axis.
+To change concurrency on an existing run, send SIGINT to its coordinator and
+wait for it to exit, then repeat the command with `--resume` and the new
+`--concurrency`. Keep the same output directory, data, agents, repetitions,
+endpoints and timeout. Completed attempts, including failures, are preserved.
+Unfinished attempts are archived under `interrupted/` before they are retried.
+The manifest records each resumption and its code revision and concurrency.
 Full runs default to one sample per task and configuration (13,749 episodes).
 `--repetitions 8` measures average correctness over eight attempts, not pass@8.
 The default episode timeout is 1,800 seconds for all configurations, with a

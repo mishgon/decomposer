@@ -11,6 +11,7 @@ import signal
 import socket
 import subprocess
 import sys
+from uuid import uuid4
 
 import httpx
 from decomposer.agent_server import agent_server
@@ -101,7 +102,8 @@ async def main(args):
         raise ValueError("Agents must be unique")
     await preflight(agents)
     root = args.output_dir.resolve()
-    root.mkdir(parents=True, exist_ok=False)
+    if not args.resume:
+        root.mkdir(parents=True, exist_ok=False)
     manifest = {
         "status": "running", "started_at": now(), "agents": agents,
         "dataset": DATASET, "dataset_revision": REVISION,
@@ -114,6 +116,21 @@ async def main(args):
         "packages": {name: version(name) for name in
                      ("langchain", "langgraph", "langgraph-sdk", "math-verify", "datasets")},
     }
+    if args.resume:
+        previous = json.loads((root / "manifest.json").read_text())
+        if previous["status"] not in {"interrupted", "needs_attention"}:
+            raise ValueError("Stop the previous runner before resuming")
+        for key in ("agents", "dataset", "dataset_revision", "data_sha256", "tasks",
+                    "repetitions", "timeout_seconds", "models", "base_url", "sft_url", "packages"):
+            if previous[key] != manifest[key]:
+                raise ValueError(f"Resume must preserve {key}")
+        previous.setdefault("resumptions", []).append({
+            "started_at": now(), "code_revision": manifest["code_revision"],
+            "previous_concurrency": previous["concurrency"], "concurrency": args.concurrency,
+        })
+        manifest = previous
+        manifest.update(status="running", concurrency=args.concurrency)
+        manifest.pop("finished_at", None)
     save(root / "manifest.json", manifest)
     semaphore = asyncio.Semaphore(args.concurrency)
     stop = asyncio.Event()
@@ -125,6 +142,18 @@ async def main(args):
             if stop.is_set():
                 return
             directory = root / agent / f"{task['task_id']}-r{repetition:03d}"
+            if directory.exists():
+                result_path = directory / "result.json"
+                if result_path.exists():
+                    entry = json.loads(result_path.read_text())
+                    if entry.get("error") != "CancelledError()":
+                        entry["directory"] = str(directory.relative_to(root))
+                        manifest["episodes"].append(entry)
+                        save(root / "manifest.json", manifest)
+                        return
+                archived = root / "interrupted" / agent
+                archived.mkdir(parents=True, exist_ok=True)
+                directory.rename(archived / f"{directory.name}-{uuid4().hex[:8]}")
             directory.mkdir(parents=True)
             save(directory / "task.json", task)
             command = [sys.executable, "-m", "gyms.masbench.run", "--episode", "--agent", agent,
@@ -162,8 +191,10 @@ async def main(args):
             print(f"{len(manifest['episodes'])}/{len(tasks) * len(agents) * args.repetitions} "
                   f"{agent} {task['task_id']}: {entry['status']} score={entry['evaluation']['score']}", flush=True)
 
+    completed = {(row["task_id"], row["agent"], row["repetition"]) for row in manifest["episodes"]}
     jobs = [asyncio.create_task(launch(task, agent, rep))
-            for task in tasks for rep in range(1, args.repetitions + 1) for agent in agents]
+            for task in tasks for rep in range(1, args.repetitions + 1) for agent in agents
+            if (task["task_id"], agent, rep) not in completed]
     try:
         await asyncio.gather(*jobs)
         manifest["status"] = "needs_attention" if stop.is_set() or any(
@@ -191,6 +222,7 @@ def parser():
     cli.add_argument("--data", type=Path)
     cli.add_argument("--output-dir", type=Path, required=True, help="New run directory (must not exist)")
     cli.add_argument("--concurrency", type=int, default=12)
+    cli.add_argument("--resume", action="store_true", help="Resume a stopped run in --output-dir")
     cli.add_argument("--repetitions", type=int, default=1)
     cli.add_argument("--timeout", type=float, default=1800)
     cli.add_argument("--episode", action="store_true", help=argparse.SUPPRESS)
