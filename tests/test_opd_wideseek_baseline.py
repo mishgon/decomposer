@@ -32,11 +32,12 @@ def test_baseline_timeout_completes_but_infrastructure_errors_fail(tmp_path, mon
     monkeypatch.setattr(baseline, 'prepare', prepare)
     monkeypatch.setattr(baseline, 'agent_server', server)
     monkeypatch.setattr(baseline, 'episode', episode)
-    monkeypatch.setattr(baseline, 'create_model', lambda name: object())
+    monkeypatch.setattr(baseline, 'create_model', lambda name, base_url: object())
     close = AsyncMock()
     monkeypatch.setattr(baseline, 'close_model', close)
     monkeypatch.setenv('WS_ARTIFACT_ROOT', '')
-    args = SimpleNamespace(model=tmp_path / 'model', output=tmp_path / 'baseline', source=tmp_path / 'source', worker_python='unused')
+    args = SimpleNamespace(model=tmp_path / 'model', output=tmp_path / 'baseline', source=tmp_path / 'source',
+                           worker_python='unused', base_url='http://unused/v1')
     if failure == 'timeout':
         asyncio.run(baseline.main(args))
         manifest = json.loads((args.output / 'manifest.json').read_text())

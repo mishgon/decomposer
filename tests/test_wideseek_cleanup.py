@@ -125,6 +125,29 @@ def test_cancel_waits_for_terminal_status_to_be_visible(tmp_path):
     client.threads.delete.assert_awaited_once_with('thread')
 
 
+@pytest.mark.parametrize('initial_run', [False, True])
+def test_cleanup_cancels_run_created_after_first_scan(tmp_path, initial_run):
+    runs = {'thread': [{'run_id': 'first', 'status': 'running'}] if initial_run else []}
+    client = client_with_runs(runs)
+    original_list = client.runs.list.side_effect
+    scans = 0
+
+    async def list_runs(thread_id, **kwargs):
+        nonlocal scans
+        scans += 1
+        if scans == 2:
+            runs['thread'].append({'run_id': 'late', 'status': 'pending'})
+        return await original_list(thread_id, **kwargs)
+
+    client.runs.list.side_effect = list_runs
+    with patch('gyms.wideseek.run.asyncio.sleep', new=AsyncMock()):
+        assert asyncio.run(cleanup_workers(client, state_for('thread'), tmp_path)) == []
+    client.runs.cancel.assert_any_await('thread', 'late', wait=True)
+    saved = json.loads((tmp_path / 'subagents/thread.json').read_text())
+    assert all(r['status'] == 'interrupted' for r in saved['runs'])
+    client.threads.delete.assert_awaited_once_with('thread')
+
+
 @pytest.mark.parametrize('final_status', ['success', 'running', 'missing'])
 def test_cancel_404_requires_confirmed_terminal_run(tmp_path, final_status):
     runs = {'thread': [{'run_id': 'r', 'status': 'running'}]}

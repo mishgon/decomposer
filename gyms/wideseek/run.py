@@ -76,8 +76,11 @@ async def cleanup_workers(client, state, path):
         try:
             # A runs.create response can be lost before its ID reaches parent state.
             runs = await list_runs(thread_id)
-            for run in runs:
-                if run["status"] in {"pending", "running"}:
+            cancellation_requested = set()
+            for _ in range(21):
+                for run in runs:
+                    if run["status"] not in {"pending", "running"} or run['run_id'] in cancellation_requested:
+                        continue
                     try:
                         await asyncio.wait_for(client.runs.cancel(thread_id, run["run_id"], wait=True), 30)
                     except httpx.HTTPStatusError as exc:
@@ -89,13 +92,13 @@ async def cleanup_workers(client, state, path):
                                    r['status'] in {'success', 'error', 'interrupted', 'timeout'}
                                    for r in refreshed):
                             raise
-            runs = await list_runs(thread_id)
-            # Cancellation can return before the worker's terminal status is visible.
-            for _ in range(20):
+                    cancellation_requested.add(run['run_id'])
+                # A cancelled create request can still arrive at the server after
+                # our first scan. Cancel newly discovered runs on the next pass.
+                runs = await list_runs(thread_id)
                 if not any(r["status"] in {"pending", "running"} for r in runs):
                     break
                 await asyncio.sleep(0.5)
-                runs = await list_runs(thread_id)
             if any(r["status"] in {"pending", "running"} for r in runs):
                 raise RuntimeError("Worker still active after cancellation")
             worker_state = await asyncio.wait_for(client.threads.get_state(thread_id), 30)
