@@ -61,7 +61,10 @@ recursion limit of 410. Workers have no separate time limit. This comparison doe
 not equalize token usage; usage is saved for subsequent cost comparisons.
 
 Each episode has an isolated Agent Server with 64 execution slots. Cleanup stops
-its outstanding worker runs. Three consecutive episode errors stop scheduling
+its outstanding worker runs. The parent reserves the listening socket and passes
+its file descriptor to the server, preventing port collisions during concurrent
+startup. The actual endpoint is recorded in each episode's `server.json`.
+Three consecutive episode errors stop scheduling
 new work. Errors and timeouts count as failures; summaries include their counts
 and distinguish completed episodes from the planned denominator. Partial runs
 must not be compared as full benchmark results.

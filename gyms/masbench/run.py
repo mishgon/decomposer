@@ -8,7 +8,6 @@ import json
 import os
 from pathlib import Path
 import signal
-import socket
 import subprocess
 import sys
 from uuid import uuid4
@@ -41,19 +40,17 @@ async def episode(args):
     root = args.output_dir.resolve()
     task = json.loads((root / "task.json").read_text())
     os.environ["MASBENCH_MODEL_LOG"] = str(root / "model_calls.jsonl")
-    with socket.socket() as listener:
-        listener.bind(("127.0.0.1", 0))
-        port = listener.getsockname()[1]
-    os.environ["MASBENCH_AGENT_URL"] = f"http://127.0.0.1:{port}"
     started = now()
     state, error = {}, None
     inputs = task_input(task)
     save(root / "input.json", inputs)
     try:
-        async with agent_server(Path(__file__).with_name("langgraph.json"), port=port,
-                                startup_timeout=120, n_jobs_per_worker=64):
+        async with agent_server(Path(__file__).with_name("langgraph.json"), port=0,
+                                startup_timeout=120, n_jobs_per_worker=64,
+                                url_env="MASBENCH_AGENT_URL") as url:
+            save(root / "server.json", {"url": url})
             state, error = await invoke_and_capture(
-                os.environ["MASBENCH_AGENT_URL"], args.agent, inputs,
+                url, args.agent, inputs,
                 timeout=args.timeout, config={"recursion_limit": 410},
             )
     except Exception as exc:
