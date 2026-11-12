@@ -7,10 +7,11 @@ checkpoint="${2:?Starting checkpoint directory}"
 output="${3:?New baseline output directory}"
 test -f "$checkpoint/config.json"
 test ! -e "$output"
-if [[ -n "$(ss -ltnH 'sport = :8024')" ]]; then
-    echo "Port 8024 is already occupied; refusing to reuse another server." >&2
-    exit 1
-fi
+python - <<'PY'
+import socket
+with socket.socket() as listener:
+    listener.bind(('127.0.0.1', 8024))
+PY
 used=$(nvidia-smi -i "$gpu" --query-gpu=memory.used --format=csv,noheader,nounits)
 if (( used > 1024 )); then
     echo "GPU $gpu is occupied ($used MiB); refusing to launch." >&2
