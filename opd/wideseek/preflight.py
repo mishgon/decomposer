@@ -29,7 +29,8 @@ async def check(model_path, output, *, worker_url, search_url):
     values = await asyncio.wait_for(score(ids, tokenizer=tokenizer, output=output / 'teacher.json'), 90)
     subagent = model(RESEARCHER_MODEL)
     try:
-        reply = await asyncio.wait_for(subagent.ainvoke('Reply with OK.', max_tokens=512), 90)
+        # The lmrouter transport owns timeouts and outage recovery.
+        reply = await subagent.ainvoke('Reply with OK.', max_tokens=512)
         if not reply.content:
             raise ValueError('Subagent returned no content')
     finally:
