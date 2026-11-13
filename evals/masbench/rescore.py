@@ -69,7 +69,11 @@ def declared_integer(text):
     direct = integer(text)
     if direct is not None:
         return direct
-    if re.search(r"\b(or|maybe|possibly|uncertain|cannot)\b", text, re.IGNORECASE):
+    if re.search(r"\b(or|and|maybe|possibly|uncertain|cannot)\b|[,;]", text, re.IGNORECASE):
+        return None
+    # A named result may be followed by a calculation chain. An equation such
+    # as X + 1 = 3 does not declare X's answer and must not become 3.
+    if not re.match(r"^[A-Za-z][A-Za-z0-9_'’ .]*?(?:\s*=(?!=)|\s+is\s+|\s*→)", text):
         return None
     result = re.search(
         r"(?:(?<![!<>=])=|≡|→|\bis\b)\s*([+-]?\d+)(?:\s*\((?:mod(?:ulo)?\s+23|directly given as \1)\))?\.?$",
@@ -107,6 +111,10 @@ def normalize_answer(text, count):
             block = clean[field.end():end]
             labels = re.findall(r"(?im)^[ \t]*(?:[-*][ \t]*)?Answer[ \t]*:[ \t]*([^\n]+)", block)
             declarations = ([field[2]] if field[2].strip() else []) + labels
+            if not field[2].strip() and block.strip():
+                next_line = block.strip().splitlines()[0]
+                if integer(next_line) is not None:
+                    declarations.insert(0, next_line)
             candidates = [declared_integer(value) for value in declarations]
             values.append(candidates[0] if candidates and None not in candidates and len(set(candidates)) == 1 else None)
         if fields and (indices != list(range(1, count + 1)) or None in values):
