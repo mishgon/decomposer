@@ -1,0 +1,5 @@
+{
+  "training_sources": [
+    {"gym": "wideseek", "split": "depth", "weight": 1.0}
+  ]
+}
