@@ -26,6 +26,40 @@ judge, so it is not an exact reproduction of the paper's scoring implementation.
 We report answer correctness, excluding the training reward for executing a
 generated orchestration graph.
 
+### Offline Scoring Audit
+
+`evals.masbench.rescore` preserves the original results and reports two additional
+metrics. `official` runs the pinned authors' deterministic comparison functions,
+including MathScorer and math-verify, with the optional LLM judge disabled. The
+functions are loaded unchanged from a source checkout after verifying file
+hashes; AST selection avoids importing the unrelated VERL training runtime.
+Single-answer responses are passed whole, as upstream does. Multi-answer tasks
+require all boxes in the response to match the expected count and order.
+
+`normalized` is a separate, non-official diagnostic. It accepts explicit integer
+answer fields and the last `Final Answer(s)` section, then applies the same
+upstream scorer. It preserves order and repetitions, rejects ambiguous fields,
+and does not evaluate expressions or search for reference values in explanations.
+Normalization uses the expected answer count but never reference values. It can
+both promote and demote results. Per the experiment's reporting convention,
+timeouts and GraphRecursionError step limits are excluded from aggregate
+denominators; other errors remain failures. Excluded counts are reported separately.
+All attempts, including exclusions, remain in the per-episode audit.
+Unrecognized formats retain their original text; the diagnostic does
+not claim to recover every correctly stated answer.
+
+The audit takes an immutable JSON snapshot with `manifest` and `answers` keys.
+`manifest` is the saved run manifest; each `answers` entry has the episode's
+`directory` and the exact contents of its `answer.txt` as `answer`. The output
+records per-episode scores, normalized text, answer and snapshot hashes, upstream
+file hashes, and package versions. It refuses to overwrite an existing report.
+
+```bash
+.venv/bin/python -m evals.masbench.rescore artifacts/evals/masbench/snapshot.json \
+  --upstream /path/to/MAS-Orchestra-0527c70a508eb49ed42d5dd49a91ea857551e242 \
+  --output artifacts/evals/masbench/rescored.json
+```
+
 ## Run
 
 Install the project and gym requirements in an existing Python 3.12 environment:
