@@ -11,8 +11,6 @@ import subprocess
 import sys
 import time
 
-from opd.synth.mlspace.experiments import SANITY_ROOT
-
 
 def duration(seconds):
     minutes = max(0, round(seconds / 60))
@@ -66,6 +64,30 @@ def update_eta(points, step, total):
         return None
     seconds = (by_step[recent[-1]] - by_step[recent[0]]) / (recent[-1] - recent[0])
     return max(0, total-step)*seconds if seconds > 0 else None
+
+
+def resume_history(train, series):
+    """Include ancestor metrics only through the checkpoint actually restored."""
+    merged = {tag: {p.step: p for p in points} for tag, points in series.items()}
+    seen = {train.resolve()}
+    restored_step = 0
+    cutoff = None
+    while source := read_json(train / 'run.json').get('resume_from'):
+        checkpoint = Path(source)
+        step = int(checkpoint.name.removeprefix('global_step_'))
+        if cutoff is None:
+            restored_step = step
+        cutoff = min(cutoff, step) if cutoff is not None else step
+        train = checkpoint.parent.parent.resolve()
+        if train in seen:
+            raise ValueError('Cycle in checkpoint resume history')
+        seen.add(train)
+        for tag, points in scalars(train / 'tensorboard').items():
+            history = merged.setdefault(tag, {})
+            for point in points:
+                if point.step <= cutoff:
+                    history.setdefault(point.step, point)
+    return {tag: [points[s] for s in sorted(points)] for tag, points in merged.items()}, restored_step
 
 
 def planned_updates(train):
@@ -168,9 +190,11 @@ def show(root, run=None):
         if active and not metadata and baseline['status'] == 'running' and len(rows) >= 3:
             eta = (total-len(rows)) * (now-baseline['started_at']) / len(rows)
             print(f'  ETA baseline only: ~{duration(eta)} (observed wall throughput)')
-    series = scalars(train / 'tensorboard')
-    points = series.get('training/global_step', [])
-    step = int(points[-1].value) if points else 0
+    current_series = scalars(train / 'tensorboard')
+    series, restored_step = resume_history(train, current_series)
+    # ETA uses only this attempt's clock, excluding downtime before a resume.
+    points = current_series.get('training/global_step', [])
+    step = max(restored_step, int(points[-1].value) if points else 0)
     marker = train / 'checkpoints/latest_checkpointed_iteration.txt'
     if marker.exists():
         try:
@@ -179,6 +203,8 @@ def show(root, run=None):
             pass
     total = planned_updates(train)
     print(f"Optimizer updates: {step}/{total if total is not None else '?'}")
+    if restored_step:
+        print(f'Resumed from step {restored_step} | history included through that checkpoint')
     if state in {'completed', 'succeeded'}:
         print('ETA: finished')
     elif not active:
@@ -225,7 +251,7 @@ def show(root, run=None):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--root', type=Path, default=SANITY_ROOT)
+    parser.add_argument('--root', type=Path, default=Path(__file__).resolve().parents[3] / 'decomposer-artifacts/sanity')
     parser.add_argument('--run', help='Experiment directory name (default: latest submission)')
     parser.add_argument('--once', action='store_true')
     parser.add_argument('--interval', type=float, default=15)
