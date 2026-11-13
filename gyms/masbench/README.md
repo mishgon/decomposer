@@ -37,7 +37,9 @@ Single-answer responses are passed whole, as upstream does. Multi-answer tasks
 require all boxes in the response to match the expected count and order.
 
 `normalized` is a separate, non-official diagnostic. It accepts explicit integer
-answer fields and the last `Final Answer(s)` section, then applies the same
+answer fields (including a stated integer RHS such as `X = 3` or `value is 3`),
+numbered problem blocks with an explicit `Answer:` field, and the last
+`Final Answer(s)` section, then applies the same
 upstream scorer. It preserves order and repetitions, rejects ambiguous fields,
 and does not evaluate expressions or search for reference values in explanations.
 Normalization uses the expected answer count but never reference values. It can
