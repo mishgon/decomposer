@@ -18,7 +18,7 @@ from opd.launch import add_gpu_arguments, gpu_overrides
 from opd.report import save_report
 
 
-async def main(args, overrides):
+async def main(args, overrides, *, prepare_data=prepare):
     trainer_env = None
     config_name = 'full'
     if bundle := os.environ.get('OPD_FAST_RUNTIME'):
@@ -57,7 +57,7 @@ async def main(args, overrides):
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=False)
     data = output / "data"
-    panel = prepare(args.source, data)
+    panel = prepare_data(args.source, data)
     if baseline.get("source_sha256") != panel["source_sha256"]:
         raise ValueError("Baseline and training WideSeek source differ")
     with socket.socket() as listener:
@@ -121,7 +121,7 @@ async def main(args, overrides):
     save_report(output)
 
 
-if __name__ == "__main__":
+def create_parser():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", type=Path, required=True, help="Pinned normalized WideSeek task JSONL")
     parser.add_argument("--baseline", type=Path, required=True)
@@ -130,5 +130,9 @@ if __name__ == "__main__":
     add_gpu_arguments(parser)
     parser.add_argument("--resume-from", type=Path, help="Restore full veRL checkpoint into a new output directory")
     parser.add_argument("--worker-python", type=Path, default=ROOT / ".venv-workers/bin/python")
-    args, overrides = parser.parse_known_args()
+    return parser
+
+
+if __name__ == "__main__":
+    args, overrides = create_parser().parse_known_args()
     asyncio.run(main(args, overrides))
