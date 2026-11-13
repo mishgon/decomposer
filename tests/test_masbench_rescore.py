@@ -24,6 +24,8 @@ from evals.masbench.rescore import normalize_answer, rescore, upstream_comparato
     ("\\boxed{0}\n\\boxed{0}\n### Final Answers\nProblem 1: \\boxed{0}\nProblem 2: \\boxed{0}",
      2, "\\boxed{0}\n\\boxed{0}"),
     (r"\boxed{0}\boxed{0}\boxed{0}\boxed{0}", 2, None),
+    ("\\boxed{0}\n\\boxed{0}\n**Final Answers:**\nProblem 1: \\boxed{0}\nProblem 2: \\boxed{0}",
+     2, "\\boxed{0}\n\\boxed{0}"),
     ("Answer: 3\n### Final Answer\n8", 1, r"\boxed{8}"),
 ])
 def test_explicit_answer_normalization(answer, count, expected):
@@ -51,9 +53,13 @@ def test_rescore_preserves_failures_and_reports_demotions(monkeypatch):
             for i, status in enumerate(["finished", "timeout", "error"])]
     snapshot = {"manifest": {"episodes": rows},
                 "answers": [{"directory": str(i), "answer": "Answer: 2\n9"} for i in range(3)]}
+    rows[2]["evaluation"] = {"passed": False, "score": 0}
+    snapshot["answers"].pop()
     before = json.dumps(snapshot)
     result = asyncio.run(rescore(snapshot, Path("unused")))
     assert json.dumps(snapshot) == before
     assert [row["official"] for row in result["episodes"]] == [True, False, False]
     assert not any(row["normalized"] for row in result["episodes"])
     assert result["groups"][0]["demoted"] == 1
+    assert result["groups"][0]["n"] == 2
+    assert result["groups"][0]["timeouts_excluded"] == 1

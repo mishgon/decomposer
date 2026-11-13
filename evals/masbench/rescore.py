@@ -71,7 +71,7 @@ def normalize_answer(text, count):
     multi-answer labels must cover exactly 1..count. No arithmetic is evaluated.
     """
     headings = list(re.finditer(
-        r"(?im)^\s*(?:#{1,6}\s*)?(?:\*\*)?Final Answers?(?:\*\*)?\s*:?\s*$", text,
+        r"(?im)^\s*(?:#{1,6}\s*)?(?:\*\*)?Final Answers?\s*:?(?:\*\*)?\s*:?\s*$", text,
     ))
     section = text[headings[-1].end():] if headings else text
     boxes = boxed_answers(section)
@@ -107,12 +107,14 @@ async def rescore(snapshot, source):
     episodes = []
     groups = defaultdict(list)
     for row in snapshot["manifest"]["episodes"]:
-        answer = answers[row["directory"]]
-        expected = row["evaluation"]["expected"]
-        gold = "<<horizon>>".join(expected)
-        normalized, method = normalize_answer(answer, len(expected))
+        answer = answers.get(row["directory"], "")
+        normalized, method = answer, "not_finished"
         official = corrected = False
         if row["status"] == "finished":
+            answer = answers[row["directory"]]
+            expected = row["evaluation"]["expected"]
+            gold = "<<horizon>>".join(expected)
+            normalized, method = normalize_answer(answer, len(expected))
             official = await compare(answer, gold)
             corrected = official if normalized == answer else await compare(normalized, gold)
         record = {key: row[key] for key in ("task_id", "axis", "value", "agent", "status", "directory")}
@@ -125,12 +127,16 @@ async def rescore(snapshot, source):
             groups[(row["agent"], axis)].append(record)
     summary = []
     for (agent, axis), rows in sorted(groups.items()):
+        timeouts = sum(row["status"] == "timeout" for row in rows)
+        rows = [row for row in rows if row["status"] != "timeout"]
         summary.append({"agent": agent, "axis": axis, "n": len(rows),
+                        "timeouts_excluded": timeouts,
                         **{metric: sum(row[metric] for row in rows)
                            for metric in ("original", "official", "normalized")},
                         "promoted": sum(not row["official"] and row["normalized"] for row in rows),
                         "demoted": sum(row["official"] and not row["normalized"] for row in rows)})
     return {"upstream_revision": UPSTREAM_REVISION, "source_hashes": SOURCE_HASHES,
+            "denominator": "all attempts except timeouts; errors remain failures",
             "protocol": "upstream deterministic answer correctness, LLM judge disabled",
             "normalized_protocol": "explicit integer fields or last Final Answers section; ordered exact match",
             "groups": summary, "episodes": episodes}

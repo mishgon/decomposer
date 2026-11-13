@@ -41,8 +41,10 @@ answer fields and the last `Final Answer(s)` section, then applies the same
 upstream scorer. It preserves order and repetitions, rejects ambiguous fields,
 and does not evaluate expressions or search for reference values in explanations.
 Normalization uses the expected answer count but never reference values. It can
-both promote and demote results. Timeouts and errors remain failures in both
-metrics. Unrecognized formats retain their original text; the diagnostic does
+both promote and demote results. Per the experiment's reporting convention,
+timeouts are excluded from aggregate denominators; errors remain failures.
+All attempts, including excluded timeouts, remain in the per-episode audit.
+Unrecognized formats retain their original text; the diagnostic does
 not claim to recover every correctly stated answer.
 
 The audit takes an immutable JSON snapshot with `manifest` and `answers` keys.
