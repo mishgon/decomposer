@@ -72,7 +72,7 @@ python -m evals.wideseek.teacher_solved_local \
   --gpu 0 --concurrency 128 -n 3 --episode-timeout 2700
 ```
 
-The launcher owns one loopback-only vLLM server (port 8024, 32K context) and a
+The launcher owns one loopback-only vLLM server (a free port, 32K context) and a
 dedicated researcher server. It uses the existing Qwen non-thinking sampling
 profile and collector outage/cleanup recovery. `--resume` keeps the frozen task
 set and completed attempts. `data/selection.json` records teacher evidence;
