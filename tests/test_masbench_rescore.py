@@ -50,7 +50,8 @@ def test_rescore_preserves_failures_and_reports_demotions(monkeypatch):
     rows = [{"task_id": str(i), "axis": "depth", "value": "2", "agent": "single",
              "status": status, "directory": str(i),
              "evaluation": {"passed": False, "expected": ["9"]}}
-            for i, status in enumerate(["finished", "timeout", "error"])]
+            for i, status in enumerate(["finished", "timeout", "error", "error"])]
+    rows[3]["error"] = "GraphRecursionError: recursion limit reached"
     snapshot = {"manifest": {"episodes": rows},
                 "answers": [{"directory": str(i), "answer": "Answer: 2\n9"} for i in range(3)]}
     rows[2]["evaluation"] = {"passed": False, "score": 0}
@@ -58,8 +59,9 @@ def test_rescore_preserves_failures_and_reports_demotions(monkeypatch):
     before = json.dumps(snapshot)
     result = asyncio.run(rescore(snapshot, Path("unused")))
     assert json.dumps(snapshot) == before
-    assert [row["official"] for row in result["episodes"]] == [True, False, False]
+    assert [row["official"] for row in result["episodes"]] == [True, False, False, False]
     assert not any(row["normalized"] for row in result["episodes"])
     assert result["groups"][0]["demoted"] == 1
     assert result["groups"][0]["n"] == 2
     assert result["groups"][0]["timeouts_excluded"] == 1
+    assert result["groups"][0]["step_limits_excluded"] == 1

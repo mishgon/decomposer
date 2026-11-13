@@ -118,6 +118,8 @@ async def rescore(snapshot, source):
             official = await compare(answer, gold)
             corrected = official if normalized == answer else await compare(normalized, gold)
         record = {key: row[key] for key in ("task_id", "axis", "value", "agent", "status", "directory")}
+        record["step_limit"] = (row["status"] == "error"
+                                and "GraphRecursionError" in str(row.get("error", "")))
         record.update(original=row["evaluation"]["passed"], official=official,
                       normalized=corrected, normalization=method,
                       normalized_answer=normalized if normalized != answer else None,
@@ -128,15 +130,17 @@ async def rescore(snapshot, source):
     summary = []
     for (agent, axis), rows in sorted(groups.items()):
         timeouts = sum(row["status"] == "timeout" for row in rows)
-        rows = [row for row in rows if row["status"] != "timeout"]
+        step_limits = sum(row["step_limit"] for row in rows)
+        rows = [row for row in rows if row["status"] != "timeout" and not row["step_limit"]]
         summary.append({"agent": agent, "axis": axis, "n": len(rows),
                         "timeouts_excluded": timeouts,
+                        "step_limits_excluded": step_limits,
                         **{metric: sum(row[metric] for row in rows)
                            for metric in ("original", "official", "normalized")},
                         "promoted": sum(not row["official"] and row["normalized"] for row in rows),
                         "demoted": sum(row["official"] and not row["normalized"] for row in rows)})
     return {"upstream_revision": UPSTREAM_REVISION, "source_hashes": SOURCE_HASHES,
-            "denominator": "all attempts except timeouts; errors remain failures",
+            "denominator": "exclude timeouts and GraphRecursionError; other errors remain failures",
             "protocol": "upstream deterministic answer correctness, LLM judge disabled",
             "normalized_protocol": "explicit integer fields or last Final Answers section; ordered exact match",
             "groups": summary, "episodes": episodes}

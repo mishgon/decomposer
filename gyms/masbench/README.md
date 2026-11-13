@@ -42,8 +42,9 @@ upstream scorer. It preserves order and repetitions, rejects ambiguous fields,
 and does not evaluate expressions or search for reference values in explanations.
 Normalization uses the expected answer count but never reference values. It can
 both promote and demote results. Per the experiment's reporting convention,
-timeouts are excluded from aggregate denominators; errors remain failures.
-All attempts, including excluded timeouts, remain in the per-episode audit.
+timeouts and GraphRecursionError step limits are excluded from aggregate
+denominators; other errors remain failures. Excluded counts are reported separately.
+All attempts, including exclusions, remain in the per-episode audit.
 Unrecognized formats retain their original text; the diagnostic does
 not claim to recover every correctly stated answer.
 
