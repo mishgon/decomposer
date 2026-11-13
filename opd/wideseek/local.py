@@ -92,7 +92,7 @@ def run(command):
                 process.wait()
 
 
-def main():
+def main(*, training_module='opd.wideseek.run'):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--root', type=Path, required=True, help='Large-disk experiment directory; must be new')
     parser.add_argument('--assets', type=Path, required=True)
@@ -157,7 +157,7 @@ def main():
             else:
                 run(['bash', 'opd/wideseek/baseline.sh', str(args.gpus[0]),
                                 str(args.model.resolve()), str(args.root / 'baseline')])
-            run([sys.executable, '-u', '-m', 'opd.wideseek.run',
+            run([sys.executable, '-u', '-m', training_module,
                 '--gpus', *map(str, args.gpus), '--training-gpus', str(args.training_gpus), '--source', str(args.source.resolve()),
                 '--baseline', str(args.root / 'baseline'), '--model', str(args.model.resolve()),
                 '--output', str(args.root / 'train'),
