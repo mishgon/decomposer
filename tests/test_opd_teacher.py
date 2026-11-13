@@ -19,12 +19,26 @@ class TeacherTests(unittest.TestCase):
     def test_token_meaning_is_checked_not_just_numeric_id(self):
         tokenizer = Mock()
         tokenizer.decode.return_value = ' student'
+        tokenizer.batch_decode.return_value = [' student']
         raw = {'choices': [{'prompt_logprobs': [None, {
             '2': {'logprob': -.5, 'decoded_token': ' teacher'}}]}]}
         with self.assertRaisesRegex(ValueError, 'meaning mismatch'):
             aligned_logprobs(raw, [1, 2], tokenizer)
         raw['choices'][0]['prompt_logprobs'][1]['2']['decoded_token'] = ' student'
         self.assertEqual(aligned_logprobs(raw, [1, 2], tokenizer), [0., -.5])
+
+    def test_per_token_display_can_omit_replacement_character(self):
+        tokenizer = Mock()
+        tokenizer.decode.side_effect = lambda ids, **kw: 'R\ufffdunion' if len(ids) == 3 else 'R\ufffd'
+        tokenizer.batch_decode.return_value = ['R', '\ufffd', 'union']
+        raw = {'choices': [{'prompt_logprobs': [None,
+            {'2': {'logprob': -.1, 'decoded_token': 'R'}},
+            {'3': {'logprob': -.2, 'decoded_token': ''}},
+            {'4': {'logprob': -.3, 'decoded_token': 'union'}}]}]}
+        self.assertEqual(aligned_logprobs(raw, [1, 2, 3, 4], tokenizer), [0., -.1, -.2, -.3])
+        raw['choices'][0]['prompt_logprobs'][3]['4']['decoded_token'] = 'onion'
+        with self.assertRaisesRegex(ValueError, 'meaning mismatch'):
+            aligned_logprobs(raw, [1, 2, 3, 4], tokenizer)
 
     def test_aligned_sampled_tokens(self):
         raw = {'choices': [{'prompt_logprobs': [None, {'2': {'logprob': -0.5}}]}]}

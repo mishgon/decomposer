@@ -32,7 +32,19 @@ def aligned_logprobs(response, token_ids, tokenizer=None):
     # the complete character. Compare the sequence, not individual fragments.
     if tokenizer is not None and ''.join(decoded) != tokenizer.decode(
             token_ids[1:], skip_special_tokens=False, clean_up_tokenization_spaces=False):
-        raise ValueError('Teacher/student token meaning mismatch')
+        # vLLM also returns per-token prompt displays. With prompt_logprobs=0,
+        # its UTF-8 correction tries the previous token, then emits '' if the
+        # fragment still ends in U+FFFD (even a literal replacement character).
+        # Require an exact match at every position; never drop arbitrary text.
+        parts = tokenizer.batch_decode([[token] for token in token_ids[1:]],
+            skip_special_tokens=False, clean_up_tokenization_spaces=False)
+        for index, part in enumerate(parts, 1):
+            if part.endswith('\ufffd'):
+                combined = tokenizer.decode(token_ids[index-1:index+1],
+                    skip_special_tokens=False, clean_up_tokenization_spaces=False)
+                parts[index-1] = '' if combined.endswith('\ufffd') else combined
+        if decoded != parts:
+            raise ValueError('Teacher/student token meaning mismatch')
     return values
 
 
