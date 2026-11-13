@@ -54,3 +54,28 @@ pretend to know how many future attempts will succeed.
 See [Gym setup and scoring](../../gyms/wideseek/README.md) and
 [SFT collection](../../sft/wideseek/README.md). Table item-F1 and development-set
 results are not binary benchmark pass rates or public WideSearch scores.
+
+## Teacher-Solved Depth Evaluation
+
+`teacher_solved_local` freezes every depth task with a saved Flash Next QA score
+of 1 in the supplied collection runs. It excludes the retired `spawn_subagent`
+interface, deduplicates task IDs, and shuffles with seed 42. The checkpoint must
+already be merged; retrieval and hosted researcher/judge credentials must be
+configured as for WideSeek OPD.
+
+```bash
+python -m evals.wideseek.teacher_solved_local \
+  --source /shared/data/depth/tasks.jsonl \
+  --teacher-runs /shared/collections/depth-pass1 /shared/collections/depth-pass2 \
+  --model /shared/models/merged-sft --output /shared/evals/depth-n3 \
+  --worker-python /shared/runtime/workers/bin/python \
+  --gpu 0 --concurrency 128 -n 3 --episode-timeout 2700
+```
+
+The launcher owns one loopback-only vLLM server (port 8024, 32K context) and a
+dedicated researcher server. It uses the existing Qwen non-thinking sampling
+profile and collector outage/cleanup recovery. `--resume` keeps the frozen task
+set and completed attempts. `data/selection.json` records teacher evidence;
+`eval/` contains raw traces and scores. `task-success-counts.json` records each
+task's 0–3 success count when the run exits. Unscored infrastructure failures
+remain unresolved rather than entering the zero-success bucket.
