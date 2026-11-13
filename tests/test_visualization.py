@@ -125,7 +125,7 @@ def test_animals_are_distinct_and_stable_across_runs_and_renders():
         for row in svg.findall("{*}g[@class='agent']")
     }
     assert len(set(animals.values())) == 4
-    assert "🐶" not in animals.values()
+    assert "🤖" not in animals.values()
     labels = [row.text for row in svg.findall("{*}g[@class='agent']/{*}text[@class='agent-name']")]
     assert len(set(labels)) == 4
     assert not svg.findall(".//{*}text[@class='agent-id']")
@@ -134,7 +134,7 @@ def test_animals_are_distinct_and_stable_across_runs_and_renders():
         assert agent["agent_type_id"] not in "".join(svg.itertext())
     for run_id in ("root-1", "root-2"):
         events = svg.findall(f"{{*}}g[@data-run-id='{run_id}']/{{*}}g[@class='event']/{{*}}text")
-        assert [event.text for event in events] == ["🐶", animals["root"]]
+        assert [event.text for event in events] == ["🤖", animals["root"]]
 
 
 def test_uncollected_and_failed_runs():
@@ -160,7 +160,7 @@ def test_uncollected_and_failed_runs():
 
 @pytest.mark.parametrize(("field", "status"), [("response", "responded"), ("error", "error")])
 def test_trace_text_is_escaped(field, status):
-    payload = '\n</pre></template><script>alert("x")</script><img src=x onerror="alert(1)">\n& 🐶'
+    payload = '\n</pre></template><script>alert("x")</script><img src=x onerror="alert(1)">\n& 🤖'
     payload += "\nПолное сообщение без сокращений." * 300
     identifier = payload.replace("\n", " ")
     trace = {
@@ -240,7 +240,7 @@ def test_invocation_without_agents():
     trace = _trace()
     trace.update(agents={}, agent_runs={})
     svg = _svg(render_trace(trace))
-    assert "Моська" in "".join(svg.itertext())
+    assert "Decomposer" in "".join(svg.itertext())
     assert len(svg.findall("{*}g[@class='invocation ']/{*}g[@class='event']")) == 2
     assert not svg.findall("{*}g[@class='agent']")
 
@@ -270,7 +270,7 @@ def test_decomposer_row_spans_invocation_and_shows_only_messages():
     invocation = svg.find("{*}g[@class='invocation ']")
     assert _marker_positions(invocation) == [(260, 74), (1168, 126)]
     events = invocation.findall("{*}g[@class='event']")
-    assert [event.find("{*}text").text for event in events] == ["🧑", "🐶"]
+    assert [event.find("{*}text").text for event in events] == ["🧑", "🤖"]
     assert ["".join(templates[event.attrib["data-tooltip"]].itertext()).strip() for event in events] == [
         "Compare two approaches.", "Here is the comparison.",
     ]
@@ -307,7 +307,7 @@ def test_multiple_decomposer_runs_share_one_row_and_keep_their_messages():
         assert tuple(x for x, _ in positions) == pytest.approx(coordinates)
         assert [y for _, y in positions] == [74, 126]
         events = bar.findall("{*}g[@class='event']")
-        assert [event.find("{*}text").text for event in events] == ["🧑", "🐶"]
+        assert [event.find("{*}text").text for event in events] == ["🧑", "🤖"]
         assert tuple(
             "".join(templates[event.attrib["data-tooltip"]].itertext()).strip() for event in events
         ) == messages
