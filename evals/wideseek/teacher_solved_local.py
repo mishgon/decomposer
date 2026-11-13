@@ -31,6 +31,7 @@ def main():
     if not (args.model / 'config.json').is_file():
         parser.error('Expected a merged student checkpoint')
 
+    from decomposer import models
     from gyms.wideseek import REPO_ROOT, agents
     from gyms.wideseek.run import cli
     from gyms.wideseek.runtime import save
@@ -45,9 +46,11 @@ def main():
             '--query-gpu=memory.used', '--format=csv,noheader,nounits'], text=True).strip())
         if used > 1024:
             raise RuntimeError(f'GPU {args.gpu} is occupied ({used} MiB)')
-        # The existing local Qwen profile connects to this loopback-only port.
+        # Select a process-local endpoint for the existing Qwen model profile.
         with socket.socket() as listener:
-            listener.bind(('127.0.0.1', 8024))
+            listener.bind(('127.0.0.1', 0))
+            model_port = listener.getsockname()[1]
+        models._QWEN_3_5_4B_PORT = model_port
         with socket.socket() as listener:
             listener.bind(('127.0.0.1', 0))
             worker_port = listener.getsockname()[1]
@@ -75,7 +78,7 @@ def main():
                           WS_ARTIFACT_ROOT=str(root / 'eval'))
         agents.AGENT_MODELS['decomposer'] = 'vllm/qwen_3_5_4b_non_thinking'
         command = [sys.executable, '-m', 'vllm.entrypoints.cli.main', 'serve', str(args.model.resolve()),
-            '--served-model-name', 'Qwen/Qwen3.5-4B', '--host', '127.0.0.1', '--port', '8024',
+            '--served-model-name', 'Qwen/Qwen3.5-4B', '--host', '127.0.0.1', '--port', str(model_port),
             '--max-model-len', '32768', '--max-num-seqs', str(args.concurrency),
             '--gpu-memory-utilization', '0.80', '--language-model-only',
             '--enable-auto-tool-choice', '--tool-call-parser', 'qwen3_coder', '--reasoning-parser', 'qwen3',
@@ -86,7 +89,7 @@ def main():
             '--worker-port', str(worker_port), '--worker-slots', str(max(512, 4 * args.concurrency)),
             '--worker-python', str(args.worker_python), *(['--resume'] if args.resume else [])]
         try:
-            with service(command, root / 'vllm.log', 'http://127.0.0.1:8024/health'):
+            with service(command, root / 'vllm.log', f'http://127.0.0.1:{model_port}/health'):
                 state['status'] = 'running'
                 save(root / 'evaluation.json', state)
                 cli(collect, argv=argv, parser=create_parser())
