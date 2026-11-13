@@ -100,6 +100,7 @@ def main():
     parser.add_argument('--model', type=Path, required=True)
     parser.add_argument('--search-url', help='Reuse an existing retrieval service; leave its lifecycle to its owner')
     parser.add_argument('--baseline', type=Path, help='Reuse a completed starting-checkpoint baseline; training verifies its source hash')
+    parser.add_argument('--resume-from', type=Path, help='Restore a complete veRL checkpoint into this new run')
     add_gpu_arguments(parser)
     args = parser.parse_args()
     gpu_overrides(args.gpus, args.training_gpus)
@@ -160,6 +161,7 @@ def main():
                 '--gpus', *map(str, args.gpus), '--training-gpus', str(args.training_gpus), '--source', str(args.source.resolve()),
                 '--baseline', str(args.root / 'baseline'), '--model', str(args.model.resolve()),
                 '--output', str(args.root / 'train'),
+                *(['--resume-from', str(args.resume_from.resolve())] if args.resume_from else []),
                 f'trainer.experiment_name={args.root.name}'])
             state['status'] = 'completed'
         except BaseException:
