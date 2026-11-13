@@ -74,21 +74,12 @@ def normalize_answer(text, count):
         r"(?im)^\s*(?:#{1,6}\s*)?(?:\*\*)?Final Answers?\s*:?(?:\*\*)?\s*:?\s*$", text,
     ))
     section = text[headings[-1].end():] if headings else text
-    boxes = boxed_answers(section)
-    if boxes:
-        values = [integer(value) for value in boxes]
-        if len(values) == count and all(value is not None for value in values):
-            return "\n".join(r"\boxed{" + value + "}" for value in values), "boxes"
-        return text, "abstain"
     clean = section.replace("**", "")
     if count == 1:
-        direct = integer(clean)
-        if direct is not None:
-            return r"\boxed{" + direct + "}", "integer"
         fields = re.findall(r"(?im)^\s*(?:#{1,6}\s*)?(?:Final\s+)?Answer\s*:\s*([^\n]+)", clean)
         values = [integer(field) for field in fields]
-        if values and None not in values and len(set(values)) == 1:
-            return r"\boxed{" + values[0] + "}", "answer_label"
+        if values and (None in values or len(set(values)) != 1):
+            return text, "abstain"
     else:
         fields = re.findall(
             r"(?im)^\s*(?:#{1,6}\s*)?(?:Problem|Answer|P|Task)\s*(\d+)\s*(?:Answer)?\s*:\s*([^\n]+)",
@@ -96,6 +87,22 @@ def normalize_answer(text, count):
         )
         indices = [int(index) for index, _ in fields]
         values = [integer(field) for _, field in fields]
+        if fields and (indices != list(range(1, count + 1)) or None in values):
+            return text, "abstain"
+    boxes = boxed_answers(section)
+    if boxes:
+        boxed_values = [integer(value) for value in boxes]
+        labels_agree = not values or (boxed_values == values if count > 1 else set(boxed_values) == set(values))
+        if len(boxed_values) == count and None not in boxed_values and labels_agree:
+            return "\n".join(r"\boxed{" + value + "}" for value in boxed_values), "boxes"
+        return text, "abstain"
+    if count == 1:
+        direct = integer(clean)
+        if direct is not None:
+            return r"\boxed{" + direct + "}", "integer"
+        if values and None not in values and len(set(values)) == 1:
+            return r"\boxed{" + values[0] + "}", "answer_label"
+    else:
         if indices == list(range(1, count + 1)) and None not in values:
             return "\n".join(r"\boxed{" + value + "}" for value in values), "ordered_labels"
     return text, "abstain"

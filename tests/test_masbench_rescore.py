@@ -10,6 +10,10 @@ from evals.masbench.rescore import normalize_answer, rescore, upstream_comparato
 @pytest.mark.parametrize("answer,count,expected", [
     ("**Answer: 0**\nExplanation: 3 * 12 = 36.", 1, r"\boxed{0}"),
     ("Answer: 9\nAnswer: 6", 1, None),
+    ("Answer: \\boxed{9}\nAnswer: 6", 1, None),
+    ("Answer: 6\n\\boxed{9}", 1, None),
+    ("Answer: \\boxed{9}\nAnswer: 9", 1, r"\boxed{9}"),
+    ("Problem 1: \\boxed{3}\nProblem 2: 20\n\\boxed{9}", 2, None),
     ("Answer: 9 or 6", 1, None),
     ("Answer: 9.5", 1, None),
     ("Answer: 3 + 6", 1, None),
