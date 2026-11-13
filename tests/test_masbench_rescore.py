@@ -34,6 +34,8 @@ from evals.masbench.rescore import normalize_answer, rescore, upstream_comparato
      2, "\\boxed{22}\n\\boxed{22}"),
     ("Problem 1: X = 0\n- Answer: 9\nProblem 2: Y = 21", 2, None),
     ("Problem 1: maybe X = 0\nProblem 2: Y = 21", 2, None),
+    ("Problem 1: X != 0\nProblem 2: Y = 21", 2, None),
+    ("Problem 1: X <= 0\nProblem 2: Y = 21", 2, None),
     ("Problem 1: X = 3 + 6\nProblem 2: Y = 21", 2, None),
     ("Problem 1:\n- Working: X = 3\nProblem 2:\n- Working: Y = 21", 2, None),
     ("\\boxed{0}\n\\boxed{0}\n### Final Answers\nProblem 1: \\boxed{0}\nProblem 2: \\boxed{0}",

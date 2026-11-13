@@ -72,7 +72,7 @@ def declared_integer(text):
     if re.search(r"\b(or|maybe|possibly|uncertain|cannot)\b", text, re.IGNORECASE):
         return None
     result = re.search(
-        r"(?:=|≡|→|\bis\b)\s*([+-]?\d+)(?:\s*\((?:mod(?:ulo)?\s+23|directly given as \1)\))?\.?$",
+        r"(?:(?<![!<>=])=|≡|→|\bis\b)\s*([+-]?\d+)(?:\s*\((?:mod(?:ulo)?\s+23|directly given as \1)\))?\.?$",
         text,
     )
     return str(int(result[1])) if result else None
