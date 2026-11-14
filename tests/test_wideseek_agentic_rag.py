@@ -97,6 +97,35 @@ def test_search_api_waits_out_transient_errors_and_stops_on_others(monkeypatch):
     assert len(requests) == 3
 
 
+def test_student_rag_run_records_the_search_api_and_its_researchers_prompt(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, MagicMock
+    from gyms.wideseek import run
+
+    data = tmp_path / "tasks.jsonl"
+    data.write_text(json.dumps({"task_id": "task", "question": "Q"}) + "\n")
+    args = run.create_parser().parse_args(["--agent", "student_rag", "--output", str(tmp_path / "run"),
+                                           "--data", str(data)])
+    args.mode = "decomposer"
+    monkeypatch.setattr(run.subprocess, "check_output", lambda *a, **kw: "commit")
+    monkeypatch.setattr(run, "model", lambda _: SimpleNamespace(model_name="test"))
+    monkeypatch.delenv("AGENTIC_RAG_URL", raising=False)
+    monkeypatch.setenv("AGENTIC_RAG_API_KEY", "test-key")
+    response = MagicMock()
+    response.json.return_value = {"status": "ok"}
+    get = AsyncMock(return_value=response)
+    http = MagicMock()
+    http.__aenter__ = AsyncMock(return_value=SimpleNamespace(get=get))
+    http.__aexit__ = AsyncMock()
+    monkeypatch.setattr(run.httpx, "AsyncClient", lambda **kwargs: http)
+    settings = asyncio.run(run.describe_run(args))[2]["settings"]
+    assert get.await_args_list[0].args == ("https://lmrouter.2a2i.org/rag/health",)
+    assert get.await_args_list[0].kwargs == {"headers": {"Authorization": "Bearer test-key"}}
+    assert settings["retrieval"] == {"search_api": "https://lmrouter.2a2i.org/rag", "source": "wikipedia",
+                                     "health": {"status": "ok"}}
+    assert settings["harness"]["agent_system_prompt"] == agentic_rag.SYSTEM_PROMPT
+
+
 def test_student_rag_is_the_student_over_agentic_rag_researchers(monkeypatch):
     root = Path(__file__).resolve().parents[1]
     captured = []

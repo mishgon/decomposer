@@ -19,7 +19,7 @@ from langchain_core.messages import message_to_dict
 from decomposer.visualization import write_trace_html
 from gyms.usage import build_usage_summary
 
-from gyms.wideseek import REPO_ROOT, agents
+from gyms.wideseek import REPO_ROOT, agentic_rag, agents
 from gyms.wideseek.evaluate import evaluate
 from gyms.wideseek.metrics import subagent_counts
 from gyms.wideseek.prepare import agent_input
@@ -271,10 +271,18 @@ async def describe_run(args):
     if args.mode not in {"simple", "decomposer"}:
         raise ValueError("Each run must use one setup: simple or decomposer")
     modes = [args.mode]
+    # Agentic RAG researchers search the hosted Search API instead of the offline corpus.
+    rag = agents.RESEARCHER_IDS.get(args.agent) == "researcher_agentic_rag"
     async with httpx.AsyncClient(timeout=30, trust_env=False) as http:
-        response = await http.get(os.environ.get("WS_SEARCH_URL", "http://127.0.0.1:18080") + "/health")
-        response.raise_for_status()
-        retrieval = response.json()
+        if rag:
+            url, headers = agentic_rag.search_api()
+            response = await http.get(url + "/health", headers=headers)
+            response.raise_for_status()
+            retrieval = {"search_api": url, "source": agentic_rag.SOURCE, "health": response.json()}
+        else:
+            response = await http.get(os.environ.get("WS_SEARCH_URL", "http://127.0.0.1:18080") + "/health")
+            response.raise_for_status()
+            retrieval = response.json()
         if "decomposer" in modes:
             response = await http.get(args.worker_url + "/ok")
             response.raise_for_status()
@@ -300,7 +308,7 @@ async def describe_run(args):
         digest.update(path.read_bytes() + b"\0")
     harness = {
         "source_sha256": digest.hexdigest(),
-        "agent_system_prompt": agents.AGENT_SYSTEM_PROMPT,
+        "agent_system_prompt": agentic_rag.SYSTEM_PROMPT if rag else agents.AGENT_SYSTEM_PROMPT,
         "agent_run_budget_seconds": agents.RUN_BUDGETS[args.agent][0],
         "agent_shutdown_grace_seconds": agents.RUN_BUDGETS[args.agent][1],
     }

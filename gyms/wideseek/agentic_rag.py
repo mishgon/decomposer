@@ -31,6 +31,15 @@ URL_NOT_IN_SESSION = json.dumps({
                "Copy a returned URL exactly for open/find; trailing path slashes are handled automatically."})
 
 
+SOURCE = "wikipedia"
+
+
+def search_api():
+    """The Search API front and the headers that authorize a request to it."""
+    return (os.environ.get("AGENTIC_RAG_URL", "https://lmrouter.2a2i.org/rag"),
+            {"Authorization": "Bearer " + os.environ["AGENTIC_RAG_API_KEY"]})
+
+
 def _transient(error):
     if isinstance(error, httpx.TransportError):
         return True
@@ -39,13 +48,11 @@ def _transient(error):
 
 
 # As in the monorepo, transient errors are waited out; the run budget bounds the wait.
-@retry(retry=retry_if_exception(_transient), wait=wait_exponential_jitter(initial=0.5, max=30), reraise=True)
+@retry(retry=retry_if_exception(_transient), wait=wait_exponential_jitter(multiplier=0.5, max=30), reraise=True)
 async def _post(method, payload):
+    url, headers = search_api()
     async with httpx.AsyncClient(timeout=60, trust_env=False) as client:
-        response = await client.post(
-            os.environ.get("AGENTIC_RAG_URL", "https://lmrouter.2a2i.org/rag") + "/" + method,
-            headers={"Authorization": "Bearer " + os.environ["AGENTIC_RAG_API_KEY"]},
-            json={**payload, "source": "wikipedia"})
+        response = await client.post(url + "/" + method, headers=headers, json={**payload, "source": SOURCE})
         response.raise_for_status()
         return response.json()
 
