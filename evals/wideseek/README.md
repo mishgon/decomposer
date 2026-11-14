@@ -28,8 +28,8 @@ directory, preserving every original result. Use each module's `--help`.
 DeepDive. Serve the checkpoint with vLLM on port 8024 under the name `Qwen/Qwen3.5-4B`
 (`--tool-call-parser qwen3_xml`). The profile samples it non-thinking as RL rollouts
 do: temperature 1.0 with no top-p, top-k or presence penalty, and at most 8,192 tokens
-per turn. The student keeps the agent type and the 60-second run budget of its training
-records. Its researchers run on the `researcher_non_thinking` worker graph with the
+per turn. The student keeps the agent type, its description and the 60-second run budget
+of its training records. Its researchers run on the `researcher_non_thinking` worker graph with the
 hosted non-thinking 4B model that `STUDENT_RESEARCHER_MODEL` names.
 
 Collect a fixed number of attempts per task with the SFT collector (`-n 4`), then
