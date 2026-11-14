@@ -46,8 +46,7 @@ def test_student_keeps_its_training_interface_over_non_thinking_researchers(monk
     agents.decomposer("policy", "checkpoint", "http://worker", agent="student")
     worker = captured["agent_types"][0]
     assert worker["agent_type_id"] == "qwen_3_5_4b_thinking"
-    # The description of the shared type in every SFT record (sft/chat_tools.py on sft-2.4.0).
-    assert worker["description"] == "Qwen3.5-4B thinking agent equipped with all the required tools."
+    assert worker["description"] == "Qwen3.5-4B thinking agent equipped with search and access tools."
     # The run budget of the SFT teacher prompt: create_decomposer_agent's defaults.
     defaults = inspect.signature(create_decomposer_agent).parameters
     assert (captured["agent_run_budget_seconds"], captured["agent_shutdown_grace_seconds"]) == (

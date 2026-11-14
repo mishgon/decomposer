@@ -19,11 +19,6 @@ AGENT_MODELS = {"react": REACT_MODEL, "decomposer": DECOMPOSER_MODEL, "student":
 SUBAGENT_MODELS = {"react": RESEARCHER_MODEL, "decomposer": RESEARCHER_MODEL,
                    "student": STUDENT_RESEARCHER_MODEL}
 RESEARCHER_IDS = {"decomposer": "researcher", "student": "researcher_non_thinking"}
-# The student sees the shared description that every SFT record offers for this type.
-RESEARCHER_DESCRIPTIONS = {
-    "decomposer": "Qwen3.5-4B thinking agent equipped with search and access tools.",
-    "student": "Qwen3.5-4B thinking agent equipped with all the required tools.",
-}
 AGENT_RUN_BUDGET_SECONDS = 180.0
 AGENT_SHUTDOWN_GRACE_SECONDS = 180.0
 # Run budget and shutdown grace in seconds. The student's are the ones its training prompt
@@ -54,10 +49,12 @@ def react(policy, checkpointer, *, middleware=()):
 
 def decomposer(policy, checkpointer, worker_url, *, middleware=(), agent_recursion_limit=410,
                agent="decomposer"):
+    # The student keeps the type and description its training records offer.
     run_budget, shutdown_grace = RUN_BUDGETS[agent]
     return create_decomposer_agent(decomposer_model=policy,
         agent_types=[{"agent_type_id": "qwen_3_5_4b_thinking", "assistant_id": RESEARCHER_IDS[agent],
-            "description": RESEARCHER_DESCRIPTIONS[agent], "url": worker_url}],
+            "description": "Qwen3.5-4B thinking agent equipped with search and access tools.",
+            "url": worker_url}],
         checkpointer=checkpointer, middleware=[ModelLog("decomposer"), *middleware],
         context_schema=Context, agent_recursion_limit=agent_recursion_limit,
         agent_run_budget_seconds=run_budget,
