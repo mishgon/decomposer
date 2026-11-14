@@ -11,6 +11,8 @@ from qdrant_client import QdrantClient, models
 import torch
 import uvicorn
 
+from gyms.wideseek.pages import Pages
+
 
 class Query(BaseModel):
     queries: list[str] = Field(min_length=1, max_length=8)
@@ -29,20 +31,14 @@ def serve(assets, upstream, port, qdrant_url):
     client = QdrantClient(url=qdrant_url, timeout=120)
     collection = "wiki_collection_m32_cef512"
     client.get_collection(collection)
-    pages = {}
-    with (assets / "Wiki-2018-Corpus/wiki_webpages.jsonl").open() as stream:
-        for index, line in enumerate(stream):
-            page = json.loads(line)
-            pages[page["url"]] = page
-            if index % 100000 == 0:
-                print(f"Loaded {index} pages", flush=True)
+    pages = Pages(assets / "Wiki-2018-Corpus/wiki_webpages.jsonl")
     lock = threading.Lock()
     app = FastAPI()
 
     @app.get("/health")
     def health():
         return {"status": "ready", "pages": len(pages), "collection": collection,
-                "encoder_device": "cpu", "encoder_dtype": "float32",
+                "page_storage": "disk", "encoder_device": "cpu", "encoder_dtype": "float32",
                 **json.loads((assets / "assets.json").read_text())}
 
     @app.post("/retrieve")

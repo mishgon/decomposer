@@ -4,13 +4,13 @@ from langchain.agents import create_agent
 from decomposer.core import create_decomposer_agent
 from decomposer.run_budget import RunBudgetMiddleware
 from gyms.wideseek.prompts import AGENT_SYSTEM_PROMPT
-from gyms.wideseek.runtime import Context, ModelLog, model
+from gyms.wideseek.runtime import Context, ModelLog, model, DEFAULT_MODEL, DEFAULT_TEACHER
 from gyms.wideseek.worker import access, search
 
-REACT_MODEL = "lmrouter/qwen_3_5_4b_thinking"
-DECOMPOSER_MODEL = "lmrouter/qwen_3_8_flash_next_non_thinking"
+REACT_MODEL = DEFAULT_MODEL
+DECOMPOSER_MODEL = DEFAULT_TEACHER
 RESEARCHER_MODEL = REACT_MODEL
-JUDGE_MODEL = "lmrouter/qwen_3_8_flash_next_non_thinking"
+JUDGE_MODEL = DEFAULT_TEACHER
 AGENT_MODELS = {"react": REACT_MODEL, "decomposer": DECOMPOSER_MODEL}
 RESEARCHER_ID = "researcher"
 AGENT_RUN_BUDGET_SECONDS = 60.0

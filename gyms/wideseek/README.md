@@ -11,14 +11,16 @@ Configure the shared [lmrouter access](../../README.md) once. Models use the nam
 registry in `src/decomposer/models.py`, including its optional Unix-socket tunnel,
 provider settings and retries. No local model GPU or OpenRouter is needed.
 
-On Linux, allow about 160 GB for the corpus/index and enough RAM to load the 27 GB
-page file. Retrieval uses CPU FP32 E5; upstream uses GPU FP16, so retrieval is not
+On Linux, allow about 160 GB for the corpus/index plus space for the SQLite URL
+index and temporary Qdrant optimization files (budget 250 GB). Pages are read
+from disk using a SQLite offset index; the 27 GB page file stays on disk. Retrieval uses CPU FP32 E5; upstream uses GPU FP16, so retrieval is not
 bit-for-bit identical. Existing downloaded assets are reused.
 
 ```bash
 UV_BIN="$HOME/.local/bin/uv" bash gyms/wideseek/setup.sh
 export WS_ASSETS=/large/disk/wideseek/assets
 gyms/wideseek/.venv/bin/python -m gyms.wideseek.assets --root "$WS_ASSETS"
+gyms/wideseek/.venv/bin/python -m gyms.wideseek.pages "$WS_ASSETS/Wiki-2018-Corpus/wiki_webpages.jsonl"
 ```
 
 Run these commands from the repository root. Setup creates an isolated
@@ -40,8 +42,8 @@ Local ports are 16333/16334 (Qdrant), 18080 (retrieval) and 18081 (workers).
 `env.sh` requires `LLM_PROXY_MASTER_KEY` in the calling shell's environment.
 Configure credentials using the shared lmrouter instructions before sourcing it;
 the Gym does not read a personal credential file.
-Export `LLM_PROXY_UNIX_SOCKET` when using the relay. Model parameters are not read
-from Gym environment variables. `WS_SEARCH_URL` and `WS_ASSETS` configure
+Export `LLM_PROXY_UNIX_SOCKET` when using the relay. `WS_MODEL_BACKEND=local` selects the local Pozon profiles described below.
+Sampling parameters come from the model registry. `WS_SEARCH_URL` and `WS_ASSETS` configure
 services/storage only. `--output` selects the run directory on any writable disk.
 
 ## Tasks and Raw Execution
@@ -134,3 +136,75 @@ pass before bulk collection.
 Sources: [training data](https://huggingface.co/datasets/RLinf/WideSeek-R1-train-data),
 [RLinf implementation](https://github.com/RLinf/RLinf), and
 [public evaluation](https://github.com/RLinf/WideSeek-R1-Eval).
+
+## Local Pozon Setup
+
+The `pozon/local-wideseek-4b` branch provides `pozon.sh` for the measured host:
+WSL2, RTX 5080 16 GiB, 30 GiB guest RAM. The project is under
+`~/projects/vkr-wideseek/decomposer`, assets under `~/projects/vkr-wideseek/assets`.
+Keep assets in the Linux filesystem for random-read performance. The WSL virtual
+filesystem reports 757 GiB free, but its Windows C: backing drive had only
+320 GiB free at setup; monitor both. The pinned corpus download is 155.9 GB.
+
+Run from the repository root. Install `uv` into `~/.local/bin` first, then:
+
+```bash
+UV_BIN="$HOME/.local/bin/uv" bash gyms/wideseek/setup.sh
+export WS_ASSETS="$HOME/projects/vkr-wideseek/assets"
+gyms/wideseek/.venv/bin/python -m gyms.wideseek.assets --root "$WS_ASSETS"
+bash gyms/wideseek/pozon.sh pages
+bash gyms/wideseek/pozon.sh setup-vllm
+```
+
+The page-index build streams JSONL into a SQLite URL/byte-offset index. Duplicate
+URLs preserve the old loader's last-row-wins behavior. Rebuild after replacing
+the page file; startup rejects an index with a mismatched size or modification
+time. Treat the corpus as immutable while retrieval runs. Do not run two index
+builds simultaneously. Failed builds leave the previous complete index intact.
+
+Start these services in separate tmux sessions, saving logs outside the checkout:
+
+```bash
+bash gyms/wideseek/pozon.sh qdrant
+bash gyms/wideseek/pozon.sh retrieval
+bash gyms/wideseek/pozon.sh vllm
+# Only needed for --agent decomposer:
+bash gyms/wideseek/pozon.sh workers
+```
+
+Qdrant uses Docker v1.16.2, binds localhost, and has an 8 GiB RAM cap with one
+optimization thread. Stop the earlier empty smoke container first if it occupies
+the ports: `docker stop vkr-wideseek-qdrant-smoke`. The command imports the
+upstream store and requests disk-backed vectors and HNSW through the API.
+Segment migration is asynchronous; inspect the collection's `status`,
+`optimizer_status`, and `config` before evaluating. The first import/migration
+has not yet been measured on this host. If startup exceeds the memory cap,
+inspect the logs before changing it. After creation use
+`docker start vkr-wideseek-qdrant` to restart; do not run a second process on the
+same store. Do not overwrite a migrated store with a fresh corpus download.
+
+vLLM has a separate `.venv-vllm` (CUDA 12.9 build 0.24.0), keeping CPU retrieval's
+Torch isolated. It serves BF16 Qwen3.5-4B on localhost:8024, with 16k context,
+one active sequence, 2k prefill batches, eager execution and 85% GPU allocation.
+The vision encoder is disabled. Validate the actual VRAM requirement on startup.
+Longer episodes can exceed 16k; those failures remain in the run artifacts.
+The standard checkpoint differs from the hosted unlooped deployment.
+
+```bash
+gyms/wideseek/.venv/bin/python -m gyms.wideseek.prepare --source width
+export WS_MODEL_BACKEND=local
+source gyms/wideseek/env.sh
+gyms/wideseek/.venv/bin/python -m evals.wideseek.run --agent react \
+  --output artifacts/evals/wideseek/runs/pozon-react-smoke \
+  --limit 1 -n 1 --concurrency 1 --model-calls 8 --output-tokens 8192
+```
+
+`WS_MODEL_BACKEND=local` selects local thinking 4B for ReAct/researchers and
+local non-thinking 4B for manager/judge. It needs no hosted key. Without it,
+existing hosted profiles remain the default. A single endpoint serializes all
+roles; begin with ReAct. Scores from this 4B judge are development diagnostics
+and are not comparable to scores from the hosted Flash Next judge. These are
+WideSeek training tasks, not the public held-out WideSearch benchmark.
+
+References: [Qwen3.5 vLLM recipe](https://github.com/vllm-project/recipes/blob/main/Qwen/Qwen3.5.md),
+[Qdrant collection configuration](https://qdrant.tech/documentation/manage-data/collections/).
