@@ -3,6 +3,7 @@ import json
 from itertools import count
 from pathlib import Path
 
+import pytest
 from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
 from langchain_core.messages import AIMessage, HumanMessage
 
@@ -90,6 +91,34 @@ def test_researcher_resolves_searched_pages_and_ends_with_its_finish_report(monk
     # A follow-up task on the same thread runs the model again.
     state = asyncio.run(graph.ainvoke({"messages": [*messages, HumanMessage("And when?")]}, config, context=context))
     assert state["messages"][-1].content == "Follow-up report."
+
+
+@pytest.mark.parametrize("sources, report", [([SOLARIS], f"Lem\n\nSources:\n{SOLARIS}"), (["https://unknown"], "Lem")])
+def test_researcher_gets_32_calls_and_the_last_may_only_finish(monkeypatch, tmp_path, sources, report):
+    bound = []
+
+    class RecordingModel(ToolCallingModel):
+        def bind_tools(self, tools, **kwargs):
+            bound.append(sorted(tool.name for tool in tools))
+            return self
+
+    async def request_tool(endpoint, payload, runtime):
+        return [{"url": SOLARIS, "contents": PAGE}]
+
+    policy = RecordingModel(responses=[calls(("search", {"query": f"Solaris {turn}"})) for turn in range(31)]
+                            + [calls(("finish", {"answer": "Lem", "sources": sources}))])
+    monkeypatch.setattr(agentic_rag, "request_tool", request_tool)
+    monkeypatch.setattr(agents, "model", lambda profile: policy)
+    episode = tmp_path / "episode"
+    init_budget(episode)
+    state = asyncio.run(agents.researcher_agentic_rag().ainvoke(
+        {"messages": [HumanMessage("Who wrote Solaris?")]},
+        {"configurable": {"thread_id": "researcher"}, "recursion_limit": 410},
+        context={"directory": str(episode), "agent_run_budget_seconds": 180.0, "agent_shutdown_grace_seconds": 180.0}))
+    assert policy.i == agentic_rag.MAX_TURNS == 32
+    assert bound[0] == ["find", "finish", "open", "search"] and bound[-1] == ["finish"]
+    assert [m.content for m in state["messages"] if m.type == "human"][-1] == agentic_rag.FINAL_ATTEMPT
+    assert state["messages"][-1].type == "ai" and state["messages"][-1].content == report
 
 
 def test_student_rag_run_records_its_researchers_prompt(monkeypatch, tmp_path):

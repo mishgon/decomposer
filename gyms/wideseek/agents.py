@@ -53,7 +53,7 @@ def researcher_non_thinking():
 def researcher_agentic_rag():
     # FinishReport precedes RunBudgetMiddleware, so a valid finish ends the run before a shutdown request.
     return create_agent(model(STUDENT_RESEARCHER_MODEL), tools=agentic_rag.TOOLS, context_schema=Context,
-        middleware=[agentic_rag.FinishReport(), RunBudgetMiddleware(), ModelLog("researcher")],
+        middleware=[agentic_rag.FinishReport(), agentic_rag.TurnLimit(), RunBudgetMiddleware(), ModelLog("researcher")],
         system_prompt=agentic_rag.SYSTEM_PROMPT)
 
 

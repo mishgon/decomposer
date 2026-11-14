@@ -14,7 +14,7 @@ from urllib.parse import unquote
 
 from langchain.agents.middleware import AgentMiddleware, AgentState, hook_config
 from langchain.tools import tool, ToolRuntime
-from langchain_core.messages import AIMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.types import Command
 from pydantic import Field
 
@@ -30,6 +30,11 @@ URL_NOT_IN_SESSION = json.dumps({
     "message": "URL not found in this session's search results. "
                "Copy a returned URL exactly for open/find; trailing path slashes are handled automatically."})
 PAGE_NOT_FOUND = json.dumps({"success": False, "error": "page_not_found", "message": "The page is missing from the corpus."})
+# The monorepo harness (common/harness/agentic_rag.py) allows 32 model calls; the last may only call finish.
+MAX_TURNS = 32
+FINAL_ATTEMPT = ("This is your last model call. Call finish exactly once using the evidence "
+                 "already collected. No other tools are allowed. Follow the answer and source "
+                 "requirements in the system instructions and the finish tool description.")
 LINK = re.compile(r"\[([^\]]*)\]\([^)]*\)")
 
 
@@ -187,3 +192,37 @@ class FinishReport(AgentMiddleware):
             if message.name == "finish" and message.artifact:
                 return {"messages": [AIMessage(content=message.artifact)], "jump_to": "end"}
         return None
+
+
+class TurnState(AgentState):
+    turns: NotRequired[int]
+
+
+class TurnLimit(AgentMiddleware):
+    """Allow MAX_TURNS model calls per run; the last may only call finish."""
+    state_schema = TurnState
+
+    def before_agent(self, state, runtime):
+        return {"turns": 0}
+
+    async def abefore_agent(self, state, runtime):
+        return self.before_agent(state, runtime)
+
+    @hook_config(can_jump_to=["end"])
+    def before_model(self, state, runtime):
+        if state["turns"] == MAX_TURNS - 1:
+            return {"messages": [HumanMessage(content=FINAL_ATTEMPT)]}
+        if state["turns"] >= MAX_TURNS:
+            # The last call's finish was invalid; its answer is the report.
+            call = next(m for m in reversed(state["messages"]) if isinstance(m, AIMessage)).tool_calls
+            answer = next((c["args"].get("answer", "") for c in call if c["name"] == "finish"), "")
+            return {"messages": [AIMessage(content=answer)], "jump_to": "end"}
+        return None
+
+    def after_model(self, state, runtime):
+        return {"turns": state["turns"] + 1}
+
+    async def awrap_model_call(self, request, handler):
+        if request.state["turns"] == MAX_TURNS - 1:
+            request = request.override(tools=[tool for tool in request.tools if tool.name == "finish"])
+        return await handler(request)
