@@ -32,11 +32,10 @@ per turn. The student keeps the agent type and the 60-second run budget of its t
 records. Its researchers run on the `researcher_non_thinking` worker graph with the
 hosted non-thinking 4B model that `STUDENT_RESEARCHER_MODEL` names. `--agent student_180`
 is the same student with the teachers' 180-second run budget and shutdown grace.
-`--agent student_rag` is the student over `researcher_agentic_rag` workers: the monorepo's
-cited-search harness (search, open, find and finish) over the hosted Search API's
-`wikipedia` source instead of the offline Wiki-2018 corpus. It reads the API key from
-`AGENTIC_RAG_API_KEY` and the front from `AGENTIC_RAG_URL`, by default
-`https://lmrouter.2a2i.org/rag`.
+`--agent student_rag` is `student_180` over `researcher_agentic_rag` workers: the monorepo's
+cited-search harness (search, open, find and finish) over the same offline Wiki-2018 corpus.
+Its tools answer as the hosted Search API does: up to 5 distinct pages per search, and page
+text without link markup in lines of at most 200 characters.
 
 Collect a fixed number of attempts per task with the SFT collector (`-n 4`), then
 write the band of the finished run:

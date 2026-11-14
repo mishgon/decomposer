@@ -21,19 +21,19 @@ AGENT_MODELS = {"react": REACT_MODEL, "decomposer": DECOMPOSER_MODEL, "student":
 SUBAGENT_MODELS = {"react": RESEARCHER_MODEL, "decomposer": RESEARCHER_MODEL,
                    "student": STUDENT_RESEARCHER_MODEL, "student_180": STUDENT_RESEARCHER_MODEL,
                    "student_rag": STUDENT_RESEARCHER_MODEL}
-# student_rag's researchers use the monorepo's cited-search harness instead of WideSeek's tools.
+# student_rag's researchers use the monorepo's cited-search harness over WideSeek's corpus.
 RESEARCHER_IDS = {"decomposer": "researcher", "student": "researcher_non_thinking",
                   "student_180": "researcher_non_thinking", "student_rag": "researcher_agentic_rag"}
 AGENT_RUN_BUDGET_SECONDS = 180.0
 AGENT_SHUTDOWN_GRACE_SECONDS = 180.0
 # Run budget and shutdown grace in seconds. The student's are the ones its training prompt
 # names: create_decomposer_agent's defaults, which the SFT teacher collections used.
-# student_180 is the same student with the teachers' budget.
+# student_180 is the same student with the teachers' budget, which student_rag also gets.
 RUN_BUDGETS = {"react": (AGENT_RUN_BUDGET_SECONDS, AGENT_SHUTDOWN_GRACE_SECONDS),
                "decomposer": (AGENT_RUN_BUDGET_SECONDS, AGENT_SHUTDOWN_GRACE_SECONDS),
                "student": (60.0, 60.0),
                "student_180": (AGENT_RUN_BUDGET_SECONDS, AGENT_SHUTDOWN_GRACE_SECONDS),
-               "student_rag": (60.0, 60.0)}
+               "student_rag": (AGENT_RUN_BUDGET_SECONDS, AGENT_SHUTDOWN_GRACE_SECONDS)}
 
 
 def _researcher(profile):
