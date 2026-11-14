@@ -7,6 +7,7 @@ limit. Work and shutdown grace each last 180 seconds.
 """
 import asyncio
 import json
+import inspect
 import os
 import time
 from typing import Annotated, NotRequired
@@ -14,7 +15,7 @@ from functools import lru_cache
 from uuid import uuid4
 
 import httpx
-from langchain.agents.middleware import hook_config
+from langchain.agents.middleware import AgentMiddleware, hook_config
 from langchain.tools import tool, ToolRuntime
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage, convert_to_openai_messages
 from langchain_core.utils.function_calling import convert_to_openai_tool
@@ -179,7 +180,29 @@ def finish(answer: Annotated[str, Field(description=(
     return json.dumps({"success": True}), "\n\n".join([answer, *(["Sources:\n" + "\n".join(cited)] if cited else [])])
 
 
-TOOLS = [search, open_page, find, finish]
+TOOLS = [find, finish, open_page, search]
+for tool in TOOLS:
+    tool.description = inspect.cleandoc(tool.description)
+
+# Match MCP 2.0 schemas and the monorepo's canonical_tools, including title fields.
+TOOL_SCHEMAS = []
+for tool in TOOLS:
+    parameters = tool.tool_call_schema.model_json_schema()
+    parameters.pop("description", None)
+    parameters["title"] = tool.name + "Arguments"
+    TOOL_SCHEMAS.append({"type": "function", "function": {
+        "name": tool.name, "description": tool.description, "parameters": parameters}})
+TOOL_SCHEMAS = json.loads(json.dumps(TOOL_SCHEMAS, sort_keys=True, ensure_ascii=False))
+
+
+def model_messages(messages):
+    # Reports adapt the tool result to Decomposer's interface, not the researcher conversation.
+    return [message.model_copy(update={"name": None}) if isinstance(message, ToolMessage) else message
+            for message in messages if not message.additional_kwargs.get("decomposer_report")]
+
+
+def report_message(content=""):
+    return AIMessage(content=content, additional_kwargs={"decomposer_report": True})
 
 
 def _merge(pages, update):
@@ -197,7 +220,7 @@ def context_tokenizer():
 
 
 def prompt_tokens(messages, tools):
-    wire = convert_to_openai_messages([SystemMessage(SYSTEM_PROMPT), *messages])
+    wire = convert_to_openai_messages([SystemMessage(SYSTEM_PROMPT), *model_messages(messages)])
     for message in wire:
         for call in message.get("tool_calls", []):
             arguments = call["function"]["arguments"]
@@ -224,6 +247,23 @@ class ResearchProtocol(RunBudgetMiddleware):
     """Execute the original tool protocol sequentially, bounded by wall-clock time."""
     state_schema = SearchState
 
+    def __init__(self, tool_middleware=()):
+        self.tool_middleware = tuple(middleware for middleware in tool_middleware
+                                    if (type(middleware).awrap_tool_call is not AgentMiddleware.awrap_tool_call
+                                        or type(middleware).wrap_tool_call is not AgentMiddleware.wrap_tool_call))
+        self.tool_node = ToolNode(TOOLS, awrap_tool_call=self.awrap_tool_call)
+
+    async def awrap_tool_call(self, request, handler):
+        # ToolNode executes one call at a time; retain create_agent's wrapper order.
+        for middleware in reversed(self.tool_middleware):
+            inner = handler
+
+            async def wrapped(request, middleware=middleware, inner=inner):
+                return await middleware.awrap_tool_call(request, inner)
+
+            handler = wrapped
+        return await super().awrap_tool_call(request, handler)
+
     def before_agent(self, state, runtime):
         return {**super().before_agent(state, runtime), "invalid_turns": 0, "output_tokens": 0,
                 "previous_call": None, "repeated_calls": 0, "end_status": None}
@@ -234,20 +274,18 @@ class ResearchProtocol(RunBudgetMiddleware):
         if update:
             update["messages"] = [HumanMessage(FINISH_REQUEST)]
         messages = [*state["messages"], *(update or {}).get("messages", [])]
-        tools = [finish] if state["shutdown_requested"] or update else TOOLS
         status = ("output_limit" if state["output_tokens"] >= 65536 else
-                  "context_limit" if 65536 - prompt_tokens(messages, tools) - 512 < 4096 else None)
+                  "context_limit" if 65536 - prompt_tokens(messages, TOOL_SCHEMAS) - 512 < 4096 else None)
         if status:
-            return {"end_status": status, "messages": [AIMessage(content="")], "jump_to": "end"}
+            return {"end_status": status, "messages": [report_message()], "jump_to": "end"}
         return update
 
     def _prepare_model_request(self, request):
-        tools = [finish] if request.state["shutdown_requested"] else request.tools
-        return request.override(tools=tools, model_settings={**request.model_settings, "max_tokens": 4096})
+        return request.override(messages=model_messages(request.messages), tools=TOOL_SCHEMAS,
+                                model_settings={**request.model_settings, "max_tokens": 4096})
 
     def after_model(self, state, runtime):
-        # The async hook below owns routing, including finish during shutdown grace.
-        return None
+        raise NotImplementedError("ResearchProtocol requires async execution (ainvoke/astream).")
 
     @hook_config(can_jump_to=["model", "end"])
     async def aafter_model(self, state, runtime):
@@ -256,12 +294,17 @@ class ResearchProtocol(RunBudgetMiddleware):
                    "repeated_calls": state["repeated_calls"],
                    "output_tokens": state["output_tokens"] + (message.usage_metadata or {}).get("output_tokens", 0)}
         valid = 0
-        node = ToolNode(TOOLS)
-        validators = {tool.name: Draft202012Validator(tool.tool_call_schema.model_json_schema()) for tool in TOOLS}
+        validators = {schema["function"]["name"]: Draft202012Validator(schema["function"]["parameters"])
+                      for schema in TOOL_SCHEMAS}
         calls = [*message.tool_calls, *[{**call, "args": None} for call in message.invalid_tool_calls]]
+        if raw_calls := message.additional_kwargs.get("tool_calls"):
+            # LangChain separates malformed calls; preserve the provider's original batch order.
+            by_id = {call["id"]: call for call in calls}
+            calls = [by_id[call["id"]] for call in raw_calls]
         for call in calls:
             name, args = call["name"], call["args"]
             errors = ([{"path": [], "message": "Unknown tool name."}] if name not in validators else
+                      [{"path": [], "message": "Arguments must be a JSON object."}] if not isinstance(args, dict) else
                       [{"path": list(e.path), "message": e.message} for e in validators[name].iter_errors(args)])
             if errors:
                 result = {"error": "invalid_tool_call_format", "details": errors}
@@ -282,7 +325,7 @@ class ResearchProtocol(RunBudgetMiddleware):
                     tool_state = {**state, "pages": {**state.get("pages", {}), **updates["pages"]},
                                   "messages": [message.model_copy(update={"tool_calls": [call]})]}
                     async with asyncio.timeout(remaining):
-                        output = await node.ainvoke(tool_state, get_config(), runtime=runtime)
+                        output = await self.tool_node.ainvoke(tool_state, get_config(), runtime=runtime)
                     for item in output if isinstance(output, list) else [output]:
                         update = item.update if isinstance(item, Command) else item
                         updates["messages"].extend(update.get("messages", []))
@@ -290,7 +333,7 @@ class ResearchProtocol(RunBudgetMiddleware):
                     tool_message = updates["messages"][-1]
                     if name == "finish" and tool_message.artifact:
                         updates["end_status"] = "finished"
-                        updates["messages"].append(AIMessage(content=tool_message.artifact))
+                        updates["messages"].append(report_message(tool_message.artifact))
                     if not updates.get("end_status"):
                         continue
                     break
@@ -299,11 +342,12 @@ class ResearchProtocol(RunBudgetMiddleware):
                 break
         updates["invalid_turns"] = 0 if valid else state["invalid_turns"] + 1
         if not valid:
-            updates["messages"].append(HumanMessage(INVALID_TURN))
             if updates["invalid_turns"] >= 3:
                 updates["end_status"] = "invalid_tool_call"
+            else:
+                updates["messages"].append(HumanMessage(INVALID_TURN))
         if updates.get("end_status"):
-            report = updates["messages"].pop() if updates["end_status"] == "finished" else AIMessage(content="")
+            report = updates["messages"].pop() if updates["end_status"] == "finished" else report_message()
             completed = {m.tool_call_id for m in updates["messages"] if isinstance(m, ToolMessage)}
             for call in calls:
                 if call["id"] not in completed:

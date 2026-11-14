@@ -204,7 +204,7 @@ def test_grace_keeps_finish_available(monkeypatch, tmp_path):
 
     class InspectTools(AgentMiddleware):
         async def awrap_model_call(self, request, handler):
-            assert [t.name for t in request.tools] == ["finish"]
+            assert request.tools == agentic_rag.TOOL_SCHEMAS
             assert request.model_settings["max_tokens"] == 4096
             assert request.messages[-1].content == agentic_rag.FINISH_REQUEST
             return await handler(request)
@@ -257,3 +257,137 @@ def test_tool_execution_cannot_overrun_shutdown_grace(monkeypatch, tmp_path):
             {"messages": [HumanMessage("Question")]}, {"configurable": {"thread_id": "test"}},
             context={"directory": str(tmp_path), "agent_run_budget_seconds": .1,
                      "agent_shutdown_grace_seconds": .1}))
+
+
+def test_registered_tool_middleware_runs_in_order_and_can_reject(monkeypatch, tmp_path):
+    from langchain.agents.middleware import AgentMiddleware
+    from langchain_core.messages import ToolMessage
+    from unittest.mock import AsyncMock
+    events = []
+
+    class Outer(AgentMiddleware):
+        async def awrap_tool_call(self, request, handler):
+            events.append(("before", request.tool_call["name"]))
+            result = await handler(request)
+            events.append(("after", request.tool_call["name"]))
+            return result
+
+    class RejectSearch(AgentMiddleware):
+        async def awrap_tool_call(self, request, handler):
+            events.append(("inner", request.tool_call["name"]))
+            if request.tool_call["name"] == "search":
+                return ToolMessage('blocked', name='search', tool_call_id=request.tool_call['id'])
+            return await handler(request)
+
+    post = AsyncMock()
+    monkeypatch.setattr(agentic_rag, "_post", post)
+    tmp_path = tmp_path / "episode"
+    init_budget(tmp_path)
+    policy = ToolCallingModel(responses=[calls(("search", {"query": "q"})),
+                                        calls(("finish", {"answer": "Unknown", "sources": []}))])
+    state = asyncio.run(agents.react(policy, None, middleware=[Outer(), RejectSearch()]).ainvoke(
+        {"messages": [HumanMessage("Question")]}, {"configurable": {"thread_id": "test"}},
+        context={"directory": str(tmp_path), **CONTEXT}))
+    assert state['end_status'] == 'finished'
+    assert post.await_count == 0
+    assert events == [(stage, name) for name in ('search', 'finish') for stage in ('before', 'inner', 'after')]
+
+
+def test_wire_schemas_and_followup_history_match_protocol(monkeypatch, tmp_path):
+    from pathlib import Path
+    from decomposer import models
+    from gyms.wideseek.runtime import close_model
+    from langgraph.checkpoint.memory import InMemorySaver
+
+    expected = json.loads((Path(__file__).parent / 'fixtures/agentic_rag/tools.json').read_text())
+    requests = []
+
+    def respond(request):
+        payload = json.loads(request.content)
+        requests.append(payload)
+        return httpx.Response(200, json={
+            'id': f'response-{len(requests)}', 'object': 'chat.completion', 'created': 1, 'model': 'occ-4b',
+            'choices': [{'index': 0, 'finish_reason': 'tool_calls', 'message': {
+                'role': 'assistant', 'content': None, 'tool_calls': [{
+                    'id': f'finish-{len(requests)}', 'type': 'function',
+                    'function': {'name': 'finish', 'arguments': '{"answer":"Known answer","sources":[]}'}}]}}],
+            'usage': {'prompt_tokens': 100, 'completion_tokens': 20, 'total_tokens': 120}})
+
+    monkeypatch.setattr(models.httpx, 'HTTPTransport', lambda **kwargs: httpx.MockTransport(respond))
+    monkeypatch.setattr(models.httpx, 'AsyncHTTPTransport', lambda **kwargs: httpx.MockTransport(respond))
+    tmp_path = tmp_path / 'episode'
+    init_budget(tmp_path)
+
+    async def run():
+        policy = models.create_model('lmrouter/occ_4b_non_thinking')
+        try:
+            graph = agents.react(policy, InMemorySaver())
+            for question in ('Question', 'Follow-up'):
+                state = await graph.ainvoke({'messages': [HumanMessage(question)]},
+                    {'configurable': {'thread_id': 'test'}}, context={'directory': str(tmp_path), **CONTEXT})
+                assert state['messages'][-1].content == 'Known answer'
+        finally:
+            await close_model(policy)
+
+    asyncio.run(run())
+    assert len(requests) == 2
+    for payload in requests:
+        assert payload['tools'] == expected
+        assert json.dumps(payload['tools']) == json.dumps(expected)
+        assert payload['model'] == 'occ-4b'
+        assert payload['chat_template_kwargs']['enable_thinking'] is False
+        assert (payload['temperature'], payload['top_p'], payload['top_k']) == (.7, .8, 20)
+        assert payload.get('max_tokens', payload.get('max_completion_tokens')) == 4096
+        assert payload['messages'][0] == {'role': 'system', 'content': (
+            Path(__file__).parent / 'fixtures/agentic_rag/system_prompt.txt').read_text()}
+    messages = requests[-1]['messages']
+    assert [message['role'] for message in messages] == ['system', 'user', 'assistant', 'tool', 'user']
+    assert messages[-2] == {'role': 'tool', 'content': '{"success": true}', 'tool_call_id': 'finish-1'}
+    assert not any(message.get('content') == 'Known answer' for message in messages)
+
+
+def test_shutdown_rejects_search_without_hiding_its_schema(monkeypatch, tmp_path):
+    import time
+    from langchain.agents.middleware import AgentMiddleware
+    from unittest.mock import AsyncMock
+
+    class ExpireWork(AgentMiddleware):
+        def before_agent(self, state, runtime):
+            return {'shutdown_at': time.monotonic() - 1, 'timeout_at': time.monotonic() + 180}
+
+    post = AsyncMock()
+    monkeypatch.setattr(agentic_rag, '_post', post)
+    tmp_path = tmp_path / 'episode'
+    init_budget(tmp_path)
+    policy = ToolCallingModel(responses=[calls(('search', {'query': 'q'})),
+        calls(('finish', {'answer': 'Unknown', 'sources': []}))])
+    state = asyncio.run(agents.react(policy, None, middleware=[ExpireWork()]).ainvoke(
+        {'messages': [HumanMessage('Question')]}, {'configurable': {'thread_id': 'test'}},
+        context={'directory': str(tmp_path), **CONTEXT}))
+    assert state['end_status'] == 'finished'
+    assert post.await_count == 0
+    tools = [m for m in state['messages'] if m.type == 'tool']
+    assert json.loads(tools[0].content) == {
+        'error': 'finish_required', 'message': 'Only finish is allowed on the final attempt.'}
+
+
+def test_malformed_call_preceding_finish_receives_feedback_in_original_order(monkeypatch, tmp_path):
+    tmp_path = tmp_path / 'episode'
+    init_budget(tmp_path)
+    response = calls(('finish', {'answer': 'Unknown', 'sources': []}))
+    finish_id = response.tool_calls[0]['id']
+    response.invalid_tool_calls = [{'name': 'search', 'args': '{', 'id': 'malformed',
+                                    'error': 'invalid JSON', 'type': 'invalid_tool_call'}]
+    response.additional_kwargs['tool_calls'] = [
+        {'id': 'malformed', 'type': 'function', 'function': {'name': 'search', 'arguments': '{'}},
+        {'id': finish_id, 'type': 'function', 'function': {
+            'name': 'finish', 'arguments': '{"answer":"Unknown","sources":[]}'}}]
+    policy = ToolCallingModel(responses=[response])
+    state = asyncio.run(agents.react(policy, None).ainvoke(
+        {'messages': [HumanMessage('Question')]}, {'configurable': {'thread_id': 'test'}},
+        context={'directory': str(tmp_path), **CONTEXT}))
+    tools = [m for m in state['messages'] if m.type == 'tool']
+    assert [m.tool_call_id for m in tools] == ['malformed', finish_id]
+    assert json.loads(tools[0].content) == {'error': 'invalid_tool_call_format', 'details': [
+        {'path': [], 'message': 'Arguments must be a JSON object.'}]}
+    assert state['end_status'] == 'finished'

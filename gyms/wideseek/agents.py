@@ -25,7 +25,7 @@ def researcher():
 
 def react(policy, checkpointer, *, middleware=()):
     return create_agent(policy, tools=agentic_rag.TOOLS, system_prompt=agentic_rag.SYSTEM_PROMPT,
-        context_schema=Context, middleware=[agentic_rag.ResearchProtocol(), ModelLog("researcher"), *middleware],
+        context_schema=Context, middleware=[agentic_rag.ResearchProtocol(middleware), ModelLog("researcher"), *middleware],
         checkpointer=checkpointer)
 
 
