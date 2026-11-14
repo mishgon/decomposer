@@ -34,6 +34,9 @@ RUN_BUDGETS = {"react": (AGENT_RUN_BUDGET_SECONDS, AGENT_SHUTDOWN_GRACE_SECONDS)
                "student": (60.0, 60.0),
                "student_180": (AGENT_RUN_BUDGET_SECONDS, AGENT_SHUTDOWN_GRACE_SECONDS),
                "student_rag": (AGENT_RUN_BUDGET_SECONDS, AGENT_SHUTDOWN_GRACE_SECONDS)}
+# Graph steps per researcher run, 410 unless listed. student_rag's researchers have no turn limit,
+# so their run budget alone ends them (gyms/gaia2 allows the same 10000 steps).
+RESEARCHER_RECURSION_LIMITS = {"student_rag": 10000}
 
 
 def _researcher(profile):
@@ -53,7 +56,7 @@ def researcher_non_thinking():
 def researcher_agentic_rag():
     # FinishReport precedes RunBudgetMiddleware, so a valid finish ends the run before a shutdown request.
     return create_agent(model(STUDENT_RESEARCHER_MODEL), tools=agentic_rag.TOOLS, context_schema=Context,
-        middleware=[agentic_rag.FinishReport(), agentic_rag.TurnLimit(), RunBudgetMiddleware(), ModelLog("researcher")],
+        middleware=[agentic_rag.FinishReport(), RunBudgetMiddleware(), ModelLog("researcher")],
         system_prompt=agentic_rag.SYSTEM_PROMPT)
 
 
@@ -62,10 +65,11 @@ def react(policy, checkpointer, *, middleware=()):
         context_schema=Context, middleware=[RunBudgetMiddleware(), ModelLog("researcher"), *middleware], checkpointer=checkpointer)
 
 
-def decomposer(policy, checkpointer, worker_url, *, middleware=(), agent_recursion_limit=410,
+def decomposer(policy, checkpointer, worker_url, *, middleware=(), agent_recursion_limit=None,
                agent="decomposer"):
     # The student keeps the type ID its training records offer and WideSeek's description.
     run_budget, shutdown_grace = RUN_BUDGETS[agent]
+    agent_recursion_limit = agent_recursion_limit or RESEARCHER_RECURSION_LIMITS.get(agent, 410)
     return create_decomposer_agent(decomposer_model=policy,
         agent_types=[{"agent_type_id": "qwen_3_5_4b_thinking", "assistant_id": RESEARCHER_IDS[agent],
             "description": "Qwen3.5-4B thinking agent equipped with search and access tools.",

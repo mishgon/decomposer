@@ -140,7 +140,7 @@ async def episode(task, mode, attempt, root, args, *, middleware=(), policy=None
     policy = policy if policy is not None else model(agents.AGENT_MODELS[args.agent])
     if mode == "decomposer":
         agent = agents.decomposer(policy, checkpoint, args.worker_url, middleware=middleware,
-                                 agent_recursion_limit=getattr(args, 'agent_recursion_limit', 410),
+                                 agent_recursion_limit=getattr(args, 'agent_recursion_limit', None),
                                  agent=args.agent)
     else:
         agent = agents.react(policy, checkpoint, middleware=middleware)

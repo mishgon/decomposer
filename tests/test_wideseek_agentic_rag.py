@@ -76,33 +76,24 @@ def test_researcher_resolves_searched_pages_and_ends_with_its_finish_report(monk
     assert state["messages"][-1].content == "Follow-up report."
 
 
-@pytest.mark.parametrize("sources, report", [([SOLARIS], f"Lem\n\nSources:\n{SOLARIS}"), (["https://unknown"], "Lem")])
-def test_researcher_gets_32_calls_and_the_last_may_only_finish(monkeypatch, tmp_path, sources, report):
-    bound = []
-
-    class RecordingModel(ToolCallingModel):
-        def bind_tools(self, tools, **kwargs):
-            bound.append(sorted(tool.name for tool in tools))
-            return self
-
+def test_researcher_has_no_turn_limit_within_its_recursion_limit(monkeypatch, tmp_path):
     async def post(method, payload):
         return {"results": [{"page_id": 64199, "url": SOLARIS, "title": "Solaris (novel)", "snippet": "Solaris"}]}
 
     # The fake model returns to its first response after its last, so a spare one keeps i counting calls.
-    policy = RecordingModel(responses=[calls(("search", {"query": f"Solaris {turn}"})) for turn in range(31)]
-                            + [calls(("finish", {"answer": "Lem", "sources": sources})), AIMessage(content="unused")])
+    policy = ToolCallingModel(responses=[calls(("search", {"query": f"Solaris {turn}"})) for turn in range(80)]
+                              + [calls(("finish", {"answer": "Lem", "sources": [SOLARIS]})), AIMessage(content="unused")])
     monkeypatch.setattr(agentic_rag, "_post", post)
     monkeypatch.setattr(agents, "model", lambda profile: policy)
     episode = tmp_path / "episode"
     init_budget(episode)
     state = asyncio.run(agents.researcher_agentic_rag().ainvoke(
         {"messages": [HumanMessage("Who wrote Solaris?")]},
-        {"configurable": {"thread_id": "researcher"}, "recursion_limit": 410},
+        {"configurable": {"thread_id": "researcher"},
+         "recursion_limit": agents.RESEARCHER_RECURSION_LIMITS["student_rag"]},
         context={"directory": str(episode), **CONTEXT}))
-    assert policy.i == agentic_rag.MAX_TURNS == 32
-    assert bound[0] == ["find", "finish", "open", "search"] and bound[-1] == ["finish"]
-    assert [m.content for m in state["messages"] if m.type == "human"][-1] == agentic_rag.FINAL_ATTEMPT
-    assert state["messages"][-1].type == "ai" and state["messages"][-1].content == report
+    assert policy.i == 81
+    assert state["messages"][-1].type == "ai" and state["messages"][-1].content == f"Lem\n\nSources:\n{SOLARIS}"
 
 
 def test_search_api_waits_out_transient_errors_and_stops_on_others(monkeypatch):
@@ -166,6 +157,7 @@ def test_student_rag_is_student_180_over_agentic_rag_researchers(monkeypatch):
         agents.decomposer("policy", "checkpoint", "http://worker", agent=agent)
     student, rag = (kw["agent_types"][0] for kw in captured)
     assert rag == {**student, "assistant_id": "researcher_agentic_rag"}
+    assert [kw["agent_recursion_limit"] for kw in captured] == [410, 10000]
     for table in (agents.AGENT_MODELS, agents.SUBAGENT_MODELS, agents.RUN_BUDGETS):
         assert table["student_rag"] == table["student_180"]
     for gym in ("wideseek", "deepdive"):
