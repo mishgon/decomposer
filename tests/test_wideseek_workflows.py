@@ -69,9 +69,11 @@ def test_student_180_differs_from_the_student_only_in_its_run_budget(monkeypatch
         agents.decomposer("policy", "checkpoint", "http://worker", agent=agent)
     student, longer = calls
     assert (longer["agent_run_budget_seconds"], longer["agent_shutdown_grace_seconds"]) == (180.0, 180.0)
-    budget = ("agent_run_budget_seconds", "agent_shutdown_grace_seconds")
-    assert {k: v for k, v in student.items() if k not in budget} == {
-        k: v for k, v in longer.items() if k not in budget}
+    # Each call builds its own ModelLog, so the middleware is compared by type.
+    assert [type(m) for m in student["middleware"]] == [type(m) for m in longer["middleware"]]
+    apart = ("agent_run_budget_seconds", "agent_shutdown_grace_seconds", "middleware")
+    assert {k: v for k, v in student.items() if k not in apart} == {
+        k: v for k, v in longer.items() if k not in apart}
     for table in (agents.AGENT_MODELS, agents.SUBAGENT_MODELS, agents.RESEARCHER_IDS):
         assert table["student_180"] == table["student"]
 
