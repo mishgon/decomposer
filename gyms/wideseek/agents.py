@@ -21,7 +21,7 @@ AGENT_MODELS = {"react": REACT_MODEL, "decomposer": DECOMPOSER_MODEL, "student":
 SUBAGENT_MODELS = {"react": RESEARCHER_MODEL, "decomposer": RESEARCHER_MODEL,
                    "student": STUDENT_RESEARCHER_MODEL, "student_180": STUDENT_RESEARCHER_MODEL,
                    "student_rag": STUDENT_RESEARCHER_MODEL}
-# student_rag's researchers use the monorepo's cited-search harness over WideSeek's corpus.
+# student_rag's researchers use the monorepo's cited-search harness over its hosted Search API.
 RESEARCHER_IDS = {"decomposer": "researcher", "student": "researcher_non_thinking",
                   "student_180": "researcher_non_thinking", "student_rag": "researcher_agentic_rag"}
 AGENT_RUN_BUDGET_SECONDS = 180.0

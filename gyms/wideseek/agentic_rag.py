@@ -1,25 +1,25 @@
-"""The monorepo's cited-search researcher harness over WideSeek's local Wiki-2018 corpus.
+"""The monorepo's cited-search researcher harness over its hosted Search API.
 
 Prompts, tool descriptions and settings follow the monorepo at 1a73e8a:
-common/tools/agentic_rag.py, common/toolsets/agentic_rag_search.py, common/tasks/agentic_rag.py
-and configs/filter_difficulty/agentic_rag.toml. Search, open and find answer as the hosted Search
-API does, over the corpus the reference answers come from: pages are plain text without link
-markup, wrapped at 200 characters per line.
+common/tools/agentic_rag.py, common/toolsets/agentic_rag_search.py, common/harness/agentic_rag.py,
+common/tasks/agentic_rag.py and configs/filter_difficulty/agentic_rag.toml.
 """
+import asyncio
 import json
-import re
-import textwrap
+import os
+import time
 from typing import Annotated, NotRequired
-from urllib.parse import unquote
+from uuid import uuid4
 
+import httpx
 from langchain.agents.middleware import AgentMiddleware, AgentState, hook_config
 from langchain.tools import tool, ToolRuntime
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.types import Command
 from pydantic import Field
+from tenacity import retry, retry_if_exception, wait_exponential_jitter
 
-from gyms.wideseek.runtime import Context
-from gyms.wideseek.worker import request_tool
+from gyms.wideseek.runtime import Context, directory, save
 
 SYSTEM_PROMPT = """Answer using retrieved evidence only. Finish with your answer and supporting sources. Do not list competing answers unless requested.
 
@@ -29,23 +29,49 @@ URL_NOT_IN_SESSION = json.dumps({
     "success": False, "error": "url_not_in_session",
     "message": "URL not found in this session's search results. "
                "Copy a returned URL exactly for open/find; trailing path slashes are handled automatically."})
-PAGE_NOT_FOUND = json.dumps({"success": False, "error": "page_not_found", "message": "The page is missing from the corpus."})
 # The monorepo harness (common/harness/agentic_rag.py) allows 32 model calls; the last may only call finish.
 MAX_TURNS = 32
 FINAL_ATTEMPT = ("This is your last model call. Call finish exactly once using the evidence "
                  "already collected. No other tools are allowed. Follow the answer and source "
                  "requirements in the system instructions and the finish tool description.")
-LINK = re.compile(r"\[([^\]]*)\]\([^)]*\)")
+SOURCE = "wikipedia"
 
 
-def plain(text):
-    """Corpus markdown as plain text: a link keeps only its anchor text."""
-    return LINK.sub(r"\1", text)
+def search_api():
+    """The Search API front and the headers that authorize a request to it."""
+    return (os.environ.get("AGENTIC_RAG_URL", "https://lmrouter.2a2i.org/rag"),
+            {"Authorization": "Bearer " + os.environ["AGENTIC_RAG_API_KEY"]})
 
 
-def page_lines(page):
-    return [line for paragraph in plain(page["contents"]).split("\n")
-            for line in textwrap.wrap(paragraph, 200) or [""]]
+def _transient(error):
+    if isinstance(error, httpx.TransportError):
+        return True
+    return isinstance(error, httpx.HTTPStatusError) and (
+        error.response.status_code in {408, 409, 429} or error.response.status_code >= 500)
+
+
+# As in the monorepo, transient errors are waited out; the run budget bounds the wait.
+@retry(retry=retry_if_exception(_transient), wait=wait_exponential_jitter(multiplier=0.5, max=30), reraise=True)
+async def _post(method, payload):
+    url, headers = search_api()
+    async with httpx.AsyncClient(timeout=60, trust_env=False) as client:
+        response = await client.post(url + "/" + method, headers=headers, json={**payload, "source": SOURCE})
+        response.raise_for_status()
+        return response.json()
+
+
+async def request_search_api(method, payload, runtime):
+    row = {"tool": method, "arguments": payload, "started_at": time.time()}
+    path = (await asyncio.to_thread(directory, runtime.context)) / "tool_calls" / f"{uuid4().hex}.json"
+    try:
+        row["response"] = await _post(method, payload)
+        return row["response"]
+    except Exception as exc:
+        row["error"] = f"{type(exc).__name__}: {exc}"
+        raise
+    finally:
+        row["finished_at"] = time.time()
+        await asyncio.to_thread(save, path, row)
 
 
 def page_url_key(url):
@@ -69,15 +95,11 @@ async def search(query: Annotated[str, Field(description="Search query.")],
 
     Use open or find to inspect the supporting evidence.
     """
-    # The index holds passages; like the hosted API, return distinct pages, each with its best passage.
-    passages = {}
-    for hit in await request_tool("/retrieve", {"queries": [query], "topk": 10}, runtime):
-        passages.setdefault(hit["url"], hit["contents"])
-    hits = [{"url": url, "title": unquote(url.split("title=", 1)[1]), "snippet": plain(contents)[:300]}
-            for url, contents in list(passages.items())[:5]]
-    return Command(update={"pages": [hit["url"] for hit in hits],
-                           "messages": [ToolMessage(json.dumps(hits, ensure_ascii=False), name="search",
-                                                    tool_call_id=runtime.tool_call_id)]})
+    hits = (await request_search_api("search", {"query": query, "limit": 5}, runtime))["results"]
+    content = json.dumps([{key: hit[key] for key in ("url", "title", "snippet")} for hit in hits],
+                         ensure_ascii=False)
+    return Command(update={"pages": {hit["url"]: hit["page_id"] for hit in hits},
+                           "messages": [ToolMessage(content, name="search", tool_call_id=runtime.tool_call_id)]})
 
 
 @tool("open")
@@ -89,15 +111,13 @@ async def open_page(url: Annotated[str, Field(description="Page URL returned by 
 
     Choose any starting line to inspect a passage or continue reading.
     """
-    url = page_url(runtime.state.get("pages", []), url)
+    pages = runtime.state.get("pages", {})
+    url = page_url(pages, url)
     if url is None:
         return URL_NOT_IN_SESSION
-    page = await request_tool("/access", {"urls": [url]}, runtime)
-    if page is None:
-        return PAGE_NOT_FOUND
-    lines, loc = page_lines(page), loc or 0
-    return json.dumps({"lines": "\n".join(lines[loc:loc + 16]), "total_lines_on_page": len(lines),
-                       "loc": loc, "num_lines": 16}, ensure_ascii=False)
+    result = await request_search_api(
+        "open", {"page_id": pages[url], "loc": 0 if loc is None else loc, "num_lines": 16}, runtime)
+    return json.dumps(result, ensure_ascii=False)
 
 
 @tool
@@ -114,26 +134,13 @@ async def find(url: Annotated[str, Field(description="Page URL returned by searc
     Use open for surrounding context. Invalid or timed-out patterns return
     feedback; simplify or correct the pattern and retry.
     """
-    url = page_url(runtime.state.get("pages", []), url)
+    pages = runtime.state.get("pages", {})
+    url = page_url(pages, url)
     if url is None:
         return URL_NOT_IN_SESSION
-    try:
-        regex = re.compile(pattern, re.IGNORECASE)
-    except re.error as exc:
-        return json.dumps({"success": False, "error": "invalid_pattern",
-                           "message": f"invalid find regular expression: {exc}"})
-    page = await request_tool("/access", {"urls": [url]}, runtime)
-    if page is None:
-        return PAGE_NOT_FOUND
-    lines = page_lines(page)
-    matches = []
-    for number, line in enumerate(lines):
-        if match := regex.search(line):
-            start, end = max(0, match.start() - 50), min(len(line), match.end() + 50)
-            matches.append({"line": number, "excerpt": ("..." if start else "") + line[start:end]
-                            + ("..." if end < len(line) else "")})
-    return json.dumps({"matches": matches[:16], "total_matches": len(matches), "total_lines_on_page": len(lines)},
-                      ensure_ascii=False)
+    result = await request_search_api(
+        "find", {"page_id": pages[url], "pattern": pattern, "max_entries": 16}, runtime)
+    return json.dumps(result, ensure_ascii=False)
 
 
 @tool(response_format="content_and_artifact")
@@ -152,7 +159,7 @@ def finish(answer: Annotated[str, Field(description=(
     A valid submission ends the session; invalid submissions return feedback
     for correction.
     """
-    pages = runtime.state.get("pages", [])
+    pages = runtime.state.get("pages", {})
     resolved = [page_url(pages, url) for url in sources]
     unknown = [url for url, match in zip(sources, resolved) if match is None]
     cited = [match for match in resolved if match is not None]
@@ -172,12 +179,12 @@ def finish(answer: Annotated[str, Field(description=(
 TOOLS = [search, open_page, find, finish]
 
 
-def _union(pages, update):
-    return pages + [url for url in update if url not in pages]
+def _merge(pages, update):
+    return {**pages, **update}
 
 
 class SearchState(AgentState):
-    pages: NotRequired[Annotated[list[str], _union]]
+    pages: NotRequired[Annotated[dict[str, int], _merge]]
 
 
 class FinishReport(AgentMiddleware):
