@@ -37,16 +37,24 @@ cited-search harness (search, open, find and finish) over the same offline Wiki-
 Its tools answer as the hosted Search API does: up to 5 distinct pages per search, and page
 text without link markup in lines of at most 200 characters.
 
-Collect a fixed number of attempts per task with the SFT collector (`-n 4`), then
-write the band of the finished run:
+Collect attempts with the SFT collector in two stages. Run 2 attempts per task (`-n 2`),
+then write the band so far and the tasks whose two attempts agree:
 
 ```bash
-gyms/wideseek/.venv/bin/python -m evals.wideseek.band <run_dir>
+gyms/wideseek/.venv/bin/python -m evals.wideseek.band <first_run> \
+  --undecided undecided.jsonl --data <pool.jsonl>
 ```
 
-`band.json` lists the tasks solved on some attempts but not all, plus the passes of
-every task. A pass is an attempt the collector counts as a success. Timeouts, context
-overflows and runaway turns are failed attempts; outage failures are rerun, not counted.
+Run 2 more attempts on `undecided.jsonl`, then write the band of both runs:
+
+```bash
+gyms/wideseek/.venv/bin/python -m evals.wideseek.band <first_run> <second_run>
+```
+
+`band.json`, in the last run, lists the tasks solved on some attempts but not all, plus
+the passes of every task over all given runs. A pass is an attempt the collector counts
+as a success. Timeouts, context overflows and runaway turns are failed attempts; outage
+failures are rerun, not counted.
 
 ```bash
 bash evals/wideseek/watch-wideseek.sh
