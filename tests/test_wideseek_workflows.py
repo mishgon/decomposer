@@ -75,6 +75,12 @@ def test_student_samples_local_vllm_as_rl_rollouts(monkeypatch):
     assert not metadata["extra_body"]["chat_template_kwargs"]["enable_thinking"]
     assert not metadata["preserve_reasoning"]
     asyncio.run(close_model(policy))
+    researcher = model(agents.STUDENT_RESEARCHER_MODEL)
+    metadata = model_metadata(researcher)
+    assert metadata["model_name"] == "occ-4b"
+    assert not metadata["extra_body"]["chat_template_kwargs"]["enable_thinking"]
+    assert not metadata["preserve_reasoning"]
+    asyncio.run(close_model(researcher))
 
 
 def test_summary_keeps_judge_errors_separate_and_excludes_judge_tokens():

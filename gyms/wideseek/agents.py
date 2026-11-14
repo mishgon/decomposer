@@ -11,9 +11,9 @@ REACT_MODEL = "lmrouter/qwen_3_5_4b_thinking"
 DECOMPOSER_MODEL = "lmrouter/qwen_3_8_flash_next_non_thinking"
 RESEARCHER_MODEL = REACT_MODEL
 # The student is an SFT manager checkpoint that local vLLM serves as Qwen/Qwen3.5-4B, over
-# non-thinking hosted researchers.
+# non-thinking hosted OCC-4b researchers.
 STUDENT_MODEL = "vllm/qwen_3_5_4b_non_thinking_rl_sampling"
-STUDENT_RESEARCHER_MODEL = "lmrouter/qwen_3_5_4b_non_thinking"
+STUDENT_RESEARCHER_MODEL = "lmrouter/occ_4b_non_thinking"
 JUDGE_MODEL = "lmrouter/qwen_3_8_flash_next_non_thinking"
 AGENT_MODELS = {"react": REACT_MODEL, "decomposer": DECOMPOSER_MODEL, "student": STUDENT_MODEL}
 SUBAGENT_MODELS = {"react": RESEARCHER_MODEL, "decomposer": RESEARCHER_MODEL,

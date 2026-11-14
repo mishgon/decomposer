@@ -113,6 +113,7 @@ def create_model(
         "lmrouter/qwen_3_5_4b_non_thinking",
         "lmrouter/qwen_3_5_4b_unlooped_thinking",
         "lmrouter/qwen_3_5_4b_unlooped_non_thinking",
+        "lmrouter/occ_4b_non_thinking",
         "lmrouter/qwen_3_8_flash_next_non_thinking",
         "lmrouter/qwen_3_8_flash_next_low_thinking",
         "lmrouter/qwen_3_8_flash_next_medium_thinking",
@@ -234,6 +235,29 @@ def create_model(
                 temperature=0.7,
                 top_p=0.8,
                 extra_body={"top_k": 20, "chat_template_kwargs": {"enable_thinking": False}},
+                preserve_reasoning=False,
+                timeout=600,
+                max_retries=0,
+                http_client=sync_client,
+                http_async_client=client,
+                disable_streaming=True,
+                use_responses_api=False,
+            )
+        case "lmrouter/occ_4b_non_thinking":
+            # OCC-4b is night26-pure100, a Qwen3.5-4B; Qwen's non-thinking settings.
+            return ChatVLLM(
+                model="occ-4b",
+                base_url="https://lmrouter.2a2i.org/v1",
+                api_key=os.environ.get("LLM_PROXY_MASTER_KEY", "EMPTY"),
+                temperature=0.7,
+                top_p=0.8,
+                presence_penalty=1.5,
+                extra_body={
+                    "top_k": 20,
+                    "min_p": 0.0,
+                    "repetition_penalty": 1.0,
+                    "chat_template_kwargs": {"enable_thinking": False},
+                },
                 preserve_reasoning=False,
                 timeout=600,
                 max_retries=0,

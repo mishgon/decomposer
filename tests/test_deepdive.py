@@ -128,7 +128,8 @@ def test_launcher_uses_deepdive_data_and_cleans_workers_on_failure(tmp_path, mon
 def test_deepdive_worker_uses_wideseek_retrieval_agent():
     root = Path(__file__).resolve().parents[1]
     graphs = json.loads((root / "gyms/deepdive/langgraph.json").read_text())["graphs"]
-    assert graphs == {"researcher": "gyms.wideseek.agents:researcher"}
+    assert graphs == {"researcher": "gyms.wideseek.agents:researcher",
+                      "researcher_non_thinking": "gyms.wideseek.agents:researcher_non_thinking"}
 
 
 def test_collection_pool_mixes_both_qa_splits(tmp_path):
