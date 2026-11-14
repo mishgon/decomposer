@@ -28,15 +28,14 @@ directory, preserving every original result. Use each module's `--help`.
 DeepDive. Serve the checkpoint with vLLM on port 8024 under the name `Qwen/Qwen3.5-4B`
 (`--tool-call-parser qwen3_xml`). The profile samples it non-thinking as RL rollouts
 do: temperature 1.0 with no top-p, top-k or presence penalty, and at most 8,192 tokens
-per turn. The student keeps the agent type and the 60-second run budget of its training
-records. Its researchers run on the `researcher_non_thinking` worker graph with the
-hosted non-thinking 4B model that `STUDENT_RESEARCHER_MODEL` names. `--agent student_180`
-is the same student with the teachers' 180-second run budget and shutdown grace.
-`--agent student_rag` is `student_180` over `researcher_agentic_rag` workers: the monorepo's
-cited-search harness (search, open, find and finish, with no turn limit: the run budget alone
-ends a researcher run) over the hosted Search API's `wikipedia` source instead of the offline
-Wiki-2018 corpus. It reads the API key from `AGENTIC_RAG_API_KEY` and the front from `AGENTIC_RAG_URL`,
-by default `https://lmrouter.2a2i.org/rag`.
+per turn. All setups use the same `researcher` graph: non-thinking `occ-4b` with the
+colleagues' `search`, `open`, `find`, and `finish` tools. `react` runs that researcher directly.
+Researchers have 180 seconds of work and 180 seconds to submit through `finish`.
+There is no turn limit. The original protocol guards malformed/repeated calls and
+retains the 65,536-token context/output limits and 4,096-token per-call limit.
+The Search API uses the `wikipedia` source, `AGENTIC_RAG_API_KEY`, and
+`AGENTIC_RAG_URL` (default `https://lmrouter.2a2i.org/rag`).
+The retired `student_180` and `student_rag` variants are replaced by `student`.
 
 Collect attempts with the SFT collector in two stages. Run 2 attempts per task (`-n 2`),
 then write the band so far and the tasks whose two attempts agree:

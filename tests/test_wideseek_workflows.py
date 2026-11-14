@@ -9,7 +9,7 @@ from gyms.wideseek.run import create_parser
 
 def test_named_agent_cli_rejects_model_overrides_and_legacy_flags():
     parser = create_parser()
-    for name in ("react", "decomposer", "student", "student_180"):
+    for name in ("react", "decomposer", "student"):
         assert parser.parse_args(["--agent", name, "--output", "/tmp/raw"]).agent == name
     for flag in ("--mode", "--harness", "--model", "--subagent-model", "--judge-model"):
         with pytest.raises(SystemExit):
@@ -31,51 +31,30 @@ def test_researcher_id_is_explicit_and_matches_server(monkeypatch):
     agents.decomposer("policy", "checkpoint", "http://worker")
     worker = captured["agent_types"][0]
     assert worker["assistant_id"] == "researcher"
-    assert worker["agent_type_id"] == "qwen_3_5_4b_thinking"
+    assert worker["agent_type_id"] == "occ_4b_non_thinking"
     assert graphs[worker["assistant_id"]] == "gyms.wideseek.agents:researcher"
     assert worker["url"] == "http://worker"
 
 
-def test_student_keeps_its_training_interface_over_non_thinking_researchers(monkeypatch):
-    import inspect
-    from decomposer.core import create_decomposer_agent
+def test_student_uses_shared_non_thinking_researchers(monkeypatch):
     from gyms.wideseek import agents
     root = Path(__file__).resolve().parents[1]
     captured = {}
     monkeypatch.setattr(agents, "create_decomposer_agent", lambda **kw: captured.update(kw))
     agents.decomposer("policy", "checkpoint", "http://worker", agent="student")
     worker = captured["agent_types"][0]
-    assert worker["agent_type_id"] == "qwen_3_5_4b_thinking"
-    assert worker["description"] == "Qwen3.5-4B thinking agent equipped with search and access tools."
-    # The run budget of the SFT teacher prompt: create_decomposer_agent's defaults.
-    defaults = inspect.signature(create_decomposer_agent).parameters
+    assert worker["agent_type_id"] == "occ_4b_non_thinking"
+    assert worker["description"] == "OCC-4B non-thinking agent equipped with search, open, find and finish tools."
     assert (captured["agent_run_budget_seconds"], captured["agent_shutdown_grace_seconds"]) == (
-        defaults["agent_run_budget_seconds"].default, defaults["agent_shutdown_grace_seconds"].default)
+        180.0, 180.0)
     for gym in ("wideseek", "deepdive"):
         graphs = json.loads((root / f"gyms/{gym}/langgraph.json").read_text())["graphs"]
-        assert graphs[worker["assistant_id"]] == "gyms.wideseek.agents:researcher_non_thinking"
+        assert graphs[worker["assistant_id"]] == "gyms.wideseek.agents:researcher"
     profiles = []
     monkeypatch.setattr(agents, "model", profiles.append)
     monkeypatch.setattr(agents, "create_agent", lambda *args, **kwargs: None)
-    agents.researcher_non_thinking()
-    assert profiles == [agents.STUDENT_RESEARCHER_MODEL] == [agents.SUBAGENT_MODELS["student"]]
-
-
-def test_student_180_differs_from_the_student_only_in_its_run_budget(monkeypatch):
-    from gyms.wideseek import agents
-    calls = []
-    monkeypatch.setattr(agents, "create_decomposer_agent", lambda **kw: calls.append(kw))
-    for agent in ("student", "student_180"):
-        agents.decomposer("policy", "checkpoint", "http://worker", agent=agent)
-    student, longer = calls
-    assert (longer["agent_run_budget_seconds"], longer["agent_shutdown_grace_seconds"]) == (180.0, 180.0)
-    # Each call builds its own ModelLog, so the middleware is compared by type.
-    assert [type(m) for m in student["middleware"]] == [type(m) for m in longer["middleware"]]
-    apart = ("agent_run_budget_seconds", "agent_shutdown_grace_seconds", "middleware")
-    assert {k: v for k, v in student.items() if k not in apart} == {
-        k: v for k, v in longer.items() if k not in apart}
-    for table in (agents.AGENT_MODELS, agents.SUBAGENT_MODELS, agents.RESEARCHER_IDS):
-        assert table["student_180"] == table["student"]
+    agents.researcher()
+    assert profiles == [agents.RESEARCHER_MODEL] == [agents.SUBAGENT_MODELS["student"]]
 
 
 def test_student_samples_local_vllm_as_rl_rollouts(monkeypatch):
@@ -92,7 +71,7 @@ def test_student_samples_local_vllm_as_rl_rollouts(monkeypatch):
     assert not metadata["extra_body"]["chat_template_kwargs"]["enable_thinking"]
     assert not metadata["preserve_reasoning"]
     asyncio.run(close_model(policy))
-    researcher = model(agents.STUDENT_RESEARCHER_MODEL)
+    researcher = model(agents.RESEARCHER_MODEL)
     metadata = model_metadata(researcher)
     assert metadata["model_name"] == "occ-4b"
     assert not metadata["extra_body"]["chat_template_kwargs"]["enable_thinking"]
@@ -162,12 +141,12 @@ def test_models_use_shared_registry_without_sampling_environment(monkeypatch):
     monkeypatch.setenv("LLM_PROXY_MASTER_KEY", "test-secret")
     policy = model(DEFAULT_SUBAGENT)
     metadata = model_metadata(policy)
-    assert metadata["model_name"] == "Qwen/Qwen3.5-4B"
-    assert metadata["temperature"] == 1.0
+    assert metadata["model_name"] == "occ-4b"
+    assert metadata["temperature"] == 0.7
     assert metadata["presence_penalty"] == 1.5
-    assert metadata["top_p"] == .95
-    assert metadata["extra_body"]["chat_template_kwargs"]["enable_thinking"]
-    assert metadata["preserve_reasoning"]
+    assert metadata["top_p"] == .8
+    assert not metadata["extra_body"]["chat_template_kwargs"]["enable_thinking"]
+    assert not metadata["preserve_reasoning"]
     assert "test-secret" not in json.dumps(metadata)
     import asyncio
     from gyms.wideseek.runtime import close_model

@@ -144,7 +144,7 @@ async def episode(task, mode, attempt, root, args, *, middleware=(), policy=None
                                  agent=args.agent)
     else:
         agent = agents.react(policy, checkpoint, middleware=middleware)
-    config = {"recursion_limit": getattr(args, 'recursion_limit', 410),
+    config = {"recursion_limit": getattr(args, 'recursion_limit', 10000 if mode != 'decomposer' else 410),
               "configurable": {"thread_id": uuid4().hex}}
     result = {"task_id": task["task_id"], "task": task["task_id"],
               "episode_id": path.name, "run_id": root.name,
@@ -178,12 +178,18 @@ async def episode(task, mode, attempt, root, args, *, middleware=(), policy=None
             result["status"] = "error"
         cleanup_finished = True
 
+    context = {"directory": str(path.resolve())}
+    if mode != "decomposer":
+        context.update(agent_run_budget_seconds=agents.RUN_BUDGETS[args.agent][0],
+                       agent_shutdown_grace_seconds=agents.RUN_BUDGETS[args.agent][1])
     try:
         async with asyncio.timeout_at(episode_deadline):
             try:
                 state = await agent.ainvoke(agent_input(task), config=config,
-                                           context={"directory": str(path.resolve())})
+                                           context=context)
                 result["status"] = "finished"
+                if state.get("end_status"):
+                    result["end_status"] = state["end_status"]
                 if state.get("stop_reason"):
                     result.update(status="skipped", stop_reason=state["stop_reason"],
                                   sequence_length=state.get("sequence_length"))
@@ -271,18 +277,11 @@ async def describe_run(args):
     if args.mode not in {"simple", "decomposer"}:
         raise ValueError("Each run must use one setup: simple or decomposer")
     modes = [args.mode]
-    # Agentic RAG researchers search the hosted Search API instead of the offline corpus.
-    rag = agents.RESEARCHER_IDS.get(args.agent) == "researcher_agentic_rag"
     async with httpx.AsyncClient(timeout=30, trust_env=False) as http:
-        if rag:
-            url, headers = agentic_rag.search_api()
-            response = await http.get(url + "/health", headers=headers)
-            response.raise_for_status()
-            retrieval = {"search_api": url, "source": agentic_rag.SOURCE, "health": response.json()}
-        else:
-            response = await http.get(os.environ.get("WS_SEARCH_URL", "http://127.0.0.1:18080") + "/health")
-            response.raise_for_status()
-            retrieval = response.json()
+        url, headers = agentic_rag.search_api()
+        response = await http.get(url + "/health", headers=headers)
+        response.raise_for_status()
+        retrieval = {"search_api": url, "source": agentic_rag.SOURCE, "health": response.json()}
         if "decomposer" in modes:
             response = await http.get(args.worker_url + "/ok")
             response.raise_for_status()
@@ -308,7 +307,7 @@ async def describe_run(args):
         digest.update(path.read_bytes() + b"\0")
     harness = {
         "source_sha256": digest.hexdigest(),
-        "agent_system_prompt": agentic_rag.SYSTEM_PROMPT if rag else agents.AGENT_SYSTEM_PROMPT,
+        "agent_system_prompt": agentic_rag.SYSTEM_PROMPT,
         "agent_run_budget_seconds": agents.RUN_BUDGETS[args.agent][0],
         "agent_shutdown_grace_seconds": agents.RUN_BUDGETS[args.agent][1],
     }
@@ -316,7 +315,7 @@ async def describe_run(args):
     settings = {"tasks": [t["task_id"] for t in tasks], "data_sha256": hashlib.sha256(raw).hexdigest(),
                 "agent": args.agent, "modes": modes, "repetitions": args.n, "concurrency": args.concurrency,
                 "model": profiles["agent"]["model_name"], "model_profiles": profiles,
-                "generation": profiles["agent"], "recursion_limit": 410,
+                "generation": profiles["agent"], "recursion_limit": 10000 if args.mode != "decomposer" else 410,
                 "harness": harness,
                 "retrieval": retrieval,
                 "model_calls": args.model_calls, "output_tokens": args.output_tokens,

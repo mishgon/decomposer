@@ -2,77 +2,40 @@
 from langchain.agents import create_agent
 
 from decomposer.core import create_decomposer_agent
-from decomposer.run_budget import RunBudgetMiddleware
 from gyms.wideseek import agentic_rag
-from gyms.wideseek.prompts import AGENT_SYSTEM_PROMPT
 from gyms.wideseek.runtime import Context, ModelLog, model
-from gyms.wideseek.worker import access, search
 
-REACT_MODEL = "lmrouter/qwen_3_5_4b_thinking"
+REACT_MODEL = "lmrouter/occ_4b_non_thinking"
 DECOMPOSER_MODEL = "lmrouter/qwen_3_8_flash_next_non_thinking"
 RESEARCHER_MODEL = REACT_MODEL
-# The student is an SFT manager checkpoint that local vLLM serves as Qwen/Qwen3.5-4B, over
-# non-thinking hosted OCC-4b researchers.
 STUDENT_MODEL = "vllm/qwen_3_5_4b_non_thinking_rl_sampling"
-STUDENT_RESEARCHER_MODEL = "lmrouter/occ_4b_non_thinking"
 JUDGE_MODEL = "lmrouter/qwen_3_8_flash_next_non_thinking"
-AGENT_MODELS = {"react": REACT_MODEL, "decomposer": DECOMPOSER_MODEL, "student": STUDENT_MODEL,
-                "student_180": STUDENT_MODEL, "student_rag": STUDENT_MODEL}
-SUBAGENT_MODELS = {"react": RESEARCHER_MODEL, "decomposer": RESEARCHER_MODEL,
-                   "student": STUDENT_RESEARCHER_MODEL, "student_180": STUDENT_RESEARCHER_MODEL,
-                   "student_rag": STUDENT_RESEARCHER_MODEL}
-# student_rag's researchers use the monorepo's cited-search harness over its hosted Search API.
-RESEARCHER_IDS = {"decomposer": "researcher", "student": "researcher_non_thinking",
-                  "student_180": "researcher_non_thinking", "student_rag": "researcher_agentic_rag"}
+AGENT_MODELS = {"react": REACT_MODEL, "decomposer": DECOMPOSER_MODEL, "student": STUDENT_MODEL}
+SUBAGENT_MODELS = dict.fromkeys(AGENT_MODELS, RESEARCHER_MODEL)
+RESEARCHER_IDS = dict.fromkeys(("decomposer", "student"), "researcher")
 AGENT_RUN_BUDGET_SECONDS = 180.0
 AGENT_SHUTDOWN_GRACE_SECONDS = 180.0
-# Run budget and shutdown grace in seconds. The student's are the ones its training prompt
-# names: create_decomposer_agent's defaults, which the SFT teacher collections used.
-# student_180 is the same student with the teachers' budget, which student_rag also gets.
-RUN_BUDGETS = {"react": (AGENT_RUN_BUDGET_SECONDS, AGENT_SHUTDOWN_GRACE_SECONDS),
-               "decomposer": (AGENT_RUN_BUDGET_SECONDS, AGENT_SHUTDOWN_GRACE_SECONDS),
-               "student": (60.0, 60.0),
-               "student_180": (AGENT_RUN_BUDGET_SECONDS, AGENT_SHUTDOWN_GRACE_SECONDS),
-               "student_rag": (AGENT_RUN_BUDGET_SECONDS, AGENT_SHUTDOWN_GRACE_SECONDS)}
-# Graph steps per researcher run, 410 unless listed. student_rag's researchers have no turn limit,
-# so their run budget alone ends them (gyms/gaia2 allows the same 10000 steps).
-RESEARCHER_RECURSION_LIMITS = {"student_rag": 10000}
-
-
-def _researcher(profile):
-    return create_agent(model(profile), tools=[search, access], context_schema=Context,
-        middleware=[RunBudgetMiddleware(), ModelLog("researcher")],
-        system_prompt=AGENT_SYSTEM_PROMPT)
+RUN_BUDGETS = dict.fromkeys(AGENT_MODELS, (AGENT_RUN_BUDGET_SECONDS, AGENT_SHUTDOWN_GRACE_SECONDS))
+RESEARCHER_RECURSION_LIMITS = dict.fromkeys(AGENT_MODELS, 10000)
 
 
 def researcher():
-    return _researcher(RESEARCHER_MODEL)
-
-
-def researcher_non_thinking():
-    return _researcher(STUDENT_RESEARCHER_MODEL)
-
-
-def researcher_agentic_rag():
-    # FinishReport precedes RunBudgetMiddleware, so a valid finish ends the run before a shutdown request.
-    return create_agent(model(STUDENT_RESEARCHER_MODEL), tools=agentic_rag.TOOLS, context_schema=Context,
-        middleware=[agentic_rag.FinishReport(), RunBudgetMiddleware(), ModelLog("researcher")],
-        system_prompt=agentic_rag.SYSTEM_PROMPT)
+    return react(model(RESEARCHER_MODEL), None)
 
 
 def react(policy, checkpointer, *, middleware=()):
-    return create_agent(policy, tools=[search, access], system_prompt=AGENT_SYSTEM_PROMPT,
-        context_schema=Context, middleware=[RunBudgetMiddleware(), ModelLog("researcher"), *middleware], checkpointer=checkpointer)
+    return create_agent(policy, tools=agentic_rag.TOOLS, system_prompt=agentic_rag.SYSTEM_PROMPT,
+        context_schema=Context, middleware=[agentic_rag.ResearchProtocol(), ModelLog("researcher"), *middleware],
+        checkpointer=checkpointer)
 
 
 def decomposer(policy, checkpointer, worker_url, *, middleware=(), agent_recursion_limit=None,
                agent="decomposer"):
-    # The student keeps the type ID its training records offer and WideSeek's description.
     run_budget, shutdown_grace = RUN_BUDGETS[agent]
     agent_recursion_limit = agent_recursion_limit or RESEARCHER_RECURSION_LIMITS.get(agent, 410)
     return create_decomposer_agent(decomposer_model=policy,
-        agent_types=[{"agent_type_id": "qwen_3_5_4b_thinking", "assistant_id": RESEARCHER_IDS[agent],
-            "description": "Qwen3.5-4B thinking agent equipped with search and access tools.",
+        agent_types=[{"agent_type_id": "occ_4b_non_thinking", "assistant_id": RESEARCHER_IDS[agent],
+            "description": "OCC-4B non-thinking agent equipped with search, open, find and finish tools.",
             "url": worker_url}],
         checkpointer=checkpointer, middleware=[ModelLog("decomposer"), *middleware],
         context_schema=Context, agent_recursion_limit=agent_recursion_limit,

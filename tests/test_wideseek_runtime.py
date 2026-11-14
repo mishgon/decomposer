@@ -252,7 +252,7 @@ if __name__ == "__main__": unittest.main()
 
 def test_researcher_prompt_keeps_common_and_environment_instructions(monkeypatch):
     from gyms.wideseek import agents
-    from gyms.wideseek.prompts import AGENT_SYSTEM_PROMPT
+    from gyms.wideseek.agentic_rag import SYSTEM_PROMPT as AGENT_SYSTEM_PROMPT
 
     captured = {}
     monkeypatch.setattr(agents, 'model', lambda _: object())

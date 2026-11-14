@@ -1,9 +1,9 @@
-# DeepDive with Offline Wikipedia
+# DeepDive
 
 This gym adapts [zai-org/DeepDive](https://huggingface.co/datasets/zai-org/DeepDive)
-to the same Wikipedia-2018 corpus, E5 encoder, Qdrant index, and `search`/`access`
-tools as WideSeek. It does not use live web search. Results describe this offline
-adaptation, not the original DeepDive benchmark setting.
+to the same hosted Agentic RAG tools as WideSeek, using the Search API's
+`wikipedia` source. Results describe this adaptation, not the original
+DeepDive benchmark setting.
 
 ## Prepare Tasks
 
@@ -29,7 +29,7 @@ the agent. The raw Parquet preserves original fields for audit.
 
 ## Run Episodes
 
-Start or reuse your own healthy [WideSeek retrieval service](../wideseek/README.md).
+Configure the [WideSeek Search API credentials](../wideseek/README.md).
 The same workers can serve DeepDive, or start dedicated workers:
 
 ```bash
@@ -38,7 +38,7 @@ python -m langgraph_cli dev --config gyms/deepdive/langgraph.json \
   --host 127.0.0.1 --port 18085 --no-browser --no-reload --n-jobs-per-worker 16
 ```
 
-In another shell with the same credentials and `WS_SEARCH_URL`:
+In another shell with the same model and Search API credentials:
 
 ```bash
 python -m gyms.deepdive.run --agent decomposer --limit 2 --concurrency 2 \
@@ -50,11 +50,12 @@ python -m gyms.deepdive.run --agent decomposer --limit 2 --concurrency 2 \
 `--data artifacts/gyms/deepdive/data/qa_sft/tasks.jsonl`.
 
 The gym reuses WideSeek's Decomposer/React agents and QA evaluator. The coordinator
-and judge use hosted Qwen3.8 Flash Next; researchers use hosted base Qwen3.5-4B
-with thinking and preserved reasoning. The system prompt explicitly identifies
-the offline 2018 corpus. Existing defaults remain: recursion 410, a 45-minute
-episode deadline, and researcher budgets of 180 seconds plus 180 seconds shutdown
-grace. There is no cumulative 32K trace cap.
+and judge use hosted Qwen3.8 Flash Next; researchers use hosted `occ-4b`
+without thinking. `react` uses the same researcher directly. Researchers use
+`search`, `open`, `find`, and `finish`, with 180 seconds of work plus 180 seconds
+shutdown grace. A valid `finish` is required. There is no turn limit;
+context/output limits match the colleagues' harness (65,536 tokens).
+The manager keeps recursion 410 and the episode deadline is 45 minutes.
 
 The QA evaluator extracts the boxed final answer and asks the judge whether it
 matches the reference, returning `qa_accuracy` (0 or 1). A missing boxed answer

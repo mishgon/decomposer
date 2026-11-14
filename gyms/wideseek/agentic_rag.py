@@ -3,19 +3,26 @@
 Prompts, tool descriptions and settings follow the monorepo at 1a73e8a:
 common/tools/agentic_rag.py, common/toolsets/agentic_rag_search.py, common/tasks/agentic_rag.py
 and configs/filter_difficulty/agentic_rag.toml. Unlike the monorepo harness, a run has no turn
-limit; its run budget ends it.
+limit. Work and shutdown grace each last 180 seconds.
 """
 import asyncio
 import json
 import os
 import time
 from typing import Annotated, NotRequired
+from functools import lru_cache
 from uuid import uuid4
 
 import httpx
-from langchain.agents.middleware import AgentMiddleware, AgentState, hook_config
+from langchain.agents.middleware import hook_config
 from langchain.tools import tool, ToolRuntime
-from langchain_core.messages import AIMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage, convert_to_openai_messages
+from langchain_core.utils.function_calling import convert_to_openai_tool
+from langgraph.prebuilt import ToolNode
+from langgraph.config import get_config
+from jsonschema import Draft202012Validator
+
+from decomposer.run_budget import RunBudgetMiddleware, RunBudgetState
 from langgraph.types import Command
 from pydantic import Field
 from tenacity import retry, retry_if_exception, wait_exponential_jitter
@@ -35,7 +42,7 @@ SOURCE = "wikipedia"
 
 def search_api():
     """The Search API front and the headers that authorize a request to it."""
-    return (os.environ.get("AGENTIC_RAG_URL", "https://lmrouter.2a2i.org/rag"),
+    return (os.environ.get("AGENTIC_RAG_URL", "https://lmrouter.2a2i.org/rag").rstrip("/"),
             {"Authorization": "Bearer " + os.environ["AGENTIC_RAG_API_KEY"]})
 
 
@@ -179,19 +186,132 @@ def _merge(pages, update):
     return {**pages, **update}
 
 
-class SearchState(AgentState):
+INVALID_TURN = "No valid tool was called. Check the tool name and argument format, then call a tool correctly. If you want to finish, call finish with all required arguments."
+FINISH_REQUEST = "Your work budget has expired. Call finish using the evidence already collected. No other tools are allowed. Follow the answer and source requirements in the system instructions and the finish tool description."
+
+
+@lru_cache
+def context_tokenizer():
+    from transformers import AutoTokenizer
+    return AutoTokenizer.from_pretrained("Qwen/Qwen3.5-4B")
+
+
+def prompt_tokens(messages, tools):
+    wire = convert_to_openai_messages([SystemMessage(SYSTEM_PROMPT), *messages])
+    for message in wire:
+        for call in message.get("tool_calls", []):
+            arguments = call["function"]["arguments"]
+            if isinstance(arguments, str):
+                try:
+                    call["function"]["arguments"] = json.loads(arguments)
+                except json.JSONDecodeError:
+                    call["function"]["arguments"] = {"invalid_arguments": arguments}
+    return len(context_tokenizer().apply_chat_template(
+        wire, tools=[convert_to_openai_tool(tool) for tool in tools],
+        tokenize=True, add_generation_prompt=True, enable_thinking=False))
+
+
+class SearchState(RunBudgetState):
     pages: NotRequired[Annotated[dict[str, int], _merge]]
+    output_tokens: NotRequired[int]
+    invalid_turns: NotRequired[int]
+    previous_call: NotRequired[dict | None]
+    repeated_calls: NotRequired[int]
+    end_status: NotRequired[str | None]
 
 
-class FinishReport(AgentMiddleware):
-    """Keep the session's searched pages and end the run on a valid finish, its report last."""
+class ResearchProtocol(RunBudgetMiddleware):
+    """Execute the original tool protocol sequentially, bounded by wall-clock time."""
     state_schema = SearchState
+
+    def before_agent(self, state, runtime):
+        return {**super().before_agent(state, runtime), "invalid_turns": 0, "output_tokens": 0,
+                "previous_call": None, "repeated_calls": 0, "end_status": None}
 
     @hook_config(can_jump_to=["end"])
     def before_model(self, state, runtime):
-        for message in reversed(state["messages"]):
-            if not isinstance(message, ToolMessage):
-                return None
-            if message.name == "finish" and message.artifact:
-                return {"messages": [AIMessage(content=message.artifact)], "jump_to": "end"}
+        update = super().before_model(state, runtime)
+        if update:
+            update["messages"] = [HumanMessage(FINISH_REQUEST)]
+        messages = [*state["messages"], *(update or {}).get("messages", [])]
+        tools = [finish] if state["shutdown_requested"] or update else TOOLS
+        status = ("output_limit" if state["output_tokens"] >= 65536 else
+                  "context_limit" if 65536 - prompt_tokens(messages, tools) - 512 < 4096 else None)
+        if status:
+            return {"end_status": status, "messages": [AIMessage(content="")], "jump_to": "end"}
+        return update
+
+    def _prepare_model_request(self, request):
+        tools = [finish] if request.state["shutdown_requested"] else request.tools
+        return request.override(tools=tools, model_settings={**request.model_settings, "max_tokens": 4096})
+
+    def after_model(self, state, runtime):
+        # The async hook below owns routing, including finish during shutdown grace.
         return None
+
+    @hook_config(can_jump_to=["model", "end"])
+    async def aafter_model(self, state, runtime):
+        message = state["messages"][-1]
+        updates = {"messages": [], "pages": {}, "previous_call": state["previous_call"],
+                   "repeated_calls": state["repeated_calls"],
+                   "output_tokens": state["output_tokens"] + (message.usage_metadata or {}).get("output_tokens", 0)}
+        valid = 0
+        node = ToolNode(TOOLS)
+        validators = {tool.name: Draft202012Validator(tool.tool_call_schema.model_json_schema()) for tool in TOOLS}
+        calls = [*message.tool_calls, *[{**call, "args": None} for call in message.invalid_tool_calls]]
+        for call in calls:
+            name, args = call["name"], call["args"]
+            errors = ([{"path": [], "message": "Unknown tool name."}] if name not in validators else
+                      [{"path": list(e.path), "message": e.message} for e in validators[name].iter_errors(args)])
+            if errors:
+                result = {"error": "invalid_tool_call_format", "details": errors}
+            elif state["shutdown_requested"] and name != "finish":
+                valid += 1
+                result = {"error": "finish_required", "message": "Only finish is allowed on the final attempt."}
+            else:
+                valid += 1
+                key = {"name": name, "arguments": args}
+                updates["repeated_calls"] = updates["repeated_calls"] + 1 if key == updates["previous_call"] else 1
+                updates["previous_call"] = key
+                if updates["repeated_calls"] >= 3 and not state["shutdown_requested"]:
+                    result = {"error": "loop_detected", "rejected": True}
+                    updates["end_status"] = "loop_detected"
+                else:
+                    timeout_at = state["timeout_at"]
+                    remaining = None if timeout_at is None else max(0, timeout_at - time.monotonic())
+                    tool_state = {**state, "pages": {**state.get("pages", {}), **updates["pages"]},
+                                  "messages": [message.model_copy(update={"tool_calls": [call]})]}
+                    async with asyncio.timeout(remaining):
+                        output = await node.ainvoke(tool_state, get_config(), runtime=runtime)
+                    for item in output if isinstance(output, list) else [output]:
+                        update = item.update if isinstance(item, Command) else item
+                        updates["messages"].extend(update.get("messages", []))
+                        updates["pages"].update(update.get("pages", {}))
+                    tool_message = updates["messages"][-1]
+                    if name == "finish" and tool_message.artifact:
+                        updates["end_status"] = "finished"
+                        updates["messages"].append(AIMessage(content=tool_message.artifact))
+                    if not updates.get("end_status"):
+                        continue
+                    break
+            updates["messages"].append(ToolMessage(json.dumps(result), name=name, tool_call_id=call["id"]))
+            if updates.get("end_status"):
+                break
+        updates["invalid_turns"] = 0 if valid else state["invalid_turns"] + 1
+        if not valid:
+            updates["messages"].append(HumanMessage(INVALID_TURN))
+            if updates["invalid_turns"] >= 3:
+                updates["end_status"] = "invalid_tool_call"
+        if updates.get("end_status"):
+            report = updates["messages"].pop() if updates["end_status"] == "finished" else AIMessage(content="")
+            completed = {m.tool_call_id for m in updates["messages"] if isinstance(m, ToolMessage)}
+            for call in calls:
+                if call["id"] not in completed:
+                    updates["messages"].append(ToolMessage(
+                        json.dumps({"error": "session_ended", "rejected": True}),
+                        name=call["name"], tool_call_id=call["id"]))
+            updates["messages"].append(report)
+            updates["jump_to"] = "end"
+        else:
+            updates["jump_to"] = "model"
+        return updates

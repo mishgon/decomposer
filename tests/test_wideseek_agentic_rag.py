@@ -1,7 +1,6 @@
 import asyncio
 import json
 from itertools import count
-from pathlib import Path
 
 import httpx
 import pytest
@@ -19,6 +18,11 @@ CONTEXT = {"agent_run_budget_seconds": 180.0, "agent_shutdown_grace_seconds": 18
 class ToolCallingModel(FakeMessagesListChatModel):
     def bind_tools(self, tools, **kwargs):
         return self
+
+
+@pytest.fixture(autouse=True)
+def token_count(monkeypatch):
+    monkeypatch.setattr(agentic_rag, "prompt_tokens", lambda messages, tools: 100)
 
 
 CALL_IDS = count()
@@ -44,13 +48,13 @@ def test_researcher_resolves_searched_pages_and_ends_with_its_finish_report(monk
         calls(("open", {"url": "https://en.wikipedia.org/wiki/Lem"}), ("find", {"url": SOLARIS + "/", "pattern": "Lem"})),
         calls(("finish", {"answer": "Stanisław Lem", "sources": ["https://en.wikipedia.org/wiki/Lem"]})),
         calls(("finish", {"answer": "Stanisław Lem", "sources": [SOLARIS + "/"]})),
-        AIMessage(content="Follow-up report."),
+        calls(("finish", {"answer": "Follow-up report.", "sources": []})),
     ])
     monkeypatch.setattr(agentic_rag, "_post", post)
     monkeypatch.setattr(agents, "model", lambda profile: policy)
     episode = tmp_path / "episode"
     init_budget(episode)
-    graph = agents.researcher_agentic_rag()
+    graph = agents.researcher()
     config = {"configurable": {"thread_id": "researcher"}}
     context = {"directory": str(episode), **CONTEXT}
     state = asyncio.run(graph.ainvoke({"messages": [HumanMessage("Who wrote Solaris?")]}, config, context=context))
@@ -87,10 +91,10 @@ def test_researcher_has_no_turn_limit_within_its_recursion_limit(monkeypatch, tm
     monkeypatch.setattr(agents, "model", lambda profile: policy)
     episode = tmp_path / "episode"
     init_budget(episode)
-    state = asyncio.run(agents.researcher_agentic_rag().ainvoke(
+    state = asyncio.run(agents.researcher().ainvoke(
         {"messages": [HumanMessage("Who wrote Solaris?")]},
         {"configurable": {"thread_id": "researcher"},
-         "recursion_limit": agents.RESEARCHER_RECURSION_LIMITS["student_rag"]},
+         "recursion_limit": agents.RESEARCHER_RECURSION_LIMITS["student"]},
         context={"directory": str(episode), **CONTEXT}))
     assert policy.i == 81
     assert state["messages"][-1].type == "ai" and state["messages"][-1].content == f"Lem\n\nSources:\n{SOLARIS}"
@@ -125,7 +129,7 @@ def test_student_rag_run_records_the_search_api_and_its_researchers_prompt(monke
 
     data = tmp_path / "tasks.jsonl"
     data.write_text(json.dumps({"task_id": "task", "question": "Q"}) + "\n")
-    args = run.create_parser().parse_args(["--agent", "student_rag", "--output", str(tmp_path / "run"),
+    args = run.create_parser().parse_args(["--agent", "student", "--output", str(tmp_path / "run"),
                                            "--data", str(data)])
     args.mode = "decomposer"
     monkeypatch.setattr(run.subprocess, "check_output", lambda *a, **kw: "commit")
@@ -149,17 +153,107 @@ def test_student_rag_run_records_the_search_api_and_its_researchers_prompt(monke
         180.0, 180.0)
 
 
-def test_student_rag_is_student_180_over_agentic_rag_researchers(monkeypatch):
-    root = Path(__file__).resolve().parents[1]
-    captured = []
-    monkeypatch.setattr(agents, "create_decomposer_agent", lambda **kw: captured.append(kw))
-    for agent in ("student_180", "student_rag"):
-        agents.decomposer("policy", "checkpoint", "http://worker", agent=agent)
-    student, rag = (kw["agent_types"][0] for kw in captured)
-    assert rag == {**student, "assistant_id": "researcher_agentic_rag"}
-    assert [kw["agent_recursion_limit"] for kw in captured] == [410, 10000]
-    for table in (agents.AGENT_MODELS, agents.SUBAGENT_MODELS, agents.RUN_BUDGETS):
-        assert table["student_rag"] == table["student_180"]
-    for gym in ("wideseek", "deepdive"):
-        graphs = json.loads((root / f"gyms/{gym}/langgraph.json").read_text())["graphs"]
-        assert graphs["researcher_agentic_rag"] == "gyms.wideseek.agents:researcher_agentic_rag"
+
+@pytest.mark.parametrize("responses,status", [
+    ([AIMessage(content="Unsubmitted answer") for _ in range(3)], "invalid_tool_call"),
+    ([calls(("search", {"query": "same"})) for _ in range(3)], "loop_detected"),
+    ([calls(("search", {"query": 123})) for _ in range(3)], "invalid_tool_call"),
+])
+def test_protocol_rejects_plain_answers_repeats_and_invalid_arguments(monkeypatch, tmp_path, responses, status):
+    from unittest.mock import AsyncMock
+    post = AsyncMock(return_value={"results": []})
+    monkeypatch.setattr(agentic_rag, "_post", post)
+    tmp_path = tmp_path / "episode"
+    init_budget(tmp_path)
+    policy = ToolCallingModel(responses=responses + [AIMessage(content="unused")])
+    state = asyncio.run(agents.react(policy, None).ainvoke(
+        {"messages": [HumanMessage("Question")]}, {"configurable": {"thread_id": "test"}}, context={"directory": str(tmp_path), **CONTEXT}))
+    assert state["end_status"] == status
+    assert state["messages"][-1].content == ""
+    assert policy.i == 3
+    assert post.await_count == (2 if status == "loop_detected" else 0)
+
+
+def test_tools_share_sequential_state_and_stop_immediately_after_finish(monkeypatch, tmp_path):
+    from unittest.mock import AsyncMock
+    post = AsyncMock(return_value={"results": [{"page_id": 1, "url": SOLARIS, "title": "Solaris", "snippet": "Lem"}]})
+    monkeypatch.setattr(agentic_rag, "_post", post)
+    tmp_path = tmp_path / "episode"
+    init_budget(tmp_path)
+    policy = ToolCallingModel(responses=[calls(
+        ("search", {"query": "Solaris"}),
+        ("finish", {"answer": "Lem", "sources": [SOLARIS]}),
+        ("search", {"query": "must not run"}))])
+    state = asyncio.run(agents.react(policy, None).ainvoke(
+        {"messages": [HumanMessage("Question")]}, {"configurable": {"thread_id": "test"}}, context={"directory": str(tmp_path), **CONTEXT}))
+    assert state["end_status"] == "finished"
+    assert post.await_count == 1
+    assert state["messages"][-1].content == f"Lem\n\nSources:\n{SOLARIS}"
+    tool_messages = [m for m in state["messages"] if m.type == "tool"]
+    assert len(tool_messages) == 3
+    assert json.loads(tool_messages[-1].content)["error"] == "session_ended"
+
+
+def test_grace_keeps_finish_available(monkeypatch, tmp_path):
+    import time
+    from langchain.agents.middleware import AgentMiddleware
+
+    class ExpireWork(AgentMiddleware):
+        def before_agent(self, state, runtime):
+            return {"shutdown_at": time.monotonic() - 1, "timeout_at": time.monotonic() + 180}
+
+    class InspectTools(AgentMiddleware):
+        async def awrap_model_call(self, request, handler):
+            assert [t.name for t in request.tools] == ["finish"]
+            assert request.model_settings["max_tokens"] == 4096
+            assert request.messages[-1].content == agentic_rag.FINISH_REQUEST
+            return await handler(request)
+
+    tmp_path = tmp_path / "episode"
+    init_budget(tmp_path, tokens=100000)
+    policy = ToolCallingModel(responses=[calls(("finish", {"answer": "Unknown", "sources": []}))])
+    state = asyncio.run(agents.react(policy, None, middleware=[ExpireWork(), InspectTools()]).ainvoke(
+        {"messages": [HumanMessage("Question")]}, {"configurable": {"thread_id": "test"}}, context={"directory": str(tmp_path), **CONTEXT}))
+    assert state["end_status"] == "finished"
+    assert state["messages"][-1].content == "Unknown"
+
+
+def test_context_limit_stops_before_model_call(monkeypatch, tmp_path):
+    monkeypatch.setattr(agentic_rag, "prompt_tokens", lambda messages, tools: 65536)
+    tmp_path = tmp_path / "episode"
+    init_budget(tmp_path)
+    policy = ToolCallingModel(responses=[AIMessage(content="must not run"), AIMessage(content="unused")])
+    state = asyncio.run(agents.react(policy, None).ainvoke(
+        {"messages": [HumanMessage("Question")]}, {"configurable": {"thread_id": "test"}}, context={"directory": str(tmp_path), **CONTEXT}))
+    assert state["end_status"] == "context_limit"
+    assert policy.i == 0
+
+
+def test_output_limit_stops_before_another_model_call(monkeypatch, tmp_path):
+    from unittest.mock import AsyncMock
+    monkeypatch.setattr(agentic_rag, "_post", AsyncMock(return_value={"results": []}))
+    tmp_path = tmp_path / "episode"
+    init_budget(tmp_path)
+    response = calls(("search", {"query": "question"}))
+    response.usage_metadata = {"input_tokens": 100, "output_tokens": 65536, "total_tokens": 65636}
+    policy = ToolCallingModel(responses=[response, AIMessage(content="must not run")])
+    state = asyncio.run(agents.react(policy, None).ainvoke(
+        {"messages": [HumanMessage("Question")]}, {"configurable": {"thread_id": "test"}},
+        context={"directory": str(tmp_path), **CONTEXT}))
+    assert state["end_status"] == "output_limit"
+    assert policy.i == 1
+
+
+def test_tool_execution_cannot_overrun_shutdown_grace(monkeypatch, tmp_path):
+    async def post(method, payload):
+        await asyncio.sleep(10)
+
+    monkeypatch.setattr(agentic_rag, "_post", post)
+    tmp_path = tmp_path / "episode"
+    init_budget(tmp_path)
+    policy = ToolCallingModel(responses=[calls(("search", {"query": "question"}))])
+    with pytest.raises(TimeoutError):
+        asyncio.run(agents.react(policy, None).ainvoke(
+            {"messages": [HumanMessage("Question")]}, {"configurable": {"thread_id": "test"}},
+            context={"directory": str(tmp_path), "agent_run_budget_seconds": .1,
+                     "agent_shutdown_grace_seconds": .1}))
