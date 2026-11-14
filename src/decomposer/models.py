@@ -15,6 +15,8 @@ from langchain_openai import ChatOpenAI
 from langchain_openrouter import ChatOpenRouter
 from pydantic import BaseModel, Field
 
+from decomposer.lmrouter_transport import AsyncRecoveringTransport, RecoveringTransport
+
 
 _QWEN_3_5_4B_PORT = 8024
 _QWEN_3_8_FLASH_NEXT_PORT = 8025
@@ -106,6 +108,8 @@ def create_model(
         "vllm/qwen_3_5_4b_thinking",
         "vllm/qwen_3_5_4b_non_thinking",
         "vllm/qwen_3_8_flash_next_non_thinking",
+        "lmrouter/qwen_3_5_4b_thinking",
+        "lmrouter/qwen_3_5_4b_non_thinking",
         "lmrouter/qwen_3_5_4b_unlooped_thinking",
         "lmrouter/qwen_3_5_4b_unlooped_non_thinking",
         "lmrouter/qwen_3_8_flash_next_non_thinking",
@@ -124,21 +128,21 @@ def create_model(
         raise ValueError("base_url is supported only for vllm models")
     if not model_id.startswith("openrouter/"):
         socket = os.environ.get("LLM_PROXY_UNIX_SOCKET") if model_id.startswith("lmrouter/") else None
-        sync_client = httpx.Client(
-            transport=httpx.HTTPTransport(uds=socket) if socket else None,
-            trust_env=False,
-        )
-        client = httpx.AsyncClient(
-            transport=httpx.AsyncHTTPTransport(uds=socket) if socket else None,
-            trust_env=False,
-        )
+        transport = httpx.HTTPTransport(uds=socket, trust_env=False)
+        async_transport = httpx.AsyncHTTPTransport(uds=socket, trust_env=False)
+        if model_id.startswith("lmrouter/"):
+            transport = RecoveringTransport(transport)
+            async_transport = AsyncRecoveringTransport(async_transport)
+        sync_client = httpx.Client(transport=transport, trust_env=False)
+        client = httpx.AsyncClient(transport=async_transport, trust_env=False)
     match model_id:
-        case "vllm/qwen_3_5_4b_thinking" | "vllm/qwen_3_5_4b_non_thinking":
-            thinking = model_id == "vllm/qwen_3_5_4b_thinking"
+        case "vllm/qwen_3_5_4b_thinking" | "vllm/qwen_3_5_4b_non_thinking" | "lmrouter/qwen_3_5_4b_thinking" | "lmrouter/qwen_3_5_4b_non_thinking":
+            thinking = not model_id.endswith("non_thinking")
+            hosted = model_id.startswith("lmrouter/")
             return ChatVLLM(
                 model="Qwen/Qwen3.5-4B",
-                base_url=base_url or f"http://{os.environ.get('VLLM_HOST', '127.0.0.1')}:{_QWEN_3_5_4B_PORT}/v1",
-                api_key="EMPTY",
+                base_url="https://lmrouter.2a2i.org/v1" if hosted else base_url or f"http://{os.environ.get('VLLM_HOST', '127.0.0.1')}:{_QWEN_3_5_4B_PORT}/v1",
+                api_key=os.environ.get("LLM_PROXY_MASTER_KEY", "EMPTY") if hosted else "EMPTY",
                 # https://huggingface.co/Qwen/Qwen3.5-4B#best-practices
                 temperature=1.0 if thinking else 0.7,
                 top_p=0.95 if thinking else 0.8,
@@ -151,7 +155,7 @@ def create_model(
                 },
                 preserve_reasoning=thinking,
                 timeout=600,
-                max_retries=2,
+                max_retries=0 if model_id.startswith("lmrouter/") else 2,
                 http_client=sync_client,
                 http_async_client=client,
                 disable_streaming=True,
@@ -189,7 +193,7 @@ def create_model(
                 extra_body={"top_k": 20, "chat_template_kwargs": {"enable_thinking": True}},
                 preserve_reasoning=True,
                 timeout=600,
-                max_retries=2,
+                max_retries=0,
                 http_client=sync_client,
                 http_async_client=client,
                 disable_streaming=True,
@@ -205,7 +209,7 @@ def create_model(
                 extra_body={"top_k": 20, "chat_template_kwargs": {"enable_thinking": False}},
                 preserve_reasoning=False,
                 timeout=600,
-                max_retries=2,
+                max_retries=0,
                 http_client=sync_client,
                 http_async_client=client,
                 disable_streaming=True,
@@ -228,7 +232,7 @@ def create_model(
                 },
                 preserve_reasoning=False,
                 timeout=600,
-                max_retries=2,
+                max_retries=0,
                 http_client=sync_client,
                 http_async_client=client,
                 disable_streaming=True,
@@ -258,7 +262,7 @@ def create_model(
                 },
                 preserve_reasoning=True,
                 timeout=600,
-                max_retries=2,
+                max_retries=0,
                 http_client=sync_client,
                 http_async_client=client,
                 disable_streaming=True,

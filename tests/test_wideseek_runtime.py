@@ -65,6 +65,8 @@ class ScoreTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(saved["evaluation"]["score"], .5)
 
     async def test_cancelled_execution_is_not_reused_on_retry(self):
+        from langgraph_sdk import get_client
+        clients = [get_client(url="http://unused") for _ in range(2)]
         graph = MagicMock()
         graph.ainvoke = AsyncMock(side_effect=[asyncio.CancelledError(), {}])
         graph.aget_state = AsyncMock(return_value=SimpleNamespace(values={}))
@@ -74,7 +76,8 @@ class ScoreTests(unittest.IsolatedAsyncioTestCase):
         task = {"task_id": "test", "question": "Question", "answer": "Answer", "unique_columns": []}
         with tempfile.TemporaryDirectory() as folder, patch("gyms.wideseek.run.model", return_value=policy), \
                 patch("gyms.wideseek.run.agents.react", return_value=graph), \
-                patch("gyms.wideseek.run.evaluate", new=AsyncMock(return_value={"score": 0.})):
+                patch("gyms.wideseek.run.evaluate", new=AsyncMock(return_value={"score": 0.})), \
+                patch("gyms.wideseek.run.get_client", side_effect=clients):
             root = Path(folder)
             with self.assertRaises(asyncio.CancelledError):
                 await episode(task, "simple", 1, root, args)
@@ -87,6 +90,7 @@ class ScoreTests(unittest.IsolatedAsyncioTestCase):
             import json
             result = json.loads((parent / "result.json").read_text())
             self.assertNotEqual(result["execution_directory"], old.name)
+            self.assertTrue(all(client.http.client.is_closed for client in clients))
 
     async def test_context_overflow_saves_partial_trace_and_other_attempt_continues(self):
         import json
@@ -216,6 +220,31 @@ class ScoreTests(unittest.IsolatedAsyncioTestCase):
                     {"content": "Grade: {'idx_0': {'response': 'A', 'target': 'A'}}"}]
         for text in ("Oops", "```json\n{}\n```", '```json\n{"idx_0": 0.5}\n```'):
             with self.assertRaises(ValueError): validate_judge(text, messages)
+
+    def test_bare_json_is_validated_and_normalized_for_native_reward(self):
+        messages = [{"content": "You are an expert in grading"},
+                    {"content": "Grade: {'idx_0': {'response': 'A', 'target': 'A'}}"}]
+        self.assertEqual(validate_judge('{"idx_0": 1}', messages), '```json\n{"idx_0": 1}\n```')
+        for text in ('{}', '{"idx_0": 0.5}', '{"idx_0": true}', '[]'):
+            with self.assertRaises(ValueError):
+                validate_judge(text, messages)
+
+    async def test_malformed_judge_retries_preserve_raw_responses(self):
+        import json
+        from langchain_core.messages import AIMessage
+        task = {"question": "Nationality?", "answer": "Australian", "unique_columns": []}
+        for replies, expected in [(["Sorry", "Correct"], ("scored", 1.)),
+                                  (["Sorry"] * 3, ("judge_error", None))]:
+            judge = SimpleNamespace(ainvoke=AsyncMock(side_effect=[AIMessage(content=s) for s in replies]))
+            with tempfile.TemporaryDirectory() as root, \
+                    patch("gyms.wideseek.evaluate.model", return_value=judge), \
+                    patch("gyms.wideseek.evaluate.close_model", new=AsyncMock()):
+                result = await evaluate(task, r"\boxed{Australian}", Path(root))
+                self.assertEqual((result["status"], result["score"]), expected)
+                self.assertEqual(judge.ainvoke.await_count, len(replies))
+                records = [json.loads(p.read_text()) for p in (Path(root) / "judge_calls").glob("*.json")]
+                self.assertEqual(len(records), len(replies))
+                self.assertEqual(sorted(r["attempt"] for r in records), list(range(1, len(replies) + 1)))
 
 
 if __name__ == "__main__": unittest.main()

@@ -20,6 +20,7 @@ def client_with_runs(runs):
         next(r for r in runs[thread_id] if r['run_id'] == run_id)['status'] = 'interrupted'
 
     return SimpleNamespace(
+        http=SimpleNamespace(client=SimpleNamespace(aclose=AsyncMock())),
         runs=SimpleNamespace(list=AsyncMock(side_effect=list_runs), cancel=AsyncMock(side_effect=cancel)),
         threads=SimpleNamespace(get_state=AsyncMock(return_value={'values': {'messages': [
             {'type': 'ai', 'content': 'answer', 'additional_kwargs': {'reasoning_content': 'reasoning'}}]}}),
@@ -105,9 +106,49 @@ def test_cancellation_failure_retains_thread(tmp_path):
 def test_worker_still_running_after_cancel_is_not_deleted(tmp_path):
     client = client_with_runs({'thread': [{'run_id': 'active', 'status': 'running'}]})
     client.runs.cancel.side_effect = None
-    errors = asyncio.run(cleanup_workers(client, state_for('thread'), tmp_path))
+    with patch('gyms.wideseek.run.asyncio.sleep', new=AsyncMock()):
+        errors = asyncio.run(cleanup_workers(client, state_for('thread'), tmp_path))
     assert errors == ['thread: RuntimeError: Worker still active after cancellation']
     client.threads.delete.assert_not_awaited()
+
+
+def test_cancel_waits_for_terminal_status_to_be_visible(tmp_path):
+    client = client_with_runs({'thread': [{'run_id': 'active', 'status': 'running'}]})
+    client.runs.cancel.side_effect = None
+    client.runs.list.side_effect = [
+        [{'run_id': 'active', 'status': status}]
+        for status in ['running', 'running', 'running', 'interrupted']
+    ]
+    with patch('gyms.wideseek.run.asyncio.sleep', new=AsyncMock()):
+        assert asyncio.run(cleanup_workers(client, state_for('thread'), tmp_path)) == []
+    saved = json.loads((tmp_path/'subagents/thread.json').read_text())
+    assert saved['runs'][0]['status'] == 'interrupted'
+    client.threads.delete.assert_awaited_once_with('thread')
+
+
+@pytest.mark.parametrize('final_status', ['success', 'running', 'missing'])
+def test_cancel_404_requires_confirmed_terminal_run(tmp_path, final_status):
+    runs = {'thread': [{'run_id': 'r', 'status': 'running'}]}
+    client = client_with_runs(runs)
+
+    async def cancel(*args, **kwargs):
+        if final_status == 'missing':
+            runs['thread'].clear()
+        else:
+            runs['thread'][0]['status'] = final_status
+        response = httpx.Response(404, request=httpx.Request('POST', 'http://worker/cancel'))
+        response.raise_for_status()
+
+    client.runs.cancel.side_effect = cancel
+    errors = asyncio.run(cleanup_workers(client, state_for('thread'), tmp_path))
+    if final_status == 'success':
+        assert errors == []
+        archived = json.loads((tmp_path / 'subagents/thread.json').read_text())
+        assert archived['runs'][0]['status'] == 'success'
+        client.threads.delete.assert_awaited_once_with('thread')
+    else:
+        assert len(errors) == 1 and 'HTTPStatusError' in errors[0]
+        client.threads.delete.assert_not_awaited()
 
 
 def test_shared_server_cleanup_does_not_touch_another_episode(tmp_path):
@@ -149,6 +190,30 @@ def test_html_failure_preserves_result_and_resume_does_not_repeat(tmp_path):
     assert result['html_error'] == 'OSError: HTML failed'
     assert (tmp_path / result['trace_path']).is_file()
     graph.ainvoke.assert_awaited_once()
+
+
+def test_injected_training_policy_is_used_and_remains_open(tmp_path):
+    from langchain_core.messages import AIMessage
+    from gyms.wideseek import run
+
+    policy = SimpleNamespace(_llm_type='verl')
+    graph = MagicMock()
+    graph.ainvoke = AsyncMock(return_value={'messages': [AIMessage(content='Answer')]})
+    graph.aget_state = AsyncMock(return_value=SimpleNamespace(values={}))
+    args = SimpleNamespace(agent='decomposer', model_calls=None, output_tokens=None,
+                           worker_url='http://unused', episode_timeout=1)
+    with patch.object(run, 'model') as create, \
+            patch.object(run.agents, 'decomposer', return_value=graph) as build, \
+            patch.object(run, 'get_client', return_value=client_with_runs({})), \
+            patch.object(run, 'close_model', new=AsyncMock()) as close, \
+            patch.object(run, 'evaluate', new=AsyncMock(return_value={'status': 'scored', 'score': 1.})):
+        result = asyncio.run(episode({'task_id': 'task', 'question': 'Question', 'unique_columns': []},
+                                    'decomposer', 1, tmp_path, args, policy=policy))
+    create.assert_not_called()
+    close.assert_not_awaited()
+    assert build.call_args.args[0] is policy
+    assert json.loads(json.dumps(result)) == json.loads((tmp_path / 'decomposer/task/attempt-001/result.json').read_text())
+    assert result['evaluation']['score'] == 1.
 
 
 def test_snapshot_and_model_close_failures_still_archive_and_save(tmp_path):
@@ -221,3 +286,54 @@ def test_episode_deadline_cancels_each_stage_and_preserves_trace(tmp_path, stage
     assert cleanup.await_count == (2 if stage == 'cleanup' else 1)
     if stage != 'evaluation':
         evaluate.assert_not_awaited()
+
+
+def test_cleanup_can_resume_after_archived_thread_was_deleted(tmp_path):
+    client = client_with_runs({'gone': []})
+    save(tmp_path / 'subagents/gone.json', {'runs': [{'status': 'interrupted'}], 'values': {}})
+    response = httpx.Response(404, request=httpx.Request('GET', 'http://worker/threads/gone/runs'))
+    client.runs.list.side_effect = httpx.HTTPStatusError('gone', request=response.request, response=response)
+    assert asyncio.run(cleanup_workers(client, state_for('gone'), tmp_path)) == []
+    client.threads.delete.assert_not_awaited()
+    (tmp_path / 'subagents/gone.json').unlink()
+    assert asyncio.run(cleanup_workers(client, state_for('gone'), tmp_path))
+
+
+def test_cleanup_threads_progress_concurrently(tmp_path):
+    client = client_with_runs({'a': [], 'b': []})
+    async def run():
+        arrived = set()
+        both = asyncio.Event()
+        async def snapshot(thread):
+            arrived.add(thread)
+            if len(arrived) == 2:
+                both.set()
+            await asyncio.wait_for(both.wait(), 1)
+            return {'values': {}}
+        client.threads.get_state.side_effect = snapshot
+        assert await cleanup_workers(client, state_for('a', 'b'), tmp_path) == []
+    asyncio.run(run())
+
+
+def test_hundreds_of_threads_do_not_exhaust_cleanup_connection_pool(tmp_path):
+    threads = [f'thread-{i}' for i in range(248)]
+    client = client_with_runs({thread: [] for thread in threads})
+    active = peak = 0
+
+    async def list_runs(thread, **kwargs):
+        nonlocal active, peak
+        active += 1
+        peak = max(peak, active)
+        try:
+            if active > 100:
+                raise httpx.PoolTimeout('cleanup pool exhausted')
+            await asyncio.sleep(0)
+            return []
+        finally:
+            active -= 1
+
+    client.runs.list.side_effect = list_runs
+    assert asyncio.run(cleanup_workers(client, state_for(*threads), tmp_path)) == []
+    assert 1 < peak < 100
+    assert client.threads.delete.await_count == len(threads)
+    assert len(list((tmp_path / 'subagents').glob('*.json'))) == len(threads)

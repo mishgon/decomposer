@@ -22,7 +22,7 @@ def trace_counts(path):
     return subagent_counts(json.loads(path.read_text())['messages'])
 
 
-def display(root, run=None):
+def display(root, run=None, success_threshold=.9):
     roots = [root, *(root / stage / "wideseek/runs" for stage in ("gyms", "evals", "sft"))]
     manifests = [p for base in roots for p in base.glob("*/manifest.json")]
     path = next((base / run / "manifest.json" for base in roots
@@ -75,6 +75,11 @@ def display(root, run=None):
     print(f"WIDESEEK  {directory.name}  ({datetime.now(timezone.utc):%H:%M:%S UTC})")
     print("-" * 76)
     print(f"Status: {'completed' if finished else 'running' if active else 'STOPPED / interrupted'} | concurrency {settings['concurrency']}")
+    outage_path = directory / 'outage.json'
+    outage = json.loads(outage_path.read_text()) if outage_path.exists() else {}
+    if active and outage.get('status') == 'paused':
+        print(f"PAUSED: service unavailable | outage {duration(now-outage['since'])} | "
+              f"next probe in {max(0, int(outage.get('next_retry_at', now)-now))}s")
     if scheduler:
         covered = {r['task_id'] for r in rows if qualifies(r, scheduler['success_threshold'])}
         culled = len(scheduler['culled_tasks'])
@@ -92,6 +97,13 @@ def display(root, run=None):
     print()
     mode, = settings["modes"]
     selected = [r for r in rows if r['mode'] == mode]
+    threshold = scheduler['success_threshold'] if scheduler else success_threshold
+    good = sum(qualifies(r, threshold) for r in selected)
+    print(f"Qualified F1 > {threshold}: {good} | throughput {done*3600/elapsed:.1f} episodes/hour")
+    errors = Counter((r.get('error') or r.get('stop_reason') or r['status']).split('\n')[0]
+                     for r in selected if r['status'] != 'finished')
+    for reason, count in errors.most_common(5):
+        print(f"  {count:4d}  {reason[:130]}")
     scores = [r['evaluation'].get('score') for r in selected if r['status'] != 'skipped']
     mean = f"{sum(s or 0 for s in scores)/len(scores):.3f}" if scores else '--'
     returned = sum(r['status'] == 'finished' for r in selected)
@@ -150,12 +162,13 @@ if __name__ == '__main__':
     parser.add_argument('--root', type=Path, required=True)
     parser.add_argument('run', nargs='?')
     parser.add_argument('--once', action='store_true')
+    parser.add_argument('--success-threshold', type=float, default=.9)
     parser.add_argument('--interval', type=float, default=15)
     args = parser.parse_args()
     while True:
         if not args.once:
             print('\033[2J\033[H', end='', flush=True)
-        display(args.root, args.run)
+        display(args.root, args.run, args.success_threshold)
         if args.once:
             break
         time.sleep(max(1, args.interval))

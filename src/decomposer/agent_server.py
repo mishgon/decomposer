@@ -19,6 +19,7 @@ async def agent_server(
     port: int = 2024,
     startup_timeout: float = 60,
     n_jobs_per_worker: int = 16,
+    python_executable: str | Path | None = None,
 ) -> AsyncIterator[str]:
     """Run a local Agent Server and stop it when the context exits."""
     config_path = Path(config_path).resolve()
@@ -29,13 +30,14 @@ async def agent_server(
             if path.name != ".langgraph_api":
                 (Path(workdir) / path.name).symlink_to(path)
         command = [
-            sys.executable, "-m", "langgraph_cli", "dev",
+            str(python_executable or sys.executable), "-m", "langgraph_cli", "dev",
             "--config", str(config_path),
             "--host", host, "--port", str(port),
             "--no-browser", "--no-reload",
             "--n-jobs-per-worker", str(n_jobs_per_worker),
         ]
         with socket.socket() as listener:
+            listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             listener.bind((host, port))
         process = await asyncio.create_subprocess_exec(
             *command, cwd=workdir, start_new_session=True,

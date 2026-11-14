@@ -71,26 +71,62 @@ async def cleanup_workers(client, state, path):
 
     errors = []
     thread_ids = dict.fromkeys(s["thread_id"] for s in state.get("agents", {}).values())
-    for thread_id in thread_ids:
+    async def clean_thread(thread_id):
+        archive = path / "subagents" / f"{thread_id}.json"
         try:
             # A runs.create response can be lost before its ID reaches parent state.
             runs = await list_runs(thread_id)
             for run in runs:
                 if run["status"] in {"pending", "running"}:
-                    await asyncio.wait_for(client.runs.cancel(thread_id, run["run_id"], wait=True), 30)
+                    try:
+                        await asyncio.wait_for(client.runs.cancel(thread_id, run["run_id"], wait=True), 60)
+                    except httpx.HTTPStatusError as exc:
+                        if exc.response.status_code != 404:
+                            raise
+                        # The worker can finish between listing and cancellation.
+                        refreshed = await list_runs(thread_id)
+                        if not any(r['run_id'] == run['run_id'] and
+                                   r['status'] in {'success', 'error', 'interrupted', 'timeout'}
+                                   for r in refreshed):
+                            raise
             runs = await list_runs(thread_id)
+            # Cancellation can return before the worker's terminal status is visible.
+            for _ in range(20):
+                if not any(r["status"] in {"pending", "running"} for r in runs):
+                    break
+                await asyncio.sleep(0.5)
+                runs = await list_runs(thread_id)
             if any(r["status"] in {"pending", "running"} for r in runs):
                 raise RuntimeError("Worker still active after cancellation")
             worker_state = await asyncio.wait_for(client.threads.get_state(thread_id), 30)
-            save(path / "subagents" / f"{thread_id}.json", {**worker_state, "runs": runs})
+            save(archive, {**worker_state, "runs": runs})
             # Never discard remote checkpoints unless the archive was saved successfully.
             await asyncio.wait_for(client.threads.delete(thread_id), 30)
         except Exception as exc:
+            status = getattr(getattr(exc, 'response', None), 'status_code', None)
+            if (status == 404 or type(exc).__name__ == 'NotFoundError') and archive.is_file():
+                saved = json.loads(archive.read_text())
+                if 'runs' in saved and all(r['status'] in {'success', 'error', 'interrupted', 'timeout'}
+                                           for r in saved['runs']):
+                    return  # A previous cleanup archived and deleted this thread.
             errors.append(f"{thread_id}: {type(exc).__name__}: {exc}")
+
+    # A model can create hundreds of unused threads. Keep cleanup below the
+    # SDK connection-pool limit; waiting for a slot is not worker cleanup time.
+    semaphore = asyncio.Semaphore(16)
+    async def bounded(thread_id):
+        async with semaphore:
+            try:
+                async with asyncio.timeout(60):
+                    await clean_thread(thread_id)
+            except TimeoutError:
+                errors.append(f"{thread_id}: TimeoutError: Worker cleanup exceeded 60s")
+
+    await asyncio.gather(*(bounded(thread_id) for thread_id in thread_ids))
     return errors
 
 
-async def episode(task, mode, attempt, root, args, *, middleware=()):
+async def episode(task, mode, attempt, root, args, *, middleware=(), policy=None):
     attempt_path = root / mode / task["task_id"] / f"attempt-{attempt:03d}"
     if (attempt_path / "result.json").exists():
         return
@@ -100,12 +136,15 @@ async def episode(task, mode, attempt, root, args, *, middleware=()):
     init_budget(path, args.model_calls, args.output_tokens)
     checkpoint = InMemorySaver()
     client = get_client(url=args.worker_url)
-    policy = model(agents.AGENT_MODELS[args.agent])
+    owns_policy = policy is None
+    policy = policy if policy is not None else model(agents.AGENT_MODELS[args.agent])
     if args.agent == "decomposer":
-        agent = agents.decomposer(policy, checkpoint, args.worker_url, middleware=middleware)
+        agent = agents.decomposer(policy, checkpoint, args.worker_url, middleware=middleware,
+                                 agent_recursion_limit=getattr(args, 'agent_recursion_limit', 410))
     else:
         agent = agents.react(policy, checkpoint, middleware=middleware)
-    config = {"recursion_limit": 410, "configurable": {"thread_id": uuid4().hex}}
+    config = {"recursion_limit": getattr(args, 'recursion_limit', 410),
+              "configurable": {"thread_id": uuid4().hex}}
     result = {"task_id": task["task_id"], "task": task["task_id"],
               "episode_id": path.name, "run_id": root.name,
               "repetition": attempt, "mode": mode, "attempt": attempt,
@@ -129,7 +168,8 @@ async def episode(task, mode, attempt, root, args, *, middleware=()):
         except Exception as exc:
             errors = [f"{type(exc).__name__}: {exc}"]
         try:
-            await close_model(policy)
+            if owns_policy:
+                await close_model(policy)
         except Exception as exc:
             errors.append(f"Model cleanup: {type(exc).__name__}: {exc}")
         if errors:
@@ -169,10 +209,14 @@ async def episode(task, mode, attempt, root, args, *, middleware=()):
     finally:
         if not cleanup_finished:
             try:
-                async with asyncio.timeout(60):
+                async with asyncio.timeout(90):
                     await finish_agents()
             except TimeoutError:
-                result.setdefault("cleanup_errors", []).append("Episode cleanup exceeded 60s")
+                result.setdefault("cleanup_errors", []).append("Episode cleanup exceeded 90s")
+        try:
+            await client.http.client.aclose()
+        except Exception as exc:
+            result.setdefault("cleanup_errors", []).append(f"Worker client cleanup: {type(exc).__name__}: {exc}")
 
     result.setdefault("agent_finished_at", time.time())
     messages = state.get("messages", [])
@@ -180,7 +224,7 @@ async def episode(task, mode, attempt, root, args, *, middleware=()):
              "thread_id": config["configurable"]["thread_id"],
              "task": task["task_id"], "repetition": attempt, "attempt": attempt,
              "harness": args.agent, "assistant_id": args.agent,
-             "model": agents.AGENT_MODELS[args.agent],
+             "model": agents.AGENT_MODELS[args.agent] if owns_policy else policy._llm_type,
              "started_at": datetime.fromtimestamp(result["started_at"], timezone.utc).isoformat(),
              "finished_at": datetime.fromtimestamp(result["agent_finished_at"], timezone.utc).isoformat(),
              "agent_error": result.get("error"),
@@ -212,6 +256,7 @@ async def episode(task, mode, attempt, root, args, *, middleware=()):
         result["html_error"] = f"{type(exc).__name__}: {exc}"
     save(attempt_path / "result.json", result)
     print(json.dumps({k: result[k] for k in ("mode", "task_id", "attempt", "status", "evaluation")}), flush=True)
+    return result
 
 
 async def describe_run(args):
@@ -285,7 +330,7 @@ async def prepare_run(args):
     return tasks, root
 
 
-async def run_jobs(tasks, jobs, root, args, *, middleware=()):
+async def run_jobs(tasks, jobs, root, args, *, middleware=(), episode_runner=None):
     """Run explicit (task ID, attempt number) pairs at bounded concurrency."""
     by_id = {task["task_id"]: task for task in tasks}
     semaphore = asyncio.Semaphore(args.concurrency)
@@ -299,8 +344,10 @@ async def run_jobs(tasks, jobs, root, args, *, middleware=()):
             result_path = root / args.mode / task_id / f"attempt-{attempt:03d}" / "result.json"
             started_at = time.time()
             try:
-                await episode(by_id[task_id], args.mode, attempt, root, args, middleware=middleware)
+                await (episode_runner or episode)(by_id[task_id], args.mode, attempt, root, args, middleware=middleware)
             except Exception as exc:
+                if episode_runner is not None:
+                    raise
                 if not result_path.exists():
                     save(result_path, {
                         "task_id": task_id, "task": task_id, "attempt": attempt, "repetition": attempt,
@@ -322,9 +369,13 @@ async def run_jobs(tasks, jobs, root, args, *, middleware=()):
                 "started_at", "finished_at", "trace_path", "evaluation")})
             save(manifest_path, manifest)
 
+    pending = [asyncio.create_task(bounded(task, attempt)) for task, attempt in jobs]
     try:
-        await asyncio.gather(*(bounded(task, attempt) for task, attempt in jobs))
+        await asyncio.gather(*pending)
     except BaseException:
+        for job in pending:
+            job.cancel()
+        await asyncio.gather(*pending, return_exceptions=True)
         manifest["status"] = "interrupted"
         raise
     else:
