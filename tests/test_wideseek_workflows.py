@@ -9,7 +9,7 @@ from gyms.wideseek.run import create_parser
 
 def test_named_agent_cli_rejects_model_overrides_and_legacy_flags():
     parser = create_parser()
-    for name in ("react", "decomposer"):
+    for name in ("react", "decomposer", "student"):
         assert parser.parse_args(["--agent", name, "--output", "/tmp/raw"]).agent == name
     for flag in ("--mode", "--harness", "--model", "--subagent-model", "--judge-model"):
         with pytest.raises(SystemExit):
@@ -34,6 +34,47 @@ def test_researcher_id_is_explicit_and_matches_server(monkeypatch):
     assert worker["agent_type_id"] == "qwen_3_5_4b_thinking"
     assert graphs[worker["assistant_id"]] == "gyms.wideseek.agents:researcher"
     assert worker["url"] == "http://worker"
+
+
+def test_student_keeps_its_training_interface_over_non_thinking_researchers(monkeypatch):
+    import inspect
+    from decomposer.core import create_decomposer_agent
+    from gyms.wideseek import agents
+    root = Path(__file__).resolve().parents[1]
+    captured = {}
+    monkeypatch.setattr(agents, "create_decomposer_agent", lambda **kw: captured.update(kw))
+    agents.decomposer("policy", "checkpoint", "http://worker", agent="student")
+    worker = captured["agent_types"][0]
+    assert worker["agent_type_id"] == "qwen_3_5_4b_thinking"
+    assert worker["description"] == "Qwen3.5-4B thinking agent equipped with search and access tools."
+    # The run budget of the SFT teacher prompt: create_decomposer_agent's defaults.
+    defaults = inspect.signature(create_decomposer_agent).parameters
+    assert (captured["agent_run_budget_seconds"], captured["agent_shutdown_grace_seconds"]) == (
+        defaults["agent_run_budget_seconds"].default, defaults["agent_shutdown_grace_seconds"].default)
+    for gym in ("wideseek", "deepdive"):
+        graphs = json.loads((root / f"gyms/{gym}/langgraph.json").read_text())["graphs"]
+        assert graphs[worker["assistant_id"]] == "gyms.wideseek.agents:researcher_non_thinking"
+    profiles = []
+    monkeypatch.setattr(agents, "model", profiles.append)
+    monkeypatch.setattr(agents, "create_agent", lambda *args, **kwargs: None)
+    agents.researcher_non_thinking()
+    assert profiles == [agents.STUDENT_RESEARCHER_MODEL] == [agents.SUBAGENT_MODELS["student"]]
+
+
+def test_student_samples_local_vllm_as_rl_rollouts(monkeypatch):
+    import asyncio
+    from gyms.wideseek import agents
+    from gyms.wideseek.runtime import close_model, model, model_metadata
+    monkeypatch.delenv("VLLM_HOST", raising=False)
+    policy = model(agents.STUDENT_MODEL)
+    metadata = model_metadata(policy)
+    assert policy.openai_api_base == "http://127.0.0.1:8024/v1"
+    assert metadata["model_name"] == "Qwen/Qwen3.5-4B"
+    assert (metadata["temperature"], metadata["top_p"], metadata["presence_penalty"]) == (1.0, 1.0, 0.0)
+    assert (metadata["extra_body"]["top_k"], metadata["extra_body"]["min_p"]) == (-1, 0.0)
+    assert not metadata["extra_body"]["chat_template_kwargs"]["enable_thinking"]
+    assert not metadata["preserve_reasoning"]
+    asyncio.run(close_model(policy))
 
 
 def test_summary_keeps_judge_errors_separate_and_excludes_judge_tokens():

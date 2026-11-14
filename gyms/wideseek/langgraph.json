@@ -1,7 +1,8 @@
 {
   "dependencies": ["."],
   "graphs": {
-    "researcher": "gyms.wideseek.agents:researcher"
+    "researcher": "gyms.wideseek.agents:researcher",
+    "researcher_non_thinking": "gyms.wideseek.agents:researcher_non_thinking"
   },
   "python_version": "3.12"
 }

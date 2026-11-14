@@ -138,9 +138,10 @@ async def episode(task, mode, attempt, root, args, *, middleware=(), policy=None
     client = get_client(url=args.worker_url)
     owns_policy = policy is None
     policy = policy if policy is not None else model(agents.AGENT_MODELS[args.agent])
-    if args.agent == "decomposer":
+    if mode == "decomposer":
         agent = agents.decomposer(policy, checkpoint, args.worker_url, middleware=middleware,
-                                 agent_recursion_limit=getattr(args, 'agent_recursion_limit', 410))
+                                 agent_recursion_limit=getattr(args, 'agent_recursion_limit', 410),
+                                 agent=args.agent)
     else:
         agent = agents.react(policy, checkpoint, middleware=middleware)
     config = {"recursion_limit": getattr(args, 'recursion_limit', 410),
@@ -279,7 +280,7 @@ async def describe_run(args):
             response.raise_for_status()
     profiles = {}
     for role, profile in (("agent", agents.AGENT_MODELS[args.agent]),
-                          ("subagent", agents.RESEARCHER_MODEL), ("judge", agents.JUDGE_MODEL)):
+                          ("subagent", agents.SUBAGENT_MODELS[args.agent]), ("judge", agents.JUDGE_MODEL)):
         policy = model(profile)
         try:
             profiles[role] = {"profile": profile, **model_metadata(policy)}
@@ -300,8 +301,8 @@ async def describe_run(args):
     harness = {
         "source_sha256": digest.hexdigest(),
         "agent_system_prompt": agents.AGENT_SYSTEM_PROMPT,
-        "agent_run_budget_seconds": agents.AGENT_RUN_BUDGET_SECONDS,
-        "agent_shutdown_grace_seconds": agents.AGENT_SHUTDOWN_GRACE_SECONDS,
+        "agent_run_budget_seconds": agents.RUN_BUDGETS[args.agent][0],
+        "agent_shutdown_grace_seconds": agents.RUN_BUDGETS[args.agent][1],
     }
 
     settings = {"tasks": [t["task_id"] for t in tasks], "data_sha256": hashlib.sha256(raw).hexdigest(),

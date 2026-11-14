@@ -19,7 +19,9 @@ _TRANSIENT = re.compile(
 )
 _FATAL = re.compile(r'\b(AuthenticationError|PermissionDeniedError|NotFoundError|BadRequestError)\b|'
                     r'''\b(?:HTTPStatusError: |Error code: |Client error ['"])(?:400|401|403|404)\b''')
-_CONTEXT_OVERFLOW = re.compile(r'\b(OpenAIContextOverflowError|ContextWindowExceededError|context_length_exceeded)\b')
+# Local vLLM rejects an overlong prompt with a 400 that names its maximum context length.
+_CONTEXT_OVERFLOW = re.compile(r'\b(OpenAIContextOverflowError|ContextWindowExceededError|context_length_exceeded|'
+                               r"model's maximum context length)\b")
 
 
 def transient(error):
@@ -55,7 +57,7 @@ def execution_errors(result, directory):
 
 async def probe_models(agent):
     # Exercise authenticated generation, not just HTTP health or model listing.
-    for profile in dict.fromkeys((agents.AGENT_MODELS[agent], agents.RESEARCHER_MODEL, agents.JUDGE_MODEL)):
+    for profile in dict.fromkeys((agents.AGENT_MODELS[agent], agents.SUBAGENT_MODELS[agent], agents.JUDGE_MODEL)):
         policy = model(profile)
         try:
             async with asyncio.timeout(60):
@@ -126,6 +128,7 @@ async def collect_episode(guard, run_episode, task, mode, attempt, root, args, *
             stopping_failure = bool(_CONTEXT_OVERFLOW.search(error)) or error.startswith('GraphRecursionError:') or error in {
                 'ValueError: Decomposer requested tools instead of completing graceful shutdown',
                 'ValueError: Agent requested tools instead of returning its report',
+                'RuntimeError: vLLM exhausted max_completion_tokens before completing its response.',
             }
             if result.get('status') == 'error' and not stopping_failure:
                 raise RuntimeError(f"Unclassified episode error: {result_path}")

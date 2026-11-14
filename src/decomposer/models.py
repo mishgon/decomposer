@@ -107,6 +107,7 @@ def create_model(
     model_id: Literal[
         "vllm/qwen_3_5_4b_thinking",
         "vllm/qwen_3_5_4b_non_thinking",
+        "vllm/qwen_3_5_4b_non_thinking_rl_sampling",
         "vllm/qwen_3_8_flash_next_non_thinking",
         "lmrouter/qwen_3_5_4b_thinking",
         "lmrouter/qwen_3_5_4b_non_thinking",
@@ -156,6 +157,32 @@ def create_model(
                 preserve_reasoning=thinking,
                 timeout=600,
                 max_retries=0 if model_id.startswith("lmrouter/") else 2,
+                http_client=sync_client,
+                http_async_client=client,
+                disable_streaming=True,
+                use_responses_api=False,
+            )
+        case "vllm/qwen_3_5_4b_non_thinking_rl_sampling":
+            # A Qwen3.5-4B manager checkpoint as RL rollouts sample it: the plain distribution
+            # at temperature 1.0 (gyms/tau2_gym/experiments.py RL_ROLLOUT_SAMPLING on rl-tau2).
+            # The completion cap ends a runaway turn instead of letting it fill the context.
+            return ChatVLLM(
+                model="Qwen/Qwen3.5-4B",
+                base_url=base_url or f"http://{os.environ.get('VLLM_HOST', '127.0.0.1')}:{_QWEN_3_5_4B_PORT}/v1",
+                api_key="EMPTY",
+                temperature=1.0,
+                top_p=1.0,
+                presence_penalty=0.0,
+                max_tokens=8192,
+                extra_body={
+                    "top_k": -1,
+                    "min_p": 0.0,
+                    "repetition_penalty": 1.0,
+                    "chat_template_kwargs": {"enable_thinking": False},
+                },
+                preserve_reasoning=False,
+                timeout=600,
+                max_retries=2,
                 http_client=sync_client,
                 http_async_client=client,
                 disable_streaming=True,
