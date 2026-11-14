@@ -186,7 +186,8 @@ same store. Do not overwrite a migrated store with a fresh corpus download.
 vLLM has a separate `.venv-vllm` (CUDA 12.9 build 0.24.0), keeping CPU retrieval's
 Torch isolated. It serves BF16 Qwen3.5-4B on localhost:8024, with 16k context,
 one active sequence, 2k prefill batches, eager execution and 85% GPU allocation.
-The vision encoder is disabled. Validate the actual VRAM requirement on startup.
+The vision encoder is disabled. Sampling uses the PyTorch fallback to avoid
+requiring a system CUDA toolkit for FlashInfer JIT compilation. Validate the actual VRAM requirement on startup.
 Longer episodes can exceed 16k; those failures remain in the run artifacts.
 The standard checkpoint differs from the hosted unlooped deployment.
 
@@ -199,8 +200,9 @@ gyms/wideseek/.venv/bin/python -m evals.wideseek.run --agent react \
   --limit 1 -n 1 --concurrency 1 --model-calls 8 --output-tokens 8192
 ```
 
-`WS_MODEL_BACKEND=local` selects local thinking 4B for ReAct/researchers and
-local non-thinking 4B for manager/judge. It needs no hosted key. Without it,
+`WS_MODEL_BACKEND=local` selects local non-thinking 4B for ReAct, researchers,
+manager and judge. Both client requests and the server default set
+`enable_thinking=false`. It needs no hosted key. Without it,
 existing hosted profiles remain the default. A single endpoint serializes all
 roles; begin with ReAct. Scores from this 4B judge are development diagnostics
 and are not comparable to scores from the hosted Flash Next judge. These are

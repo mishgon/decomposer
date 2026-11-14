@@ -16,6 +16,8 @@ case "${1:-}" in
     ;;
   vllm)
     export CUDA_VISIBLE_DEVICES=0
+    # Use the PyTorch sampler; FlashInfer sampling requires a system CUDA toolkit.
+    export VLLM_USE_FLASHINFER_SAMPLER=0
     exec .venv-vllm/bin/vllm serve Qwen/Qwen3.5-4B \
       --host 127.0.0.1 --port 8024 --dtype bfloat16 \
       --max-model-len 16384 --max-num-seqs 1 --max-num-batched-tokens 2048 \

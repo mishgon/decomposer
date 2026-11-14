@@ -42,10 +42,12 @@ def test_local_profiles_need_no_hosted_credentials():
 from gyms.wideseek import agents
 from gyms.wideseek.runtime import model, close_model
 import asyncio
-assert agents.REACT_MODEL == 'vllm/qwen_3_5_4b_thinking'
+assert agents.REACT_MODEL == 'vllm/qwen_3_5_4b_non_thinking'
 assert agents.JUDGE_MODEL == 'vllm/qwen_3_5_4b_non_thinking'
 for profile in (agents.REACT_MODEL, agents.DECOMPOSER_MODEL):
     policy = model(profile)
+    assert policy.extra_body["chat_template_kwargs"]["enable_thinking"] is False
+    assert policy.preserve_reasoning is False
     assert str(policy.openai_api_base) == 'http://127.0.0.1:8024/v1'
     asyncio.run(close_model(policy))
 """], env=env, check=True)

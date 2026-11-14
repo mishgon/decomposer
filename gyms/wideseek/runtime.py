@@ -20,7 +20,7 @@ from decomposer.run_budget import RunBudgetContext
 MODEL_BACKEND = os.environ.get("WS_MODEL_BACKEND", "hosted")
 if MODEL_BACKEND not in {"hosted", "local"}:
     raise ValueError("WS_MODEL_BACKEND must be hosted or local")
-DEFAULT_MODEL = "vllm/qwen_3_5_4b_thinking" if MODEL_BACKEND == "local" else "lmrouter/qwen_3_5_4b_thinking"
+DEFAULT_MODEL = "vllm/qwen_3_5_4b_non_thinking" if MODEL_BACKEND == "local" else "lmrouter/qwen_3_5_4b_thinking"
 DEFAULT_SUBAGENT = DEFAULT_MODEL
 DEFAULT_TEACHER = "vllm/qwen_3_5_4b_non_thinking" if MODEL_BACKEND == "local" else "lmrouter/qwen_3_8_flash_next_non_thinking"
 MODEL_PROFILES = (DEFAULT_MODEL, DEFAULT_SUBAGENT, DEFAULT_TEACHER)
