@@ -3,6 +3,7 @@ from langchain.agents import create_agent
 
 from decomposer.core import create_decomposer_agent
 from decomposer.run_budget import RunBudgetMiddleware
+from gyms.wideseek import agentic_rag
 from gyms.wideseek.prompts import AGENT_SYSTEM_PROMPT
 from gyms.wideseek.runtime import Context, ModelLog, model
 from gyms.wideseek.worker import access, search
@@ -16,11 +17,13 @@ STUDENT_MODEL = "vllm/qwen_3_5_4b_non_thinking_rl_sampling"
 STUDENT_RESEARCHER_MODEL = "lmrouter/occ_4b_non_thinking"
 JUDGE_MODEL = "lmrouter/qwen_3_8_flash_next_non_thinking"
 AGENT_MODELS = {"react": REACT_MODEL, "decomposer": DECOMPOSER_MODEL, "student": STUDENT_MODEL,
-                "student_180": STUDENT_MODEL}
+                "student_180": STUDENT_MODEL, "student_rag": STUDENT_MODEL}
 SUBAGENT_MODELS = {"react": RESEARCHER_MODEL, "decomposer": RESEARCHER_MODEL,
-                   "student": STUDENT_RESEARCHER_MODEL, "student_180": STUDENT_RESEARCHER_MODEL}
+                   "student": STUDENT_RESEARCHER_MODEL, "student_180": STUDENT_RESEARCHER_MODEL,
+                   "student_rag": STUDENT_RESEARCHER_MODEL}
+# student_rag's researchers use the monorepo's cited-search harness instead of WideSeek's tools.
 RESEARCHER_IDS = {"decomposer": "researcher", "student": "researcher_non_thinking",
-                  "student_180": "researcher_non_thinking"}
+                  "student_180": "researcher_non_thinking", "student_rag": "researcher_agentic_rag"}
 AGENT_RUN_BUDGET_SECONDS = 180.0
 AGENT_SHUTDOWN_GRACE_SECONDS = 180.0
 # Run budget and shutdown grace in seconds. The student's are the ones its training prompt
@@ -29,7 +32,8 @@ AGENT_SHUTDOWN_GRACE_SECONDS = 180.0
 RUN_BUDGETS = {"react": (AGENT_RUN_BUDGET_SECONDS, AGENT_SHUTDOWN_GRACE_SECONDS),
                "decomposer": (AGENT_RUN_BUDGET_SECONDS, AGENT_SHUTDOWN_GRACE_SECONDS),
                "student": (60.0, 60.0),
-               "student_180": (AGENT_RUN_BUDGET_SECONDS, AGENT_SHUTDOWN_GRACE_SECONDS)}
+               "student_180": (AGENT_RUN_BUDGET_SECONDS, AGENT_SHUTDOWN_GRACE_SECONDS),
+               "student_rag": (60.0, 60.0)}
 
 
 def _researcher(profile):
@@ -44,6 +48,13 @@ def researcher():
 
 def researcher_non_thinking():
     return _researcher(STUDENT_RESEARCHER_MODEL)
+
+
+def researcher_agentic_rag():
+    # FinishReport precedes RunBudgetMiddleware, so a valid finish ends the run before a shutdown request.
+    return create_agent(model(STUDENT_RESEARCHER_MODEL), tools=agentic_rag.TOOLS, context_schema=Context,
+        middleware=[agentic_rag.FinishReport(), RunBudgetMiddleware(), ModelLog("researcher")],
+        system_prompt=agentic_rag.SYSTEM_PROMPT)
 
 
 def react(policy, checkpointer, *, middleware=()):

@@ -129,7 +129,8 @@ def test_deepdive_worker_uses_wideseek_retrieval_agent():
     root = Path(__file__).resolve().parents[1]
     graphs = json.loads((root / "gyms/deepdive/langgraph.json").read_text())["graphs"]
     assert graphs == {"researcher": "gyms.wideseek.agents:researcher",
-                      "researcher_non_thinking": "gyms.wideseek.agents:researcher_non_thinking"}
+                      "researcher_non_thinking": "gyms.wideseek.agents:researcher_non_thinking",
+                      "researcher_agentic_rag": "gyms.wideseek.agents:researcher_agentic_rag"}
 
 
 def test_collection_pool_mixes_both_qa_splits(tmp_path):

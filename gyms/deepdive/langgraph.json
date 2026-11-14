@@ -2,7 +2,8 @@
   "dependencies": ["."],
   "graphs": {
     "researcher": "gyms.wideseek.agents:researcher",
-    "researcher_non_thinking": "gyms.wideseek.agents:researcher_non_thinking"
+    "researcher_non_thinking": "gyms.wideseek.agents:researcher_non_thinking",
+    "researcher_agentic_rag": "gyms.wideseek.agents:researcher_agentic_rag"
   },
   "python_version": "3.12"
 }
