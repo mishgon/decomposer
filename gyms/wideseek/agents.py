@@ -49,7 +49,7 @@ def react(policy, checkpointer, *, middleware=()):
 
 def decomposer(policy, checkpointer, worker_url, *, middleware=(), agent_recursion_limit=410,
                agent="decomposer"):
-    # The student keeps the type and description its training records offer.
+    # The student keeps the type ID its training records offer and WideSeek's description.
     run_budget, shutdown_grace = RUN_BUDGETS[agent]
     return create_decomposer_agent(decomposer_model=policy,
         agent_types=[{"agent_type_id": "qwen_3_5_4b_thinking", "assistant_id": RESEARCHER_IDS[agent],
