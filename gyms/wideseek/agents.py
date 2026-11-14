@@ -15,17 +15,21 @@ RESEARCHER_MODEL = REACT_MODEL
 STUDENT_MODEL = "vllm/qwen_3_5_4b_non_thinking_rl_sampling"
 STUDENT_RESEARCHER_MODEL = "lmrouter/occ_4b_non_thinking"
 JUDGE_MODEL = "lmrouter/qwen_3_8_flash_next_non_thinking"
-AGENT_MODELS = {"react": REACT_MODEL, "decomposer": DECOMPOSER_MODEL, "student": STUDENT_MODEL}
+AGENT_MODELS = {"react": REACT_MODEL, "decomposer": DECOMPOSER_MODEL, "student": STUDENT_MODEL,
+                "student_180": STUDENT_MODEL}
 SUBAGENT_MODELS = {"react": RESEARCHER_MODEL, "decomposer": RESEARCHER_MODEL,
-                   "student": STUDENT_RESEARCHER_MODEL}
-RESEARCHER_IDS = {"decomposer": "researcher", "student": "researcher_non_thinking"}
+                   "student": STUDENT_RESEARCHER_MODEL, "student_180": STUDENT_RESEARCHER_MODEL}
+RESEARCHER_IDS = {"decomposer": "researcher", "student": "researcher_non_thinking",
+                  "student_180": "researcher_non_thinking"}
 AGENT_RUN_BUDGET_SECONDS = 180.0
 AGENT_SHUTDOWN_GRACE_SECONDS = 180.0
 # Run budget and shutdown grace in seconds. The student's are the ones its training prompt
 # names: create_decomposer_agent's defaults, which the SFT teacher collections used.
+# student_180 is the same student with the teachers' budget.
 RUN_BUDGETS = {"react": (AGENT_RUN_BUDGET_SECONDS, AGENT_SHUTDOWN_GRACE_SECONDS),
                "decomposer": (AGENT_RUN_BUDGET_SECONDS, AGENT_SHUTDOWN_GRACE_SECONDS),
-               "student": (60.0, 60.0)}
+               "student": (60.0, 60.0),
+               "student_180": (AGENT_RUN_BUDGET_SECONDS, AGENT_SHUTDOWN_GRACE_SECONDS)}
 
 
 def _researcher(profile):

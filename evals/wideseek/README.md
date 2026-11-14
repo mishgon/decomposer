@@ -30,7 +30,8 @@ DeepDive. Serve the checkpoint with vLLM on port 8024 under the name `Qwen/Qwen3
 do: temperature 1.0 with no top-p, top-k or presence penalty, and at most 8,192 tokens
 per turn. The student keeps the agent type and the 60-second run budget of its training
 records. Its researchers run on the `researcher_non_thinking` worker graph with the
-hosted non-thinking 4B model that `STUDENT_RESEARCHER_MODEL` names.
+hosted non-thinking 4B model that `STUDENT_RESEARCHER_MODEL` names. `--agent student_180`
+is the same student with the teachers' 180-second run budget and shutdown grace.
 
 Collect a fixed number of attempts per task with the SFT collector (`-n 4`), then
 write the band of the finished run:

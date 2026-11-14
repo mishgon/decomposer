@@ -9,7 +9,7 @@ from gyms.wideseek.run import create_parser
 
 def test_named_agent_cli_rejects_model_overrides_and_legacy_flags():
     parser = create_parser()
-    for name in ("react", "decomposer", "student"):
+    for name in ("react", "decomposer", "student", "student_180"):
         assert parser.parse_args(["--agent", name, "--output", "/tmp/raw"]).agent == name
     for flag in ("--mode", "--harness", "--model", "--subagent-model", "--judge-model"):
         with pytest.raises(SystemExit):
@@ -59,6 +59,21 @@ def test_student_keeps_its_training_interface_over_non_thinking_researchers(monk
     monkeypatch.setattr(agents, "create_agent", lambda *args, **kwargs: None)
     agents.researcher_non_thinking()
     assert profiles == [agents.STUDENT_RESEARCHER_MODEL] == [agents.SUBAGENT_MODELS["student"]]
+
+
+def test_student_180_differs_from_the_student_only_in_its_run_budget(monkeypatch):
+    from gyms.wideseek import agents
+    calls = []
+    monkeypatch.setattr(agents, "create_decomposer_agent", lambda **kw: calls.append(kw))
+    for agent in ("student", "student_180"):
+        agents.decomposer("policy", "checkpoint", "http://worker", agent=agent)
+    student, longer = calls
+    assert (longer["agent_run_budget_seconds"], longer["agent_shutdown_grace_seconds"]) == (180.0, 180.0)
+    budget = ("agent_run_budget_seconds", "agent_shutdown_grace_seconds")
+    assert {k: v for k, v in student.items() if k not in budget} == {
+        k: v for k, v in longer.items() if k not in budget}
+    for table in (agents.AGENT_MODELS, agents.SUBAGENT_MODELS, agents.RESEARCHER_IDS):
+        assert table["student_180"] == table["student"]
 
 
 def test_student_samples_local_vllm_as_rl_rollouts(monkeypatch):
