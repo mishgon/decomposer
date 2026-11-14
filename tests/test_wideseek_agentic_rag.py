@@ -105,8 +105,9 @@ def test_researcher_gets_32_calls_and_the_last_may_only_finish(monkeypatch, tmp_
     async def request_tool(endpoint, payload, runtime):
         return [{"url": SOLARIS, "contents": PAGE}]
 
+    # The fake model returns to its first response after its last, so a spare one keeps i counting calls.
     policy = RecordingModel(responses=[calls(("search", {"query": f"Solaris {turn}"})) for turn in range(31)]
-                            + [calls(("finish", {"answer": "Lem", "sources": sources}))])
+                            + [calls(("finish", {"answer": "Lem", "sources": sources})), AIMessage(content="unused")])
     monkeypatch.setattr(agentic_rag, "request_tool", request_tool)
     monkeypatch.setattr(agents, "model", lambda profile: policy)
     episode = tmp_path / "episode"
