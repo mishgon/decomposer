@@ -249,3 +249,8 @@ claim the last slot.
 Use `access(url, contains="keyword or year")` to find a relevant passage directly,
 starting at `offset`, rather than stepping through a long page. Keyword matching
 is literal and case-insensitive; a no-match response is explicit.
+
+The reserved ReAct final response uses temperature 0 and can reserve up to 16384
+output tokens, bounded by the remaining shared token budget. Research calls keep
+their 4096-token allowance when a shared token cap is configured. Natural early
+answers are saved as generated; format violations remain visible in evaluation.

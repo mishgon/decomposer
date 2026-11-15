@@ -66,13 +66,14 @@ def init_budget(path, calls=None, tokens=None):
         db.execute("INSERT INTO budget VALUES (?,?)", (calls, tokens))
 
 
-def reserve(path, *, with_remaining=False):
+def reserve(path, *, with_remaining=False, final_response=False):
     with sqlite3.connect(path / "budget.sqlite", timeout=30) as db:
         db.execute("BEGIN IMMEDIATE")
         calls, tokens = db.execute("SELECT calls,tokens FROM budget").fetchone()
         if (calls is not None and calls < 1) or (tokens is not None and tokens < 1):
             raise BudgetExceeded("Shared episode model budget exhausted")
-        limit = min(tokens, 4096) if tokens is not None else None
+        final_limit = 16384 if final_response and calls == 1 else None
+        limit = min(tokens, final_limit or 4096) if tokens is not None else final_limit
         db.execute("UPDATE budget SET calls=calls-1,tokens=tokens-?", (limit,))
     remaining = calls - 1 if calls is not None else None
     return (limit, remaining) if with_remaining else limit
@@ -90,7 +91,8 @@ class ModelLog(AgentMiddleware):
 
     async def awrap_model_call(self, request, handler):
         path = await asyncio.to_thread(directory, request.runtime.context)
-        limit, remaining = await asyncio.to_thread(reserve, path, with_remaining=True)
+        limit, remaining = await asyncio.to_thread(reserve, path, with_remaining=True,
+                                                  final_response=self.final_response)
         final_response = self.final_response and remaining == 0
         log = path / "model_calls.jsonl"
         started = time.monotonic()
@@ -115,6 +117,8 @@ class ModelLog(AgentMiddleware):
                 # Reserve the last permitted call for an answer, not another tool request.
                 overrides["tool_choice"] = "none"
                 overrides["tools"] = []
+                settings["temperature"] = 0.
+                row["budget_finalization_temperature"] = 0.
                 if MODEL_BACKEND == "local":
                     extra = {**(getattr(request.model, "extra_body", None) or {}),
                              **settings.get("extra_body", {})}

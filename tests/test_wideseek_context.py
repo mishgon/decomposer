@@ -177,3 +177,14 @@ def test_keyword_access_reaches_a_fact_beyond_the_preview(monkeypatch):
     assert len(found) < 1200
     missing = asyncio.run(worker.access.coroutine('url', None, contains='literal.*keyword'))
     assert 'not found' in missing
+
+
+def test_final_answer_reservation_accounts_for_the_larger_token_allowance(tmp_path):
+    import sqlite3
+    from gyms.wideseek.runtime import init_budget, reserve
+    path = tmp_path / 'budget'
+    init_budget(path, calls=1, tokens=20000)
+    limit, remaining = reserve(path, with_remaining=True, final_response=True)
+    assert (limit, remaining) == (16384, 0)
+    with sqlite3.connect(path / 'budget.sqlite') as db:
+        assert db.execute('SELECT tokens FROM budget').fetchone()[0] == 3616

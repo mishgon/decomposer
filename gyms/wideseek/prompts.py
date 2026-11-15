@@ -15,4 +15,10 @@ record of verified facts and source URLs in your messages before more tool calls
 older tool results can be cleared from the model context. If a cleared result is
 needed again, repeat its search or access call. Do not invent missing cells.
 
-""" + BASE_AGENT_SYSTEM_PROMPT
+""" + BASE_AGENT_SYSTEM_PROMPT + """
+
+For a final table answer, return only one fenced Markdown block starting with
+```markdown and ending with ```. Use the requested column headers exactly.
+Do not add commentary outside that block. Mark unavailable facts as unknown
+instead of estimating missing values.
+"""
