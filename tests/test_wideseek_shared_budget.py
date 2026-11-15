@@ -98,3 +98,19 @@ def test_researcher_returns_report_then_coordinator_can_answer(tmp_path):
     assert len(seen) == 3
     assert seen[-1].tools == []
     assert runtime.reserve(path, role='decomposer', final_response=True)[2]
+
+
+def test_call_only_budget_does_not_add_an_output_token_cap(tmp_path):
+    path = tmp_path / 'episode'
+    runtime.init_budget(path, calls=40, coordinated=True)
+    assert runtime.reserve(path, role='decomposer')[0] is None
+    runtime.register_worker(path, 'worker')
+    assert runtime.reserve(path, role='researcher', thread_id='worker')[0] is None
+
+
+def test_worker_and_coordinator_reports_fit_exactly_two_remaining_calls(tmp_path):
+    path = tmp_path / 'episode'
+    runtime.init_budget(path, calls=2, coordinated=True)
+    assert runtime.register_worker(path, 'worker')
+    assert runtime.reserve(path, role='researcher', thread_id='worker')[2]
+    assert runtime.reserve(path, role='decomposer', final_response=True)[2]

@@ -81,7 +81,7 @@ def register_worker(path, thread_id):
         if not coordinated:
             return True
         active = db.execute("SELECT count(*) FROM workers").fetchone()[0]
-        if closing or active >= 3 or calls <= active + 2 or (tokens is not None and tokens < (active + 2) * 4096):
+        if closing or active >= 3 or calls < active + 2 or (tokens is not None and tokens < (active + 2) * 4096):
             return False
         return db.execute("INSERT OR IGNORE INTO workers VALUES (?)", (thread_id,)).rowcount == 1
 
@@ -114,7 +114,7 @@ def reserve(path, *, with_remaining=False, final_response=False, role=None, thre
                 final = bool(closing or calls == 1 or (tokens is not None and tokens <= 4096))
                 if active:
                     raise BudgetExceeded("Collect active workers before calling coordinator")
-        limit = 16384 if final else (4096 if tokens is not None or coordinated else None)
+        limit = 16384 if final else (4096 if tokens is not None else None)
         if tokens is not None:
             limit = min(limit, tokens - held_tokens)
         if limit is not None and limit < 1:
