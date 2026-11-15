@@ -109,16 +109,21 @@ class ModelLog(AgentMiddleware):
             if limit is not None:
                 settings["max_tokens"] = limit
             system = request.system_message
+            overrides = {}
             if final_response and request.tools:
                 # Reserve the last permitted call for an answer, not another tool request.
-                settings["tool_choice"] = "none"
+                overrides["tool_choice"] = "none"
+                overrides["tools"] = []
                 notice = ("No tool calls remain in this episode's model-call budget. "
                           "Return the requested final answer now using only available evidence. "
-                          "Mark unresolved entries as unknown; do not invent missing information.")
+                          "Mark unresolved entries as unknown; do not invent missing information. "
+                          "Tools are unavailable. Do not emit tool-call markup or instructions to call tools. "
+                          "Follow the requested output format exactly, including a markdown code fence "
+                          "when requested; do not add commentary outside the requested answer.")
                 content = system.content if system else ""
                 blocks = [{"type": "text", "text": content}] if isinstance(content, str) else list(content)
                 system = SystemMessage(content=[*blocks, {"type": "text", "text": notice}])
-            response = await handler(request.override(model_settings=settings, system_message=system))
+            response = await handler(request.override(model_settings=settings, system_message=system, **overrides))
             outcome = {"status": "success", "response": [message_to_dict(m) for m in response.result]}
             used = sum((getattr(m, "usage_metadata", None) or {}).get("output_tokens", 0)
                        for m in response.result)

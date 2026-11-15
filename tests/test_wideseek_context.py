@@ -127,7 +127,9 @@ def test_last_budgeted_call_reserves_a_final_answer(tmp_path, monkeypatch):
         return SimpleNamespace(result=[AIMessage(content='final answer')])
 
     asyncio.run(runtime.ModelLog('react').awrap_model_call(request, handler))
-    assert seen[0].model_settings['tool_choice'] == 'none'
+    assert seen[0].tool_choice == 'none'
+    assert seen[0].tools == []
+    assert 'tool_choice' not in seen[0].model_settings
     assert 'Original instructions' in seen[0].system_message.text
     assert 'do not invent' in seen[0].system_message.text
     assert seen[0].messages == request.messages
