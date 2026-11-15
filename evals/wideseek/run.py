@@ -6,16 +6,16 @@ from gyms.wideseek.run import cli, main as run_episodes
 from gyms.wideseek.runtime import save
 
 
-def summarize(rows):
-    scores = [r["evaluation"]["score"] for r in rows if r["evaluation"]["score"] is not None]
-    judge_skipped = sum(r["evaluation"].get("status") == "not_requested" for r in rows)
+def summarize(rows, *, skip_judge=False):
+    scores = [r["evaluation"]["score"] for r in rows if r["evaluation"]["score"] is not None and not skip_judge]
+    judge_skipped = len(rows) if skip_judge else sum(r["evaluation"].get("status") == "not_requested" for r in rows)
     seconds = [r["agent_finished_at"] - r["started_at"] for r in rows]
     tokens = {field: sum(role[field] for r in rows for name, role in r.get("usage", {}).items() if name != "judge")
               for field in ("input_tokens", "output_tokens")}
     return {"attempts": len(rows), "scored": len(scores), "unscored": len(rows) - len(scores),
             "judge_skipped": judge_skipped,
             "mean_native_score": statistics.mean(scores) if scores else None,
-            "mean_native_score_infra_zero": sum(scores) / len(rows) if rows and not judge_skipped else None,
+            "mean_native_score_infra_zero": sum(scores) / len(rows) if rows and not judge_skipped and not skip_judge else None,
             "metrics": sorted({r["evaluation"].get("metric", "unscored") for r in rows}),
             "mean_agent_seconds": statistics.mean(seconds) if seconds else None,
             "median_agent_seconds": statistics.median(seconds) if seconds else None,
@@ -27,7 +27,7 @@ async def main(args):
     await run_episodes(args)
     rows = [json.loads(path.read_text())
             for path in (args.output / args.mode).glob("*/attempt-???/result.json")]
-    save(args.output / "summary.json", summarize(rows))
+    save(args.output / "summary.json", summarize(rows, skip_judge=getattr(args, "skip_judge", False)))
 
 
 if __name__ == "__main__":

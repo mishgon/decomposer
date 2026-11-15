@@ -150,5 +150,9 @@ class ModelLog(AgentMiddleware):
         finally:
             await asyncio.to_thread(append_record, log, {
                 "call_id": row["call_id"], "role": self.role, **outcome,
+                "generation": {**model_metadata(request.model), **settings},
+                "effective_tool_count": len(overrides.get("tools", request.tools)),
+                **{key: row[key] for key in ("budget_finalization", "budget_finalization_temperature") if key in row},
+                **({"effective_system_message": message_to_dict(system)} if overrides else {}),
                 "finished_at": datetime.now(timezone.utc).isoformat(),
                 "duration_seconds": time.monotonic() - started})

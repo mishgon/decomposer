@@ -139,6 +139,14 @@ def test_last_budgeted_call_reserves_a_final_answer(tmp_path, monkeypatch):
     assert 'Original instructions' in seen[0].system_message.text
     assert 'do not invent' in seen[0].system_message.text
     assert seen[0].messages == request.messages
+    import json
+    outcome = json.loads((tmp_path / 'model_calls.jsonl').read_text().splitlines()[-1])
+    assert outcome['generation']['temperature'] == 0.
+    assert outcome['generation']['extra_body']['structured_outputs'] == extra['structured_outputs']
+    assert outcome['budget_finalization'] == 'local_markdown_grammar'
+    assert outcome['budget_finalization_temperature'] == 0.
+    assert outcome['effective_tool_count'] == 0
+    assert 'No tool calls remain' in str(outcome['effective_system_message'])
 
 
 def test_concurrent_reservations_identify_exactly_one_final_slot(tmp_path):
@@ -188,3 +196,13 @@ def test_final_answer_reservation_accounts_for_the_larger_token_allowance(tmp_pa
     assert (limit, remaining) == (16384, 0)
     with sqlite3.connect(path / 'budget.sqlite') as db:
         assert db.execute('SELECT tokens FROM budget').fetchone()[0] == 3616
+
+
+def test_timeout_only_generation_run_has_no_quality_score():
+    from evals.wideseek.run import summarize
+    rows = [{'evaluation': {'status': 'timeout', 'score': None},
+             'started_at': 1, 'agent_finished_at': 2, 'status': 'timeout'}]
+    summary = summarize(rows, skip_judge=True)
+    assert summary['judge_skipped'] == 1
+    assert summary['mean_native_score'] is None
+    assert summary['mean_native_score_infra_zero'] is None
