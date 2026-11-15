@@ -79,7 +79,8 @@ concurrent episodes can queue behind each other. Wikipedia retrieval stays share
 Each agent has recursion limit 410. `--episode-timeout` defaults to 2,700 seconds
 and covers agent execution, worker cleanup and evaluation. On expiry, emergency
 cleanup gets up to 60 additional seconds; available traces and results are then saved.
-Optional `--model-calls` and `--output-tokens` provide shared smoke budgets.
+`--model-calls` defaults to 40 shared model calls per episode.
+Optional `--output-tokens` also bounds the shared output-token budget.
 The Gym adds no default completion cap; hosted context/output limits still apply.
 Raw and evaluation runs require a new output directory. Only the SFT collector
 supports `--resume`. A file lock prevents concurrent writers to one run.
@@ -241,10 +242,23 @@ and any unresolved output are part of the experiment protocol.
 
 For local ReAct finalization, vLLM bans tool-call delimiters; requests for Markdown
 use a fenced-table decoding grammar. This constrains format, not factual accuracy.
-Finalization is opt-in for ReAct only: delegated researchers and the Decomposer
-manager retain their existing shared-budget behavior. Remaining calls are read
-atomically within the reservation transaction, so concurrent callers cannot both
-claim the last slot.
+Decomposer shares this cap with every delegated researcher. Before starting a
+worker, it atomically reserves one report call for that worker and one final
+coordinator call; at most three workers can be active. A worker's report slot
+cannot be spent on additional research. When only reserved calls or tokens remain,
+all workers finish with tools disabled, then the coordinator answers without tools.
+Early completion releases unused report reservations. Each reserved report retains
+4096 output tokens when a token cap is configured; remaining tokens may permit a
+larger final response. A model call can finish earlier than the cap.
+
+While delegated runs are pending, the harness invokes `wait` without inference.
+These control messages have `budget_control=collect_workers` and separate
+`budget_events.jsonl` records; they do not appear as provider model calls or usage.
+Final reports and the coordinator answer are real calls counted inside the cap.
+Terminal failed workers release their unused report reservations when collected.
+Worker history is paginated back to its input checkpoint when collecting results.
+The call cap bounds requested model invocations; provider transport retries remain
+part of the model client's retry policy.
 
 Use `access(url, contains="keyword or year")` to find a relevant passage directly,
 starting at `offset`, rather than stepping through a long page. Keyword matching

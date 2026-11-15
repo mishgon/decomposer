@@ -1126,3 +1126,19 @@ def test_run_budget_and_context_share_one_server_field(async_invocation, context
     }
     if context_type == "dict":
         assert context == {"value": 42}
+
+
+@pytest.mark.parametrize('async_invocation', [False, True])
+def test_wait_reads_older_pages_until_run_input(async_invocation):
+    client = _completed_client(async_invocation)
+    history = _run_history('run_a')
+    newest = {**history[0], 'checkpoint': {'checkpoint_id': 'newest'},
+              'metadata': {'source': 'loop'}}
+    middle = {**newest, 'checkpoint': {'checkpoint_id': 'middle'}}
+    client.threads.get_history.side_effect = [[newest], [middle], [history[-1]]]
+    tool = _build_wait_tool(_client_cache(client))
+    result = asyncio.run(tool.coroutine(_wait_runtime())) if async_invocation else tool.func(_wait_runtime())
+    assert result.update['agent_runs']['run_a']['response']
+    assert client.threads.get_history.call_count == 3
+    assert client.threads.get_history.call_args_list[1].kwargs['before'] == newest['checkpoint']
+    assert client.threads.get_history.call_args_list[2].kwargs['before'] == middle['checkpoint']
