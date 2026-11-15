@@ -234,7 +234,18 @@ score; aggregate quality fields remain null. Saved answers can be scored later
 using `evals/wideseek/rescore.py`. Generation-only completion and format checks
 must not be presented as native item-F1 scores.
 
-When `--model-calls` is set, the last reserved model call disables tools and asks
+For ReAct with `--model-calls`, the last reserved model call disables tools and asks
 for the final answer based on collected evidence. Unknown entries must remain
 unknown. Logs mark this call with `budget_final_response`; the model-call cap
 and any unresolved output are part of the experiment protocol.
+
+For local ReAct finalization, vLLM bans tool-call delimiters; requests for Markdown
+use a fenced-table decoding grammar. This constrains format, not factual accuracy.
+Finalization is opt-in for ReAct only: delegated researchers and the Decomposer
+manager retain their existing shared-budget behavior. Remaining calls are read
+atomically within the reservation transaction, so concurrent callers cannot both
+claim the last slot.
+
+Use `access(url, contains="keyword or year")` to find a relevant passage directly,
+starting at `offset`, rather than stepping through a long page. Keyword matching
+is literal and case-insensitive; a no-match response is explicit.

@@ -1,6 +1,7 @@
 """The same offline search tools serve simple agents and delegated workers."""
 import asyncio
 import os
+import re
 import time
 from typing import Annotated
 from uuid import uuid4
@@ -35,7 +36,7 @@ async def search(query: str, runtime: ToolRuntime[Context],
                  topk: Annotated[int, Field(ge=1, le=10)] = 3) -> str:
     """Search Wiki-2018. Returns up to 1500 characters per passage and URLs; topk is 1–10.
 
-    Use access(url, offset=...) to read beyond a truncated passage preview.
+    Use access(url, contains=...) to locate a specific fact in the full page.
     """
     if not 1 <= topk <= 10:
         raise ValueError("topk must be between 1 and 10")
@@ -50,20 +51,27 @@ async def search(query: str, runtime: ToolRuntime[Context],
 @tool
 async def access(url: str, runtime: ToolRuntime[Context],
                  access_token: Annotated[int, Field(ge=1, le=6000)] = 3000,
-                 offset: Annotated[int, Field(ge=0)] = 0) -> str:
+                 offset: Annotated[int, Field(ge=0)] = 0,
+                 contains: str = "") -> str:
     """Read a Wiki-2018 page slice. access_token is 1–6000 characters, not tokens.
 
-    offset is a character offset into the full page. Read another slice only
-    when a required fact is missing. Stop once enough evidence is available.
+    Prefer contains (a literal keyword or year) to jump to a relevant passage
+    instead of reading every slice. offset starts the read or keyword search
+    at that character. Read further only when a required fact is still missing.
     """
     if not 1 <= access_token <= 6000 or offset < 0:
         raise ValueError("access_token must be between 1 and 6000; offset must be nonnegative")
     page = await request_tool("/access", {"urls": [url]}, runtime)
     if not page:
         return "[Page not found. Use an exact URL returned by search; do not retry this unchanged URL.]"
+    if contains:
+        match = re.search(re.escape(contains), page["contents"][offset:], flags=re.IGNORECASE)
+        if match is None:
+            return f"[Keyword {contains!r} not found after offset {offset}. Try another keyword or search.]"
+        offset += max(0, match.start() - 300)
     end = min(offset + access_token, len(page["contents"]))
     if offset >= len(page["contents"]):
         return "[End of page.]"
     text = page["contents"][offset:end]
-    return (text + f"\n[Page truncated; next offset={end}. Use access with this offset to continue.]"
+    return (text + f"\n[Page truncated; next offset={end}. Read further only if a required fact is still missing.]"
             if end < len(page["contents"]) else text + "\n[End of page.]")

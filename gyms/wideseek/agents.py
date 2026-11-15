@@ -34,7 +34,7 @@ def researcher():
 
 def react(policy, checkpointer, *, middleware=()):
     return create_agent(policy, tools=[search, access], system_prompt=AGENT_SYSTEM_PROMPT,
-        context_schema=Context, middleware=[RunBudgetMiddleware(), ModelLog("researcher"),
+        context_schema=Context, middleware=[RunBudgetMiddleware(), ModelLog("researcher", final_response=True),
             *context_middleware(), *middleware], checkpointer=checkpointer)
 
 

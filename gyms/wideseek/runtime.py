@@ -66,7 +66,7 @@ def init_budget(path, calls=None, tokens=None):
         db.execute("INSERT INTO budget VALUES (?,?)", (calls, tokens))
 
 
-def reserve(path):
+def reserve(path, *, with_remaining=False):
     with sqlite3.connect(path / "budget.sqlite", timeout=30) as db:
         db.execute("BEGIN IMMEDIATE")
         calls, tokens = db.execute("SELECT calls,tokens FROM budget").fetchone()
@@ -74,7 +74,8 @@ def reserve(path):
             raise BudgetExceeded("Shared episode model budget exhausted")
         limit = min(tokens, 4096) if tokens is not None else None
         db.execute("UPDATE budget SET calls=calls-1,tokens=tokens-?", (limit,))
-    return limit
+    remaining = calls - 1 if calls is not None else None
+    return (limit, remaining) if with_remaining else limit
 
 
 def refund(path, amount):
@@ -83,14 +84,14 @@ def refund(path, amount):
 
 
 class ModelLog(AgentMiddleware):
-    def __init__(self, role):
+    def __init__(self, role, *, final_response=False):
         self.role = role
+        self.final_response = final_response
 
     async def awrap_model_call(self, request, handler):
         path = await asyncio.to_thread(directory, request.runtime.context)
-        limit = await asyncio.to_thread(reserve, path)
-        with sqlite3.connect(path / "budget.sqlite") as db:
-            final_response = db.execute("SELECT calls FROM budget").fetchone()[0] == 0
+        limit, remaining = await asyncio.to_thread(reserve, path, with_remaining=True)
+        final_response = self.final_response and remaining == 0
         log = path / "model_calls.jsonl"
         started = time.monotonic()
         row = {"call_id": uuid4().hex, "role": self.role,
@@ -114,6 +115,14 @@ class ModelLog(AgentMiddleware):
                 # Reserve the last permitted call for an answer, not another tool request.
                 overrides["tool_choice"] = "none"
                 overrides["tools"] = []
+                if MODEL_BACKEND == "local":
+                    extra = {**(getattr(request.model, "extra_body", None) or {}),
+                             **settings.get("extra_body", {})}
+                    extra["bad_words"] = [*extra.get("bad_words", []), "<tool_call>", "</tool_call>", "<function="]
+                    if any(m.type == "human" and "markdown" in m.text.casefold() for m in request.messages):
+                        extra["structured_outputs"] = {"regex": r"```markdown\n\|[\s\S]*```"}
+                        row["budget_finalization"] = "local_markdown_grammar"
+                    settings["extra_body"] = extra
                 notice = ("No tool calls remain in this episode's model-call budget. "
                           "Return the requested final answer now using only available evidence. "
                           "Mark unresolved entries as unknown; do not invent missing information. "

@@ -113,12 +113,14 @@ def test_last_budgeted_call_reserves_a_final_answer(tmp_path, monkeypatch):
 
     tmp_path = tmp_path / 'episode'
     runtime.init_budget(tmp_path, calls=1, tokens=4096)
+    monkeypatch.setattr(runtime, 'MODEL_BACKEND', 'local')
     monkeypatch.setattr(runtime, 'get_config', lambda: {'configurable': {'thread_id': 'test'}})
     request = SimpleNamespace(runtime=SimpleNamespace(context={'directory': str(tmp_path)}),
-        model=SimpleNamespace(), model_settings={}, tools=[{'type': 'function', 'function': {
+        model=SimpleNamespace(extra_body={'chat_template_kwargs': {'enable_thinking': False}}),
+        model_settings={}, tools=[{'type': 'function', 'function': {
             'name': 'search', 'description': 'search', 'parameters': {'type': 'object'}}}],
         system_message=SystemMessage(content='Original instructions'),
-        messages=[HumanMessage(content='Original question')])
+        messages=[HumanMessage(content='Original question asks for a Markdown table')])
     request.override = lambda **kwargs: SimpleNamespace(**{**vars(request), **kwargs})
     seen = []
 
@@ -126,10 +128,52 @@ def test_last_budgeted_call_reserves_a_final_answer(tmp_path, monkeypatch):
         seen.append(actual)
         return SimpleNamespace(result=[AIMessage(content='final answer')])
 
-    asyncio.run(runtime.ModelLog('react').awrap_model_call(request, handler))
+    asyncio.run(runtime.ModelLog('react', final_response=True).awrap_model_call(request, handler))
     assert seen[0].tool_choice == 'none'
     assert seen[0].tools == []
     assert 'tool_choice' not in seen[0].model_settings
+    extra = seen[0].model_settings['extra_body']
+    assert extra['chat_template_kwargs'] == {'enable_thinking': False}
+    assert '<tool_call>' in extra['bad_words']
+    assert 'regex' in extra['structured_outputs']
     assert 'Original instructions' in seen[0].system_message.text
     assert 'do not invent' in seen[0].system_message.text
     assert seen[0].messages == request.messages
+
+
+def test_concurrent_reservations_identify_exactly_one_final_slot(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+    from gyms.wideseek.runtime import init_budget, reserve
+    path = tmp_path / 'budget'
+    init_budget(path, calls=2)
+    with ThreadPoolExecutor(2) as pool:
+        reservations = list(pool.map(lambda _: reserve(path, with_remaining=True), range(2)))
+    assert sorted(remaining for _, remaining in reservations) == [0, 1]
+
+
+def test_remote_researchers_do_not_force_the_manager_final_answer(tmp_path, monkeypatch):
+    from gyms.wideseek import runtime
+    runtime.init_budget(tmp_path / 'episode', calls=1)
+    monkeypatch.setattr(runtime, 'get_config', lambda: {'configurable': {'thread_id': 'test'}})
+    request = SimpleNamespace(runtime=SimpleNamespace(context={'directory': str(tmp_path / 'episode')}),
+        model=SimpleNamespace(), model_settings={}, tools=[{'type': 'function', 'function': {
+            'name': 'search', 'description': 'search', 'parameters': {'type': 'object'}}}],
+        system_message=None, messages=[HumanMessage(content='question')])
+    request.override = lambda **kwargs: SimpleNamespace(**{**vars(request), **kwargs})
+    seen = []
+    async def handler(actual):
+        seen.append(actual)
+        return SimpleNamespace(result=[AIMessage(content='result')])
+    asyncio.run(runtime.ModelLog('researcher').awrap_model_call(request, handler))
+    assert seen[0].tools == request.tools
+    assert 'tool_choice' not in vars(seen[0])
+
+
+def test_keyword_access_reaches_a_fact_beyond_the_preview(monkeypatch):
+    text = 'irrelevant introduction. ' * 2000 + 'Enrollment in 2016 was 12345. ' + 'tail. ' * 1000
+    monkeypatch.setattr(worker, 'request_tool', AsyncMock(return_value={'contents': text}))
+    found = asyncio.run(worker.access.coroutine('url', None, access_token=1000, contains='2016'))
+    assert 'Enrollment in 2016 was 12345.' in found
+    assert len(found) < 1200
+    missing = asyncio.run(worker.access.coroutine('url', None, contains='literal.*keyword'))
+    assert 'not found' in missing

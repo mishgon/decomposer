@@ -4,6 +4,8 @@ AGENT_SYSTEM_PROMPT = """The search and access tools use an offline Wikipedia co
 
 Search results are passage previews, and access returns a bounded page slice.
 Truncation notices indicate that more text exists, not that a fact is absent.
+Prefer access with contains set to a relevant keyword or year to jump directly
+to the needed passage. Avoid reading a long page sequentially from start to end.
 Read another slice only if a required fact is still missing; a next-offset notice
 is not a request to read the whole page. Stop searching and return the requested
 answer as soon as the retrieved evidence is sufficient. Use exact URLs returned
