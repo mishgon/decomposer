@@ -39,6 +39,17 @@ AGENT_TYPE: AgentType = {
 }
 
 
+def test_default_decomposer_prompt_has_no_time_budget(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(core, "create_agent", lambda **kwargs: captured.update(kwargs))
+    create_decomposer_agent(decomposer_model="test", agent_types=[AGENT_TYPE])
+    assert "Each run has a time budget of" not in captured["system_prompt"]
+    assert "{run_budget_convention}" not in captured["system_prompt"]
+    with pytest.raises(ValueError, match="agent_shutdown_grace_seconds is required"):
+        create_decomposer_agent(decomposer_model="test", agent_types=[AGENT_TYPE],
+                                agent_run_budget_seconds=60)
+
+
 AGENT_TYPES = [
     {
         "agent_type_id": "dummy",
@@ -690,10 +701,7 @@ def test_decomposer_delegates(monkeypatch, async_invocation: bool) -> None:
 
     assert client.runs.create.call_count == 2
     assert all(
-        call.kwargs["config"] is None and call.kwargs["context"] == {
-            "agent_run_budget_seconds": 60.0,
-            "agent_shutdown_grace_seconds": 60.0,
-        }
+        call.kwargs["config"] is None and call.kwargs["context"] is None
         for call in client.runs.create.call_args_list
     )
     assert result["agents"] == {

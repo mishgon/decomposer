@@ -507,7 +507,7 @@ def _build_run_tool(
     clients: _ClientCache,
     recursion_limit: int | None,
     agent_run_budget_seconds: float | None = None,
-    agent_shutdown_grace_seconds: float = 60.0,
+    agent_shutdown_grace_seconds: float | None = None,
 ) -> StructuredTool:
     run_config = {}
     if recursion_limit is not None:
@@ -1018,7 +1018,7 @@ def _build_decomposer_agent_tools(
     agent_types: dict[str, AgentType],
     agent_recursion_limit: int | None,
     agent_run_budget_seconds: float | None = None,
-    agent_shutdown_grace_seconds: float = 60.0,
+    agent_shutdown_grace_seconds: float | None = None,
 ) -> list[StructuredTool]:
     clients = _ClientCache(agent_types)
     return [
@@ -1040,7 +1040,7 @@ class DecomposerAgentMiddleware(AgentMiddleware[DecomposerAgentState, ContextT, 
         agent_types: Sequence[AgentType],
         agent_recursion_limit: int | None,
         agent_run_budget_seconds: float | None = None,
-        agent_shutdown_grace_seconds: float = 60.0,
+        agent_shutdown_grace_seconds: float | None = None,
     ) -> None:
         super().__init__()
 
@@ -1239,12 +1239,14 @@ def create_decomposer_agent(
     checkpointer: Checkpointer | None = None,
     decomposer_recursion_limit: int | None = None,
     agent_recursion_limit: int | None = None,
-    agent_run_budget_seconds: float | None = 60.0,
-    agent_shutdown_grace_seconds: float = 60.0,
+    agent_run_budget_seconds: float | None = None,
+    agent_shutdown_grace_seconds: float | None = None,
 ) -> CompiledStateGraph:
     if agent_run_budget_seconds is not None and agent_run_budget_seconds <= 0:
         raise ValueError("agent_run_budget_seconds must be positive")
-    if agent_shutdown_grace_seconds <= 0:
+    if agent_run_budget_seconds is not None and agent_shutdown_grace_seconds is None:
+        raise ValueError("agent_shutdown_grace_seconds is required when agent_run_budget_seconds is set")
+    if agent_shutdown_grace_seconds is not None and agent_shutdown_grace_seconds <= 0:
         raise ValueError("agent_shutdown_grace_seconds must be positive")
     decomposer_middelware = DecomposerAgentMiddleware(
         agent_types, agent_recursion_limit,

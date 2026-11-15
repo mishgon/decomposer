@@ -58,8 +58,10 @@ support the budget must declare these optional fields in their `context_schema`
 and install `RunBudgetMiddleware`. Extend `RunBudgetContext` for a `TypedDict`
 schema, or declare equivalent fields in a dataclass or Pydantic schema. The
 middleware reads `runtime.context`; nested agents must receive that context too.
-An absent or `None` work budget disables the limit. Shutdown grace defaults to
-60 seconds. `config` retains framework settings such as `recursion_limit`.
+Both parameters default to `None`, so runs have no time budget by default.
+To enable one, set both the work budget and shutdown grace to positive numbers.
+An absent or `None` work budget disables the limit. `config` retains framework
+settings such as `recursion_limit`.
 
 ## Repo structure
 
