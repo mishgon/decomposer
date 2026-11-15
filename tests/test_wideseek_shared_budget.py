@@ -70,7 +70,8 @@ class RepeatingModel(FakeMessagesListChatModel):
         return self
 
 
-def test_researcher_returns_report_then_coordinator_can_answer(tmp_path):
+def test_researcher_returns_report_then_coordinator_can_answer(tmp_path, monkeypatch):
+    monkeypatch.setattr(runtime, "MODEL_BACKEND", "local")
     path = tmp_path / 'episode'
     runtime.init_budget(path, calls=4, coordinated=True)
     runtime.register_worker(path, 'worker')
@@ -97,6 +98,8 @@ def test_researcher_returns_report_then_coordinator_can_answer(tmp_path):
     assert result['messages'][-1].content == 'verified partial report'
     assert len(seen) == 3
     assert seen[-1].tools == []
+    assert seen[-1].model_settings['extra_body']['structured_outputs']['regex'] == r'[\s\S]{1,4000}'
+    assert '4000 characters' in seen[-1].system_message.text
     assert runtime.reserve(path, role='decomposer', final_response=True)[2]
 
 

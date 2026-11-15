@@ -178,7 +178,10 @@ class ModelLog(AgentMiddleware):
                     extra = {**(getattr(request.model, "extra_body", None) or {}),
                              **settings.get("extra_body", {})}
                     extra["bad_words"] = [*extra.get("bad_words", []), "<tool_call>", "</tool_call>", "<function="]
-                    if any(m.type == "human" and "markdown" in m.text.casefold() for m in request.messages):
+                    if coordinated and self.role == "researcher":
+                        extra["structured_outputs"] = {"regex": r"[\s\S]{1,4000}"}
+                        row["budget_finalization"] = "local_report_grammar"
+                    elif any(m.type == "human" and "markdown" in m.text.casefold() for m in request.messages):
                         extra["structured_outputs"] = {"regex": r"```markdown\n\|[\s\S]*```"}
                         row["budget_finalization"] = "local_markdown_grammar"
                     settings["extra_body"] = extra
@@ -188,6 +191,10 @@ class ModelLog(AgentMiddleware):
                           "Tools are unavailable. Do not emit tool-call markup or instructions to call tools. "
                           "Follow the requested output format exactly, including a markdown code fence "
                           "when requested; do not add commentary outside the requested answer.")
+                if coordinated and self.role == "researcher":
+                    notice += (" This is a worker report, not the coordinator's final answer. "
+                               "In at most 4000 characters, summarize verified findings, source URLs, "
+                               "and unresolved gaps. Return partial findings even if the subtask is unfinished.")
                 content = system.content if system else ""
                 blocks = [{"type": "text", "text": content}] if isinstance(content, str) else list(content)
                 system = SystemMessage(content=[*blocks, {"type": "text", "text": notice}])

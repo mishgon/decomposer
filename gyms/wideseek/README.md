@@ -255,6 +255,9 @@ While delegated runs are pending, the harness invokes `wait` without inference.
 These control messages have `budget_control=collect_workers` and separate
 `budget_events.jsonl` records; they do not appear as provider model calls or usage.
 Final reports and the coordinator answer are real calls counted inside the cap.
+Local reserved worker reports use a 4000-character decoding bound so repetitive
+reports finish before exhausting their completion-token allowance. The coordinator
+retains the requested final-answer format and its larger token allowance.
 Terminal failed workers release their unused report reservations when collected.
 Worker history is paginated back to its input checkpoint when collecting results.
 The call cap bounds requested model invocations; provider transport retries remain
