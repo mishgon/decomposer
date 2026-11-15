@@ -105,3 +105,29 @@ def test_page_lookup_accepts_underscores_without_overriding_exact_urls(tmp_path)
     assert pages.get(prefix + 'Alexander_Fleming') == rows[0]
     assert pages.get(prefix + 'Exact_Name') == rows[1]
     assert pages.get(prefix + 'Missing_Page') is None
+
+
+def test_last_budgeted_call_reserves_a_final_answer(tmp_path, monkeypatch):
+    from langchain_core.messages import SystemMessage
+    from gyms.wideseek import runtime
+
+    tmp_path = tmp_path / 'episode'
+    runtime.init_budget(tmp_path, calls=1, tokens=4096)
+    monkeypatch.setattr(runtime, 'get_config', lambda: {'configurable': {'thread_id': 'test'}})
+    request = SimpleNamespace(runtime=SimpleNamespace(context={'directory': str(tmp_path)}),
+        model=SimpleNamespace(), model_settings={}, tools=[{'type': 'function', 'function': {
+            'name': 'search', 'description': 'search', 'parameters': {'type': 'object'}}}],
+        system_message=SystemMessage(content='Original instructions'),
+        messages=[HumanMessage(content='Original question')])
+    request.override = lambda **kwargs: SimpleNamespace(**{**vars(request), **kwargs})
+    seen = []
+
+    async def handler(actual):
+        seen.append(actual)
+        return SimpleNamespace(result=[AIMessage(content='final answer')])
+
+    asyncio.run(runtime.ModelLog('react').awrap_model_call(request, handler))
+    assert seen[0].model_settings['tool_choice'] == 'none'
+    assert 'Original instructions' in seen[0].system_message.text
+    assert 'do not invent' in seen[0].system_message.text
+    assert seen[0].messages == request.messages

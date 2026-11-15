@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 
 from langchain.agents.middleware import AgentMiddleware
 from langchain_core.utils.function_calling import convert_to_openai_tool
-from langchain_core.messages import message_to_dict
+from langchain_core.messages import SystemMessage, message_to_dict
 from langgraph.config import get_config
 from gyms.model_logging import append_record, request_delta
 from decomposer.models import create_model as model
@@ -89,11 +89,14 @@ class ModelLog(AgentMiddleware):
     async def awrap_model_call(self, request, handler):
         path = await asyncio.to_thread(directory, request.runtime.context)
         limit = await asyncio.to_thread(reserve, path)
+        with sqlite3.connect(path / "budget.sqlite") as db:
+            final_response = db.execute("SELECT calls FROM budget").fetchone()[0] == 0
         log = path / "model_calls.jsonl"
         started = time.monotonic()
         row = {"call_id": uuid4().hex, "role": self.role,
                "thread_id": get_config()["configurable"]["thread_id"],
                "started_at": datetime.now(timezone.utc).isoformat(), "max_tokens": limit,
+               "budget_final_response": final_response,
                "generation": {**model_metadata(request.model), **request.model_settings},
                "request_message_count": len(request.messages),
                "request_delta": [message_to_dict(m) for m in request_delta(request.messages)]}
@@ -105,7 +108,17 @@ class ModelLog(AgentMiddleware):
             settings = dict(request.model_settings)
             if limit is not None:
                 settings["max_tokens"] = limit
-            response = await handler(request.override(model_settings=settings))
+            system = request.system_message
+            if final_response and request.tools:
+                # Reserve the last permitted call for an answer, not another tool request.
+                settings["tool_choice"] = "none"
+                notice = ("No tool calls remain in this episode's model-call budget. "
+                          "Return the requested final answer now using only available evidence. "
+                          "Mark unresolved entries as unknown; do not invent missing information.")
+                content = system.content if system else ""
+                blocks = [{"type": "text", "text": content}] if isinstance(content, str) else list(content)
+                system = SystemMessage(content=[*blocks, {"type": "text", "text": notice}])
+            response = await handler(request.override(model_settings=settings, system_message=system))
             outcome = {"status": "success", "response": [message_to_dict(m) for m in response.result]}
             used = sum((getattr(m, "usage_metadata", None) or {}).get("output_tokens", 0)
                        for m in response.result)

@@ -233,3 +233,8 @@ traces without calling an LLM judge. Results record `not_requested` with a null
 score; aggregate quality fields remain null. Saved answers can be scored later
 using `evals/wideseek/rescore.py`. Generation-only completion and format checks
 must not be presented as native item-F1 scores.
+
+When `--model-calls` is set, the last reserved model call disables tools and asks
+for the final answer based on collected evidence. Unknown entries must remain
+unknown. Logs mark this call with `budget_final_response`; the model-call cap
+and any unresolved output are part of the experiment protocol.
