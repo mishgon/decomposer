@@ -156,7 +156,9 @@ async def episode(task, mode, attempt, root, args, *, middleware=()):
             answer = messages[-1].content if messages and messages[-1].type == "ai" and not messages[-1].tool_calls else ""
             result["answer"] = answer
             try:
-                result["evaluation"] = await evaluate(task, answer, path, judge_model_id=agents.JUDGE_MODEL)
+                result["evaluation"] = ({"status": "not_requested", "score": None}
+                    if getattr(args, "skip_judge", False) else
+                    await evaluate(task, answer, path, judge_model_id=agents.JUDGE_MODEL))
             except Exception as exc:
                 result["evaluation"] = {"status": "evaluation_error", "score": None,
                                         "error": f"{type(exc).__name__}: {exc}"}
@@ -268,6 +270,7 @@ async def describe_run(args):
                 "model_calls": args.model_calls, "output_tokens": args.output_tokens,
                 "episode_timeout": args.episode_timeout,
                 "judge": {"model": profiles["judge"]["model_name"], "profile": agents.JUDGE_MODEL,
+                          "enabled": not getattr(args, "skip_judge", False),
                           "temperature": 0., "thinking": False, "paper_comparable": False}}
     manifest = {"run_id": root.name, "status": "running",
                 "harness": args.agent, "assistant_id": args.agent,
@@ -348,6 +351,7 @@ def create_parser():
     parser.add_argument("--concurrency", type=int, default=2)
     parser.add_argument("--model-calls", type=int, default=None, help="Optional shared call cap; default uncapped")
     parser.add_argument("--output-tokens", type=int, default=None, help="Optional shared token cap; default uncapped")
+    parser.add_argument("--skip-judge", action="store_true", help="Save answers and traces without LLM judging; rescore later")
     parser.add_argument("--episode-timeout", type=float, default=2700,
                         help="Deadline for agent execution, worker cleanup and evaluation; emergency cleanup gets up to 60s more")
     parser.add_argument("--worker-url", default="http://127.0.0.1:18081")

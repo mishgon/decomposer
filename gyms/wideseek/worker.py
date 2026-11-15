@@ -33,18 +33,37 @@ async def request_tool(endpoint, payload, runtime):
 @tool
 async def search(query: str, runtime: ToolRuntime[Context],
                  topk: Annotated[int, Field(ge=1, le=10)] = 3) -> str:
-    """Search the fixed Wiki-2018 corpus. Returns passages and URLs; topk is 1–10."""
+    """Search Wiki-2018. Returns up to 1500 characters per passage and URLs; topk is 1–10.
+
+    Use access(url, offset=...) to read beyond a truncated passage preview.
+    """
     if not 1 <= topk <= 10:
         raise ValueError("topk must be between 1 and 10")
     docs = await request_tool("/retrieve", {"queries": [query], "topk": topk}, runtime)
-    return "\n\n".join(f"[Doc {i+1}]({d['url']}):\n{d['contents'][:5000]}" for i, d in enumerate(docs)) or "No search results are found."
+    return "\n\n".join(
+        f"[Doc {i+1}]({d['url']}):\n{d['contents'][:1500]}"
+        + ("\n[Passage preview truncated; use access(url) for the full page.]"
+           if len(d['contents']) > 1500 else "")
+        for i, d in enumerate(docs)) or "No search results are found."
 
 
 @tool
 async def access(url: str, runtime: ToolRuntime[Context],
-                 access_token: Annotated[int, Field(ge=1, le=20000)] = 5000) -> str:
-    """Read a Wiki-2018 page by URL. access_token limits characters, from 1 to 20000."""
-    if not 1 <= access_token <= 20000:
-        raise ValueError("access_token must be between 1 and 20000")
+                 access_token: Annotated[int, Field(ge=1, le=6000)] = 3000,
+                 offset: Annotated[int, Field(ge=0)] = 0) -> str:
+    """Read a Wiki-2018 page slice. access_token is 1–6000 characters, not tokens.
+
+    offset is a character offset into the full page. Read another slice only
+    when a required fact is missing. Stop once enough evidence is available.
+    """
+    if not 1 <= access_token <= 6000 or offset < 0:
+        raise ValueError("access_token must be between 1 and 6000; offset must be nonnegative")
     page = await request_tool("/access", {"urls": [url]}, runtime)
-    return page["contents"][:access_token] if page else "No More Information is Found for this URL."
+    if not page:
+        return "[Page not found. Use an exact URL returned by search; do not retry this unchanged URL.]"
+    end = min(offset + access_token, len(page["contents"]))
+    if offset >= len(page["contents"]):
+        return "[End of page.]"
+    text = page["contents"][offset:end]
+    return (text + f"\n[Page truncated; next offset={end}. Use access with this offset to continue.]"
+            if end < len(page["contents"]) else text + "\n[End of page.]")

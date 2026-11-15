@@ -54,6 +54,9 @@ class Pages:
         # Each request owns its connection and file cursor (FastAPI uses threads).
         with sqlite3.connect(self.uri, uri=True) as db:
             row = db.execute("SELECT offset FROM pages WHERE url=?", (url,)).fetchone()
+            if row is None and "_" in url:
+                # Wikipedia titles use underscores and encoded spaces interchangeably.
+                row = db.execute("SELECT offset FROM pages WHERE url=?", (url.replace("_", "%20"),)).fetchone()
         if row is None:
             return None
         with self.source.open("rb") as stream:

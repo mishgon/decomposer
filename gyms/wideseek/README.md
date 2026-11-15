@@ -210,3 +210,26 @@ WideSeek training tasks, not the public held-out WideSearch benchmark.
 
 References: [Qwen3.5 vLLM recipe](https://github.com/vllm-project/recipes/blob/main/Qwen/Qwen3.5.md),
 [Qdrant collection configuration](https://qdrant.tech/documentation/manage-data/collections/).
+
+## Context Bounds and Generation-only Checks
+
+Search returns at most 1500 characters per passage, with a notice when the
+preview is truncated. `access` defaults to 3000 characters, permits up to 6000,
+and accepts a character `offset`. Its truncation notice supplies the next offset;
+read further slices when the required fact is absent from the current slice.
+The agent prompt asks researchers to retain concise verified facts and source URLs.
+
+Local agents use LangChain ContextEditingMiddleware: above approximately 8000
+message tokens it clears older tool-result bodies while retaining the latest four.
+It preserves user questions, tool-call IDs and arguments, and assistant notes.
+Edits apply only to model requests; graph state and raw tool logs stay intact.
+The approximate threshold is not a hard context bound. Configure the server with
+sufficient room for the retained results, tools, instructions and output budget.
+The 16k setup overflowed on the first local width smoke; the experiment tests a
+64k server window alongside these smaller tool responses.
+
+Pass `--skip-judge` to either the Gym or evaluation runner to collect answers and
+traces without calling an LLM judge. Results record `not_requested` with a null
+score; aggregate quality fields remain null. Saved answers can be scored later
+using `evals/wideseek/rescore.py`. Generation-only completion and format checks
+must not be presented as native item-F1 scores.
