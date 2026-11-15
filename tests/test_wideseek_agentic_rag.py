@@ -80,26 +80,6 @@ def test_researcher_resolves_searched_pages_and_ends_with_its_finish_report(monk
     assert state["messages"][-1].content == "Follow-up report."
 
 
-def test_researcher_has_no_turn_limit_within_its_recursion_limit(monkeypatch, tmp_path):
-    async def post(method, payload):
-        return {"results": [{"page_id": 64199, "url": SOLARIS, "title": "Solaris (novel)", "snippet": "Solaris"}]}
-
-    # The fake model returns to its first response after its last, so a spare one keeps i counting calls.
-    policy = ToolCallingModel(responses=[calls(("search", {"query": f"Solaris {turn}"})) for turn in range(80)]
-                              + [calls(("finish", {"answer": "Lem", "sources": [SOLARIS]})), AIMessage(content="unused")])
-    monkeypatch.setattr(agentic_rag, "_post", post)
-    monkeypatch.setattr(agents, "model", lambda profile: policy)
-    episode = tmp_path / "episode"
-    init_budget(episode)
-    state = asyncio.run(agents.researcher().ainvoke(
-        {"messages": [HumanMessage("Who wrote Solaris?")]},
-        {"configurable": {"thread_id": "researcher"},
-         "recursion_limit": agents.RESEARCHER_RECURSION_LIMITS["student"]},
-        context={"directory": str(episode), **CONTEXT}))
-    assert policy.i == 81
-    assert state["messages"][-1].type == "ai" and state["messages"][-1].content == f"Lem\n\nSources:\n{SOLARIS}"
-
-
 def test_search_api_waits_out_transient_errors_and_stops_on_others(monkeypatch):
     requests, statuses = [], [503, 200, 401]
 
@@ -227,6 +207,44 @@ def test_context_limit_stops_before_model_call(monkeypatch, tmp_path):
         {"messages": [HumanMessage("Question")]}, {"configurable": {"thread_id": "test"}}, context={"directory": str(tmp_path), **CONTEXT}))
     assert state["end_status"] == "context_limit"
     assert policy.i == 0
+
+
+@pytest.mark.parametrize("last_call, expected_status", [
+    (("finish", {"answer": "Partial answer", "sources": []}), "finished"),
+    (("search", {"query": "must not execute"}), "turn_limit"),
+    (("finish", {"answer": "", "sources": []}), "turn_limit"),
+])
+def test_last_of_32_model_calls_only_allows_finish_and_resets_next_run(
+    monkeypatch, tmp_path, last_call, expected_status,
+):
+    from unittest.mock import AsyncMock
+    from langgraph.checkpoint.memory import InMemorySaver
+
+    post = AsyncMock(return_value={"results": []})
+    monkeypatch.setattr(agentic_rag, "_post", post)
+    tmp_path = tmp_path / "episode"
+    init_budget(tmp_path)
+    policy = ToolCallingModel(responses=[
+        *(calls(("search", {"query": f"question {i}"})) for i in range(31)),
+        calls(last_call),
+        calls(("finish", {"answer": "Next task", "sources": []})),
+    ])
+    graph = agents.react(policy, InMemorySaver())
+    config = {"configurable": {"thread_id": "test"}, "recursion_limit": 500}
+    context = {"directory": str(tmp_path), **CONTEXT}
+    state = asyncio.run(graph.ainvoke({"messages": [HumanMessage("Question")]}, config, context=context))
+    assert policy.i == 32
+    assert post.await_count == 31
+    assert state["completed_turns"] == 32
+    assert state["end_status"] == expected_status
+    assert sum(m.content == agentic_rag.LAST_TURN_REQUEST for m in state["messages"]) == 1
+    if last_call[0] == "search":
+        tool_messages = [m for m in state["messages"] if m.type == "tool"]
+        assert json.loads(tool_messages[-1].content)["error"] == "finish_required"
+    state = asyncio.run(graph.ainvoke({"messages": [HumanMessage("Another task")]}, config, context=context))
+    assert state["completed_turns"] == 1
+    assert state["end_status"] == "finished"
+    assert state["messages"][-1].content == "Next task"
 
 
 def test_output_limit_stops_before_another_model_call(monkeypatch, tmp_path):

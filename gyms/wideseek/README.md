@@ -18,8 +18,9 @@ Both `react` and Decomposer researchers use `occ-4b` non-thinking and the same
 `search`, `open`, `find`, `finish` protocol over the API's `wikipedia` source.
 Only a valid `finish` submits an answer. Invalid turns and repeated identical
 calls terminate after three attempts, as in the colleagues' harness.
-Researchers have 180 seconds of work plus 180 seconds for `finish`, with no
-model-turn limit. Context and cumulative output limits are 65,536 tokens;
+Researchers have 180 seconds of work plus 180 seconds for `finish`, and at most
+32 model calls per run. The 32nd call permits only `finish`, as in the colleagues'
+harness. Context and cumulative output limits are 65,536 tokens;
 individual responses allow 4,096 tokens.
 
 ## Tasks and Raw Execution

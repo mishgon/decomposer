@@ -2,8 +2,8 @@
 
 Prompts, tool descriptions and settings follow the monorepo at 1a73e8a:
 common/tools/agentic_rag.py, common/toolsets/agentic_rag_search.py, common/tasks/agentic_rag.py
-and configs/filter_difficulty/agentic_rag.toml. Unlike the monorepo harness, a run has no turn
-limit. Work and shutdown grace each last 180 seconds.
+and configs/filter_difficulty/agentic_rag.toml. A run allows 32 model calls, with the last
+reserved for finish. Work and shutdown grace each last 180 seconds.
 """
 import asyncio
 import json
@@ -211,6 +211,8 @@ def _merge(pages, update):
 
 INVALID_TURN = "No valid tool was called. Check the tool name and argument format, then call a tool correctly. If you want to finish, call finish with all required arguments."
 FINISH_REQUEST = "Your work budget has expired. Call finish using the evidence already collected. No other tools are allowed. Follow the answer and source requirements in the system instructions and the finish tool description."
+MAX_TURNS = 32
+LAST_TURN_REQUEST = "This is your last model call. Call finish exactly once using the evidence already collected. No other tools are allowed. Follow the answer and source requirements in the system instructions and the finish tool description."
 
 
 @lru_cache
@@ -235,6 +237,7 @@ def prompt_tokens(messages, tools):
 
 
 class SearchState(RunBudgetState):
+    completed_turns: NotRequired[int]
     pages: NotRequired[Annotated[dict[str, int], _merge]]
     output_tokens: NotRequired[int]
     invalid_turns: NotRequired[int]
@@ -244,7 +247,7 @@ class SearchState(RunBudgetState):
 
 
 class ResearchProtocol(RunBudgetMiddleware):
-    """Execute the original tool protocol sequentially, bounded by wall-clock time."""
+    """Execute the original tool protocol with model-turn and wall-clock limits."""
     state_schema = SearchState
 
     def __init__(self, tool_middleware=()):
@@ -266,13 +269,17 @@ class ResearchProtocol(RunBudgetMiddleware):
 
     def before_agent(self, state, runtime):
         return {**super().before_agent(state, runtime), "invalid_turns": 0, "output_tokens": 0,
-                "previous_call": None, "repeated_calls": 0, "end_status": None}
+                "previous_call": None, "repeated_calls": 0, "end_status": None, "completed_turns": 0}
 
     @hook_config(can_jump_to=["end"])
     def before_model(self, state, runtime):
+        if state["completed_turns"] >= MAX_TURNS:
+            return {"end_status": "turn_limit", "messages": [report_message()], "jump_to": "end"}
         update = super().before_model(state, runtime)
         if update:
             update["messages"] = [HumanMessage(FINISH_REQUEST)]
+        if state["completed_turns"] == MAX_TURNS - 1:
+            update = {"shutdown_requested": True, "messages": [HumanMessage(LAST_TURN_REQUEST)]}
         messages = [*state["messages"], *(update or {}).get("messages", [])]
         status = ("output_limit" if state["output_tokens"] >= 65536 else
                   "context_limit" if 65536 - prompt_tokens(messages, TOOL_SCHEMAS) - 512 < 4096 else None)
@@ -291,6 +298,7 @@ class ResearchProtocol(RunBudgetMiddleware):
     async def aafter_model(self, state, runtime):
         message = state["messages"][-1]
         updates = {"messages": [], "pages": {}, "previous_call": state["previous_call"],
+                   "completed_turns": state["completed_turns"] + 1,
                    "repeated_calls": state["repeated_calls"],
                    "output_tokens": state["output_tokens"] + (message.usage_metadata or {}).get("output_tokens", 0)}
         valid = 0
