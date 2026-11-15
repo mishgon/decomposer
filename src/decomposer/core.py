@@ -182,7 +182,7 @@ class RunSchema(BaseModel):
 
 
 class DecomposerAgentState(AgentState[ResponseT]):
-    run_prompt_counts: NotRequired[dict[str, int]]
+    repeated_run_attempts: NotRequired[dict[str, int]]
     shutdown_requested: NotRequired[bool]
     decomposer_agent_runs: NotRequired[list[AgentRun]]
     agents: Annotated[
@@ -491,14 +491,24 @@ def _build_fork_tool(clients: _ClientCache) -> StructuredTool:
     )
 
 
-def _get_run_prompt_error(prompt: str, state: DecomposerAgentState) -> str | None:
+def _get_duplicate_run_id(agent_id: str, prompt: str, state: DecomposerAgentState) -> str | None:
+    latest = max(
+        ((run_id, run) for run_id, run in reversed(state.get("agent_runs", {}).items())
+         if run["agent_id"] == agent_id),
+        key=lambda item: item[1]["started_at"], default=None,
+    )
+    if latest is not None:
+        run_id, run = latest
+        if (run["prompt"] == prompt
+                and run["started_at"] >= state["decomposer_agent_runs"][-1]["started_at"]):
+            return run_id
+    return None
+
+
+def _get_run_prompt_error(agent_id: str, prompt: str, state: DecomposerAgentState) -> str | None:
     if not prompt.strip():
         return EMPTY_PROMPT_ERROR
-    if any(
-        run["prompt"] == prompt
-        and run["started_at"] >= state["decomposer_agent_runs"][-1]["started_at"]
-        for run in state["agent_runs"].values()
-    ):
+    if _get_duplicate_run_id(agent_id, prompt, state) is not None:
         return DUPLICATE_PROMPT_ERROR
     return None
 
@@ -531,7 +541,7 @@ def _build_run_tool(
         prompt: str,
         runtime: ToolRuntime,
     ) -> str | Command:
-        error = _get_run_prompt_error(prompt, runtime.state)
+        error = _get_run_prompt_error(agent_id, prompt, runtime.state)
         if error is not None:
             return error
 
@@ -594,7 +604,7 @@ def _build_run_tool(
         prompt: str,
         runtime: ToolRuntime,
     ) -> str | Command:
-        error = _get_run_prompt_error(prompt, runtime.state)
+        error = _get_run_prompt_error(agent_id, prompt, runtime.state)
         if error is not None:
             return error
 
@@ -1080,7 +1090,7 @@ class DecomposerAgentMiddleware(AgentMiddleware[DecomposerAgentState, ContextT, 
         }
         return {
             "decomposer_agent_runs": [*state.get("decomposer_agent_runs", []), run],
-            "run_prompt_counts": {},
+            "repeated_run_attempts": {},
             "shutdown_requested": False,
         }
 
@@ -1149,19 +1159,24 @@ class DecomposerAgentMiddleware(AgentMiddleware[DecomposerAgentState, ContextT, 
             if tool_call["name"] == "run"
             and isinstance(tool_call["args"].get("agent_id"), str)
         )
-        prompt_counts = Counter(
-            tool_call["args"]["prompt"]
-            for tool_call in tool_calls
-            if tool_call["name"] == "run"
-            and isinstance(tool_call["args"].get("prompt"), str)
-        )
-        run_prompt_counts = Counter(state.get("run_prompt_counts", {}))
-        run_prompt_counts.update(prompt_counts)
+        repeated_run_attempts = dict(state.get("repeated_run_attempts", {}))
+        repeated_runs = []
+        for call in tool_calls:
+            if call["name"] != "run":
+                continue
+            agent_id, prompt = call["args"].get("agent_id"), call["args"].get("prompt")
+            if not isinstance(agent_id, str) or not isinstance(prompt, str) or not prompt.strip():
+                continue
+            run_id = _get_duplicate_run_id(agent_id, prompt, state)
+            if run_id is not None:
+                # The original started run is attempt one; rejected duplicates also count.
+                repeated_run_attempts[run_id] = repeated_run_attempts.get(run_id, 1) + 1
+                repeated_runs.append(run_id)
         if not state.get("shutdown_requested", False) and any(
-            prompt.strip() and run_prompt_counts[prompt] >= 3 for prompt in prompt_counts
+            repeated_run_attempts[run_id] >= 3 for run_id in repeated_runs
         ):
             return {
-                "run_prompt_counts": dict(run_prompt_counts),
+                "repeated_run_attempts": repeated_run_attempts,
                 "shutdown_requested": True,
                 "messages": [
                     ToolMessage(
@@ -1195,12 +1210,6 @@ class DecomposerAgentMiddleware(AgentMiddleware[DecomposerAgentState, ContextT, 
                 and agent_run_counts[tool_call["args"]["agent_id"]] > 1
             ):
                 error = PARALLEL_RUN_CALL_ERROR
-            elif (
-                tool_call["name"] == "run"
-                and isinstance(tool_call["args"].get("prompt"), str)
-                and prompt_counts[tool_call["args"]["prompt"]] > 1
-            ):
-                error = DUPLICATE_PROMPT_ERROR
             else:
                 continue
             rejected_calls.append(
@@ -1211,10 +1220,10 @@ class DecomposerAgentMiddleware(AgentMiddleware[DecomposerAgentState, ContextT, 
                 )
             )
         if rejected_calls:
-            return {"messages": rejected_calls, "run_prompt_counts": dict(run_prompt_counts)}
+            return {"messages": rejected_calls, "repeated_run_attempts": repeated_run_attempts}
 
         if tool_calls:
-            return {"run_prompt_counts": dict(run_prompt_counts)}
+            return {"repeated_run_attempts": repeated_run_attempts}
 
         agent_runs = state["agent_runs"]
         if any("response_sequence_number" not in run for run in agent_runs.values()):
