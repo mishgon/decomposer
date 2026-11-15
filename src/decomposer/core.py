@@ -717,10 +717,16 @@ def _build_wait_tool(
                     )
                 with trace("wait.process_result", metadata={"agent_run_id": run["run_id"]}):
                     if history:
-                        if history[-1]["metadata"]["source"] != "input":
-                            raise ValueError(
-                                "History is truncated; increase `HISTORY_LIMIT`."
+                        while history[-1]["metadata"]["source"] != "input":
+                            page = client.threads.get_history(
+                                thread_id=run["thread_id"], limit=HISTORY_LIMIT,
+                                metadata={"run_id": run["run_id"]},
+                                before=history[-1]["checkpoint"],
                             )
+                            if not page:
+                                raise ValueError("Agent run history is missing its input checkpoint")
+                            # Only the newest and input snapshots are needed to extract messages.
+                            history = [history[0], page[-1]]
 
                         before_messages = history[-1]["values"]["messages"]
                         after_messages = history[0]["values"]["messages"]
@@ -893,10 +899,16 @@ def _build_wait_tool(
                     )
                 with trace("wait.process_result", metadata={"agent_run_id": run["run_id"]}):
                     if history:
-                        if history[-1]["metadata"]["source"] != "input":
-                            raise ValueError(
-                                "History is truncated; increase `HISTORY_LIMIT`."
+                        while history[-1]["metadata"]["source"] != "input":
+                            page = await client.threads.get_history(
+                                thread_id=run["thread_id"], limit=HISTORY_LIMIT,
+                                metadata={"run_id": run["run_id"]},
+                                before=history[-1]["checkpoint"],
                             )
+                            if not page:
+                                raise ValueError("Agent run history is missing its input checkpoint")
+                            # Only the newest and input snapshots are needed to extract messages.
+                            history = [history[0], page[-1]]
 
                         before_messages = history[-1]["values"]["messages"]
                         after_messages = history[0]["values"]["messages"]

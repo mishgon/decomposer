@@ -43,7 +43,7 @@ def decomposer(policy, checkpointer, worker_url, *, middleware=()):
         agent_types=[{"agent_type_id": "qwen_3_5_4b_thinking", "assistant_id": RESEARCHER_ID,
             "description": "Qwen3.5-4B thinking agent equipped with search and access tools.",
             "url": worker_url}],
-        checkpointer=checkpointer, middleware=[ModelLog("decomposer"), *context_middleware(), *middleware],
+        checkpointer=checkpointer, middleware=[ModelLog("decomposer", final_response=True), *context_middleware(), *middleware],
         context_schema=Context, agent_recursion_limit=410,
         agent_run_budget_seconds=AGENT_RUN_BUDGET_SECONDS,
         agent_shutdown_grace_seconds=AGENT_SHUTDOWN_GRACE_SECONDS)

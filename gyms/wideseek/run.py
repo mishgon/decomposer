@@ -97,7 +97,7 @@ async def episode(task, mode, attempt, root, args, *, middleware=()):
     episode_deadline = asyncio.get_running_loop().time() + args.episode_timeout
     # Never reuse a crashed execution's path: surviving workers retain that context.
     path = attempt_path / f"execution-{uuid4().hex}"
-    init_budget(path, args.model_calls, args.output_tokens)
+    init_budget(path, args.model_calls, args.output_tokens, coordinated=args.agent == "decomposer")
     checkpoint = InMemorySaver()
     client = get_client(url=args.worker_url)
     policy = model(agents.AGENT_MODELS[args.agent])
@@ -349,7 +349,7 @@ def create_parser():
     parser.add_argument("--limit", type=int, default=2)
     parser.add_argument("-n", type=int, default=3)
     parser.add_argument("--concurrency", type=int, default=2)
-    parser.add_argument("--model-calls", type=int, default=None, help="Optional shared call cap; default uncapped")
+    parser.add_argument("--model-calls", type=int, default=40, help="Shared call cap including reports and final answer (default: 40)")
     parser.add_argument("--output-tokens", type=int, default=None, help="Optional shared token cap; default uncapped")
     parser.add_argument("--skip-judge", action="store_true", help="Save answers and traces without LLM judging; rescore later")
     parser.add_argument("--episode-timeout", type=float, default=2700,
