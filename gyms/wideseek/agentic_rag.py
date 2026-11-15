@@ -3,7 +3,7 @@
 Prompts, tool descriptions and settings follow the monorepo at 1a73e8a:
 common/tools/agentic_rag.py, common/toolsets/agentic_rag_search.py, common/tasks/agentic_rag.py
 and configs/filter_difficulty/agentic_rag.toml. A run allows 32 model calls, with the last
-reserved for finish. Work and shutdown grace each last 180 seconds.
+reserved for finish. The gyms impose no per-run wall-clock budget.
 """
 import asyncio
 import json
@@ -54,7 +54,7 @@ def _transient(error):
         error.response.status_code in {408, 409, 429} or error.response.status_code >= 500)
 
 
-# As in the monorepo, transient errors are waited out; the run budget bounds the wait.
+# As in the monorepo, transient errors are waited out; the episode deadline bounds the wait.
 @retry(retry=retry_if_exception(_transient), wait=wait_exponential_jitter(multiplier=0.5, max=30), reraise=True)
 async def _post(method, payload):
     url, headers = search_api()

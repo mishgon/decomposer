@@ -179,9 +179,6 @@ async def episode(task, mode, attempt, root, args, *, middleware=(), policy=None
         cleanup_finished = True
 
     context = {"directory": str(path.resolve())}
-    if mode != "decomposer":
-        context.update(agent_run_budget_seconds=agents.RUN_BUDGETS[args.agent][0],
-                       agent_shutdown_grace_seconds=agents.RUN_BUDGETS[args.agent][1])
     try:
         async with asyncio.timeout_at(episode_deadline):
             try:
@@ -308,8 +305,8 @@ async def describe_run(args):
     harness = {
         "source_sha256": digest.hexdigest(),
         "agent_system_prompt": agentic_rag.SYSTEM_PROMPT,
-        "agent_run_budget_seconds": agents.RUN_BUDGETS[args.agent][0],
-        "agent_shutdown_grace_seconds": agents.RUN_BUDGETS[args.agent][1],
+        "agent_run_budget_seconds": None,
+        "agent_shutdown_grace_seconds": None,
     }
 
     settings = {"tasks": [t["task_id"] for t in tasks], "data_sha256": hashlib.sha256(raw).hexdigest(),

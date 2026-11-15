@@ -45,8 +45,7 @@ def test_student_uses_shared_non_thinking_researchers(monkeypatch):
     worker = captured["agent_types"][0]
     assert worker["agent_type_id"] == "occ_4b_non_thinking"
     assert worker["description"] == "OCC-4B non-thinking agent equipped with search, open, find and finish tools."
-    assert (captured["agent_run_budget_seconds"], captured["agent_shutdown_grace_seconds"]) == (
-        180.0, 180.0)
+    assert captured["agent_run_budget_seconds"] is None
     for gym in ("wideseek", "deepdive"):
         graphs = json.loads((root / f"gyms/{gym}/langgraph.json").read_text())["graphs"]
         assert graphs[worker["assistant_id"]] == "gyms.wideseek.agents:researcher"
@@ -55,6 +54,18 @@ def test_student_uses_shared_non_thinking_researchers(monkeypatch):
     monkeypatch.setattr(agents, "create_agent", lambda *args, **kwargs: None)
     agents.researcher()
     assert profiles == [agents.RESEARCHER_MODEL] == [agents.SUBAGENT_MODELS["student"]]
+
+
+@pytest.mark.parametrize("agent", ["decomposer", "student"])
+def test_decomposer_prompt_omits_worker_time_budget(monkeypatch, agent):
+    from decomposer import core
+    from gyms.wideseek import agents
+
+    captured = {}
+    monkeypatch.setattr(core, "create_agent", lambda **kw: captured.update(kw))
+    agents.decomposer("policy", None, "http://worker", agent=agent)
+    assert "Each run has a time budget of" not in captured["system_prompt"]
+    assert "{run_budget_convention}" not in captured["system_prompt"]
 
 
 def test_student_samples_local_vllm_as_rl_rollouts(monkeypatch):

@@ -12,7 +12,7 @@ from gyms.wideseek import agentic_rag, agents
 from gyms.wideseek.runtime import init_budget
 
 SOLARIS = "https://en.wikipedia.org/wiki/Solaris_(novel)"
-CONTEXT = {"agent_run_budget_seconds": 180.0, "agent_shutdown_grace_seconds": 180.0}
+CONTEXT = {}
 
 
 class ToolCallingModel(FakeMessagesListChatModel):
@@ -130,7 +130,7 @@ def test_student_rag_run_records_the_search_api_and_its_researchers_prompt(monke
                                      "health": {"status": "ok"}}
     assert settings["harness"]["agent_system_prompt"] == agentic_rag.SYSTEM_PROMPT
     assert (settings["harness"]["agent_run_budget_seconds"], settings["harness"]["agent_shutdown_grace_seconds"]) == (
-        180.0, 180.0)
+        None, None)
 
 
 
@@ -236,6 +236,8 @@ def test_last_of_32_model_calls_only_allows_finish_and_resets_next_run(
     assert policy.i == 32
     assert post.await_count == 31
     assert state["completed_turns"] == 32
+    assert state["shutdown_at"] is None
+    assert state["timeout_at"] is None
     assert state["end_status"] == expected_status
     assert sum(m.content == agentic_rag.LAST_TURN_REQUEST for m in state["messages"]) == 1
     if last_call[0] == "search":

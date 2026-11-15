@@ -52,8 +52,8 @@ python -m gyms.deepdive.run --agent decomposer --limit 2 --concurrency 2 \
 The gym reuses WideSeek's Decomposer/React agents and QA evaluator. The coordinator
 and judge use hosted Qwen3.8 Flash Next; researchers use hosted `occ-4b`
 without thinking. `react` uses the same researcher directly. Researchers use
-`search`, `open`, `find`, and `finish`, with 180 seconds of work plus 180 seconds
-shutdown grace. A valid `finish` is required. Each run allows 32 model calls,
+`search`, `open`, `find`, and `finish`, without a per-run wall-clock budget.
+A valid `finish` is required. Each run allows 32 model calls,
 with the last reserved for `finish`, as in the colleagues' harness;
 context/output limits match the colleagues' harness (65,536 tokens).
 The manager keeps recursion 410 and the episode deadline is 45 minutes.
