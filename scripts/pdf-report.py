@@ -174,11 +174,10 @@ def planned_updates(d):
         return metadata["optimizer_updates"]
     groups = config.get("rollout", {}).get("total_rollout_steps")
     if manifest and config:
-        available = (
-            manifest["train_tasks"]
-            * manifest["attempts_per_task_per_epoch"]
-            * config["trainer"]["total_epochs"]
-        )
+        rows = manifest.get("training_episodes")
+        if rows is None:
+            rows = manifest["train_tasks"] * manifest["attempts_per_task_per_epoch"]
+        available = rows * config["trainer"]["total_epochs"]
         groups = min(groups, available) if groups is not None else available
     if groups is None:
         return None

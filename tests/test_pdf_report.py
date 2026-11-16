@@ -87,18 +87,30 @@ def test_bad_token_alignment_is_explicit(tmp_path):
         report.load_run(tmp_path)
 
 
-def test_planned_updates_uses_run_configuration():
+@pytest.mark.parametrize('manifest,epochs,expected', [
+    ({'train_tasks': 20, 'attempts_per_task_per_epoch': 1}, 4, 10),
+    ({'train_tasks': 6, 'training_episodes': 256}, 1, 32),
+])
+def test_planned_updates_uses_run_configuration(tmp_path, manifest, epochs, expected):
+    import yaml
+    from opd.wideseek.watch import planned_updates
+
     data = {
         "run_metadata": {},
-        "manifest": {"train_tasks": 20, "attempts_per_task_per_epoch": 1},
+        "manifest": manifest,
         "config": {
             "rollout": {"total_rollout_steps": 512},
-            "trainer": {"total_epochs": 4},
+            "trainer": {"total_epochs": epochs},
             "actor_rollout_ref": {"actor": {"ppo_mini_batch_size": 8}},
             "async_training": {"require_batches": 1, "trigger_parameter_sync_step": 1},
         },
     }
-    assert report.planned_updates(data) == 10
+    assert report.planned_updates(data) == expected
+    save(tmp_path / 'data/manifest.json', manifest)
+    config = tmp_path / 'hydra/.hydra/config.yaml'
+    config.parent.mkdir(parents=True)
+    config.write_text(yaml.safe_dump(data['config']))
+    assert planned_updates(tmp_path) == expected
     data["run_metadata"]["optimizer_updates"] = 64
     assert report.planned_updates(data) == 64
 

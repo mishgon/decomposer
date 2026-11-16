@@ -99,7 +99,9 @@ def planned_updates(train):
     manifest = read_json(train / 'data/manifest.json')
     if not manifest:
         return None
-    rows = manifest['train_tasks'] * manifest['attempts_per_task_per_epoch']
+    rows = manifest.get('training_episodes')
+    if rows is None:
+        rows = manifest['train_tasks'] * manifest['attempts_per_task_per_epoch']
     groups = rows * config['trainer']['total_epochs']
     cap = config['rollout'].get('total_rollout_steps')
     if cap is not None:
