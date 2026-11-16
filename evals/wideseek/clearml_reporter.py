@@ -41,9 +41,12 @@ class Totals:
 
     def add(self, row):
         self.counts['completed'] += 1
-        for key, value in row.get('agent_statistics', {}).items():
-            self.counts[key + '_sum'] += value
-            self.counts[key + '_count'] += 1
+        # Match the requested trace filter independently of the in-band threshold.
+        if resolved(row, .9) and (not row['task_id'].startswith('deepdive-')
+                                 or row['evaluation']['score'] == 1):
+            for key, value in row.get('agent_statistics', {}).items():
+                self.counts[key + '_sum'] += value
+                self.counts[key + '_count'] += 1
         outcome = resolved(row, self.threshold)
         if outcome is None:
             self.counts['unresolved'] += 1
@@ -89,9 +92,9 @@ class Totals:
         for key, label in (('created', 'Successful new calls'),
                            ('peak_concurrency', 'Peak concurrency (includes queued runs)')):
             count = self.counts[key + '_count']
-            values['Subagent telemetry episodes', label] = count
+            values['Subagent telemetry successful episodes', label] = count
             if count:
-                values['Subagents per episode', label] = self.counts[key + '_sum'] / count
+                values['Subagents per successful episode', label] = self.counts[key + '_sum'] / count
         return values
 
 

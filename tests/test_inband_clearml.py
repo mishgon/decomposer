@@ -231,13 +231,18 @@ def test_subagent_statistics_count_successful_new_and_terminal_overlap():
     assert episode_subagent_statistics({}, {}) == {}
 
 
-def test_subagent_means_include_failed_episodes_and_use_separate_coverage():
+def test_subagent_means_only_include_successful_traces_and_use_separate_coverage():
     rows = [result('depth-0', 1, 1060, agent_statistics={'created': 4, 'peak_concurrency': 3}),
             result('depth-1', None, 1061, status='error', evaluation={'status': 'evaluation_error'},
                    agent_statistics={'created': 2}),
-            result('depth-2', 0, 1062, agent_statistics={'created': 0, 'peak_concurrency': 0})]
+            result('depth-2', 0, 1062, agent_statistics={'created': 0, 'peak_concurrency': 0}),
+            result('width-3', .9, 1063, agent_statistics={'created': 100}),
+            result('width-4', .91, 1064, agent_statistics={'created': 2}),
+            result('deepdive-qa_rl-5', .95, 1065, agent_statistics={'created': 100}),
+            result('deepdive-qa_sft-6', 1, 1066, agent_statistics={'created': 0, 'peak_concurrency': 0}),
+            result('depth-7', 1, 1067, cleanup_errors=['missing worker'], agent_statistics={'created': 100})]
     _, values = timeline(rows, manifest(['depth-0', 'depth-1', 'depth-2']), .9, .5)
-    assert values['Subagents per episode', 'Successful new calls'] == 2
-    assert values['Subagents per episode', 'Peak concurrency (includes queued runs)'] == 1.5
-    assert values['Subagent telemetry episodes', 'Successful new calls'] == 3
-    assert values['Subagent telemetry episodes', 'Peak concurrency (includes queued runs)'] == 2
+    assert values['Subagents per successful episode', 'Successful new calls'] == 2
+    assert values['Subagents per successful episode', 'Peak concurrency (includes queued runs)'] == 1.5
+    assert values['Subagent telemetry successful episodes', 'Successful new calls'] == 3
+    assert values['Subagent telemetry successful episodes', 'Peak concurrency (includes queued runs)'] == 2
