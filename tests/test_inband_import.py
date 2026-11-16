@@ -19,10 +19,10 @@ def test_import_preserves_results_and_expands_to_four_attempts(tmp_path, monkeyp
     attempt.mkdir(parents=True)
     (attempt / 'result.json').write_text('{"status":"finished"}')
     previous = {'revision': 'old', 'repetitions': 2,
-                'settings': {'tasks': ['task'], 'data_sha256': 'same', 'repetitions': 2}}
+                'settings': {'tasks': ['task'], 'data_sha256': 'same', 'repetitions': 2, 'concurrency': 1024}}
     (old / 'manifest.json').write_text(json.dumps(previous))
     manifest = {'revision': 'new', 'repetitions': 4,
-                'settings': {**previous['settings'], 'repetitions': 4}}
+                'settings': {**previous['settings'], 'repetitions': 4, 'concurrency': 2048}}
     monkeypatch.setattr(launcher, 'describe_run', AsyncMock(return_value=([], new, manifest)))
     collect = AsyncMock()
     monkeypatch.setattr(launcher, 'collect', collect)
@@ -30,6 +30,7 @@ def test_import_preserves_results_and_expands_to_four_attempts(tmp_path, monkeyp
     asyncio.run(launcher.collection(args))
     assert (new / 'decomposer/task/attempt-001/result.json').read_bytes() == (attempt / 'result.json').read_bytes()
     assert json.loads((new / 'manifest.json').read_text())['imported_run']['completed_attempts'] == 1
+    assert json.loads((new / 'manifest.json').read_text())['imported_run']['settings']['concurrency'] == 1024
     assert args.resume
     asyncio.run(launcher.collection(args))
     assert collect.await_count == 2

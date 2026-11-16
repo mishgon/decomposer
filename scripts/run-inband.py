@@ -22,9 +22,9 @@ async def collection(args):
     if args.import_run and not args.output.exists():
         _, root, manifest = await describe_run(args)
         previous = json.loads((args.import_run / 'manifest.json').read_text())
-        # Relocation can change the host, health response and repetition count.
+        # Relocation can change the host, health response, repetitions and concurrency.
         # Task bytes, models, sampling and episode budgets must remain identical.
-        ignored = {'repetitions', 'harness', 'retrieval'}
+        ignored = {'repetitions', 'concurrency', 'harness', 'retrieval'}
         for key, value in manifest['settings'].items():
             if key not in ignored and previous['settings'].get(key) != value:
                 raise ValueError(f'Imported run differs in {key}')
