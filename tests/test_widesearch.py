@@ -81,7 +81,11 @@ def query():
     ("|name|value|\n|---|---|\n|C|3|", 0, 0, 0),
 ])
 def test_upstream_table_metrics(monkeypatch, tmp_path, answer, row_f1, item_f1, success):
-    monkeypatch.setattr(evaluation, "create_model", lambda _: None)
+    def judge_model(model_id, **kwargs):
+        assert kwargs == {"recover_outages": False}
+        return None
+
+    monkeypatch.setattr(evaluation, "create_model", judge_model)
     value = evaluation.score(query(), answer, tmp_path)
     assert value["status"] == "evaluated"
     assert value["score"] == success
@@ -90,7 +94,7 @@ def test_upstream_table_metrics(monkeypatch, tmp_path, answer, row_f1, item_f1, 
 
 
 def test_judge_failure_is_unscored_and_raw_response_saved(monkeypatch, tmp_path):
-    monkeypatch.setattr(evaluation, "create_model", lambda _: SimpleNamespace(invoke=lambda _: AIMessage(content="bad JSON")))
+    monkeypatch.setattr(evaluation, "create_model", lambda _, **kwargs: SimpleNamespace(invoke=lambda _: AIMessage(content="bad JSON")))
     q = query()
     q.evaluation["eval_pipeline"]["name"]["metric"] = ["exact_match"]
     value = evaluation.score(q, "|name|value|\n|---|---|\n|A|1|", tmp_path)
@@ -112,7 +116,7 @@ def test_summary_keeps_missing_and_failed_attempts_in_denominator():
 @pytest.mark.parametrize("scores", [{}, {"idx_0": 1}, {"idx_0": 1, "idx_1": .5},
                                     {"idx_0": 1, "idx_1": "1"}, {"idx_0": 1, "idx_1": True}])
 def test_incomplete_or_nonbinary_judge_scores_are_unscored(monkeypatch, tmp_path, scores):
-    monkeypatch.setattr(evaluation, "create_model", lambda _: SimpleNamespace(
+    monkeypatch.setattr(evaluation, "create_model", lambda _, **kwargs: SimpleNamespace(
         invoke=lambda _: AIMessage(content="```json\n" + json.dumps(scores) + "\n```")))
     q = query()
     q.evaluation["eval_pipeline"]["value"]["metric"] = ["llm_judge"]

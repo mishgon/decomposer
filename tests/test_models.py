@@ -210,7 +210,7 @@ def mock_vllm(monkeypatch):
     import decomposer.agent_server as server_module
     server_socket = MagicMock()
     server_socket.return_value.__enter__.return_value.getsockname.return_value = ("127.0.0.1", 2025)
-    monkeypatch.setattr(server_module, "socket", SimpleNamespace(socket=server_socket))
+    monkeypatch.setattr(server_module, "socket", SimpleNamespace(socket=server_socket, SOL_SOCKET=1, SO_REUSEADDR=2))
     kill = MagicMock()
     monkeypatch.setattr(models.os, "killpg", kill)
     client = AsyncMock()

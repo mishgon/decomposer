@@ -49,7 +49,7 @@ def load_queries(source):
 
 
 def score(query, answer, directory):
-    model = create_model(JUDGE_MODEL)
+    model = create_model(JUDGE_MODEL, recover_outages=False)
     calls = []
 
     def completion(messages, model_config_name, *, expected_keys=None):

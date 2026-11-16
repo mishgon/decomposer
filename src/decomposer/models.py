@@ -130,6 +130,7 @@ def create_model(
     ],
     *,
     base_url: str | None = None,
+    recover_outages: bool = True,
 ) -> BaseChatModel:
     if base_url is not None and not model_id.startswith("vllm/"):
         raise ValueError("base_url is supported only for vllm models")
@@ -137,7 +138,7 @@ def create_model(
         socket = os.environ.get("LLM_PROXY_UNIX_SOCKET") if model_id.startswith("lmrouter/") else None
         transport = httpx.HTTPTransport(uds=socket, trust_env=False)
         async_transport = httpx.AsyncHTTPTransport(uds=socket, trust_env=False)
-        if model_id.startswith("lmrouter/"):
+        if model_id.startswith("lmrouter/") and recover_outages:
             transport = RecoveringTransport(transport)
             async_transport = AsyncRecoveringTransport(async_transport)
         sync_client = httpx.Client(transport=transport, trust_env=False)

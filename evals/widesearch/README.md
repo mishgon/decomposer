@@ -1,5 +1,14 @@
 # WideSearch Evaluation
 
+Before running or scoring, prepare the pinned upstream checkout:
+
+```bash
+bash gyms/widesearch/setup.sh
+```
+
+This applies the tracked evaluator fix for tables with no matching rows.
+The setup is safe to repeat and fails if the checkout cannot accept the patch.
+
 Run `python -m evals.widesearch.run <run-directory> --source <dataset-directory>`
 after running agents with `gyms.widesearch.run`. The default source is
 `artifacts/data/widesearch/source`. Scoring can be repeated without model-agent
@@ -11,6 +20,8 @@ Each answer gets at most three scoring attempts per watcher invocation; errors
 remain visible after retries are exhausted. Credential or quota errors stop the
 watcher immediately. A per-run file lock serializes watchers and final scoring,
 so they share cached results without evaluating the same episode concurrently.
+The judge disables indefinite lmrouter outage recovery and SDK retries; failed
+requests reach the scorer error handling, with a 600-second HTTP timeout.
 Generation does not wait for the scorer. A backlog can delay newly finished
 episodes because each scorer processes one answer at a time.
 

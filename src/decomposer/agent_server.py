@@ -28,6 +28,7 @@ async def agent_server(
     with socket.socket() as listener, TemporaryDirectory(prefix="agent-server-") as workdir:
         # Keep the socket reserved across startup. A free-port probe followed
         # by a later bind can connect readiness checks to another episode.
+        listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         listener.bind((host, port))
         port = listener.getsockname()[1]
         url = f"http://{client_host}:{port}"

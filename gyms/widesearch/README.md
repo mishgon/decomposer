@@ -1,5 +1,14 @@
 # WideSearch With BrowseComp-Plus Retrieval
 
+Before running or scoring, prepare the pinned upstream checkout:
+
+```bash
+bash gyms/widesearch/setup.sh
+```
+
+This applies the tracked evaluator fix for tables with no matching rows.
+The setup is safe to repeat and fails if the checkout cannot accept the patch.
+
 This experiment uses WideSearch questions and gold tables with the same
 agentic-rag harness as BrowseComp: the research prompt, `search` and `fetch`,
 per-agent URL access, and model profiles are shared directly. There is no

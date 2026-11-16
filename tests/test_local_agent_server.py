@@ -18,6 +18,7 @@ def test_socket_stays_reserved_through_startup_and_shutdown(monkeypatch, tmp_pat
         assert command[:3] == ("/custom/python", "-m", "decomposer.agent_server")
         fd = kwargs["pass_fds"][0]
         with socket.fromfd(fd, socket.AF_INET, socket.SOCK_STREAM) as inherited:
+            assert inherited.getsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR) != 0
             host, port = inherited.getsockname()
         with socket.socket() as competing:
             with pytest.raises(OSError):

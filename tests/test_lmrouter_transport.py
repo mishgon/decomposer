@@ -191,3 +191,25 @@ def test_transient_status_retries(status, delays):
             httpx.MockTransport(lambda request: httpx.Response(next(statuses), json={})))) as client:
         assert client.post('https://lmrouter.2a2i.org/v1/completions', json={}).status_code == 200
     assert delays == [5]
+
+
+@pytest.mark.parametrize("status", [429, 503])
+def test_judge_can_disable_outage_recovery(monkeypatch, status):
+    from decomposer.models import create_model
+    import openai
+
+    requests = []
+
+    def respond(request):
+        requests.append(request)
+        return httpx.Response(status, json={"error": {"message": "unavailable"}})
+
+    monkeypatch.setattr(httpx, "HTTPTransport", lambda **kwargs: httpx.MockTransport(respond))
+    model = create_model("lmrouter/qwen_3_8_flash_next_non_thinking", recover_outages=False)
+    try:
+        with pytest.raises(openai.APIStatusError):
+            model.invoke("test")
+        assert len(requests) == 1
+    finally:
+        model.http_client.close()
+        asyncio.run(model.http_async_client.aclose())
