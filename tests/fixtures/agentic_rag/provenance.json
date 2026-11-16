@@ -1,0 +1,8 @@
+{
+  "repository": "https://gitlab.2a2i.org/optimal-cognitive-core/monorepo",
+  "revision": "1a73e8a15fadcc2a3f6e2346cbed6d7a14fb23a7",
+  "files": ["common/toolsets/agentic_rag_search.py", "common/tools/agentic_rag.py", "common/toolsets/__init__.py"],
+  "verifiers_revision": "69cc0f948e327e9b2765ec927c4c0c7d3e0d0cd5",
+  "mcp_version": "2.0.0",
+  "generation": "Extract original search/open/find/finish signatures and docstrings with AST, remove self and decorators, replace bodies with an empty string return. Register functions alphabetically with MCPServer.add_tool, name=fn.__name__, description=fn.__doc__.strip(). Export list_tools input_schema as OpenAI function tools, then apply the original canonical_tools (sorted JSON keys and inspect.cleandoc on descriptions). No retrieval or model calls were made."
+}

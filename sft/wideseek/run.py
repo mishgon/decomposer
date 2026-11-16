@@ -66,7 +66,11 @@ async def main(args):
     guard = OutageGuard(root, partial(probe_models, args.agent))
     runner = partial(collect_episode, guard, episode)
     if not args.adaptive:
-        await run_jobs(tasks, ((t["task_id"], n) for n in range(1, args.n + 1) for t in tasks), root, args, episode_runner=runner)
+        # In-band evaluation needs both outcomes before a task can be classified.
+        jobs = (((t['task_id'], n) for t in tasks for n in range(1, args.n + 1))
+                if args.agent == 'student' else
+                ((t['task_id'], n) for n in range(1, args.n + 1) for t in tasks))
+        await run_jobs(tasks, jobs, root, args, episode_runner=runner)
         update_index(root, args.mode, args.success_threshold, tasks, False)
         return
     path = root / "scheduler.json"

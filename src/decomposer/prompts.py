@@ -143,7 +143,7 @@ PARALLEL_FORK_RUN_CALL_ERROR = "You cannot fork and run the same agent simultane
 
 RUN_TOOL_DESCRIPTION = """Runs an existing agent with the provided prompt in the background and immediately returns this run's ID without waiting for execution to complete. Treat the run as active until its summary is returned through `wait`.
 
-The exact same prompt cannot be assigned twice within the same user request, even to different agents. A third attempt forces you to collect any active runs’ results and return your final response.
+Do not assign an agent the exact same prompt as its most recently started run within the same user request. You may assign the same prompt to a different agent, or reuse it after the same agent has started a different task. Waiting or using other agents does not reset this rule. Two rejected repeats of that agent’s latest task (three attempts including the original run) force you to collect any active runs’ results and return your final response.
 
 When a run time budget is configured, a run may achieve partial results and return their summary through graceful shutdown. After receiving that response, decide whether a continuation is justified under *How to select tasks and agents*.
 
@@ -163,10 +163,10 @@ PROMPT_PARAMETER_DESCRIPTION = "The prompt to send to the agent."
 EMPTY_PROMPT_ERROR = "Prompt must not be empty."
 
 
-DUPLICATE_PROMPT_ERROR = """Run not started: you cannot assign the exact same prompt twice within the same user request, even to a different agent. Do not loop on unsuccessful work or merely reword the prompt to repeat it. Retry only when evidence from the user or agents shows that new information or changed conditions address the reported obstacle. Do not assume it will disappear on its own with time, or assign repeated checks in that hope. Select further tasks assuming the obstacle persists. If no useful work is possible under that assumption, wait for active runs to finish and reassess their results. Unless those results establish a basis for further work, respond with the available results and unresolved obstacles."""
+DUPLICATE_PROMPT_ERROR = """Run not started: this prompt exactly matches this agent's most recently started task. Use its existing run/result, assign a different task to this agent, or assign this task to another agent. Waiting or using other agents does not reset this restriction. Another attempt to repeat this agent's latest task will force orchestration to finish. Do not merely reword the same task to bypass the restriction."""
 
 
-DECOMPOSER_GRACEFUL_SHUTDOWN_REQUEST = """You attempted to assign the exact same task three times. Stop assigning tasks now. No tool calls in the triggering batch were executed.
+DECOMPOSER_GRACEFUL_SHUTDOWN_REQUEST = """You attempted to assign the same agent its latest task three times without starting a different task on that agent. Stop assigning tasks now. No tool calls in the triggering batch were executed.
 
 If any runs remain active, use only `wait` to collect their results. Once all run summaries have been received, respond to the user with the available results. Explain what remains incomplete and the reported obstacles. Do not assume those obstacles will disappear on their own, and do not claim completion beyond what the agents’ results support."""
 

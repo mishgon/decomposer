@@ -1,48 +1,27 @@
 # WideSeek Gym
 
-Reusable task loading, fixed Wiki-2018 search/access tools, ReAct or Decomposer
+Reusable task loading, the colleagues' hosted Agentic RAG tools, ReAct or Decomposer
 execution, raw trajectory capture and native judging. Workflows live in
 [`evals/wideseek`](../../evals/wideseek/README.md) and
 [`sft/wideseek`](../../sft/wideseek/README.md).
 
 ## Setup
 
-Configure the shared [lmrouter access](../../README.md) once. Models use the named
-registry in `src/decomposer/models.py`, including its optional Unix-socket tunnel,
-provider settings and retries. No local model GPU or OpenRouter is needed.
+Configure shared [lmrouter access](../../README.md), install dependencies with
+`bash gyms/wideseek/setup.sh`, and export `AGENTIC_RAG_API_KEY`.
+`AGENTIC_RAG_URL` defaults to `https://lmrouter.2a2i.org/rag`.
+Start researchers with `bash gyms/wideseek/serve.sh workers` (port 18081).
+Local Qdrant and retrieval services are no longer required by these agents.
+The existing asset and retrieval utilities remain for inspecting historical runs.
 
-On Linux, allow about 160 GB for the corpus/index and enough RAM to load the 27 GB
-page file. Retrieval uses CPU FP32 E5; upstream uses GPU FP16, so retrieval is not
-bit-for-bit identical. Existing downloaded assets are reused.
-
-```bash
-UV_BIN="$HOME/.local/bin/uv" bash gyms/wideseek/setup.sh
-export WS_ASSETS=/large/disk/wideseek/assets
-gyms/wideseek/.venv/bin/python -m gyms.wideseek.assets --root "$WS_ASSETS"
-```
-
-Run these commands from the repository root. Setup creates an isolated
-`gyms/wideseek/.venv` for the Gym and CPU retrieval dependencies; it does not
-install into the root `.venv` used for training or other gyms.
-It also initializes `external/RLinf` at the commit pinned by Git. The extracted
-scorer and its Apache license live in `external/wideseek_reward/`.
-
-Start each service in its own terminal or tmux session, saving stdout/stderr under
-`artifacts/gyms/wideseek/setup/`:
-
-```bash
-bash gyms/wideseek/serve.sh qdrant
-bash gyms/wideseek/serve.sh retrieval
-bash gyms/wideseek/serve.sh workers
-```
-
-Local ports are 16333/16334 (Qdrant), 18080 (retrieval) and 18081 (workers).
-`env.sh` requires `LLM_PROXY_MASTER_KEY` in the calling shell's environment.
-Configure credentials using the shared lmrouter instructions before sourcing it;
-the Gym does not read a personal credential file.
-Export `LLM_PROXY_UNIX_SOCKET` when using the relay. Model parameters are not read
-from Gym environment variables. `WS_SEARCH_URL` and `WS_ASSETS` configure
-services/storage only. `--output` selects the run directory on any writable disk.
+Both `react` and Decomposer researchers use `occ-4b` non-thinking and the same
+`search`, `open`, `find`, `finish` protocol over the API's `wikipedia` source.
+Only a valid `finish` submits an answer. Invalid turns and repeated identical
+calls terminate after three attempts, as in the colleagues' harness.
+Researchers have no per-run wall-clock budget and at most 32 model calls per run.
+The 32nd call permits only `finish`, as in the colleagues'
+harness. Context and cumulative output limits are 65,536 tokens;
+individual responses allow 4,096 tokens.
 
 ## Tasks and Raw Execution
 

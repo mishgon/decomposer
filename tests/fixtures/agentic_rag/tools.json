@@ -1,0 +1,114 @@
+[
+  {
+    "function": {
+      "description": "Find matching lines in a page returned by search.\n\nReturns up to 16 matching lines with line numbers and excerpts.\nUse open for surrounding context. Invalid or timed-out patterns return\nfeedback; simplify or correct the pattern and retry.",
+      "name": "find",
+      "parameters": {
+        "properties": {
+          "pattern": {
+            "description": "Regular expression matched within each line, case-insensitive. Plain text matches substrings; use A|B for alternatives and \\bword\\b for whole words. Escape metacharacters for literal matching, e.g. 3\\.14. Do not wrap the pattern in /.../.",
+            "title": "Pattern",
+            "type": "string"
+          },
+          "url": {
+            "description": "Page URL returned by search in this session.",
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url",
+          "pattern"
+        ],
+        "title": "findArguments",
+        "type": "object"
+      }
+    },
+    "type": "function"
+  },
+  {
+    "function": {
+      "description": "Submit the final answer and its supporting evidence.\n\nA valid submission ends the session; invalid submissions return feedback\nfor correction.",
+      "name": "finish",
+      "parameters": {
+        "properties": {
+          "answer": {
+            "description": "Direct, consistent answer supported by retrieved evidence. If evidence is insufficient, explain what remains unknown.",
+            "title": "Answer",
+            "type": "string"
+          },
+          "sources": {
+            "description": "URLs of pages whose content supports the answer, including intermediate facts needed to derive it. Rank by relevance, include each URL once, and exclude pages that did not contribute supporting evidence. Use only URLs returned by retrieval tools in this session. Use an empty list if no supporting evidence was found.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Sources",
+            "type": "array"
+          }
+        },
+        "required": [
+          "answer",
+          "sources"
+        ],
+        "title": "finishArguments",
+        "type": "object"
+      }
+    },
+    "type": "function"
+  },
+  {
+    "function": {
+      "description": "Read up to 16 lines from a page returned by search, starting at loc.\n\nChoose any starting line to inspect a passage or continue reading.",
+      "name": "open",
+      "parameters": {
+        "properties": {
+          "loc": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Zero-based starting line. Omit or use null to start at line 0.",
+            "title": "Loc"
+          },
+          "url": {
+            "description": "Page URL returned by search in this session.",
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "title": "openArguments",
+        "type": "object"
+      }
+    },
+    "type": "function"
+  },
+  {
+    "function": {
+      "description": "Search the corpus. Returns up to 5 relevant pages with URLs, titles, and snippets.\n\nUse open or find to inspect the supporting evidence.",
+      "name": "search",
+      "parameters": {
+        "properties": {
+          "query": {
+            "description": "Search query.",
+            "title": "Query",
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "title": "searchArguments",
+        "type": "object"
+      }
+    },
+    "type": "function"
+  }
+]

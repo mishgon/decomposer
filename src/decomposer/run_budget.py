@@ -13,13 +13,13 @@ from .prompts import AGENT_RUN_BUDGET_NOTICE, AGENT_GRACEFUL_SHUTDOWN_REQUEST
 
 class RunBudgetContext(TypedDict, total=False):
     agent_run_budget_seconds: float | None
-    agent_shutdown_grace_seconds: float
+    agent_shutdown_grace_seconds: float | None
 
 
 def _run_budget(context):
     if isinstance(context, Mapping):
-        return context.get("agent_run_budget_seconds"), context.get("agent_shutdown_grace_seconds", 60.0)
-    return getattr(context, "agent_run_budget_seconds", None), getattr(context, "agent_shutdown_grace_seconds", 60.0)
+        return context.get("agent_run_budget_seconds"), context.get("agent_shutdown_grace_seconds")
+    return getattr(context, "agent_run_budget_seconds", None), getattr(context, "agent_shutdown_grace_seconds", None)
 
 
 class RunBudgetState(AgentState):
@@ -50,6 +50,8 @@ class RunBudgetMiddleware(AgentMiddleware):
         shutdown_at = None
         timeout_at = None
         if agent_run_budget_seconds is not None:
+            if agent_shutdown_grace_seconds is None:
+                raise ValueError("agent_shutdown_grace_seconds is required when agent_run_budget_seconds is set")
             if agent_run_budget_seconds <= 0 or agent_shutdown_grace_seconds <= 0:
                 raise ValueError("Run budget and response grace must be positive")
             shutdown_at = time.monotonic() + agent_run_budget_seconds

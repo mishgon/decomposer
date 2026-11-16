@@ -17,7 +17,7 @@ from decomposer.run_budget import RunBudgetContext
 
 
 DEFAULT_MODEL = "lmrouter/qwen_3_5_4b_thinking"
-DEFAULT_SUBAGENT = "lmrouter/qwen_3_5_4b_thinking"
+DEFAULT_SUBAGENT = "lmrouter/occ_4b_non_thinking"
 DEFAULT_TEACHER = "lmrouter/qwen_3_8_flash_next_non_thinking"
 MODEL_PROFILES = (DEFAULT_MODEL, DEFAULT_SUBAGENT, DEFAULT_TEACHER)
 SESSION_AFFINITY_ENABLED = True
@@ -104,7 +104,7 @@ class ModelLog(AgentMiddleware):
                 settings['extra_headers'] = {**settings.get('extra_headers', {}),
                     'x-litellm-session-id': row['thread_id']}
             if limit is not None:
-                settings["max_tokens"] = limit
+                settings["max_tokens"] = min(limit, settings.get("max_tokens", limit))
             response = await handler(request.override(model_settings=settings))
             outcome = {"status": "success", "response": [message_to_dict(m) for m in response.result]}
             used = sum((getattr(m, "usage_metadata", None) or {}).get("output_tokens", 0)

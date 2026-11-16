@@ -95,6 +95,10 @@ def test_retry_same_attempt_and_preserve_raw_execution(tmp_path, monkeypatch, so
     (dict(status='timeout', evaluation=dict(status='timeout', score=None)), False),
     (dict(status='finished', evaluation=dict(status='scored', score=0)), False),
     (dict(status='error', error='ValueError: Decomposer requested tools instead of completing graceful shutdown'), False),
+    (dict(status='error', error='RuntimeError: vLLM exhausted max_completion_tokens before completing its response.'), False),
+    (dict(status='error', error="BadRequestError: Error code: 400 - {'error': {'message': \"This model's maximum "
+          "context length is 131072 tokens. However, your request has 131073 input tokens.\"}}"), False),
+    (dict(status='error', error="BadRequestError: Error code: 400 - {'error': {'message': 'Unknown tool'}}"), True),
     (dict(status='error', cleanup_errors=['still active'], error='APIConnectionError'), True),
     (dict(status='error', error='AuthenticationError: invalid key'), True),
     (dict(status='finished', evaluation=dict(status='judge_error', score=None, errors=['ValueError: invalid response'])), False),

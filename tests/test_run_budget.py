@@ -22,6 +22,23 @@ class FakeModel(FakeMessagesListChatModel):
         return self
 
 
+@pytest.mark.parametrize("context", [None, {}, SimpleNamespace()])
+def test_default_context_has_no_work_or_shutdown_deadline(monkeypatch, context):
+    middleware = RunBudgetMiddleware()
+    runtime = SimpleNamespace(context=context)
+    state = middleware.before_agent({}, runtime)
+    assert state["shutdown_at"] is None
+    assert state["timeout_at"] is None
+    monkeypatch.setattr(budget_module, "time", SimpleNamespace(monotonic=lambda: float("inf")))
+    assert middleware.before_model(state, runtime) is None
+
+
+def test_work_budget_requires_explicit_shutdown_grace():
+    runtime = SimpleNamespace(context={"agent_run_budget_seconds": 60})
+    with pytest.raises(ValueError, match="agent_shutdown_grace_seconds is required"):
+        RunBudgetMiddleware().before_agent({}, runtime)
+
+
 @pytest.mark.parametrize("asynchronous", [False, True])
 def test_report_follows_all_tool_results_and_next_run_has_fresh_budget(monkeypatch, asynchronous):
     clock = SimpleNamespace(now=0.0)

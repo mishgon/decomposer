@@ -19,7 +19,7 @@ from langchain_core.messages import message_to_dict
 from decomposer.visualization import write_trace_html
 from gyms.usage import build_usage_summary
 
-from gyms.wideseek import REPO_ROOT, agents
+from gyms.wideseek import REPO_ROOT, agentic_rag, agents
 from gyms.wideseek.evaluate import evaluate
 from gyms.wideseek.metrics import subagent_counts
 from gyms.wideseek.prepare import agent_input
@@ -138,12 +138,13 @@ async def episode(task, mode, attempt, root, args, *, middleware=(), policy=None
     client = get_client(url=args.worker_url)
     owns_policy = policy is None
     policy = policy if policy is not None else model(agents.AGENT_MODELS[args.agent])
-    if args.agent == "decomposer":
+    if mode == "decomposer":
         agent = agents.decomposer(policy, checkpoint, args.worker_url, middleware=middleware,
-                                 agent_recursion_limit=getattr(args, 'agent_recursion_limit', 410))
+                                 agent_recursion_limit=getattr(args, 'agent_recursion_limit', None),
+                                 agent=args.agent)
     else:
         agent = agents.react(policy, checkpoint, middleware=middleware)
-    config = {"recursion_limit": getattr(args, 'recursion_limit', 410),
+    config = {"recursion_limit": getattr(args, 'recursion_limit', 10000 if mode != 'decomposer' else 410),
               "configurable": {"thread_id": uuid4().hex}}
     result = {"task_id": task["task_id"], "task": task["task_id"],
               "episode_id": path.name, "run_id": root.name,
@@ -177,12 +178,15 @@ async def episode(task, mode, attempt, root, args, *, middleware=(), policy=None
             result["status"] = "error"
         cleanup_finished = True
 
+    context = {"directory": str(path.resolve())}
     try:
         async with asyncio.timeout_at(episode_deadline):
             try:
                 state = await agent.ainvoke(agent_input(task), config=config,
-                                           context={"directory": str(path.resolve())})
+                                           context=context)
                 result["status"] = "finished"
+                if state.get("end_status"):
+                    result["end_status"] = state["end_status"]
                 if state.get("stop_reason"):
                     result.update(status="skipped", stop_reason=state["stop_reason"],
                                   sequence_length=state.get("sequence_length"))
@@ -231,6 +235,21 @@ async def episode(task, mode, attempt, root, args, *, middleware=(), policy=None
              "agents": state.get("agents", {}), "agent_runs": state.get("agent_runs", {}),
              "decomposer_agent_runs": state.get("decomposer_agent_runs", []),
              "messages": [message_to_dict(m) for m in messages]}
+    # A malformed model-generated call can make vLLM reject the next history.
+    # Match its JSON parser error to the saved arguments; other 400s stay fatal.
+    error = result.get("error", "")
+    if (result["status"] == "error" and not result.get("cleanup_errors")
+            and not result.get("capture_error") and error.startswith((
+            "OpenAIInvalidRequestError: Error code: 400 - ", "BadRequestError: Error code: 400 - "))):
+        for message in trace["messages"]:
+            for call in message["data"].get("invalid_tool_calls", []):
+                if not isinstance(call.get("args"), str):
+                    continue
+                try:
+                    json.loads(call["args"])
+                except json.JSONDecodeError as exc:
+                    if error.endswith(str(exc)):
+                        result["status"] = "invalid_tool_call"
     try:
         save(path / "trace.json", trace)
     except Exception as exc:
@@ -270,16 +289,16 @@ async def describe_run(args):
     if args.mode not in {"simple", "decomposer"}:
         raise ValueError("Each run must use one setup: simple or decomposer")
     modes = [args.mode]
+    health = await agentic_rag.health()
+    url, _ = agentic_rag.search_api()
+    retrieval = {"search_api": url, "source": agentic_rag.SOURCE, "health": health}
     async with httpx.AsyncClient(timeout=30, trust_env=False) as http:
-        response = await http.get(os.environ.get("WS_SEARCH_URL", "http://127.0.0.1:18080") + "/health")
-        response.raise_for_status()
-        retrieval = response.json()
         if "decomposer" in modes:
             response = await http.get(args.worker_url + "/ok")
             response.raise_for_status()
     profiles = {}
     for role, profile in (("agent", agents.AGENT_MODELS[args.agent]),
-                          ("subagent", agents.RESEARCHER_MODEL), ("judge", agents.JUDGE_MODEL)):
+                          ("subagent", agents.SUBAGENT_MODELS[args.agent]), ("judge", agents.JUDGE_MODEL)):
         policy = model(profile)
         try:
             profiles[role] = {"profile": profile, **model_metadata(policy)}
@@ -299,15 +318,15 @@ async def describe_run(args):
         digest.update(path.read_bytes() + b"\0")
     harness = {
         "source_sha256": digest.hexdigest(),
-        "agent_system_prompt": agents.AGENT_SYSTEM_PROMPT,
-        "agent_run_budget_seconds": agents.AGENT_RUN_BUDGET_SECONDS,
-        "agent_shutdown_grace_seconds": agents.AGENT_SHUTDOWN_GRACE_SECONDS,
+        "agent_system_prompt": agentic_rag.SYSTEM_PROMPT,
+        "agent_run_budget_seconds": None,
+        "agent_shutdown_grace_seconds": None,
     }
 
     settings = {"tasks": [t["task_id"] for t in tasks], "data_sha256": hashlib.sha256(raw).hexdigest(),
                 "agent": args.agent, "modes": modes, "repetitions": args.n, "concurrency": args.concurrency,
                 "model": profiles["agent"]["model_name"], "model_profiles": profiles,
-                "generation": profiles["agent"], "recursion_limit": 410,
+                "generation": profiles["agent"], "recursion_limit": 10000 if args.mode != "decomposer" else 410,
                 "harness": harness,
                 "retrieval": retrieval,
                 "model_calls": args.model_calls, "output_tokens": args.output_tokens,

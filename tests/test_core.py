@@ -39,6 +39,17 @@ AGENT_TYPE: AgentType = {
 }
 
 
+def test_default_decomposer_prompt_has_no_time_budget(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(core, "create_agent", lambda **kwargs: captured.update(kwargs))
+    create_decomposer_agent(decomposer_model="test", agent_types=[AGENT_TYPE])
+    assert "Each run has a time budget of" not in captured["system_prompt"]
+    assert "{run_budget_convention}" not in captured["system_prompt"]
+    with pytest.raises(ValueError, match="agent_shutdown_grace_seconds is required"):
+        create_decomposer_agent(decomposer_model="test", agent_types=[AGENT_TYPE],
+                                agent_run_budget_seconds=60)
+
+
 AGENT_TYPES = [
     {
         "agent_type_id": "dummy",
@@ -690,10 +701,7 @@ def test_decomposer_delegates(monkeypatch, async_invocation: bool) -> None:
 
     assert client.runs.create.call_count == 2
     assert all(
-        call.kwargs["config"] is None and call.kwargs["context"] == {
-            "agent_run_budget_seconds": 60.0,
-            "agent_shutdown_grace_seconds": 60.0,
-        }
+        call.kwargs["config"] is None and call.kwargs["context"] is None
         for call in client.runs.create.call_args_list
     )
     assert result["agents"] == {
@@ -974,7 +982,7 @@ def test_run_rejects_exact_prompt_in_current_request(
         result = asyncio.run(tool.coroutine("thread_1", prompt, runtime))
     else:
         result = tool.func("thread_1", prompt, runtime)
-    if rejected:
+    if rejected and not other_agent:
         assert result == core.DUPLICATE_PROMPT_ERROR
         client.runs.create.assert_not_called()
     else:
@@ -982,15 +990,15 @@ def test_run_rejects_exact_prompt_in_current_request(
         client.runs.create.assert_called_once()
 
 
-def test_decomposer_rejects_same_prompt_for_parallel_agents() -> None:
+def test_decomposer_allows_same_prompt_for_parallel_agents() -> None:
     middleware = DecomposerAgentMiddleware([AGENT_TYPE], 1)
     message = AIMessage(content="", tool_calls=[
         {"name": "run", "id": "first", "args": {"agent_id": "a", "prompt": "same task"}},
         {"name": "run", "id": "second", "args": {"agent_id": "b", "prompt": "same task"}},
     ])
     result = middleware.after_model({"messages": [message]}, SimpleNamespace())
-    assert [m.tool_call_id for m in result["messages"]] == ["first", "second"]
-    assert all(m.content == core.DUPLICATE_PROMPT_ERROR for m in result["messages"])
+    assert "messages" not in result
+    assert result["repeated_run_attempts"] == {}
 
 
 @pytest.mark.parametrize("async_invocation", [False, True])
@@ -1024,7 +1032,7 @@ def test_third_prompt_attempt_forces_final_response(monkeypatch, async_invocatio
             _call("run", "second", agent_id="run_a_thread", prompt="same task"),
         ]),
         AIMessage(content="", tool_calls=[
-            _call("run", "third", agent_id="other_thread", prompt="same task"),
+            _call("run", "third", agent_id="run_a_thread", prompt="same task"),
             _call("new", "cancelled_new", agent_type_id="test"),
         ]),
     ])
@@ -1042,7 +1050,7 @@ def test_third_prompt_attempt_forces_final_response(monkeypatch, async_invocatio
     }
     result = asyncio.run(agent.ainvoke(inputs, config)) if async_invocation else agent.invoke(inputs, config)
     assert result["messages"][-1].content == "Partial results."
-    assert result["run_prompt_counts"] == {"same task": 3}
+    assert result["repeated_run_attempts"] == {"run_a": 3}
     assert result["shutdown_requested"] is True
     assert result["agent_runs"]["run_a"]["response"] == "response from run_a"
     client.runs.create.assert_called_once()
@@ -1059,7 +1067,7 @@ def test_third_prompt_attempt_forces_final_response(monkeypatch, async_invocatio
         assert requests[-2].tool_choice == "wait"
     second = {"messages": [HumanMessage(content="A new user request")]}
     result = asyncio.run(agent.ainvoke(second, config)) if async_invocation else agent.invoke(second, config)
-    assert result["run_prompt_counts"] == {}
+    assert result["repeated_run_attempts"] == {}
     assert result["shutdown_requested"] is False
     assert len(requests[-1].tools) == 4
 
@@ -1095,3 +1103,37 @@ def test_run_budget_and_context_share_one_server_field(async_invocation, context
     }
     if context_type == "dict":
         assert context == {"value": 42}
+
+
+@pytest.mark.parametrize("intervening_agent", ["thread_1", "thread_2"])
+@pytest.mark.parametrize("intervening_start", [101.0, 102.0])
+def test_duplicate_task_uses_latest_run_of_same_agent(intervening_agent, intervening_start):
+    state = {
+        "decomposer_agent_runs": [{"started_at": 100.0}],
+        "agent_runs": {
+            "original": {"agent_id": "thread_1", "prompt": "A", "started_at": 101.0},
+            "intervening": {"agent_id": intervening_agent, "prompt": "B", "started_at": intervening_start},
+        },
+        "repeated_run_attempts": {"original": 2},
+        "messages": [AIMessage(content="", tool_calls=[
+            _call("run", "retry", agent_id="thread_1", prompt="A"),
+        ])],
+    }
+    result = DecomposerAgentMiddleware([AGENT_TYPE], 1).after_model(state, SimpleNamespace())
+    if intervening_agent == "thread_1":
+        assert core._get_run_prompt_error("thread_1", "A", state) is None
+        assert "shutdown_requested" not in result
+    else:
+        assert core._get_run_prompt_error("thread_1", "A", state) == core.DUPLICATE_PROMPT_ERROR
+        assert result["shutdown_requested"] is True
+
+
+def test_unstarted_repeated_tasks_do_not_force_shutdown():
+    middleware = DecomposerAgentMiddleware([AGENT_TYPE], 1)
+    state = {"messages": [AIMessage(content="", tool_calls=[
+        _call("run", "retry", agent_id="missing", prompt="A"),
+    ])]}
+    for _ in range(3):
+        result = middleware.after_model(state, SimpleNamespace())
+        state.update(result)
+        assert "shutdown_requested" not in result

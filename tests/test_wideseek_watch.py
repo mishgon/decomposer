@@ -7,7 +7,7 @@ import tempfile
 import time
 import unittest
 
-from evals.wideseek.watch import display, subagent_counts
+from evals.wideseek.watch import display, in_band_count, subagent_counts
 
 
 class WatchTest(unittest.TestCase):
@@ -73,7 +73,7 @@ class WatchTest(unittest.TestCase):
                 text = output.getvalue()
                 self.assertIn(f"Setup: {modes[0]}", text)
                 self.assertIn("Mean native score: --", text)
-                self.assertIn("0 = 0 returned an answer + 0 stopped early", text)
+                self.assertIn("0 = 0 returned an answer + 0 skipped + 0 other stops", text)
                 self.assertIn("STOPPED / interrupted", text)
 
     def test_finds_collection_under_sft_artifacts(self):
@@ -123,3 +123,26 @@ class WatchTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_live_band_excludes_unknown_and_underfilled_tasks():
+    def row(task, score, **extra):
+        return {'task_id': task, 'status': 'finished', 'trace_available': True,
+                'evaluation': {'status': 'scored', 'score': score}, **extra}
+
+    rows = [row('mixed', 1), row('mixed', 0), row('always', 1), row('always', 1),
+            row('never', 0), row('never', 0), row('pending', 1),
+            row('judge-error', 1), row('judge-error', 0, evaluation={'status': 'evaluation_error'}),
+            row('cleanup', 1), row('cleanup', 0, cleanup_errors=['missing worker'])]
+    assert in_band_count(rows, 2, .9) == 1
+    assert in_band_count(rows, 3, .9) == 0
+    rows.append(row('judge-error', 0))
+    assert in_band_count(rows, 2, .9) == 2
+
+
+def test_live_four_attempt_cutoff_matches_selector():
+    rows = [{'task_id': str(passes), 'status': 'finished',
+             'evaluation': {'status': 'scored', 'score': int(attempt <= passes)}}
+            for passes in range(5) for attempt in range(1, 5)]
+    rows.extend([{'task_id': 'pending', 'status': 'timeout'}] * 3)
+    assert in_band_count(rows, 4, .9, max_pass_rate=.5) == 3
