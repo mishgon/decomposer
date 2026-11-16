@@ -33,9 +33,10 @@ def domain(task):
 
 
 class Totals:
-    def __init__(self, repetitions, threshold, max_pass_rate, require_success=False):
+    def __init__(self, repetitions, threshold, max_pass_rate, require_success=False, coverage=False):
         self.repetitions, self.threshold, self.max_pass_rate = repetitions, threshold, max_pass_rate
         self.require_success = require_success
+        self.coverage = coverage
         self.counts, self.attempts, self.passes = Counter(), Counter(), Counter()
         self.qualified, self.histogram = Counter(), Counter()
 
@@ -82,10 +83,15 @@ class Totals:
             ('Episodes', 'Resolved'): self.counts['resolved'],
             ('Episodes', 'Unresolved'): self.counts['unresolved'],
             ('Episodes', 'Remaining'): total - self.counts['completed'],
-            ('In-band tasks', 'All'): sum(self.qualified.values()),
             ('Evaluated tasks', 'All attempts resolved'): sum(self.histogram.values()),
         }
-        values.update({('In-band tasks', name): self.qualified[name] for name in domains})
+        if self.coverage:
+            covered = Counter(domain(task) for task, passes in self.passes.items() if passes)
+            values['Coverage tasks', 'All'] = sum(covered.values())
+            values.update({('Coverage tasks', name): covered[name] for name in domains})
+        else:
+            values['In-band tasks', 'All'] = sum(self.qualified.values())
+            values.update({('In-band tasks', name): self.qualified[name] for name in domains})
         values.update({('Successes per evaluated task', f'{i}/{self.repetitions}'): self.histogram[i]
                        for i in range(self.repetitions + 1)})
         if self.counts['resolved']:
@@ -108,12 +114,12 @@ class Totals:
         return values
 
 
-def timeline(rows, manifest, threshold, max_pass_rate, require_success=False):
+def timeline(rows, manifest, threshold, max_pass_rate, require_success=False, coverage=False):
     """Cumulative minute buckets; imported results precede this run at minute zero."""
     settings = manifest['settings']
     total = len(settings['tasks']) * settings['repetitions']
     domains = sorted({domain(task) for task in settings['tasks']})
-    totals = Totals(settings['repetitions'], threshold, max_pass_rate, require_success)
+    totals = Totals(settings['repetitions'], threshold, max_pass_rate, require_success, coverage)
     points, fresh = {}, 0
     started = manifest['started_at']
     def minute(row):
@@ -255,6 +261,9 @@ def report(args, stop=None):
                     'max_pass_rate': args.max_pass_rate}
         launch = json.loads((args.run.parent / 'launch.json').read_text())
         require_success = launch.get('require_success', False)
+        coverage = launch.get('kind') == 'coverage'
+        if coverage:
+            identity['kind'] = 'coverage'
         if require_success:
             identity['require_success'] = True
         if state and state['identity'] != identity:
@@ -280,7 +289,7 @@ def report(args, stop=None):
         cache_counters = None
         while True:
             manifest, rows, unfinished = snapshot(args.run)
-            points, current = timeline(rows, manifest, args.success_threshold, args.max_pass_rate, require_success)
+            points, current = timeline(rows, manifest, args.success_threshold, args.max_pass_rate, require_success, coverage)
             elapsed = max(1, time.time() - manifest['started_at'])
             minute = max(0, int(elapsed / 60))
             current['Throughput (episodes/hour)', 'Since collection start'] = (
@@ -321,7 +330,7 @@ def report(args, stop=None):
                     warnings.warn(f'GPU telemetry unavailable ({type(exc).__name__}); episode reporting continues')
             task.flush(wait_for_uploads=True)
             state.update(updated_at=time.time(), completed=len(rows), active=unfinished,
-                         qualifying=current['In-band tasks', 'All'], collection_status=status)
+                         qualifying=current['Coverage tasks' if coverage else 'In-band tasks', 'All'], collection_status=status)
             save(args.state, state)
             print(f'Reported {len(rows)} episodes, {state["qualifying"]} qualifying tasks; collection {status}', flush=True)
             if status in {'completed', 'failed', 'interrupted', 'stopped'} or (stop and stop.is_set()):
@@ -342,8 +351,8 @@ def collection_reporter(args):
     run = args.output.resolve()
     options = SimpleNamespace(run=run, state=run.parent / 'clearml.json',
         project=args.clearml_project, name=args.clearml_name,
-        success_threshold=args.success_threshold, max_pass_rate=args.max_pass_rate, interval=60,
-        vllm_metrics_url='http://127.0.0.1:8024/metrics')
+        success_threshold=args.success_threshold, max_pass_rate=getattr(args, 'max_pass_rate', .5), interval=60,
+        vllm_metrics_url='http://127.0.0.1:8024/metrics' if getattr(args, 'agent', 'student') == 'student' else None)
 
     def follow():
         try:
@@ -354,7 +363,7 @@ def collection_reporter(args):
         except Exception as exc:
             warnings.warn(f'ClearML reporting stopped ({type(exc).__name__}: {exc}); collection continues')
 
-    thread = Thread(target=follow, name='inband-clearml', daemon=True)
+    thread = Thread(target=follow, name='collection-clearml', daemon=True)
     thread.start()
     try:
         yield

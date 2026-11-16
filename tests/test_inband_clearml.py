@@ -313,3 +313,51 @@ def test_used_agents_include_forks_only_after_run_and_deduplicate_reruns():
     assert 'used' not in episode_subagent_statistics({'messages': [
         {'type': 'ai', 'tool_calls': [{'id': 'x', 'name': 'run', 'args': {}}]},
         {'type': 'tool', 'tool_call_id': 'x', 'content': '{"agent_run_id":"unknown"}'}]}, {})
+
+
+def test_coverage_reports_successful_task_coverage_instead_of_inband():
+    rows = [result('depth-0', 1, 1060), result('width-1', 0, 1061),
+            result('deepdive-qa_rl-2', 1, 1062)]
+    data = manifest([r['task_id'] for r in rows])
+    data['settings']['repetitions'] = 1
+    _, values = timeline(rows, data, .9, .5, coverage=True)
+    assert values['Coverage tasks', 'All'] == 2
+    assert values['Coverage tasks', 'WideSeek depth'] == 1
+    assert values['Coverage tasks', 'DeepDive QA RL'] == 1
+    assert values['Coverage tasks', 'WideSeek width'] == 0
+    assert not any(title == 'In-band tasks' for title, _ in values)
+
+
+@pytest.mark.parametrize('fails', [False, True])
+def test_coverage_launcher_preserves_final_status_for_embedded_reporter(tmp_path, monkeypatch, fails):
+    import json
+    import runpy
+    import sys
+    from contextlib import contextmanager
+    from pathlib import Path
+    entry = runpy.run_path(str(Path(__file__).parents[1] / 'scripts/run-coverage.py'))['main']
+    namespace = entry.__globals__
+    monkeypatch.setattr(sys, 'argv', ['run-coverage.py', '--agent', 'decomposer', '--data', '/tasks.jsonl',
+                                    '--output', str(tmp_path / 'eval'), '--clearml-name', 'test-coverage'])
+    monkeypatch.setattr(namespace['subprocess'], 'check_output', lambda *a, **kw: 'commit\n')
+    observed = []
+    @contextmanager
+    def reporter(args):
+        assert args.concurrency == 128 and args.n == 1 and args.limit is None
+        assert args.clearml_project == 'decomposer-coverage'
+        try:
+            yield
+        finally:
+            observed.append(json.loads((tmp_path / 'launch.json').read_text()))
+    def cli(*a, **kw):
+        if fails:
+            raise RuntimeError('test failure')
+    monkeypatch.setitem(namespace, 'collection_reporter', reporter)
+    monkeypatch.setitem(namespace, 'cli', cli)
+    if fails:
+        with pytest.raises(RuntimeError, match='test failure'):
+            entry()
+    else:
+        entry()
+    assert observed[0]['kind'] == 'coverage'
+    assert observed[0]['status'] == ('interrupted' if fails else 'completed')
