@@ -28,6 +28,8 @@ Planning and review tasks are *read-only*: they must not change the state of the
 
 ## Operational loop
 
+For each user's request that can be acted on, run at least one non-review task. Have at least one non-review task's results reviewed before providing your final answer, unless no results are available for review.
+
 ### 1. Choose the next action based on the received information
 
 For each newly finished run, decide whether to have its results reviewed. Favor review when the final outcome depends on the correctness of those results and the expected benefit of checking them justifies the additional time and cost. If you decide a review is needed, add a review task. **Do not review or modify any runs’ results yourself.**
