@@ -204,3 +204,40 @@ def test_gpu_telemetry_selects_collector_assignment_and_rejects_stale_samples(mo
     assert values == ({} if stale else {
         ('GPU utilization (%)', 'Worker 0 GPU 3'): 40,
         ('GPU memory (GiB)', 'Worker 0 GPU 3'): 2})
+
+
+def test_subagent_statistics_count_successful_new_and_terminal_overlap():
+    from gyms.wideseek.metrics import episode_subagent_statistics
+    messages = [{'type': 'ai', 'tool_calls': [
+        {'id': str(i), 'name': name} for i, name in enumerate(['new', 'new', 'new', 'fork', 'run'])]}]
+    messages += [{'type': 'tool', 'tool_call_id': str(i), 'content': content} for i, content in enumerate([
+        '{"agent_id":"a"}', '{"agent_id":"b"}', '{"error":"failed"}',
+        '{"agent_id":"c"}', '{"agent_run_id":"r"}'])]
+    messages.append(messages[1])  # A repeated serialized result is not another invocation.
+    trace = {'messages': messages, 'agents': {x: {'thread_id': x} for x in 'abc'},
+             'agent_runs': {'r': {'run_id': 'r'}}}
+    def run(id, start, end):
+        return {'run_id': id, 'status': 'success',
+                'created_at': f'2026-11-16T00:00:{start:02d}+00:00',
+                'updated_at': f'2026-11-16T00:00:{end:02d}+00:00'}
+    archives = {'a': {'runs': [run('r', 0, 10), run('r2', 20, 30)]},
+                'b': {'runs': [run('r3', 5, 15)]}, 'c': {'runs': [run('r4', 15, 20)]}}
+    assert episode_subagent_statistics(trace, archives) == {'created': 2, 'peak_concurrency': 2}
+    # Missing cleanup archives must not produce an artificially low peak.
+    del archives['b']
+    assert episode_subagent_statistics(trace, archives) == {'created': 2}
+    assert episode_subagent_statistics({'messages': [], 'agents': {}, 'agent_runs': {}}, {}) == {
+        'created': 0, 'peak_concurrency': 0}
+    assert episode_subagent_statistics({}, {}) == {}
+
+
+def test_subagent_means_include_failed_episodes_and_use_separate_coverage():
+    rows = [result('depth-0', 1, 1060, agent_statistics={'created': 4, 'peak_concurrency': 3}),
+            result('depth-1', None, 1061, status='error', evaluation={'status': 'evaluation_error'},
+                   agent_statistics={'created': 2}),
+            result('depth-2', 0, 1062, agent_statistics={'created': 0, 'peak_concurrency': 0})]
+    _, values = timeline(rows, manifest(['depth-0', 'depth-1', 'depth-2']), .9, .5)
+    assert values['Subagents per episode', 'Successful new calls'] == 2
+    assert values['Subagents per episode', 'Peak concurrency (includes queued runs)'] == 1.5
+    assert values['Subagent telemetry episodes', 'Successful new calls'] == 3
+    assert values['Subagent telemetry episodes', 'Peak concurrency (includes queued runs)'] == 2

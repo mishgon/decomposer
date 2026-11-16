@@ -4,6 +4,7 @@ from collections import Counter
 from contextlib import contextmanager
 from datetime import datetime
 import fcntl
+from functools import lru_cache
 from itertools import groupby
 import json
 import math
@@ -18,6 +19,7 @@ import httpx
 from prometheus_client.parser import text_string_to_metric_families
 
 from evals.wideseek.band import qualifies_band, resolved
+from gyms.wideseek.metrics import episode_subagent_statistics
 from gyms.wideseek.runtime import save
 
 
@@ -39,6 +41,9 @@ class Totals:
 
     def add(self, row):
         self.counts['completed'] += 1
+        for key, value in row.get('agent_statistics', {}).items():
+            self.counts[key + '_sum'] += value
+            self.counts[key + '_count'] += 1
         outcome = resolved(row, self.threshold)
         if outcome is None:
             self.counts['unresolved'] += 1
@@ -81,6 +86,12 @@ class Totals:
             values['Episode duration (minutes)', 'Mean resolved'] = self.counts['duration_sum'] / self.counts['resolved']
         if self.counts['native_count']:
             values['Native score', 'Mean scored episodes'] = self.counts['native_sum'] / self.counts['native_count']
+        for key, label in (('created', 'Successful new calls'),
+                           ('peak_concurrency', 'Peak concurrency (includes queued runs)')):
+            count = self.counts[key + '_count']
+            values['Subagent telemetry episodes', label] = count
+            if count:
+                values['Subagents per episode', label] = self.counts[key + '_sum'] / count
         return values
 
 
@@ -105,6 +116,14 @@ def timeline(rows, manifest, threshold, max_pass_rate, require_success=False):
     return points, totals.metrics(total, domains)
 
 
+@lru_cache(maxsize=65536)
+def trace_statistics(path):
+    """Only completed episodes reach here; cache compact statistics, not traces."""
+    trace = json.loads(path.read_text())
+    archives = {p.stem: json.loads(p.read_text()) for p in (path.parent / 'subagents').glob('*.json')}
+    return episode_subagent_statistics(trace, archives)
+
+
 def snapshot(run):
     manifest = json.loads((run / 'manifest.json').read_text())
     mode, = manifest['settings']['modes']
@@ -115,7 +134,13 @@ def snapshot(run):
         except (FileNotFoundError, json.JSONDecodeError):
             unfinished += 1
             continue
-        row['trace_available'] = (attempt / row['execution_directory'] / 'trace.json').is_file()
+        trace_path = attempt / row['execution_directory'] / 'trace.json'
+        row['trace_available'] = trace_path.is_file()
+        if row['trace_available']:
+            try:
+                row['agent_statistics'] = trace_statistics(trace_path)
+            except (OSError, ValueError, KeyError, TypeError) as exc:
+                warnings.warn(f'Subagent telemetry unavailable for {trace_path}: {exc}')
         rows.append(row)
     return manifest, rows, unfinished
 

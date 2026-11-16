@@ -1,6 +1,67 @@
 """Small raw-trajectory statistics, shared by execution and monitoring."""
 import json
 import math
+from collections import Counter
+from datetime import datetime
+
+
+def episode_subagent_statistics(trace, archives):
+    """Successful new calls and peak live worker runs, including queue time.
+
+    Worker creation/terminal timestamps avoid counting finished but unawaited
+    runs as concurrent. Missing archives mean unknown concurrency, not zero.
+    """
+    statistics = {}
+    if 'messages' in trace:
+        calls, created = {}, set()
+        for message in trace['messages']:
+            message = message.get('data', message)
+            if message.get('type') == 'ai':
+                calls.update({c['id']: c['name'] for c in message.get('tool_calls', [])})
+            call_id = message.get('tool_call_id')
+            if message.get('type') != 'tool' or calls.get(call_id) != 'new':
+                continue
+            try:
+                response = json.loads(message.get('content', ''))
+            except (ValueError, TypeError):
+                continue
+            if isinstance(response, dict) and response.get('agent_id') and not response.get('error'):
+                created.add(call_id)
+        statistics['created'] = len(created)
+    if 'agents' not in trace or 'agent_runs' not in trace:
+        return statistics
+    threads = {agent['thread_id'] for agent in trace['agents'].values()}
+    if not threads.issubset(archives):
+        return statistics
+    events, captured = [], set()
+    for thread_id in threads:
+        if 'runs' not in archives[thread_id]:
+            return statistics
+        for run in archives[thread_id]['runs']:
+            if run['run_id'] in captured:
+                continue
+            if run['status'] not in {'success', 'error', 'interrupted', 'timeout'}:
+                return statistics
+            try:
+                start = datetime.fromisoformat(run['created_at'].replace('Z', '+00:00')).timestamp()
+                end = datetime.fromisoformat(run['updated_at'].replace('Z', '+00:00')).timestamp()
+            except (KeyError, ValueError, TypeError):
+                return statistics
+            if not (math.isfinite(start) and math.isfinite(end) and end >= start):
+                return statistics
+            captured.add(run['run_id'])
+            if end > start:
+                events.extend(((start, 1, thread_id), (end, -1, thread_id)))
+    if not {r['run_id'] for r in trace['agent_runs'].values()}.issubset(captured):
+        return statistics
+    active, peak = Counter(), 0
+    for _, delta, thread_id in sorted(events):
+        active[thread_id] += delta
+        if not active[thread_id]:
+            del active[thread_id]
+        peak = max(peak, len(active))
+    statistics['peak_concurrency'] = peak
+    return statistics
 
 
 def qualifies(result, threshold):
