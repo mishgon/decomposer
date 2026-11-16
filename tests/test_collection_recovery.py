@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from gyms.wideseek.runtime import save
+from sft.deepdive.launch import create_parser as deepdive_parser
 from sft.wideseek import launch
 from sft.wideseek.outage import collect_episode, recoverable_cleanup
 
@@ -21,25 +22,28 @@ def test_only_worker_stop_failures_are_recoverable(error):
 
 
 @pytest.mark.parametrize('cleanup_error', ['thread: TimeoutError: ', 'thread: PoolTimeout: '])
-def test_restart_reaps_workers_before_requeue_and_preserves_results(tmp_path, monkeypatch, cleanup_error):
+@pytest.mark.parametrize('parser', [launch.create_parser, deepdive_parser])
+def test_restart_reaps_workers_before_requeue_and_preserves_results(tmp_path, monkeypatch, cleanup_error, parser):
     events = []
     unsafe = tmp_path/'decomposer/bad/attempt-001/result.json'
     completed = tmp_path/'decomposer/good/attempt-001/result.json'
     save(completed, {'evaluation': {'score': 1}})
     (unsafe.parent/'execution-1').mkdir(parents=True)
-    args = SimpleNamespace(output=tmp_path, worker_port=1, worker_slots=2,
-                           worker_python=None, resume=False)
+    args = SimpleNamespace(output=tmp_path, worker_port=parser().get_default('worker_port'),
+                           worker_slots=2, worker_python=None, resume=False)
 
     @asynccontextmanager
     async def server(*a, **kw):
+        assert kw['port'] == 0
         events.append('start')
         try:
-            yield 'http://worker'
+            yield f'http://127.0.0.1:{19000 + len(events)}'
         finally:
             assert unsafe.exists() if len(events) == 1 else not unsafe.exists()
             events.append('reaped')
 
     async def collect(args):
+        assert args.worker_url == f'http://127.0.0.1:{19000 + len(events)}'
         if not args.resume:
             save(unsafe, {'execution_directory': 'execution-1',
                          'cleanup_errors': [cleanup_error]})

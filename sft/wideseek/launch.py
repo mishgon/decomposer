@@ -54,7 +54,8 @@ async def main(args):
 
 def create_parser():
     parser = create_collection_parser()
-    parser.add_argument('--worker-port', type=int, default=18084)
+    parser.add_argument('--worker-port', type=int, default=0,
+                        help='Worker server port (default: automatically allocated on each start)')
     parser.add_argument('--worker-slots', type=int, default=512)
     parser.add_argument('--worker-python', type=Path)
     return parser
