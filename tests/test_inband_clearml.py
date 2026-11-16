@@ -1,6 +1,6 @@
 import pytest
 
-from evals.wideseek.clearml_reporter import snapshot, timeline
+from evals.wideseek.clearml_reporter import prefix_cache_metrics, snapshot, timeline
 from gyms.wideseek.runtime import save
 
 
@@ -11,6 +11,24 @@ def result(task, score, end, **extra):
 
 def manifest(tasks):
     return {'started_at': 1000, 'settings': {'tasks': tasks, 'repetitions': 4, 'modes': ['decomposer']}}
+
+
+def test_prefix_cache_uses_interval_token_counts_across_engines():
+    before = '''
+vllm:prefix_cache_queries_total{engine="0"} 100
+vllm:prefix_cache_hits_total{engine="0"} 80
+vllm:prefix_cache_queries_total{engine="1"} 100
+vllm:prefix_cache_hits_total{engine="1"} 20
+'''
+    values, counters = prefix_cache_metrics(before, None)
+    assert values == {}
+    after = before.replace(' 100', ' 200').replace(' 80', ' 180').replace(' 20\n', ' 70\n')
+    values, current = prefix_cache_metrics(after, counters)
+    assert values == {('vLLM prefix cache (%)', 'Hit (last interval)'): 75,
+                      ('vLLM prefix cache (%)', 'Miss (last interval)'): 25}
+    assert prefix_cache_metrics(after, current)[0] == {}  # Idle is not 0% hits.
+    assert prefix_cache_metrics(before, current)[0] == {}  # Counter reset.
+    assert prefix_cache_metrics('', counters) == ({}, None)
 
 
 def test_four_attempt_selection_matches_native_scoring_and_excludes_infra():
