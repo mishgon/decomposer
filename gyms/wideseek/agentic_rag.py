@@ -8,6 +8,7 @@ reserved for finish. The gyms impose no per-run wall-clock budget.
 import asyncio
 import json
 import inspect
+import logging
 import os
 import time
 from typing import Annotated, NotRequired
@@ -26,7 +27,7 @@ from jsonschema import Draft202012Validator
 from decomposer.run_budget import RunBudgetMiddleware, RunBudgetState
 from langgraph.types import Command
 from pydantic import Field
-from tenacity import retry, retry_if_exception, wait_exponential_jitter
+from tenacity import before_sleep_log, retry, retry_if_exception, wait_exponential_jitter
 
 from gyms.wideseek.runtime import Context, directory, save
 
@@ -60,6 +61,17 @@ async def _post(method, payload):
     url, headers = search_api()
     async with httpx.AsyncClient(timeout=60, trust_env=False) as client:
         response = await client.post(url + "/" + method, headers=headers, json={**payload, "source": SOURCE})
+        response.raise_for_status()
+        return response.json()
+
+
+@retry(retry=retry_if_exception(_transient), wait=wait_exponential_jitter(initial=1, max=300),
+       before_sleep=before_sleep_log(logging.getLogger(__name__), logging.WARNING), reraise=True)
+async def health():
+    """Wait out retrieval outages before starting or resuming collection."""
+    url, headers = search_api()
+    async with httpx.AsyncClient(timeout=30, trust_env=False) as client:
+        response = await client.get(url + '/health', headers=headers)
         response.raise_for_status()
         return response.json()
 

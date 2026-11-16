@@ -289,11 +289,10 @@ async def describe_run(args):
     if args.mode not in {"simple", "decomposer"}:
         raise ValueError("Each run must use one setup: simple or decomposer")
     modes = [args.mode]
+    health = await agentic_rag.health()
+    url, _ = agentic_rag.search_api()
+    retrieval = {"search_api": url, "source": agentic_rag.SOURCE, "health": health}
     async with httpx.AsyncClient(timeout=30, trust_env=False) as http:
-        url, headers = agentic_rag.search_api()
-        response = await http.get(url + "/health", headers=headers)
-        response.raise_for_status()
-        retrieval = {"search_api": url, "source": agentic_rag.SOURCE, "health": response.json()}
         if "decomposer" in modes:
             response = await http.get(args.worker_url + "/ok")
             response.raise_for_status()

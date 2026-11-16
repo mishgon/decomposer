@@ -15,6 +15,32 @@ SOLARIS = "https://en.wikipedia.org/wiki/Solaris_(novel)"
 CONTEXT = {}
 
 
+@pytest.mark.parametrize('failure', ['connection', 503, 401])
+def test_startup_health_waits_for_outages_but_rejects_bad_credentials(monkeypatch, failure):
+    monkeypatch.setenv('AGENTIC_RAG_API_KEY', 'test')
+    attempted = []
+
+    def respond(request):
+        attempted.append(request)
+        if len(attempted) == 1:
+            if failure == 'connection':
+                raise httpx.ConnectError('offline', request=request)
+            return httpx.Response(failure, request=request)
+        return httpx.Response(200, json={'status': 'ok'}, request=request)
+
+    factory = httpx.AsyncClient
+    monkeypatch.setattr(agentic_rag.httpx, 'AsyncClient', lambda **kw: factory(
+        transport=httpx.MockTransport(respond), **kw))
+    check = agentic_rag.health.retry_with(wait=wait_none())
+    if failure == 401:
+        with pytest.raises(httpx.HTTPStatusError):
+            asyncio.run(check())
+        assert len(attempted) == 1
+    else:
+        assert asyncio.run(check()) == {'status': 'ok'}
+        assert len(attempted) == 2
+
+
 class ToolCallingModel(FakeMessagesListChatModel):
     def bind_tools(self, tools, **kwargs):
         return self
