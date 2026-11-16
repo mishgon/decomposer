@@ -62,3 +62,95 @@ def test_expected_timeout_is_zero_pass_but_not_a_fake_native_score():
     assert values['Episodes', 'Resolved'] == 1
     assert values['Pass rate (%)', 'Resolved episodes'] == 0
     assert ('Native score', 'Mean scored episodes') not in values
+
+
+def test_embedded_reporter_flushes_after_collection_finishes(tmp_path, monkeypatch):
+    import json
+    from threading import Event
+    from types import SimpleNamespace
+    from evals.wideseek import clearml_reporter as reporter
+
+    run = tmp_path / 'eval'
+    save(run / 'manifest.json', {})
+    save(tmp_path / 'launch.json', {'status': 'running'})
+    ready = Event()
+    observed = []
+
+    def report(options, stop):
+        assert options.run == run
+        assert options.state == tmp_path / 'clearml.json'
+        assert options.max_pass_rate == .5
+        ready.set()
+        assert stop.wait(5)
+        observed.append(json.loads((tmp_path / 'launch.json').read_text())['status'])
+
+    monkeypatch.setattr(reporter, 'report', report)
+    args = SimpleNamespace(output=run, clearml_project='test', clearml_name='example',
+                           success_threshold=.9, max_pass_rate=.5)
+    with pytest.raises(RuntimeError, match='collection failure'):
+        with reporter.collection_reporter(args):
+            assert ready.wait(5)
+            save(tmp_path / 'launch.json', {'status': 'interrupted'})
+            raise RuntimeError('collection failure')
+    assert observed == ['interrupted']
+
+
+def test_reporter_failure_does_not_cancel_collection(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from evals.wideseek import clearml_reporter as reporter
+
+    save(tmp_path / 'eval/manifest.json', {})
+    def fail(*args):
+        raise ConnectionError('unavailable')
+    monkeypatch.setattr(reporter, 'report', fail)
+    args = SimpleNamespace(output=tmp_path / 'eval', clearml_project='test', clearml_name=None,
+                           success_threshold=.9, max_pass_rate=.5)
+    with pytest.warns(UserWarning, match='collection continues'):
+        with reporter.collection_reporter(args):
+            pass
+
+
+def test_startup_failure_does_not_create_clearml_task(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    from evals.wideseek import clearml_reporter as reporter
+
+    report = Mock()
+    monkeypatch.setattr(reporter, 'report', report)
+    args = SimpleNamespace(output=tmp_path / 'eval', clearml_project='test', clearml_name=None,
+                           success_threshold=.9, max_pass_rate=.5)
+    with reporter.collection_reporter(args):
+        pass
+    report.assert_not_called()
+
+
+def test_report_flushes_final_metrics_and_reuses_task_on_resume(tmp_path, monkeypatch):
+    import json
+    import sys
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    from evals.wideseek import clearml_reporter as reporter
+
+    run = tmp_path / 'eval'
+    data = manifest(['depth-0'])
+    data['revision'] = 'collector-commit'
+    data['settings'].update(concurrency=128, episode_timeout=2700, model_profiles={})
+    save(run / 'manifest.json', data)
+    save(tmp_path / 'launch.json', {'status': 'completed'})
+    task = Mock(id='existing-task')
+    task.get_output_log_web_page.return_value = 'https://clearml.example/task'
+    task_type = SimpleNamespace(init=Mock(return_value=task), TaskTypes=SimpleNamespace(testing='testing'))
+    monkeypatch.setitem(sys.modules, 'clearml', SimpleNamespace(Task=task_type))
+    args = SimpleNamespace(run=run, state=tmp_path / 'clearml.json', project='test', name='run',
+                           success_threshold=.9, max_pass_rate=.5, interval=60)
+    reporter.report(args)
+    reporter.report(args)
+    assert task_type.init.call_args.kwargs['reuse_last_task_id'] == 'existing-task'
+    assert task_type.init.call_args.kwargs['continue_last_task'] == 0
+    assert task.flush.call_count == 2
+    task.flush.assert_called_with(wait_for_uploads=True)
+    assert task.close.call_count == 2
+    task.mark_stopped.assert_not_called()
+    assert json.loads(args.state.read_text())['collection_status'] == 'completed'
+    assert any(call.args[:3] == ('Episodes', 'Active', 0)
+               for call in task.get_logger.return_value.report_scalar.call_args_list)

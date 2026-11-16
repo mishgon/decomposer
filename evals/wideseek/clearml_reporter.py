@@ -1,12 +1,16 @@
-"""Backfill and follow an in-band run in ClearML without changing collection."""
+"""Report in-band progress to ClearML, embedded or against an existing run."""
 import argparse
 from collections import Counter
+from contextlib import contextmanager
 import fcntl
 from itertools import groupby
 import json
 import math
 from pathlib import Path
 import time
+from threading import Event, Thread
+from types import SimpleNamespace
+import warnings
 
 from evals.wideseek.band import qualifies_band, resolved
 from gyms.wideseek.runtime import save
@@ -113,7 +117,7 @@ def snapshot(run):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--run', type=Path, required=True, help='Directory containing manifest.json')
-    parser.add_argument('--state', type=Path, required=True, help='Reporter state, outside collector directory')
+    parser.add_argument('--state', type=Path, required=True, help='Persistent reporter state')
     parser.add_argument('--project', default='decomposer-inband')
     parser.add_argument('--name')
     parser.add_argument('--success-threshold', type=float, default=.9)
@@ -122,6 +126,10 @@ def main():
     args = parser.parse_args()
     if args.interval <= 0 or not 0 <= args.max_pass_rate <= 1 or not 0 <= args.success_threshold <= 1:
         parser.error('Use a positive interval and thresholds in [0, 1]')
+    report(args)
+
+
+def report(args, stop=None):
     args.state.parent.mkdir(parents=True, exist_ok=True)
     with args.state.with_suffix('.lock').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -174,12 +182,44 @@ def main():
                          qualifying=current['In-band tasks', 'All'], collection_status=status)
             save(args.state, state)
             print(f'Reported {len(rows)} episodes, {state["qualifying"]} qualifying tasks; collection {status}', flush=True)
-            if status in {'completed', 'failed', 'interrupted', 'stopped'}:
+            if status in {'completed', 'failed', 'interrupted', 'stopped'} or (stop and stop.is_set()):
                 if status != 'completed':
                     task.mark_stopped(status_message=f'Collection {status}')
                 task.close()
                 return
-            time.sleep(args.interval)
+            if stop is None:
+                time.sleep(args.interval)
+            else:
+                stop.wait(args.interval)
+
+
+@contextmanager
+def collection_reporter(args):
+    """Follow the collector within its job; reporting must not cancel episodes."""
+    stop = Event()
+    run = args.output.resolve()
+    options = SimpleNamespace(run=run, state=run.parent / 'clearml.json',
+        project=args.clearml_project, name=args.clearml_name,
+        success_threshold=args.success_threshold, max_pass_rate=args.max_pass_rate, interval=60)
+
+    def follow():
+        try:
+            while not (run / 'manifest.json').is_file():
+                if stop.wait(1):
+                    return
+            report(options, stop)
+        except Exception as exc:
+            warnings.warn(f'ClearML reporting stopped ({type(exc).__name__}: {exc}); collection continues')
+
+    thread = Thread(target=follow, name='inband-clearml', daemon=True)
+    thread.start()
+    try:
+        yield
+    finally:
+        stop.set()
+        thread.join(timeout=30)
+        if thread.is_alive():
+            warnings.warn('ClearML flush exceeded 30 seconds; persistent results remain available for backfill')
 
 
 if __name__ == '__main__':

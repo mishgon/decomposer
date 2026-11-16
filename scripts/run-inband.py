@@ -10,6 +10,7 @@ import time
 import httpx
 
 from evals.wideseek.band import compute
+from evals.wideseek.clearml_reporter import collection_reporter
 from gyms.wideseek import REPO_ROOT
 from gyms.wideseek.run import cli, describe_run
 from gyms.wideseek.runtime import save
@@ -52,6 +53,8 @@ def main():
     parser.add_argument('--inference-python', type=Path, required=True)
     parser.add_argument('--import-run', type=Path)
     parser.add_argument('--max-pass-rate', type=float, default=.5)
+    parser.add_argument('--clearml-project', default='decomposer-inband')
+    parser.add_argument('--clearml-name', help='Defaults to the run directory name')
     args = parser.parse_args()
     if args.agent != 'student' or not 0 <= args.max_pass_rate <= 1:
         parser.error('Use --agent student and a pass-rate bound in [0, 1]')
@@ -75,7 +78,7 @@ def main():
         '--enable-auto-tool-choice', '--tool-call-parser', 'qwen3_xml', '--reasoning-parser', 'qwen3',
         '--enable-prefix-caching', '--enforce-eager',
         '--additional-config', '{"gdn_prefill_backend":"triton"}']
-    with (root / 'vllm.log').open('a') as log:
+    with collection_reporter(args), (root / 'vllm.log').open('a') as log:
         server = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
         try:
             with httpx.Client(trust_env=False, timeout=3) as client:
