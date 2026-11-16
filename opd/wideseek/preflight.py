@@ -6,16 +6,19 @@ import httpx
 from langgraph_sdk import get_client
 
 from gyms.wideseek.agents import RESEARCHER_MODEL
+from gyms.wideseek import agentic_rag
 from gyms.wideseek.runtime import model, close_model
 from opd.teacher import score
 
 
-async def check(model_path, output, *, worker_url, search_url):
+async def check(model_path, output, *, worker_url):
     from transformers import AutoTokenizer
     async with httpx.AsyncClient(timeout=30, trust_env=False) as http:
-        response = await http.post(search_url + '/retrieve', json={'queries': ['Paris'], 'topk': 1})
+        url, headers = agentic_rag.search_api()
+        response = await http.post(url + '/search', headers=headers,
+                                   json={'query': 'Paris', 'limit': 1, 'source': agentic_rag.SOURCE})
         response.raise_for_status()
-        if not response.json()['result'][0]:
+        if not response.json()['results']:
             raise ValueError('Retrieval returned no passages')
         response = await http.get(worker_url + '/ok')
         response.raise_for_status()

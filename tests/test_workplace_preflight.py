@@ -67,12 +67,13 @@ def test_wideseek_gpu_split_is_explicit(tmp_path, monkeypatch, training_gpus, gp
     monkeypatch.delenv('OPD_FAST_RUNTIME', raising=False)
     monkeypatch.setattr(preflight, 'check', AsyncMock())
     monkeypatch.setattr(run.subprocess, 'run', Mock())
+    monkeypatch.setattr(run.subprocess, 'check_output', Mock(return_value='test-commit'))
     monkeypatch.setattr(run, 'prepare', Mock(return_value={'source_sha256': None}))
     import sys
     monkeypatch.setitem(sys.modules, 'transformers', SimpleNamespace(
         AutoTokenizer=SimpleNamespace(from_pretrained=Mock(side_effect=RuntimeError('stop before GPU startup')))))
     with pytest.raises(RuntimeError, match='stop before GPU startup'):
-        asyncio.run(run.main(args, []))
+        asyncio.run(run.main(args, [], prepare_data=run.prepare))
     saved = json.loads((args.output/'run.json').read_text())
     assert f'trainer.n_gpus_per_node={training_gpus}' in saved['overrides']
     assert f'rollout.n_gpus_per_node={len(gpus)-training_gpus}' in saved['overrides']

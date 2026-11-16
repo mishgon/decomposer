@@ -92,6 +92,20 @@ def run(command):
                 process.wait()
 
 
+@contextmanager
+def reserve_gpus(gpus, directory):
+    with ExitStack() as stack:
+        directory.mkdir(parents=True, exist_ok=True)
+        for gpu in sorted(gpus):
+            lock = stack.enter_context((directory / f'.gpu-{gpu}.lock').open('a'))
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            used = int(subprocess.check_output(['nvidia-smi', '-i', str(gpu),
+                '--query-gpu=memory.used', '--format=csv,noheader,nounits'], text=True).strip())
+            if used > 1024:
+                raise RuntimeError(f'GPU {gpu} is occupied ({used} MiB)')
+        yield
+
+
 def main(*, training_module='opd.wideseek.run'):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--root', type=Path, required=True, help='Large-disk experiment directory; must be new')
@@ -127,14 +141,7 @@ def main(*, training_module='opd.wideseek.run'):
             if not response.json()['result'][0]:
                 raise RuntimeError('Existing retrieval service returned no results')
     with ExitStack() as stack:
-        args.root.parent.mkdir(parents=True, exist_ok=True)
-        for gpu in sorted(args.gpus):
-            lock = stack.enter_context((args.root.parent / f'.gpu-{gpu}.lock').open('a'))
-            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            used = int(subprocess.check_output(['nvidia-smi', '-i', str(gpu),
-                '--query-gpu=memory.used', '--format=csv,noheader,nounits'], text=True).strip())
-            if used > 1024:
-                raise RuntimeError(f'GPU {gpu} is occupied ({used} MiB)')
+        stack.enter_context(reserve_gpus(args.gpus, args.root.parent))
         args.root = args.root.resolve()
         args.root.mkdir(exist_ok=False)
         os.environ.update(WS_ASSETS=str(args.assets.resolve()), WS_TASK_SOURCE=str(args.source.resolve()),
