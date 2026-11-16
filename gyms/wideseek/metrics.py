@@ -14,10 +14,13 @@ def episode_subagent_statistics(trace, archives):
     statistics = {}
     if 'messages' in trace:
         calls, created = {}, set()
+        delegated = False
         for message in trace['messages']:
             message = message.get('data', message)
             if message.get('type') == 'ai':
                 calls.update({c['id']: c['name'] for c in message.get('tool_calls', [])})
+                delegated |= any(c['name'] in {'new', 'fork', 'run'}
+                                 for c in message.get('tool_calls', []))
             call_id = message.get('tool_call_id')
             if message.get('type') != 'tool' or calls.get(call_id) != 'new':
                 continue
@@ -28,6 +31,7 @@ def episode_subagent_statistics(trace, archives):
             if isinstance(response, dict) and response.get('agent_id') and not response.get('error'):
                 created.add(call_id)
         statistics['created'] = len(created)
+        statistics['no_delegation'] = int(not delegated)
     if 'agents' not in trace or 'agent_runs' not in trace:
         return statistics
     threads = {agent['thread_id'] for agent in trace['agents'].values()}

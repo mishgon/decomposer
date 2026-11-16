@@ -222,13 +222,32 @@ def test_subagent_statistics_count_successful_new_and_terminal_overlap():
                 'updated_at': f'2026-11-16T00:00:{end:02d}+00:00'}
     archives = {'a': {'runs': [run('r', 0, 10), run('r2', 20, 30)]},
                 'b': {'runs': [run('r3', 5, 15)]}, 'c': {'runs': [run('r4', 15, 20)]}}
-    assert episode_subagent_statistics(trace, archives) == {'created': 2, 'peak_concurrency': 2}
+    assert episode_subagent_statistics(trace, archives) == {'created': 2, 'peak_concurrency': 2, 'no_delegation': 0}
     # Missing cleanup archives must not produce an artificially low peak.
     del archives['b']
-    assert episode_subagent_statistics(trace, archives) == {'created': 2}
+    assert episode_subagent_statistics(trace, archives) == {'created': 2, 'no_delegation': 0}
     assert episode_subagent_statistics({'messages': [], 'agents': {}, 'agent_runs': {}}, {}) == {
-        'created': 0, 'peak_concurrency': 0}
+        'created': 0, 'peak_concurrency': 0, 'no_delegation': 1}
     assert episode_subagent_statistics({}, {}) == {}
+
+
+@pytest.mark.parametrize('tool', ['new', 'fork', 'run'])
+def test_zero_delegation_excludes_even_failed_or_unanswered_attempts(tool):
+    from gyms.wideseek.metrics import episode_subagent_statistics
+    trace = {'messages': [{'type': 'ai', 'tool_calls': [{'id': 'a', 'name': tool}]}]}
+    assert episode_subagent_statistics(trace, {})['no_delegation'] == 0
+
+
+def test_no_delegation_counter_only_counts_successful_captured_episodes():
+    rows = [result('depth-a', 1, 1060, agent_statistics={'no_delegation': 1}),
+            result('depth-b', 0, 1061, agent_statistics={'no_delegation': 1}),
+            result('width-c', .9, 1062, agent_statistics={'no_delegation': 1}),
+            result('deepdive-qa_rl-d', 1, 1063, agent_statistics={'no_delegation': 0}),
+            result('deepdive-qa_rl-e', .95, 1064, agent_statistics={'no_delegation': 1}),
+            result('depth-f', 1, 1065)]  # Missing telemetry is not a zero-delegation episode.
+    _, values = timeline(rows, manifest([r['task_id'] for r in rows]), .9, .5)
+    assert values['Successful episodes without delegation', 'Count'] == 1
+    assert values['Subagent telemetry successful episodes', 'Delegation calls'] == 2
 
 
 def test_subagent_means_only_include_successful_traces_and_use_separate_coverage():

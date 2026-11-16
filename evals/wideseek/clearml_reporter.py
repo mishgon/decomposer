@@ -95,6 +95,8 @@ class Totals:
             values['Subagent telemetry successful episodes', label] = count
             if count:
                 values['Subagents per successful episode', label] = self.counts[key + '_sum'] / count
+        values['Successful episodes without delegation', 'Count'] = self.counts['no_delegation_sum']
+        values['Subagent telemetry successful episodes', 'Delegation calls'] = self.counts['no_delegation_count']
         return values
 
 
