@@ -34,6 +34,18 @@ def test_band_refuses_an_unfinished_run(tmp_path):
         compute([tmp_path], 0.9)
 
 
+def test_four_attempt_cutoff_includes_zero_and_half_but_not_unresolved(tmp_path):
+    rows = {(str(passes), attempt): ('finished', 'scored', int(attempt <= passes))
+            for passes in range(5) for attempt in range(1, 5)}
+    rows.update({('unknown', attempt): ('finished', 'scored', 0) for attempt in range(1, 4)})
+    rows['unknown', 4] = ('finished', 'evaluation_error', None)
+    _run(tmp_path, 'completed', rows, repetitions=4)
+    band = compute([tmp_path], .9, max_pass_rate=.5)
+    assert band['in_band'] == ['0', '1', '2']
+    assert band['missing_attempts'] == {'unknown': 1}
+    assert band['max_pass_rate'] == .5
+
+
 def test_second_stage_attempts_only_the_undecided_tasks_and_counts_with_the_first(tmp_path, monkeypatch):
     pool = tmp_path / "pool.jsonl"
     pool.write_text("".join(json.dumps({"task_id": task, "question": task}) + "\n" for task in "dcbae"))

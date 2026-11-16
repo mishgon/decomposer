@@ -138,3 +138,11 @@ def test_live_band_excludes_unknown_and_underfilled_tasks():
     assert in_band_count(rows, 3, .9) == 0
     rows.append(row('judge-error', 0))
     assert in_band_count(rows, 2, .9) == 2
+
+
+def test_live_four_attempt_cutoff_matches_selector():
+    rows = [{'task_id': str(passes), 'status': 'finished',
+             'evaluation': {'status': 'scored', 'score': int(attempt <= passes)}}
+            for passes in range(5) for attempt in range(1, 5)]
+    rows.extend([{'task_id': 'pending', 'status': 'timeout'}] * 3)
+    assert in_band_count(rows, 4, .9, max_pass_rate=.5) == 3

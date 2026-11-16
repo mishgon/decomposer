@@ -57,7 +57,12 @@ def resolved(result, threshold):
     return None
 
 
-def compute(run_dirs, threshold):
+def qualifies_band(passes, attempts, max_pass_rate=None):
+    return (passes / attempts <= max_pass_rate if max_pass_rate is not None
+            else 0 < passes < attempts)
+
+
+def compute(run_dirs, threshold, max_pass_rate=None):
     passes, repetitions, required, unresolved = {}, [], {}, []
     for run_dir in run_dirs:
         manifest = json.loads((run_dir / "manifest.json").read_text())
@@ -81,10 +86,12 @@ def compute(run_dirs, threshold):
                 passes[task] = (count + outcome, attempts + 1)
     eligible = {task: counts for task, counts in passes.items() if counts[1] >= required[task]}
     rerun = sorted(set(passes) - eligible.keys())
-    in_band = sorted(task for task, (count, attempts) in eligible.items() if 0 < count < attempts)
+    in_band = sorted(task for task, (count, attempts) in eligible.items()
+                     if qualifies_band(count, attempts, max_pass_rate))
     return {
         "run_dirs": [str(run_dir) for run_dir in run_dirs],
         "success_threshold": threshold,
+        "max_pass_rate": max_pass_rate,
         "repetitions": repetitions,
         "tasks": len(passes),
         "never_solved": sum(count == 0 for count, _ in eligible.values()),
@@ -104,13 +111,17 @@ def main():
     parser.add_argument("run_dirs", type=Path, nargs="+", help="Runs drawn from the same task pool")
     parser.add_argument("--success-threshold", type=float, default=.9,
                         help="The collector's; QA scores are 0 or 1, so only table tasks depend on it")
+    parser.add_argument("--max-pass-rate", type=float,
+                        help="Select pass rates up to this inclusive bound, including zero")
     parser.add_argument("--undecided", type=Path, help="Write here the --data rows whose attempts all agree")
     parser.add_argument("--rerun", type=Path, help="Write here the --data rows needing replacement attempts")
     parser.add_argument("--data", type=Path, help="The task pool the runs drew from")
     args = parser.parse_args()
+    if args.max_pass_rate is not None and not 0 <= args.max_pass_rate <= 1:
+        parser.error('--max-pass-rate must be between 0 and 1')
     if (args.undecided or args.rerun) and not args.data:
         parser.error("--undecided and --rerun need --data")
-    band = compute(args.run_dirs, args.success_threshold)
+    band = compute(args.run_dirs, args.success_threshold, args.max_pass_rate)
     save(args.run_dirs[-1] / BAND_FILENAME, band)
     undecided = {task for task, count, attempts in band["passes"] if count in (0, attempts)} | set(band['rerun'])
     for output, selected in ((args.undecided, undecided), (args.rerun, set(band['rerun']))):

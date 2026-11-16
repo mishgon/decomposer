@@ -22,8 +22,8 @@ def trace_counts(path):
     return subagent_counts(json.loads(path.read_text())['messages'])
 
 
-def in_band_count(rows, repetitions, threshold):
-    from evals.wideseek.band import resolved
+def in_band_count(rows, repetitions, threshold, max_pass_rate=None):
+    from evals.wideseek.band import qualifies_band, resolved
 
     passes, attempts = Counter(), Counter()
     for row in rows:
@@ -31,10 +31,11 @@ def in_band_count(rows, repetitions, threshold):
         if outcome is not None:
             attempts[row['task_id']] += 1
             passes[row['task_id']] += outcome
-    return sum(count >= repetitions and 0 < passes[task] < count for task, count in attempts.items())
+    return sum(count >= repetitions and qualifies_band(passes[task], count, max_pass_rate)
+               for task, count in attempts.items())
 
 
-def display(root, run=None, success_threshold=.9):
+def display(root, run=None, success_threshold=.9, max_pass_rate=None):
     roots = [root, *(root / stage / "wideseek/runs" for stage in ("gyms", "evals", "sft"))]
     manifests = [p for base in roots for p in base.glob("*/manifest.json")]
     path = next((base / run / "manifest.json" for base in roots
@@ -113,9 +114,10 @@ def display(root, run=None, success_threshold=.9):
     good = sum(qualifies(r, threshold) for r in selected)
     print(f"Qualified F1 > {threshold}: {good} | throughput {done*3600/elapsed:.1f} episodes/hour")
     if settings.get('agent') == 'student':
-        found = in_band_count(selected, settings['repetitions'], threshold)
+        found = in_band_count(selected, settings['repetitions'], threshold, max_pass_rate)
+        rule = 'mixed pass/fail' if max_pass_rate is None else f'pass rate <= {max_pass_rate:.0%}'
         print(f"Qualifying in-band tasks: {found}/{len(settings['tasks'])} "
-              f"(at least {settings['repetitions']} valid attempts, mixed pass/fail)")
+              f"(at least {settings['repetitions']} valid attempts, {rule})")
     errors = Counter((r.get('error') or r.get('stop_reason') or r['status']).split('\n')[0]
                      for r in selected if r['status'] != 'finished')
     for reason, count in errors.most_common(5):
@@ -179,12 +181,15 @@ if __name__ == '__main__':
     parser.add_argument('run', nargs='?')
     parser.add_argument('--once', action='store_true')
     parser.add_argument('--success-threshold', type=float, default=.9)
+    parser.add_argument('--max-pass-rate', type=float)
     parser.add_argument('--interval', type=float, default=15)
     args = parser.parse_args()
+    if args.max_pass_rate is not None and not 0 <= args.max_pass_rate <= 1:
+        parser.error('--max-pass-rate must be between 0 and 1')
     while True:
         if not args.once:
             print('\033[2J\033[H', end='', flush=True)
-        display(args.root, args.run, args.success_threshold)
+        display(args.root, args.run, args.success_threshold, args.max_pass_rate)
         if args.once:
             break
         time.sleep(max(1, args.interval))
