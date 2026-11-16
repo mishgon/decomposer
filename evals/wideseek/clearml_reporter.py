@@ -2,15 +2,19 @@
 import argparse
 from collections import Counter
 from contextlib import contextmanager
+from datetime import datetime
 import fcntl
 from itertools import groupby
 import json
 import math
+import os
 from pathlib import Path
 import time
 from threading import Event, Thread
 from types import SimpleNamespace
 import warnings
+
+import httpx
 
 from evals.wideseek.band import qualifies_band, resolved
 from gyms.wideseek.runtime import save
@@ -114,6 +118,36 @@ def snapshot(run):
     return manifest, rows, unfinished
 
 
+def collector_gpu_metrics(api, job_id):
+    """Read only the GPUs assigned to the collector, not the reporter's host."""
+    with httpx.Client(base_url=api.rstrip('/') + '/', timeout=10,
+                      headers={'Authorization': f'Bearer {os.environ["OCC_TOKEN"]}'}) as client:
+        response = client.get(f'jobs/{job_id}/attempts')
+        response.raise_for_status()
+        attempts = [a for a in response.json()['items'] if a['status'] == 'Running']
+        if not attempts:
+            return {}
+        values = {}
+        for worker in max(attempts, key=lambda a: a['attemptNumber'])['workers']:
+            response = client.get(f'nodes/{worker["nodeId"]}')
+            response.raise_for_status()
+            inventory = response.json()['inventory']
+            # A stale observation is missing telemetry, not zero utilization.
+            observed = datetime.fromisoformat(inventory['observedAt'].replace('Z', '+00:00')).timestamp()
+            if time.time() - observed > 180:
+                continue
+            for gpu in inventory['gpus']:
+                if gpu['id'] not in worker['gpuDeviceIds']:
+                    continue
+                series = f'Worker {worker["workerIndex"]} GPU {gpu["index"]}'
+                for title, field, divisor in (
+                        ('GPU utilization (%)', 'utilizationPercent', 1),
+                        ('GPU memory (GiB)', 'memoryUsedBytes', 1024 ** 3)):
+                    if gpu.get(field) is not None:
+                        values[title, series] = gpu[field] / divisor
+        return values
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--run', type=Path, required=True, help='Directory containing manifest.json')
@@ -123,9 +157,13 @@ def main():
     parser.add_argument('--success-threshold', type=float, default=.9)
     parser.add_argument('--max-pass-rate', type=float, default=.5)
     parser.add_argument('--interval', type=float, default=60)
+    parser.add_argument('--collector-job', help='OCCtopus job ID for a separate CPU reporter')
+    parser.add_argument('--occtopus-api', help='OCCtopus API v1 URL; authenticates with OCC_TOKEN')
     args = parser.parse_args()
     if args.interval <= 0 or not 0 <= args.max_pass_rate <= 1 or not 0 <= args.success_threshold <= 1:
         parser.error('Use a positive interval and thresholds in [0, 1]')
+    if bool(args.collector_job) != bool(args.occtopus_api):
+        parser.error('--collector-job and --occtopus-api must be supplied together')
     report(args)
 
 
@@ -143,7 +181,8 @@ def report(args, stop=None):
             task_type=Task.TaskTypes.testing, reuse_last_task_id=state.get('task_id', False),
             continue_last_task=0 if state.get('task_id') else False,
             auto_connect_frameworks=False, auto_connect_arg_parser=False,
-            auto_resource_monitoring=False, auto_connect_streams=False, output_uri=False)
+            auto_resource_monitoring=not bool(getattr(args, 'collector_job', None)),
+            auto_connect_streams=False, output_uri=False)
         state.update(identity=identity, task_id=task.id, url=task.get_output_log_web_page())
         save(args.state, state)
         manifest = json.loads((args.run / 'manifest.json').read_text())
@@ -177,6 +216,12 @@ def report(args, stop=None):
             outage = args.run / 'outage.json'
             paused = outage.exists() and json.loads(outage.read_text()).get('status') == 'paused'
             logger.report_scalar('Service outage', 'Paused', int(paused), iteration=minute)
+            if getattr(args, 'collector_job', None):
+                try:
+                    for (title, series), value in collector_gpu_metrics(args.occtopus_api, args.collector_job).items():
+                        logger.report_scalar(title, series, value, iteration=minute)
+                except (httpx.HTTPError, KeyError, ValueError) as exc:
+                    warnings.warn(f'GPU telemetry unavailable ({type(exc).__name__}); episode reporting continues')
             task.flush(wait_for_uploads=True)
             state.update(updated_at=time.time(), completed=len(rows), active=unfinished,
                          qualifying=current['In-band tasks', 'All'], collection_status=status)
