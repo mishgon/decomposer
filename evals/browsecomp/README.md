@@ -14,3 +14,7 @@ pass@1, pass@3 and pass^3 when `-n 3` is used. The denominator is the selected
 task set, with infrastructure failures counted as failures. Only a normally
 finished, correctly judged episode counts as a pass. Native scores from stopped
 episodes remain available for analysis. No historical artifacts are overwritten.
+
+SFT 1.4.0 uses `--agent decomposer_sft_1_4_0`. Serve the `1.4.0/merged`
+checkpoint as `decomposer-manager-qwen35-4b-sft-1.4.0` on port 18024. Its
+sampling matches the base Qwen3.5-4B non-thinking profile in `models.py`.

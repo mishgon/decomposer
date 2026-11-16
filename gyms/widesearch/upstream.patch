@@ -1,0 +1,15 @@
+diff --git a/src/evaluation/evaluation.py b/src/evaluation/evaluation.py
+index e1f90e9..19ce4e1 100644
+--- a/src/evaluation/evaluation.py
++++ b/src/evaluation/evaluation.py
+@@ -235,7 +235,9 @@ def evaluate_single_query(
+                 metric_func_name_list = item.get("metric", [])
+                 criterion = item.get("criterion")
+                 for metric_func_name in metric_func_name_list:
+-                    if metric_func_name != "llm_judge":
++                    if df_inner.empty:
++                        metric_info_series = pd.Series(dtype=object, index=df_inner.index)
++                    elif metric_func_name != "llm_judge":
+                         metric_info_series = df_inner.apply(
+                             lambda x: metric_call(
+                                 x[col + "_response"],

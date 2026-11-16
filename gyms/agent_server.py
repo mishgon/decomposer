@@ -28,7 +28,7 @@ async def _cancel_agent_runs(client):
 
 
 async def invoke_and_capture(
-    url, assistant_id, inputs, *, thread_id=None, timeout=None, config=None,
+    url, assistant_id, inputs, *, thread_id=None, timeout=None, config=None, context=None,
 ):
     """Run on a dedicated server; stop its runs and return the trace and any error.
 
@@ -42,7 +42,7 @@ async def invoke_and_capture(
         thread_id = thread["thread_id"]
         try:
             state = await asyncio.wait_for(client.runs.wait(
-                thread_id, assistant_id, input=inputs, config=config,
+                thread_id, assistant_id, input=inputs, config=config, context=context,
             ), timeout)
             if "__error__" in state:
                 agent_error = RuntimeError(str(state["__error__"]))

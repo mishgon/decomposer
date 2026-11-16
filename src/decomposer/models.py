@@ -114,10 +114,15 @@ def create_model(
         "lmrouter/qwen_3_5_4b_unlooped_thinking",
         "lmrouter/qwen_3_5_4b_unlooped_non_thinking",
         "lmrouter/occ_4b_non_thinking",
+        "vllm/timur_4b_non_thinking",
+        "vllm/decomposer_manager_qwen35_4b_sft_1_0_0",
+        "vllm/decomposer_manager_qwen35_4b_sft_1_2_0",
+        "vllm/decomposer_manager_qwen35_4b_sft_1_4_0",
+        "lmrouter/qwen_3_8_27b_medium_thinking",
         "lmrouter/qwen_3_8_flash_next_non_thinking",
         "lmrouter/qwen_3_8_flash_next_low_thinking",
         "lmrouter/qwen_3_8_flash_next_medium_thinking",
-        "temp/qwen_3_5_4b_unlooped_thinking",
+        "temp/qwen_3_5_4b_thinking",
         "temp/qwen_3_8_flash_next_non_thinking",
         "openrouter/qwen_3_8_flash_next_non_thinking",
         "openrouter/qwen_3_8_flash_next_low_thinking",
@@ -138,13 +143,36 @@ def create_model(
         sync_client = httpx.Client(transport=transport, trust_env=False)
         client = httpx.AsyncClient(transport=async_transport, trust_env=False)
     match model_id:
-        case "vllm/qwen_3_5_4b_thinking" | "vllm/qwen_3_5_4b_non_thinking" | "lmrouter/qwen_3_5_4b_thinking" | "lmrouter/qwen_3_5_4b_non_thinking":
-            thinking = not model_id.endswith("non_thinking")
-            hosted = model_id.startswith("lmrouter/")
+        case (
+            "vllm/qwen_3_5_4b_thinking" | "vllm/qwen_3_5_4b_non_thinking"
+            | "vllm/timur_4b_non_thinking"
+            | "lmrouter/qwen_3_5_4b_thinking" | "lmrouter/qwen_3_5_4b_non_thinking"
+            | "temp/qwen_3_5_4b_thinking"
+            | "vllm/decomposer_manager_qwen35_4b_sft_1_0_0"
+            | "vllm/decomposer_manager_qwen35_4b_sft_1_1_0"
+            | "vllm/decomposer_manager_qwen35_4b_sft_1_2_0"
+            | "vllm/decomposer_manager_qwen35_4b_sft_1_4_0"
+            | "vllm/decomposer_manager_qwen35_4b_sft_1_5_0"
+        ):
+            sft = model_id.startswith("vllm/decomposer_manager_qwen35_4b_sft_")
+            early_sft = model_id == "vllm/decomposer_manager_qwen35_4b_sft_1_0_0"
+            timur = model_id == "vllm/timur_4b_non_thinking"
+            thinking = not sft and not model_id.endswith("_non_thinking")
+            if model_id.startswith("vllm/"):
+                port = 18036 if timur else 18025 if early_sft else 18024 if sft else _QWEN_3_5_4B_PORT
+                url = base_url or f"http://{os.environ.get('VLLM_HOST', '127.0.0.1')}:{port}/v1"
+                key = "EMPTY"
+            elif model_id.startswith("lmrouter/"):
+                url = "https://lmrouter.2a2i.org/v1"
+                key = os.environ.get("LLM_PROXY_MASTER_KEY", "EMPTY")
+            else:
+                url = "https://135-106-142-250.sslip.io/v1"
+                key = os.environ.get("TEMP_LLM_PROXY_MASTER_KEY", "EMPTY")
             return ChatVLLM(
-                model="Qwen/Qwen3.5-4B",
-                base_url="https://lmrouter.2a2i.org/v1" if hosted else base_url or f"http://{os.environ.get('VLLM_HOST', '127.0.0.1')}:{_QWEN_3_5_4B_PORT}/v1",
-                api_key=os.environ.get("LLM_PROXY_MASTER_KEY", "EMPTY") if hosted else "EMPTY",
+                model=("decomposer-manager-qwen35-4b-sft-" + model_id.rsplit("sft_", 1)[1].replace("_", ".")
+                       if sft else "timur-qwen35-4b" if timur else "Qwen/Qwen3.5-4B"),
+                base_url=url,
+                api_key=key,
                 # https://huggingface.co/Qwen/Qwen3.5-4B#best-practices
                 temperature=1.0 if thinking else 0.7,
                 top_p=0.95 if thinking else 0.8,
@@ -188,6 +216,26 @@ def create_model(
                 http_async_client=client,
                 disable_streaming=True,
                 use_responses_api=False,
+            )
+        case "lmrouter/qwen_3_8_27b_medium_thinking":
+            return ChatVLLM(
+                model="Qwen/Qwen3.8-27B-FP8",
+                base_url="https://lmrouter.2a2i.org/v1",
+                api_key=os.environ.get("LLM_PROXY_MASTER_KEY", "EMPTY"),
+                # https://huggingface.co/Qwen/Qwen3.8-27B#best-practices
+                temperature=1.0,
+                top_p=0.95,
+                presence_penalty=0.0,
+                reasoning_effort="medium",
+                extra_body={
+                    "allowed_openai_params": ["reasoning_effort"],
+                    "top_k": 20, "min_p": 0.0, "repetition_penalty": 1.0,
+                    "chat_template_kwargs": {"enable_thinking": True, "preserve_thinking": True},
+                },
+                preserve_reasoning=True,
+                timeout=600, max_retries=0,
+                http_client=sync_client, http_async_client=client,
+                disable_streaming=True, use_responses_api=False,
             )
         case "vllm/qwen_3_8_flash_next_non_thinking":
             return ChatVLLM(
@@ -314,22 +362,6 @@ def create_model(
                 preserve_reasoning=True,
                 timeout=600,
                 max_retries=0,
-                http_client=sync_client,
-                http_async_client=client,
-                disable_streaming=True,
-                use_responses_api=False,
-            )
-        case "temp/qwen_3_5_4b_unlooped_thinking":
-            return ChatVLLM(
-                model="Qwen/Qwen3.5-4B-unlooped",
-                base_url="https://135-106-142-250.sslip.io/v1",
-                api_key=os.environ.get("TEMP_LLM_PROXY_MASTER_KEY", "EMPTY"),
-                temperature=0.6,
-                top_p=0.95,
-                extra_body={"top_k": 20, "chat_template_kwargs": {"enable_thinking": True}},
-                preserve_reasoning=True,
-                timeout=600,
-                max_retries=2,
                 http_client=sync_client,
                 http_async_client=client,
                 disable_streaming=True,

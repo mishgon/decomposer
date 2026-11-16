@@ -140,18 +140,22 @@ def test_flash_next_uses_thinking_sampling(effort):
     assert "max_completion_tokens" not in payload
 
 
-@pytest.mark.parametrize("profile, thinking, temperature, top_p", [
-    ("lmrouter/qwen_3_5_4b_unlooped_thinking", True, .6, .95),
-    ("lmrouter/qwen_3_5_4b_unlooped_non_thinking", False, .7, .8),
+@pytest.mark.parametrize("provider, thinking", [
+    ("vllm", True), ("vllm", False),
+    ("lmrouter", True), ("lmrouter", False), ("temp", True),
 ])
-def test_unlooped_uses_checkpoint_sampling(profile, thinking, temperature, top_p):
-    model = create_model(model_id=profile)
+def test_qwen_uses_official_sampling(provider, thinking):
+    mode = "thinking" if thinking else "non_thinking"
+    model = create_model(f"{provider}/qwen_3_5_4b_{mode}")
     payload = model._get_request_payload("test")
-    assert payload["model"] == "Qwen/Qwen3.5-4B-unlooped"
-    assert payload["temperature"] == temperature
-    assert payload["top_p"] == top_p
-    assert "presence_penalty" not in payload
-    assert payload["extra_body"] == {"top_k": 20, "chat_template_kwargs": {"enable_thinking": thinking}}
+    assert payload["model"] == "Qwen/Qwen3.5-4B"
+    assert payload["temperature"] == (1.0 if thinking else 0.7)
+    assert payload["top_p"] == (0.95 if thinking else 0.8)
+    assert payload["presence_penalty"] == 1.5
+    assert payload["extra_body"] == {
+        "top_k": 20, "min_p": 0.0, "repetition_penalty": 1.0,
+        "chat_template_kwargs": {"enable_thinking": thinking},
+    }
     assert model.preserve_reasoning is thinking
 
 
@@ -204,7 +208,9 @@ def mock_vllm(monkeypatch):
     monkeypatch.setattr(models.asyncio, "create_subprocess_exec", launch)
     monkeypatch.setattr(models, "socket", SimpleNamespace(socket=MagicMock()))
     import decomposer.agent_server as server_module
-    monkeypatch.setattr(server_module, "socket", SimpleNamespace(socket=MagicMock()))
+    server_socket = MagicMock()
+    server_socket.return_value.__enter__.return_value.getsockname.return_value = ("127.0.0.1", 2025)
+    monkeypatch.setattr(server_module, "socket", SimpleNamespace(socket=server_socket))
     kill = MagicMock()
     monkeypatch.setattr(models.os, "killpg", kill)
     client = AsyncMock()
@@ -266,7 +272,7 @@ def test_vllm_server_rejects_router_model(mock_vllm):
     from decomposer.models import vllm_server
 
     async def run():
-        async with vllm_server("lmrouter/qwen_3_5_4b_unlooped_thinking", gpu="2"):
+        async with vllm_server("lmrouter/qwen_3_5_4b_thinking", gpu="2"):
             pytest.fail("Router model must not start a local server")
 
     with pytest.raises(ValueError, match="Unsupported local vLLM model"):
@@ -405,3 +411,42 @@ def test_vllm_address_override_preserves_model_settings(model_id):
 def test_non_vllm_address_override_is_rejected():
     with pytest.raises(ValueError, match="only for vllm"):
         create_model("lmrouter/qwen_3_8_flash_next_non_thinking", base_url="http://local/v1")
+
+
+@pytest.mark.parametrize("version, port", [("1_0_0", 18025), ("1_1_0", 18024), ("1_2_0", 18024), ("1_4_0", 18024), ("1_5_0", 18024)])
+def test_sft_reuses_base_non_thinking_sampling(version, port):
+    base = create_model("lmrouter/qwen_3_5_4b_non_thinking")
+    sft = create_model(f"vllm/decomposer_manager_qwen35_4b_sft_{version}")
+    expected = base._get_request_payload("test")
+    actual = sft._get_request_payload("test")
+    assert actual.pop("model") == "decomposer-manager-qwen35-4b-sft-" + version.replace("_", ".")
+    expected.pop("model")
+    assert actual == expected
+    assert not sft.preserve_reasoning
+    assert sft.openai_api_base == f"http://127.0.0.1:{port}/v1"
+
+
+def test_timur_reuses_base_non_thinking_sampling():
+    base = create_model("vllm/qwen_3_5_4b_non_thinking")
+    timur = create_model("vllm/timur_4b_non_thinking")
+    expected = base._get_request_payload("test")
+    actual = timur._get_request_payload("test")
+    assert actual.pop("model") == "timur-qwen35-4b"
+    expected.pop("model")
+    assert actual == expected
+    assert not timur.preserve_reasoning
+    assert timur.openai_api_base == "http://127.0.0.1:18036/v1"
+
+
+def test_qwen38_27b_thinking_uses_official_sampling():
+    model = create_model("lmrouter/qwen_3_8_27b_medium_thinking")
+    payload = model._get_request_payload("test")
+    assert payload["model"] == "Qwen/Qwen3.8-27B-FP8"
+    assert (payload["temperature"], payload["top_p"], payload["presence_penalty"]) == (1.0, .95, 0.0)
+    assert payload["reasoning_effort"] == "medium"
+    assert payload["extra_body"] == {
+        "allowed_openai_params": ["reasoning_effort"],
+        "top_k": 20, "min_p": 0.0, "repetition_penalty": 1.0,
+        "chat_template_kwargs": {"enable_thinking": True, "preserve_thinking": True},
+    }
+    assert model.preserve_reasoning

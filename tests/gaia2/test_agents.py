@@ -4,9 +4,11 @@ from gyms.gaia2 import agents
 from gyms.gaia2.tools import EpisodeContext
 
 
-def test_manager_uses_core_factory_and_server_checkpointing(tmp_path, monkeypatch):
+@pytest.mark.parametrize("worker", ["vllm/qwen_3_5_4b_thinking", "vllm/timur_4b_non_thinking"])
+def test_manager_uses_core_factory_and_server_checkpointing(tmp_path, monkeypatch, worker):
     for name, value in {
         "GAIA2_DECOMPOSER_MODEL_ID": "fake",
+        "GAIA2_AGENT_MODEL_ID": worker,
         "GAIA2_DECOMPOSER_BASE_URL": "http://manager/v1",
         "GAIA2_AGENT_SERVER_URL": "http://server",
         "GAIA2_AGENT_RUN_BUDGET_SECONDS": "17",
@@ -21,7 +23,7 @@ def test_manager_uses_core_factory_and_server_checkpointing(tmp_path, monkeypatc
     monkeypatch.setattr(agents, "create_decomposer_agent", lambda **kwargs: kwargs)
     result = agents.decomposer()
     assert result["decomposer_model"] == ("fake", "http://manager/v1")
-    assert result["agent_types"] == [
+    expected = [
         {
             "agent_type_id": "qwen_3_5_4b_thinking",
             "description": "Qwen3.5-4B thinking agent equipped with all the required tools.",
@@ -29,6 +31,15 @@ def test_manager_uses_core_factory_and_server_checkpointing(tmp_path, monkeypatc
             "url": "http://server",
         }
     ]
+    if worker == "vllm/timur_4b_non_thinking":
+        expected[0].update(
+            agent_type_id="timur_4b_non_thinking", assistant_id="timur_4b_non_thinking",
+            description="Timur Qwen3.5-4B non-thinking agent equipped with all the required tools.",
+        )
+        assert agents.timur_4b_non_thinking is agents.qwen_3_5_4b_thinking
+        from gyms.gaia2.run import build_parser
+        assert build_parser().parse_args(["--agent", "timur_4b_non_thinking"]).agent == "timur_4b_non_thinking"
+    assert result["agent_types"] == expected
     assert result["agent_run_budget_seconds"] == 17
     assert result["agent_shutdown_grace_seconds"] == 23
     assert result["context_schema"] is EpisodeContext
