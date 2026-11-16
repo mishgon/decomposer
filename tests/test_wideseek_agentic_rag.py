@@ -411,3 +411,27 @@ def test_malformed_call_preceding_finish_receives_feedback_in_original_order(mon
     assert json.loads(tools[0].content) == {'error': 'invalid_tool_call_format', 'details': [
         {'path': [], 'message': 'Arguments must be a JSON object.'}]}
     assert state['end_status'] == 'finished'
+
+
+@pytest.mark.parametrize("tokens", [100, 65536])
+def test_async_context_check_runs_tokenization_off_event_loop(monkeypatch, tmp_path, tokens):
+    checked = []
+
+    def count_tokens(messages, tools):
+        with pytest.raises(RuntimeError, match="no running event loop"):
+            asyncio.get_running_loop()
+        checked.append(True)
+        return tokens
+
+    monkeypatch.setattr(agentic_rag, "prompt_tokens", count_tokens)
+    tmp_path = tmp_path / "episode"
+    init_budget(tmp_path)
+    policy = ToolCallingModel(responses=[calls(("finish", {"answer": "Done", "sources": []}))])
+    state = asyncio.run(agents.react(policy, None).ainvoke(
+        {"messages": [HumanMessage("Question")]},
+        {"configurable": {"thread_id": "off-loop"}}, context={"directory": str(tmp_path)}))
+    assert checked
+    if tokens == 65536:
+        assert state["end_status"] == "context_limit"
+    else:
+        assert state["messages"][-1].content == "Done"

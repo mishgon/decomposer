@@ -287,6 +287,10 @@ class ResearchProtocol(RunBudgetMiddleware):
             return {"end_status": status, "messages": [report_message()], "jump_to": "end"}
         return update
 
+    @hook_config(can_jump_to=["end"])
+    async def abefore_model(self, state, runtime):
+        return await asyncio.to_thread(self.before_model, state, runtime)
+
     def _prepare_model_request(self, request):
         return request.override(messages=model_messages(request.messages), tools=TOOL_SCHEMAS,
                                 model_settings={**request.model_settings, "max_tokens": 4096})
