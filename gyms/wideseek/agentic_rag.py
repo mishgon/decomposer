@@ -55,7 +55,7 @@ def _transient(error):
 
 
 # As in the monorepo, transient errors are waited out; the episode deadline bounds the wait.
-@retry(retry=retry_if_exception(_transient), wait=wait_exponential_jitter(multiplier=0.5, max=30), reraise=True)
+@retry(retry=retry_if_exception(_transient), wait=wait_exponential_jitter(initial=0.5, max=30), reraise=True)
 async def _post(method, payload):
     url, headers = search_api()
     async with httpx.AsyncClient(timeout=60, trust_env=False) as client:

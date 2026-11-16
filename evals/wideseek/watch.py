@@ -22,6 +22,18 @@ def trace_counts(path):
     return subagent_counts(json.loads(path.read_text())['messages'])
 
 
+def in_band_count(rows, repetitions, threshold):
+    from evals.wideseek.band import resolved
+
+    passes, attempts = Counter(), Counter()
+    for row in rows:
+        outcome = resolved(row, threshold)
+        if outcome is not None:
+            attempts[row['task_id']] += 1
+            passes[row['task_id']] += outcome
+    return sum(count >= repetitions and 0 < passes[task] < count for task, count in attempts.items())
+
+
 def display(root, run=None, success_threshold=.9):
     roots = [root, *(root / stage / "wideseek/runs" for stage in ("gyms", "evals", "sft"))]
     manifests = [p for base in roots for p in base.glob("*/manifest.json")]
@@ -100,6 +112,10 @@ def display(root, run=None, success_threshold=.9):
     threshold = scheduler['success_threshold'] if scheduler else success_threshold
     good = sum(qualifies(r, threshold) for r in selected)
     print(f"Qualified F1 > {threshold}: {good} | throughput {done*3600/elapsed:.1f} episodes/hour")
+    if settings.get('agent') == 'student':
+        found = in_band_count(selected, settings['repetitions'], threshold)
+        print(f"Qualifying in-band tasks: {found}/{len(settings['tasks'])} "
+              f"(at least {settings['repetitions']} valid attempts, mixed pass/fail)")
     errors = Counter((r.get('error') or r.get('stop_reason') or r['status']).split('\n')[0]
                      for r in selected if r['status'] != 'finished')
     for reason, count in errors.most_common(5):
