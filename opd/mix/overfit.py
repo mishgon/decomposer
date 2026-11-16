@@ -19,7 +19,7 @@ from opd.workplace_assistant.prepare import validation_rows
 OVERRIDES = ['trainer.project_name=decomposer-mix-opd', 'trainer.total_epochs=1']
 
 
-def prepare(source, output, *, steps=32):
+def prepare(source, output, *, steps=32, holdout_tasks=0):
     import pandas as pd
 
     raw = source.read_bytes()
@@ -29,8 +29,6 @@ def prepare(source, output, *, steps=32):
     if (not tasks or len({t['task_id'] for t in tasks}) != len(tasks)
             or len({t['question_sha256'] for t in tasks}) != len(tasks)):
         raise ValueError('Training requires distinct selected tasks')
-    if steps < 1 or len(tasks) > steps * 8:
-        raise ValueError('The update budget must visit every selected task at least once')
     if any(t['source'] not in {'depth', 'width', 'deepdive-qa_rl', 'deepdive-qa_sft'} for t in tasks):
         raise ValueError('Unsupported training source')
     if any(t['question_sha256'] in heldout for t in tasks):
@@ -46,25 +44,46 @@ def prepare(source, output, *, steps=32):
     # Balance exposure, including the final partial pass through the pool.
     rng = random.Random(42)
     ordered = list(tasks)
+    holdout = []
+    if holdout_tasks:
+        groups = {source: sorted((t for t in tasks if t['source'] == source), key=lambda t: t['task_id'])
+                  for source in sorted({t['source'] for t in tasks})}
+        if (not len(groups) <= holdout_tasks <= len(tasks) - len(groups)
+                or any(len(group) < 2 for group in groups.values())):
+            raise ValueError('Holdout must leave training and validation tasks in every source')
+        counts = dict.fromkeys(groups, 1)
+        for _ in range(holdout_tasks - len(groups)):
+            source = max((s for s in groups if counts[s] < len(groups[s]) - 1),
+                         key=lambda s: len(groups[s]) * holdout_tasks / len(tasks) - counts[s])
+            counts[source] += 1
+        ordered = []
+        for source, group in groups.items():
+            rng.shuffle(group)
+            holdout.extend(group[:counts[source]])
+            ordered.extend(group[counts[source]:])
+    if steps < 1 or len(ordered) > steps * 8:
+        raise ValueError('The update budget must visit every selected training task at least once')
     rng.shuffle(ordered)
-    training = [row(ordered[i % len(tasks)], 'train') for i in range(steps * 8)]
+    training = [row(ordered[i % len(ordered)], 'train') for i in range(steps * 8)]
     rng.shuffle(training)
     probes = ordered[:6]
     workplace = validation_rows()
-    validation = [row(t, 'train_probe') for t in probes] + workplace
+    validation = [row(t, 'train_probe') for t in probes] + [row(t, 'heldout') for t in holdout] + workplace
     output.mkdir(parents=True, exist_ok=False)
     (output / 'tasks.jsonl').write_bytes(raw)
     pd.DataFrame(training).to_parquet(output / 'train.parquet', index=False)
     pd.DataFrame(validation).to_parquet(output / 'evaluation.parquet', index=False)
-    manifest = {'overfit': True, 'seed': 42, 'source_sha256': hashlib.sha256(raw).hexdigest(),
+    manifest = {'overfit': not bool(holdout), 'seed': 42, 'source_sha256': hashlib.sha256(raw).hexdigest(),
                 'task_ids': [t['task_id'] for t in tasks],
-                'train_task_ids': [t['task_id'] for t in tasks], 'train_tasks': len(tasks),
-                'heldout_task_ids': [], 'heldout_tasks': 0, 'train_probe_tasks': len(probes),
+                'train_task_ids': [t['task_id'] for t in ordered], 'train_tasks': len(ordered),
+                'heldout_task_ids': [t['task_id'] for t in holdout], 'heldout_tasks': len(holdout),
+                'heldout_sources': dict(Counter(t['source'] for t in holdout)), 'train_probe_tasks': len(probes),
                 'train_probe_task_ids': [t['task_id'] for t in probes],
-                'training_sources': dict(Counter(t['source'] for t in tasks)),
+                'training_sources': dict(Counter(t['source'] for t in ordered)),
                 'workplace_validation_tasks': len(workplace), 'training_episodes': steps * 8,
                 'optimizer_steps': steps,
-                'evaluation': 'Up to six fixed training probes and frozen Workplace-20; pass@1',
+                'evaluation': f'Up to six fixed training probes, {len(holdout)} disjoint heldout tasks '
+                              'and frozen Workplace-20; pass@1',
                 'files': {name: hashlib.sha256((output / name).read_bytes()).hexdigest()
                           for name in ('tasks.jsonl', 'train.parquet', 'evaluation.parquet')}}
     (output / 'manifest.json').write_text(json.dumps(manifest, indent=2))
@@ -90,7 +109,7 @@ async def main(args):
     with reserve_gpus(args.gpus, args.output.resolve().parent):
         await train(args, [*OVERRIDES, f'rollout.total_rollout_steps={args.steps * 8}',
                           f'trainer.experiment_name={args.output.resolve().parent.name}'],
-                    prepare_data=partial(prepare, steps=args.steps), smoke=True)
+                    prepare_data=partial(prepare, steps=args.steps, holdout_tasks=args.holdout_tasks), smoke=True)
 
 
 if __name__ == '__main__':
@@ -100,5 +119,7 @@ if __name__ == '__main__':
     signal.signal(signal.SIGTERM, interrupt)
     parser = create_parser(smoke=True)
     parser.add_argument('--steps', type=int, default=32)
+    parser.add_argument('--holdout-tasks', type=int, required=True,
+                        help='Fixed seed-42 holdout stratified by source; use 0 only for deliberate overfit runs')
     parser.description = __doc__
     asyncio.run(main(parser.parse_args()))

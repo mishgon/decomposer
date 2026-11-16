@@ -64,3 +64,39 @@ def test_mixed_selection_visits_all_tasks_in_exactly_64_batches(tmp_path, monkey
     assert len(pd.read_parquet(data / 'evaluation.parquet')) == 6
     with pytest.raises(ValueError, match='visit every'):
         overfit.prepare(source, tmp_path / 'short', steps=1)
+
+
+def test_holdout_is_stratified_disjoint_and_stable_under_input_reordering(tmp_path, monkeypatch):
+    tasks = []
+    for source, count in [('depth', 60), ('width', 69), ('deepdive-qa_rl', 47), ('deepdive-qa_sft', 13)]:
+        for i in range(count):
+            task = normalize({'question': f'{source} question {i}', 'answer': 'SECRET'}, 'depth', len(tasks))
+            task.update(source=source, task_id=f'{source}-{i:05d}')
+            tasks.append(task)
+    source = tmp_path / 'tasks.jsonl'
+    source.write_text(''.join(json.dumps(t) + '\n' for t in tasks))
+    monkeypatch.setattr(overfit, 'validation_rows', lambda: [])
+    data = tmp_path / 'data'
+    manifest = overfit.prepare(source, data, steps=64, holdout_tasks=20)
+    train = pd.read_parquet(data / 'train.parquet').to_dict('records')
+    evaluation = pd.read_parquet(data / 'evaluation.parquet').to_dict('records')
+    train_ids = {r['extra_info']['task_id'] for r in train}
+    heldout_ids = {r['extra_info']['task_id'] for r in evaluation if r['data_source'].endswith('/heldout')}
+    probe_ids = {r['extra_info']['task_id'] for r in evaluation if r['data_source'].endswith('/train_probe')}
+    assert len(train) == 512 and len(train_ids) == manifest['train_tasks'] == 169
+    assert len(heldout_ids) == manifest['heldout_tasks'] == 20
+    assert not train_ids & heldout_ids and probe_ids <= train_ids
+    assert train_ids | heldout_ids == {t['task_id'] for t in tasks}
+    hashes = {t['task_id']: t['question_sha256'] for t in tasks}
+    assert not {hashes[i] for i in train_ids} & {hashes[i] for i in heldout_ids}
+    assert manifest['heldout_sources'] == {'depth': 6, 'width': 7, 'deepdive-qa_rl': 5, 'deepdive-qa_sft': 2}
+    assert not manifest['overfit']
+    assert {r['data_source'] for r in evaluation} >= {'wideseek/heldout', 'deepdive/heldout'}
+    assert all('SECRET' not in str(r['prompt']) for r in train + evaluation)
+    source.write_text(''.join(json.dumps(t) + '\n' for t in reversed(tasks)))
+    repeat = overfit.prepare(source, tmp_path / 'repeat', steps=64, holdout_tasks=20)
+    assert repeat['heldout_task_ids'] == manifest['heldout_task_ids']
+    assert repeat['train_task_ids'] == manifest['train_task_ids']
+    for count in (-1, 3, 186):
+        with pytest.raises(ValueError, match='every source'):
+            overfit.prepare(source, tmp_path / f'bad-{count}', steps=64, holdout_tasks=count)

@@ -15,7 +15,7 @@ python -m opd.mix.select_inband \
   --pools /shared/known/tasks.jsonl /shared/unseen/tasks.jsonl \
   --output /shared/selected
 python -m opd.mix.overfit --source /shared/selected/tasks.jsonl \
-  --output /shared/experiments/mix-selected/train --steps 64 \
+  --output /shared/experiments/mix-selected/train --steps 64 --holdout-tasks 20 \
   --model /shared/models/decomposer-manager-sft-v1.7.0 \
   --worker-python /shared/runtime/workers/bin/python --gpus 0 1
 ```
@@ -23,10 +23,14 @@ python -m opd.mix.overfit --source /shared/selected/tasks.jsonl \
 Selection requires four resolved attempts, preserves each search's positive-success
 rule, checks checkpoint and task-pool identity, and rejects frozen holdout overlap.
 The snapshot records a cutoff, result checksums, outcomes, and source provenance.
-Training visits every selected question with balanced exposure: 512 episodes at
-batch 8 for 64 updates. Six fixed train probes and Workplace-20 are evaluated at
-step zero and every eight updates. There is no separate in-domain heldout panel
-for this selected-pool run. Infrastructure errors remain excluded from selection.
+The required `--holdout-tasks` argument reserves a fixed seed-42 sample, stratified
+by source, before constructing training batches. Every source retains both training
+and held-out questions. Use `--holdout-tasks 0` only for deliberate overfit experiments.
+Training visits every remaining question with balanced exposure: 512 episodes at
+batch 8 for 64 updates. Six fixed train probes, the disjoint holdout and Workplace-20
+are evaluated at step zero and every eight updates. Held-out questions never enter
+training batches or train probes. The manifest records both partitions and their
+source counts. Infrastructure errors remain excluded from selection.
 
 ## Mixed-Gym Smoke
 
