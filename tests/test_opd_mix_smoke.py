@@ -76,7 +76,9 @@ def test_smoke_uses_production_trainer_without_a_fake_baseline(tmp_path, monkeyp
 
     monkeypatch.setattr(smoke, 'reserve_gpus', reserve)
     asyncio.run(smoke.main(args))
-    launch.assert_awaited_once_with(args, smoke.OVERRIDES, prepare_data=smoke_data.prepare, smoke=True)
+    launch.assert_awaited_once_with(args,
+        [*smoke.OVERRIDES, f'trainer.experiment_name={tmp_path.name}'],
+        prepare_data=smoke_data.prepare, smoke=True)
     assert args.baseline is None
     assert 'rollout.total_rollout_steps=8' in smoke.OVERRIDES
     assert not any(o.startswith(('actor_rollout_ref.', 'distillation.')) for o in smoke.OVERRIDES)
