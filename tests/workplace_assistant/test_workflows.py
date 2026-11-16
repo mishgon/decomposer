@@ -2429,7 +2429,7 @@ def test_preset_teacher_takes_both_roles_from_models_py() -> None:
     assert not experiment.requires_subagent_proxy
     assert experiment.upstream_model_ids == (
         "Qwen/Qwen3.8-Flash-Next-NVFP4",
-        "Qwen/Qwen3.5-4B-unlooped",
+        "Qwen/Qwen3.5-4B",
     )
     body = experiment.remote_manager_extra_body
     assert body == manager_responses_body("lmrouter/qwen_3_8_flash_next_non_thinking")
@@ -2466,12 +2466,12 @@ def test_preset_teacher_takes_both_roles_from_models_py() -> None:
     configuration = run_module.runtime_configuration(experiment)
     assert configuration["manager"]["preset"] == "lmrouter/qwen_3_8_flash_next_non_thinking"
     assert configuration["manager"]["sampling"] == body
-    assert configuration["subagent"]["preset"] == "lmrouter/qwen_3_5_4b_unlooped_thinking"
+    assert configuration["subagent"]["preset"] == "lmrouter/qwen_3_5_4b_thinking"
     assert configuration["subagent"]["sampling"]["max_completion_tokens"] is None
     assert experiments.remote_subagent_record(experiment) == {
         "backend": "preset",
-        "preset": "lmrouter/qwen_3_5_4b_unlooped_thinking",
-        "model_id": "Qwen/Qwen3.5-4B-unlooped",
+        "preset": "lmrouter/qwen_3_5_4b_thinking",
+        "model_id": "Qwen/Qwen3.5-4B",
     }
     plan = run_module._dry_plan(
         repo_root,

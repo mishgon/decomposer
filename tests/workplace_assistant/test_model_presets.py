@@ -45,9 +45,12 @@ def test_subagent_preset_record_has_parameters_but_no_endpoint_or_key(monkeypatc
     monkeypatch.setenv("LLM_PROXY_MASTER_KEY", "secret-value")
     model_presets._preset.cache_clear()
     record = model_presets.preset_record(model_presets.QWEN35_UNLOOPED_THINKING_PRESET)
-    assert record["model"] == "Qwen/Qwen3.5-4B-unlooped"
-    assert (record["temperature"], record["top_p"]) == (0.6, 0.95)
-    assert record["extra_body"] == {"top_k": 20, "chat_template_kwargs": {"enable_thinking": True}}
+    assert record["model"] == "Qwen/Qwen3.5-4B"
+    assert (record["temperature"], record["top_p"]) == (1.0, 0.95)
+    assert record["extra_body"] == {
+        "top_k": 20, "min_p": 0.0, "repetition_penalty": 1.0,
+        "chat_template_kwargs": {"enable_thinking": True},
+    }
     assert record["preserve_reasoning"] is True
     assert record["max_completion_tokens"] is None
     text = json.dumps(record)

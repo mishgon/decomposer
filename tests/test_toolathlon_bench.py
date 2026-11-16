@@ -760,7 +760,7 @@ def test_serve_hides_bundle_then_runs_agent_server_until_signal(serve_env, monke
         "agent_workspace": "/workspace/dumps/workspace",
         "gateway_url": "http://127.0.0.1:4001/sse",
         "agent_server_url": "http://127.0.0.1:4002",
-        "agent_model": {"model_id": "lmrouter/qwen_3_5_4b_unlooped_thinking"},
+        "agent_model": {"model_id": "lmrouter/qwen_3_5_4b_thinking"},
         "decomposer_model": {"model_id": "lmrouter/qwen_3_8_flash_next_non_thinking"},
     }
     assert serve_env.killed == []
@@ -806,8 +806,8 @@ def test_wait_ready_fails_fast_or_times_out(monkeypatch):
 
 def test_model_metadata_has_sampling_without_credentials(monkeypatch):
     monkeypatch.setenv("LLM_PROXY_MASTER_KEY", "test-secret")
-    metadata = task.model_metadata("lmrouter/qwen_3_5_4b_unlooped_thinking")
-    assert metadata["api_model"] == "Qwen/Qwen3.5-4B-unlooped"
+    metadata = task.model_metadata("lmrouter/qwen_3_5_4b_thinking")
+    assert metadata["api_model"] == "Qwen/Qwen3.5-4B"
     assert metadata["base_url"] == "https://lmrouter.2a2i.org/v1"
     assert metadata["generation_config"]["preserve_reasoning"] is True
     assert "test-secret" not in json.dumps(metadata)
@@ -903,7 +903,7 @@ def test_agents_use_task_prompt_tools_and_server_url(monkeypatch, container_modu
 
     assert agents.qwen_3_5_4b_thinking() == "agent"
     kwargs = create_agent.call_args.kwargs
-    assert kwargs["model"].model_name == "Qwen/Qwen3.5-4B-unlooped"
+    assert kwargs["model"].model_name == "Qwen/Qwen3.5-4B"
     assert kwargs["tools"] == [gateway_tool]
     assert kwargs["system_prompt"] == agents.AGENT_SYSTEM_PROMPT.format(workspace_dir="/workspace")
     assert len(kwargs["middleware"]) == 3

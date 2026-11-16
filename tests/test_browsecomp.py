@@ -2,7 +2,7 @@ import asyncio
 from contextlib import asynccontextmanager
 import json
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import httpx
 from langchain_core.messages import AIMessage, message_to_dict
@@ -19,17 +19,26 @@ def test_tools_isolate_url_access_and_preserve_state(monkeypatch):
     runtime = SimpleNamespace(state={}, tool_call_id="s1")
     update = asyncio.run(tools.search.coroutine("query", runtime)).update
     assert update["pages"] == {"https://page": "p1"}
-    assert update["searches"] == 1
     assert asyncio.run(tools.fetch.coroutine("https://page", runtime))["error"] == "url_not_in_session"
     request.assert_awaited_once()
     runtime.state = update
     request.return_value = {"content": "evidence"}
     assert asyncio.run(tools.fetch.coroutine("https://page", runtime)) == {"content": "evidence"}
     request.assert_awaited_with("/fetch", {"page_id": "p1"})
-    runtime.state["searches"] = 10
-    count = request.await_count
-    assert asyncio.run(tools.search.coroutine("query", runtime)).update["searches"] == 0
-    assert request.await_count == count
+
+
+def test_search_continues_beyond_ten_calls(monkeypatch):
+    request = AsyncMock(return_value={"results": [
+        {"url": "https://page", "page_id": "p1", "title": "Page", "snippet": "evidence"}]})
+    monkeypatch.setattr(tools, "request", request)
+    runtime = SimpleNamespace(state={}, tool_call_id="search")
+    async def search_repeatedly():
+        for i in range(12):
+            update = (await tools.search.coroutine(f"query {i}", runtime)).update
+            runtime.state.update(update)
+            assert json.loads(update["messages"][0].content)["results"][0]["url"] == "https://page"
+    asyncio.run(search_repeatedly())
+    assert request.await_count == 12
 
 
 def test_retrieval_contract(monkeypatch):
@@ -55,18 +64,18 @@ def test_judge_errors_are_unscored_and_inclusion_is_not_a_pass(monkeypatch, tmp_
                             ainvoke=AsyncMock(return_value=AIMessage(content='{"match": false}')))
     monkeypatch.setattr(evaluate, "create_model", lambda _: model)
     task = {"question": "Which city?", "answer": "New York"}
-    output = '```json\n{"final_answer":"York"}\n```'
+    output = 'York'
     result = asyncio.run(evaluate.evaluate(task, output, tmp_path))
     assert result["score"] == 0
     model.ainvoke.assert_awaited_once()
     model.ainvoke.return_value = AIMessage(content="not a verdict")
     assert asyncio.run(evaluate.evaluate(task, output, tmp_path))["score"] is None
     assert "error" in json.loads((tmp_path / "judge.json").read_text())
-    assert evaluate.extract_answer("plain text") == ""
 
 
+@pytest.mark.parametrize("agent", list(run.AGENTS))
 @pytest.mark.parametrize("error", [None, TimeoutError("stopped")])
-def test_episode_artifacts_and_partial_capture(monkeypatch, tmp_path, error):
+def test_episode_artifacts_and_partial_capture(monkeypatch, tmp_path, error, agent):
     directory = tmp_path / "run" / "traces" / "task-r001"
     directory.mkdir(parents=True)
     (directory / "task.json").write_text(json.dumps({"task_id": "task", "question": "Q", "answer": "A"}))
@@ -74,17 +83,23 @@ def test_episode_artifacts_and_partial_capture(monkeypatch, tmp_path, error):
     async def server(*args, **kwargs):
         yield "http://fake"
     capture = AsyncMock(return_value=({"messages": [message_to_dict(AIMessage(
-        content='```json\n{"final_answer":"A"}\n```'))]}, error))
+        content='A'))]}, error))
     monkeypatch.setattr(run, "agent_server", server)
     monkeypatch.setattr(run, "invoke_and_capture", capture)
-    args = run.parser().parse_args(["--episode", "--output-dir", str(directory), "--agent", "researcher"])
+    args = run.parser().parse_args(["--episode", "--output-dir", str(directory), "--agent", agent])
     asyncio.run(run.episode(args))
     result = json.loads((directory / "result.json").read_text())
     assert result["status"] == ("timeout" if error else "finished")
     assert result["evaluation"]["score"] == 1
-    assert (directory / "trace.json").exists()
+    trace = json.loads((directory / "trace.json").read_text())
+    assert (trace["model"], trace["harness"]) == run.AGENTS[agent]
+    usage = json.loads((directory / "usage.json").read_text())
+    assert ("react" in usage) == (run.AGENTS[agent][1] == "react")
     assert (directory / "usage.json").exists()
     assert capture.call_args.kwargs["config"] == {"recursion_limit": 410}
+    assert capture.call_args.args[2]["messages"][0]["content"] == (
+        "Q\n\nIf you determine that no further external knowledge is required, "
+        "you have to wrap your final answer in \\boxed{}.")
 
 
 def test_pass_metrics_count_infra_failures():
@@ -139,7 +154,7 @@ def test_compiled_researcher_search_fetch_and_fresh_thread(monkeypatch, tmp_path
     model = Model(responses=[
         AIMessage(content="", tool_calls=[{"id": "s", "name": "search", "args": {"query": "Q"}}]),
         AIMessage(content="", tool_calls=[{"id": "f", "name": "fetch", "args": {"url": "https://page"}}]),
-        AIMessage(content='```json\n{"final_answer":"A"}\n```'),
+        AIMessage(content='A'),
     ])
     monkeypatch.setattr(agents, "create_model", lambda _: model)
     monkeypatch.setenv("BROWSECOMP_MODEL_LOG", str(tmp_path / "calls.jsonl"))
@@ -150,8 +165,7 @@ def test_compiled_researcher_search_fetch_and_fresh_thread(monkeypatch, tmp_path
     graph = agents.researcher()
     state = asyncio.run(graph.ainvoke({"messages": [{"role": "user", "content": "Q"}]}))
     assert state["pages"] == {"https://page": "p1"}
-    assert state["searches"] == 1
-    assert evaluate.extract_answer(state["messages"][-1].content) == "A"
+    assert state["messages"][-1].content == "A"
     records = [json.loads(line) for line in (tmp_path / "calls.jsonl").read_text().splitlines()]
     assert sum(r["status"] == "success" for r in records) == 3
     # A separate invocation must not inherit URLs from the preceding episode.
@@ -202,7 +216,7 @@ def researcher():
     agents.create_model = lambda _: Model(responses=[
         AIMessage(content="", tool_calls=[{"id":"s", "name":"search", "args":{"query":"Q"}}]),
         AIMessage(content="", tool_calls=[{"id":"f", "name":"fetch", "args":{"url":"https://page"}}]),
-        AIMessage(content='```json\\n{"final_answer":"A"}\\n```'),
+        AIMessage(content='A'),
     ])
     return agents.researcher()
 ''')
@@ -225,10 +239,153 @@ def researcher():
         state, error = asyncio.run(smoke())
         assert error is None
         assert state["pages"] == {"https://page": "p1"}
-        assert state["searches"] == 1
-        assert state["messages"][-1]["content"].endswith("```")
+        assert state["messages"][-1]["content"] == "A"
         assert (tmp_path / "model_calls.jsonl").exists()
     finally:
         service.shutdown()
         service.server_close()
         thread.join()
+
+
+@pytest.mark.parametrize("name", list(run.AGENTS))
+def test_registered_factories_match_trace_models_and_worker_identity(monkeypatch, name):
+    from gyms.browsecomp import agents
+    monkeypatch.setenv("BROWSECOMP_AGENT_URL", "http://worker")
+    monkeypatch.setattr(agents, "create_model", lambda model: model)
+    monkeypatch.setattr(agents, "create_agent", lambda model, **kw: {"model": model, **kw})
+    monkeypatch.setattr(agents, "create_decomposer_agent", lambda **kw: kw)
+    graphs = json.loads(run.Path(agents.__file__).with_name("langgraph.json").read_text())["graphs"]
+    assert graphs[name] == f"./agents.py:{name}"
+    config = getattr(agents, name)()
+    model, harness = run.AGENTS[name]
+    if harness == "react":
+        assert config["model"] == model
+        assert config["tools"] == [tools.search, tools.fetch]
+    else:
+        assert config["decomposer_model"] == model
+        assert config["agent_run_budget_seconds"] == 180.0
+        assert config["agent_shutdown_grace_seconds"] == 180.0
+        expected_worker = {
+            "agent_type_id": "qwen_3_5_4b_thinking", "assistant_id": "researcher",
+            "description": "Qwen3.5-4B thinking agent equipped with search and access tools.",
+            "url": "http://worker",
+        }
+        if name == "decomposer_sft_1_5_0_timur":
+            expected_worker.update(
+                agent_type_id="timur_4b_non_thinking", assistant_id="researcher_timur_non_thinking",
+                description="Timur Qwen3.5-4B non-thinking agent equipped with search and access tools.",
+            )
+            assert agents.worker_model(name) == "vllm/timur_4b_non_thinking"
+            assert agents.researcher_timur_non_thinking()["model"] == agents.worker_model(name)
+        else:
+            assert agents.worker_model(name) == "vllm/qwen_3_5_4b_thinking"
+        assert config["agent_types"] == [expected_worker]
+
+
+@pytest.mark.parametrize("mismatch", [None, "agent", "timeout", "running"])
+def test_resume_keeps_completed_episodes_and_archives_partial_logs(monkeypatch, tmp_path, mismatch):
+    data = tmp_path / "tasks.jsonl"
+    data.write_text(json.dumps({"task_id": "a", "question": "Q", "answer": "A"}) + "\n")
+    root = tmp_path / "run"
+    complete = root / "traces/a-r001"
+    complete.mkdir(parents=True)
+    (complete / "trace.json").write_text('original trace')
+    partial = root / "traces/a-r002"
+    partial.mkdir()
+    (partial / "model_calls.jsonl").write_text('interrupted request')
+    args = run.parser().parse_args(["--data", str(data), "--all", "-n", "3",
+        "--agent", "researcher", "--resume", str(root), "--concurrency", "8"])
+    config = {k: str(v) if isinstance(v, run.Path) else v for k, v in vars(args).items()}
+    config["concurrency"] = 2
+    manifest = {"run_id": "run", "status": "interrupted", "started_at": run.now(),
+        "finished_at": run.now(), "assistant_id": "researcher", "tasks": ["a"],
+        "repetitions": 3, "config": config, "provenance": {
+            "revision": run.subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=run.REPO_ROOT, text=True).strip(),
+            "data_sha256": run.hashlib.sha256(data.read_bytes()).hexdigest(), "backend": args.retrieval_url,
+            "model": run.AGENTS[args.agent][0], "worker_model": None, "worker_budget_seconds": None, "worker_grace_seconds": None,
+        }, "episodes": [{"task": "a", "repetition": 1,
+            "status": "finished", "evaluation": {"score": 1, "passed": True}}]}
+    if mismatch == "agent":
+        manifest["assistant_id"] = "decomposer"
+    elif mismatch == "timeout":
+        manifest["config"]["timeout"] = 100
+    elif mismatch == "running":
+        manifest["status"] = "running"
+    run.save(root / "manifest.json", manifest)
+    monkeypatch.setattr(run, "preflight", AsyncMock())
+    calls = []
+    async def spawn(*command, **kwargs):
+        calls.append(command)
+        directory = run.Path(command[command.index("--output-dir") + 1])
+        assert not (directory / "model_calls.jsonl").exists()
+        return SimpleNamespace(returncode=1, wait=AsyncMock(return_value=1))
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", spawn)
+    if mismatch:
+        with pytest.raises(ValueError, match="Resume"):
+            asyncio.run(run.main(args))
+        assert not calls
+        assert (partial / "model_calls.jsonl").read_text() == 'interrupted request'
+        return
+    assert asyncio.run(run.main(args)) == root
+    result = json.loads((root / "manifest.json").read_text())
+    assert len(calls) == 2
+    assert len(result["episodes"]) == 3
+    assert {(x["task"], x["repetition"]) for x in result["episodes"]} == {("a", 1), ("a", 2), ("a", 3)}
+    assert result["episodes"][0] == manifest["episodes"][0]
+    assert (complete / "trace.json").read_text() == 'original trace'
+    assert next((root / "interrupted").glob('*/model_calls.jsonl')).read_text() == 'interrupted request'
+    assert result["resumptions"][-1]["concurrency"] == 8
+    assert result["status"] == "needs_attention"
+
+
+@pytest.mark.parametrize('output,score,reason', [
+    ('  New York\n', 1, 'exact_match'),
+    ('\n  ', 0, 'missing_final_answer'),
+])
+def test_plain_answer_and_empty_response_need_no_judge(monkeypatch, tmp_path, output, score, reason):
+    factory = Mock()
+    monkeypatch.setattr(evaluate, 'create_model', factory)
+    result = asyncio.run(evaluate.evaluate({'question': 'Which city?', 'answer': 'New York'}, output, tmp_path))
+    assert result['score'] == score
+    assert result['reason'] == reason
+    factory.assert_not_called()
+
+
+@pytest.mark.parametrize('output,verdict', [
+    ('The answer is New York.', True),
+    ('New York or Boston; I cannot determine which.', False),
+    ('<tool_call><function=search>New York</function></tool_call>', False),
+])
+def test_entire_final_text_is_sent_to_judge(monkeypatch, tmp_path, output, verdict):
+    model = SimpleNamespace(bind=lambda **kwargs: model,
+                            ainvoke=AsyncMock(return_value=AIMessage(content=json.dumps({'match': verdict}))))
+    monkeypatch.setattr(evaluate, 'create_model', lambda _: model)
+    result = asyncio.run(evaluate.evaluate({'question': 'Which city?', 'answer': 'New York'}, output, tmp_path))
+    assert result['passed'] is verdict
+    messages = model.ainvoke.call_args.args[0]
+    assert json.loads(messages[1]['content'])['generated'] == output
+    assert json.loads((tmp_path / 'judge.json').read_text())['messages'] == messages
+    assert result['format_ok'] is False
+    assert result['answer'] == output
+
+
+@pytest.mark.parametrize('output,answer,format_ok', [
+    (r'Candidate Boston. \boxed{New York} More explanation.', 'New York', True),
+    (r'\boxed{Boston} Correction: \boxed{New York}', 'New York', True),
+    (r'Evidence. \boxed{fly\text{-}by} Caveat.', r'fly\text{-}by', True),
+    (r'<think>\boxed{Boston}</think>New York', 'New York', False),
+    (r'New York. \boxed{}', '', False),
+    (r'Incomplete \boxed{New York', r'Incomplete \boxed{New York', False),
+])
+def test_boxed_answer_selection(monkeypatch, tmp_path, output, answer, format_ok):
+    model = SimpleNamespace(bind=lambda **kwargs: model,
+                            ainvoke=AsyncMock(return_value=AIMessage(content='{"match": false}')))
+    monkeypatch.setattr(evaluate, 'create_model', lambda _: model)
+    result = asyncio.run(evaluate.evaluate({'question': 'Which?', 'answer': 'other'}, output, tmp_path))
+    assert result['answer'] == answer
+    assert result['format_ok'] is format_ok
+    if answer:
+        assert json.loads(model.ainvoke.call_args.args[0][1]['content'])['generated'] == answer
+    else:
+        assert result['reason'] == 'missing_final_answer'
+        model.ainvoke.assert_not_called()
