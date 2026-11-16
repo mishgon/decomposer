@@ -30,6 +30,10 @@ def test_four_attempt_selection_matches_native_scoring_and_excludes_infra():
     assert values['Native score', 'Mean scored episodes'] == pytest.approx(10 / 23)
     for i in range(5):
         assert values['Successes per evaluated task', f'{i}/4'] == 1
+    _, unseen = timeline(rows, manifest([f'depth-{i}' for i in range(5)] + ['width-unknown']),
+                         .9, .5, require_success=True)
+    assert unseen['In-band tasks', 'All'] == 2
+    assert unseen['Episodes', 'Unresolved'] == 1
 
 
 def test_backfill_orders_results_and_does_not_count_imported_results_in_throughput():

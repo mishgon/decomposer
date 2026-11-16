@@ -53,6 +53,7 @@ def main():
     parser.add_argument('--inference-python', type=Path, required=True)
     parser.add_argument('--import-run', type=Path)
     parser.add_argument('--max-pass-rate', type=float, default=.5)
+    parser.add_argument('--require-success', action='store_true', help='Require at least one successful attempt')
     parser.add_argument('--clearml-project', default='decomposer-inband')
     parser.add_argument('--clearml-name', help='Defaults to the run directory name')
     args = parser.parse_args()
@@ -60,6 +61,10 @@ def main():
         parser.error('Use --agent student and a pass-rate bound in [0, 1]')
     root = args.output.resolve().parent
     root.mkdir(parents=True, exist_ok=True)
+    if (root / 'launch.json').exists():
+        previous = json.loads((root / 'launch.json').read_text())
+        if previous.get('require_success', False) != args.require_success:
+            raise ValueError('Cannot change the selection rule while resuming a run')
     initialization = json.loads((args.model / 'opd_initialization.json').read_text())
     if args.import_run:
         original = json.loads((args.import_run.parent / 'launch.json').read_text())
@@ -67,7 +72,8 @@ def main():
             raise ValueError('Imported attempts used a different checkpoint')
     state = {'status': 'starting_inference', 'student_model': str(args.model),
              'initialization': initialization, 'repetitions': args.n, 'concurrency': args.concurrency,
-             'max_pass_rate': args.max_pass_rate, 'started_at': time.time(),
+             'max_pass_rate': args.max_pass_rate, 'require_success': args.require_success,
+             'started_at': time.time(),
              'commit': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=REPO_ROOT, text=True).strip()}
     save(root / 'launch.json', state)
     command = [str(args.inference_python), '-m', 'vllm.entrypoints.openai.api_server',
@@ -97,7 +103,8 @@ def main():
             save(root / 'launch.json', state)
             print('SFT inference ready; starting grouped in-band attempts', flush=True)
             cli(run, parser=parser)
-            save(args.output / 'band.json', compute([args.output], args.success_threshold, args.max_pass_rate))
+            save(args.output / 'band.json', compute([args.output], args.success_threshold,
+                                                  args.max_pass_rate, args.require_success))
             state['status'] = 'completed'
         except BaseException as exc:
             state.update(status='interrupted', error=f'{type(exc).__name__}: {exc}')
