@@ -215,19 +215,19 @@ def test_subagent_statistics_count_successful_new_and_terminal_overlap():
         '{"agent_id":"c"}', '{"agent_run_id":"r"}'])]
     messages.append(messages[1])  # A repeated serialized result is not another invocation.
     trace = {'messages': messages, 'agents': {x: {'thread_id': x} for x in 'abc'},
-             'agent_runs': {'r': {'run_id': 'r'}}}
+             'agent_runs': {'r': {'run_id': 'r', 'agent_id': 'a'}}}
     def run(id, start, end):
         return {'run_id': id, 'status': 'success',
                 'created_at': f'2026-11-16T00:00:{start:02d}+00:00',
                 'updated_at': f'2026-11-16T00:00:{end:02d}+00:00'}
     archives = {'a': {'runs': [run('r', 0, 10), run('r2', 20, 30)]},
                 'b': {'runs': [run('r3', 5, 15)]}, 'c': {'runs': [run('r4', 15, 20)]}}
-    assert episode_subagent_statistics(trace, archives) == {'created': 2, 'peak_concurrency': 2, 'no_delegation': 0}
+    assert episode_subagent_statistics(trace, archives) == {'created': 2, 'peak_concurrency': 2, 'no_delegation': 0, 'used': 1}
     # Missing cleanup archives must not produce an artificially low peak.
     del archives['b']
-    assert episode_subagent_statistics(trace, archives) == {'created': 2, 'no_delegation': 0}
+    assert episode_subagent_statistics(trace, archives) == {'created': 2, 'no_delegation': 0, 'used': 1}
     assert episode_subagent_statistics({'messages': [], 'agents': {}, 'agent_runs': {}}, {}) == {
-        'created': 0, 'peak_concurrency': 0, 'no_delegation': 1}
+        'created': 0, 'peak_concurrency': 0, 'no_delegation': 1, 'used': 0}
     assert episode_subagent_statistics({}, {}) == {}
 
 
@@ -250,6 +250,19 @@ def test_no_delegation_counter_only_counts_successful_captured_episodes():
     assert values['Subagent telemetry successful episodes', 'Delegation calls'] == 2
 
 
+def test_subagent_buckets_only_include_successes_and_do_not_mislabel_delegation():
+    statistics = [{'used': n} for n in [0, 1, 2, 3, 9]]
+    statistics += [{'created': 10}, {}]
+    rows = [result(f'depth-{i}', 1, 1060 + i, agent_statistics=s) for i, s in enumerate(statistics)]
+    rows.append(result('depth-fail', 0, 1070, agent_statistics={'created': 9, 'no_delegation': 0}))
+    rows.append(result('width-boundary', .9, 1071, agent_statistics={'created': 2, 'no_delegation': 0, 'used': 1}))
+    _, values = timeline(rows, manifest([r['task_id'] for r in rows]), .9, .5)
+    assert {label: value for (title, label), value in values.items()
+            if title == 'Successful episodes by subagent count'} == {
+        '0 delegations': 1, '1 subagent': 1, '2 subagents': 1, '3+ subagents': 2}
+    assert values['Subagent telemetry successful episodes', 'Distinct subagents used (including forks)'] == 5
+
+
 def test_subagent_means_only_include_successful_traces_and_use_separate_coverage():
     rows = [result('depth-0', 1, 1060, agent_statistics={'created': 4, 'peak_concurrency': 3}),
             result('depth-1', None, 1061, status='error', evaluation={'status': 'evaluation_error'},
@@ -265,3 +278,23 @@ def test_subagent_means_only_include_successful_traces_and_use_separate_coverage
     assert values['Subagents per successful episode', 'Peak concurrency (includes queued runs)'] == 1.5
     assert values['Subagent telemetry successful episodes', 'Successful new calls'] == 3
     assert values['Subagent telemetry successful episodes', 'Peak concurrency (includes queued runs)'] == 2
+
+
+def test_used_agents_include_forks_only_after_run_and_deduplicate_reruns():
+    import json
+    from gyms.wideseek.metrics import episode_subagent_statistics
+    actions = [('new', {}, {'agent_id': 'a'}), ('fork', {}, {'agent_id': 'b'}),
+               ('fork', {}, {'agent_id': 'unused'}),
+               ('run', {'agent_id': 'a'}, {'agent_run_id': 'r1'}),
+               ('run', {'agent_id': 'a'}, {'agent_run_id': 'r2'}),
+               ('run', {'agent_id': 'b'}, {'agent_run_id': 'r3'}),
+               ('run', {'agent_id': 'unused'}, {'error': 'failed'})]
+    messages = []
+    for i, (name, args, response) in enumerate(actions):
+        messages.extend([{'type': 'ai', 'tool_calls': [{'id': str(i), 'name': name, 'args': args}]},
+                         {'type': 'tool', 'tool_call_id': str(i), 'content': json.dumps(response)}])
+    statistics = episode_subagent_statistics({'messages': messages}, {})
+    assert statistics == {'created': 1, 'no_delegation': 0, 'used': 2}
+    assert 'used' not in episode_subagent_statistics({'messages': [
+        {'type': 'ai', 'tool_calls': [{'id': 'x', 'name': 'run', 'args': {}}]},
+        {'type': 'tool', 'tool_call_id': 'x', 'content': '{"agent_run_id":"unknown"}'}]}, {})

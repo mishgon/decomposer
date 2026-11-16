@@ -19,7 +19,7 @@ import httpx
 from prometheus_client.parser import text_string_to_metric_families
 
 from evals.wideseek.band import qualifies_band, resolved
-from gyms.wideseek.metrics import episode_subagent_statistics
+from gyms.wideseek.metrics import episode_subagent_statistics, subagent_bucket
 from gyms.wideseek.runtime import save
 
 
@@ -47,6 +47,10 @@ class Totals:
             for key, value in row.get('agent_statistics', {}).items():
                 self.counts[key + '_sum'] += value
                 self.counts[key + '_count'] += 1
+            statistics = row.get('agent_statistics', {})
+            bucket = subagent_bucket(statistics)
+            if bucket is not None:
+                self.counts[f'subagent_bucket_{bucket}'] += 1
         outcome = resolved(row, self.threshold)
         if outcome is None:
             self.counts['unresolved'] += 1
@@ -90,6 +94,7 @@ class Totals:
         if self.counts['native_count']:
             values['Native score', 'Mean scored episodes'] = self.counts['native_sum'] / self.counts['native_count']
         for key, label in (('created', 'Successful new calls'),
+                           ('used', 'Distinct subagents used (including forks)'),
                            ('peak_concurrency', 'Peak concurrency (includes queued runs)')):
             count = self.counts[key + '_count']
             values['Subagent telemetry successful episodes', label] = count
@@ -97,6 +102,9 @@ class Totals:
                 values['Subagents per successful episode', label] = self.counts[key + '_sum'] / count
         values['Successful episodes without delegation', 'Count'] = self.counts['no_delegation_sum']
         values['Subagent telemetry successful episodes', 'Delegation calls'] = self.counts['no_delegation_count']
+        for bucket, label in enumerate(('0 delegations', '1 subagent',
+                                        '2 subagents', '3+ subagents')):
+            values['Successful episodes by subagent count', label] = self.counts[f'subagent_bucket_{bucket}']
         return values
 
 
