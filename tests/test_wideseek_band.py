@@ -44,6 +44,10 @@ def test_four_attempt_cutoff_includes_zero_and_half_but_not_unresolved(tmp_path)
     assert band['in_band'] == ['0', '1', '2']
     assert band['missing_attempts'] == {'unknown': 1}
     assert band['max_pass_rate'] == .5
+    unseen = compute([tmp_path], .9, max_pass_rate=.5, require_success=True)
+    assert unseen['in_band'] == ['1', '2']
+    assert unseen['missing_attempts'] == {'unknown': 1}
+    assert unseen['require_success'] is True
 
 
 def test_second_stage_attempts_only_the_undecided_tasks_and_counts_with_the_first(tmp_path, monkeypatch):

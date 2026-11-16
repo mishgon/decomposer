@@ -22,7 +22,7 @@ def trace_counts(path):
     return subagent_counts(json.loads(path.read_text())['messages'])
 
 
-def in_band_count(rows, repetitions, threshold, max_pass_rate=None):
+def in_band_count(rows, repetitions, threshold, max_pass_rate=None, require_success=False):
     from evals.wideseek.band import qualifies_band, resolved
 
     passes, attempts = Counter(), Counter()
@@ -31,7 +31,7 @@ def in_band_count(rows, repetitions, threshold, max_pass_rate=None):
         if outcome is not None:
             attempts[row['task_id']] += 1
             passes[row['task_id']] += outcome
-    return sum(count >= repetitions and qualifies_band(passes[task], count, max_pass_rate)
+    return sum(count >= repetitions and qualifies_band(passes[task], count, max_pass_rate, require_success)
                for task, count in attempts.items())
 
 
@@ -114,8 +114,13 @@ def display(root, run=None, success_threshold=.9, max_pass_rate=None):
     good = sum(qualifies(r, threshold) for r in selected)
     print(f"Qualified F1 > {threshold}: {good} | throughput {done*3600/elapsed:.1f} episodes/hour")
     if settings.get('agent') == 'student':
-        found = in_band_count(selected, settings['repetitions'], threshold, max_pass_rate)
+        launch_path = directory.parent / 'launch.json'
+        launch = json.loads(launch_path.read_text()) if launch_path.exists() else {}
+        require_success = launch.get('require_success', False)
+        found = in_band_count(selected, settings['repetitions'], threshold, max_pass_rate, require_success)
         rule = 'mixed pass/fail' if max_pass_rate is None else f'pass rate <= {max_pass_rate:.0%}'
+        if require_success:
+            rule += ', at least one success'
         print(f"Qualifying in-band tasks: {found}/{len(settings['tasks'])} "
               f"(at least {settings['repetitions']} valid attempts, {rule})")
     errors = Counter((r.get('error') or r.get('stop_reason') or r['status']).split('\n')[0]

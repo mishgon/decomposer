@@ -30,8 +30,9 @@ def domain(task):
 
 
 class Totals:
-    def __init__(self, repetitions, threshold, max_pass_rate):
+    def __init__(self, repetitions, threshold, max_pass_rate, require_success=False):
         self.repetitions, self.threshold, self.max_pass_rate = repetitions, threshold, max_pass_rate
+        self.require_success = require_success
         self.counts, self.attempts, self.passes = Counter(), Counter(), Counter()
         self.qualified, self.histogram = Counter(), Counter()
 
@@ -47,13 +48,13 @@ class Totals:
         if self.attempts[task] >= self.repetitions:
             self.histogram[self.passes[task]] -= 1
             self.qualified[domain(task)] -= qualifies_band(
-                self.passes[task], self.attempts[task], self.max_pass_rate)
+                self.passes[task], self.attempts[task], self.max_pass_rate, self.require_success)
         self.attempts[task] += 1
         self.passes[task] += outcome
         if self.attempts[task] >= self.repetitions:
             self.histogram[self.passes[task]] += 1
             self.qualified[domain(task)] += qualifies_band(
-                self.passes[task], self.attempts[task], self.max_pass_rate)
+                self.passes[task], self.attempts[task], self.max_pass_rate, self.require_success)
         evaluation = row.get('evaluation', {})
         score = evaluation.get('score')
         if (evaluation.get('status') == 'scored' and type(score) in (int, float)
@@ -82,12 +83,12 @@ class Totals:
         return values
 
 
-def timeline(rows, manifest, threshold, max_pass_rate):
+def timeline(rows, manifest, threshold, max_pass_rate, require_success=False):
     """Cumulative minute buckets; imported results precede this run at minute zero."""
     settings = manifest['settings']
     total = len(settings['tasks']) * settings['repetitions']
     domains = sorted({domain(task) for task in settings['tasks']})
-    totals = Totals(settings['repetitions'], threshold, max_pass_rate)
+    totals = Totals(settings['repetitions'], threshold, max_pass_rate, require_success)
     points, fresh = {}, 0
     started = manifest['started_at']
     def minute(row):
@@ -174,6 +175,10 @@ def report(args, stop=None):
         state = json.loads(args.state.read_text()) if args.state.exists() else {}
         identity = {'run': str(args.run.resolve()), 'threshold': args.success_threshold,
                     'max_pass_rate': args.max_pass_rate}
+        launch = json.loads((args.run.parent / 'launch.json').read_text())
+        require_success = launch.get('require_success', False)
+        if require_success:
+            identity['require_success'] = True
         if state and state['identity'] != identity:
             raise ValueError('Reporter state belongs to another run or selection rule')
         from clearml import Task
@@ -196,7 +201,7 @@ def report(args, stop=None):
         print(f'ClearML: {state["url"]}', flush=True)
         while True:
             manifest, rows, unfinished = snapshot(args.run)
-            points, current = timeline(rows, manifest, args.success_threshold, args.max_pass_rate)
+            points, current = timeline(rows, manifest, args.success_threshold, args.max_pass_rate, require_success)
             elapsed = max(1, time.time() - manifest['started_at'])
             minute = max(0, int(elapsed / 60))
             current['Throughput (episodes/hour)', 'Since collection start'] = (
