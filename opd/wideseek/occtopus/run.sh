@@ -46,7 +46,7 @@ with httpx.Client(trust_env=False, timeout=30) as client:
         raise RuntimeError('ClearML authentication returned no token')
 print('lmrouter and ClearML authentication passed', flush=True)
 PY
-model="$state/models/decomposer-manager-sft-v1.2.0"
+model="$state/models/decomposer-manager-sft-v1.7.0"
 if [[ ! -f "$model/opd_initialization.json" ]]; then
     python -m opd.wideseek.prepare_model --gpu 0 --output "$model"
 fi
