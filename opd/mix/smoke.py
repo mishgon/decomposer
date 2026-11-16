@@ -12,7 +12,6 @@ from opd.wideseek.run import create_parser, main as train
 # Inherit the production optimizer, LoRA, token budgets, sampling and checkpointing.
 OVERRIDES = [
     'trainer.project_name=decomposer-mix-opd',
-    'trainer.experiment_name=mix-smoke',
     'trainer.total_epochs=1',
     'rollout.total_rollout_steps=8',
     'trainer.val_before_train=false',
@@ -27,7 +26,8 @@ async def main(args):
     gpu_overrides(args.gpus, args.training_gpus)
     check_inputs(args)
     with reserve_gpus(args.gpus, args.output.resolve().parent):
-        await train(args, OVERRIDES, prepare_data=prepare, smoke=True)
+        overrides = [*OVERRIDES, f'trainer.experiment_name={args.output.resolve().parent.name}']
+        await train(args, overrides, prepare_data=prepare, smoke=True)
 
 
 if __name__ == '__main__':
