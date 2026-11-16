@@ -15,6 +15,7 @@ from types import SimpleNamespace
 import warnings
 
 import httpx
+from prometheus_client.parser import text_string_to_metric_families
 
 from evals.wideseek.band import qualifies_band, resolved
 from gyms.wideseek.runtime import save
@@ -149,6 +150,27 @@ def collector_gpu_metrics(api, job_id):
         return values
 
 
+def prefix_cache_metrics(text, previous):
+    """Token-weighted hit/miss percentages since the previous vLLM scrape."""
+    names = {'vllm:prefix_cache_queries_total', 'vllm:prefix_cache_hits_total'}
+    counters = Counter()
+    for family in text_string_to_metric_families(text):
+        for sample in family.samples:
+            if sample.name in names:
+                counters[sample.name] += sample.value
+    if set(counters) != names or not all(math.isfinite(v) and v >= 0 for v in counters.values()):
+        return {}, None
+    if previous is None or any(counters[k] < previous[k] for k in names):
+        return {}, counters
+    queries = counters['vllm:prefix_cache_queries_total'] - previous['vllm:prefix_cache_queries_total']
+    hits = counters['vllm:prefix_cache_hits_total'] - previous['vllm:prefix_cache_hits_total']
+    if queries <= 0 or not 0 <= hits <= queries:
+        return {}, counters
+    rate = 100 * hits / queries
+    return {('vLLM prefix cache (%)', 'Hit (last interval)'): rate,
+            ('vLLM prefix cache (%)', 'Miss (last interval)'): 100 - rate}, counters
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--run', type=Path, required=True, help='Directory containing manifest.json')
@@ -199,6 +221,7 @@ def report(args, stop=None):
             'models': settings['model_profiles'], 'checkpoint': launch.get('initialization')}, name='Collection')
         logger = task.get_logger()
         print(f'ClearML: {state["url"]}', flush=True)
+        cache_counters = None
         while True:
             manifest, rows, unfinished = snapshot(args.run)
             points, current = timeline(rows, manifest, args.success_threshold, args.max_pass_rate, require_success)
@@ -221,6 +244,15 @@ def report(args, stop=None):
             outage = args.run / 'outage.json'
             paused = outage.exists() and json.loads(outage.read_text()).get('status') == 'paused'
             logger.report_scalar('Service outage', 'Paused', int(paused), iteration=minute)
+            if getattr(args, 'vllm_metrics_url', None):
+                try:
+                    response = httpx.get(args.vllm_metrics_url, timeout=3, trust_env=False)
+                    response.raise_for_status()
+                    values, cache_counters = prefix_cache_metrics(response.text, cache_counters)
+                    for (title, series), value in values.items():
+                        logger.report_scalar(title, series, value, iteration=minute)
+                except (httpx.HTTPError, ValueError) as exc:
+                    warnings.warn(f'Prefix cache telemetry unavailable ({type(exc).__name__}); episode reporting continues')
             if getattr(args, 'collector_job', None):
                 try:
                     for (title, series), value in collector_gpu_metrics(args.occtopus_api, args.collector_job).items():
@@ -250,7 +282,8 @@ def collection_reporter(args):
     run = args.output.resolve()
     options = SimpleNamespace(run=run, state=run.parent / 'clearml.json',
         project=args.clearml_project, name=args.clearml_name,
-        success_threshold=args.success_threshold, max_pass_rate=args.max_pass_rate, interval=60)
+        success_threshold=args.success_threshold, max_pass_rate=args.max_pass_rate, interval=60,
+        vllm_metrics_url='http://127.0.0.1:8024/metrics')
 
     def follow():
         try:
