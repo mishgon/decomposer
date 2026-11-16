@@ -154,3 +154,31 @@ def test_report_flushes_final_metrics_and_reuses_task_on_resume(tmp_path, monkey
     assert json.loads(args.state.read_text())['collection_status'] == 'completed'
     assert any(call.args[:3] == ('Episodes', 'Active', 0)
                for call in task.get_logger.return_value.report_scalar.call_args_list)
+
+
+@pytest.mark.parametrize('stale', [False, True])
+def test_gpu_telemetry_selects_collector_assignment_and_rejects_stale_samples(monkeypatch, stale):
+    from datetime import datetime, timezone
+    import httpx
+    from evals.wideseek import clearml_reporter as reporter
+
+    monkeypatch.setenv('OCC_TOKEN', 'test-token')
+    monkeypatch.setattr(reporter.time, 'time', lambda: 1000)
+    def handler(request):
+        assert request.headers['Authorization'] == 'Bearer test-token'
+        if request.url.path.endswith('/attempts'):
+            return httpx.Response(200, json={'items': [
+                {'attemptNumber': 1, 'status': 'Failed', 'workers': []},
+                {'attemptNumber': 2, 'status': 'Running', 'workers': [
+                    {'nodeId': 'node', 'workerIndex': 0, 'gpuDeviceIds': ['ours']}]}]})
+        assert request.url.path == '/api/v1/nodes/node'
+        return httpx.Response(200, json={'inventory': {
+            'observedAt': datetime.fromtimestamp(700 if stale else 999, timezone.utc).isoformat(),
+            'gpus': [{'id': 'other', 'index': 0, 'utilizationPercent': 100, 'memoryUsedBytes': 0},
+                     {'id': 'ours', 'index': 3, 'utilizationPercent': 40, 'memoryUsedBytes': 2 * 1024 ** 3}]}})
+    client = httpx.Client
+    monkeypatch.setattr(reporter.httpx, 'Client', lambda **kw: client(transport=httpx.MockTransport(handler), **kw))
+    values = reporter.collector_gpu_metrics('https://scheduler.example/api/v1', 'job')
+    assert values == ({} if stale else {
+        ('GPU utilization (%)', 'Worker 0 GPU 3'): 40,
+        ('GPU memory (GiB)', 'Worker 0 GPU 3'): 2})
