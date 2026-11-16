@@ -122,8 +122,7 @@ async def main(args, overrides, *, prepare_data=prepare, smoke=False):
     finally:
         manifest["finished_at"] = time.time()
         (output / "run.json").write_text(json.dumps(manifest, indent=2))
-    if not smoke:
-        save_report(output)
+    save_report(output)
 
 
 def create_parser(*, smoke=False):
