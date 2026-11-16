@@ -3,7 +3,30 @@
 The full-run control recipe is **100% WideSeek depth**. `recipe.json` declares
 that composition. A separate four-task smoke exercises DeepDive and both
 WideSeek splits. Full-run mixture sampling and difficulty filtering are not
-implemented yet. Unsupported control recipe changes fail explicitly.
+implemented in the control recipe. Unsupported control recipe changes fail explicitly.
+
+## Frozen In-Band Selection
+
+Freeze the qualifying tasks from completed attempts in running searches:
+
+```bash
+python -m opd.mix.select_inband \
+  --runs /shared/known/eval /shared/unseen/eval \
+  --pools /shared/known/tasks.jsonl /shared/unseen/tasks.jsonl \
+  --output /shared/selected
+python -m opd.mix.overfit --source /shared/selected/tasks.jsonl \
+  --output /shared/experiments/mix-selected/train --steps 64 \
+  --model /shared/models/decomposer-manager-sft-v1.7.0 \
+  --worker-python /shared/runtime/workers/bin/python --gpus 0 1
+```
+
+Selection requires four resolved attempts, preserves each search's positive-success
+rule, checks checkpoint and task-pool identity, and rejects frozen holdout overlap.
+The snapshot records a cutoff, result checksums, outcomes, and source provenance.
+Training visits every selected question with balanced exposure: 512 episodes at
+batch 8 for 64 updates. Six fixed train probes and Workplace-20 are evaluated at
+step zero and every eight updates. There is no separate in-domain heldout panel
+for this selected-pool run. Infrastructure errors remain excluded from selection.
 
 ## Mixed-Gym Smoke
 
