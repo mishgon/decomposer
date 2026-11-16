@@ -56,6 +56,27 @@ the passes of every task over all given runs. A pass is an attempt the collector
 as a success. Timeouts, context overflows and runaway turns are failed attempts; outage
 failures are rerun, not counted.
 
+Judge errors, infrastructure failures, failed cleanup/export and unknown errors
+are excluded from both passes and attempts. `band.json` records these results in
+`unresolved`. Before classifying a task, the selector requires at least the largest
+`-n` requested for that task across the supplied runs. Tasks below that minimum
+appear in `rerun`, with their shortfalls in `missing_attempts`; they also remain
+in `--undecided`, even if their valid attempts already include a pass and a fail.
+
+Write just those tasks to a replacement collection file:
+
+```bash
+gyms/wideseek/.venv/bin/python -m evals.wideseek.band <run> \
+  --rerun rerun.jsonl --data <pool.jsonl>
+```
+
+Collect replacement attempts in a new output directory, then pass both the
+original and replacement run directories to `band`. Repeat until `rerun` is empty.
+For example, one pass plus one judge error in a two-attempt run is unclassified;
+one valid replacement failure makes it in-band with one pass in two valid attempts.
+Additional valid attempts from later stages still contribute to the pass rate.
+Known episode time, token, context and recursion limits remain measured failures.
+
 ```bash
 bash evals/wideseek/watch-wideseek.sh
 ```
