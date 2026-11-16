@@ -23,6 +23,7 @@ from gyms.wideseek import REPO_ROOT, agents
 from gyms.wideseek.evaluate import evaluate
 from gyms.wideseek.metrics import subagent_counts
 from gyms.wideseek.prepare import agent_input
+from gyms.wideseek.worker import SUMMARY_MODEL, ACCESS_CHARACTERS
 from gyms.wideseek.runtime import (BudgetExceeded, close_model, init_budget, model, model_metadata, save)
 
 
@@ -236,7 +237,8 @@ async def describe_run(args):
             response.raise_for_status()
     profiles = {}
     for role, profile in (("agent", agents.AGENT_MODELS[args.agent]),
-                          ("subagent", agents.RESEARCHER_MODEL), ("judge", agents.JUDGE_MODEL)):
+                          ("subagent", agents.RESEARCHER_MODEL), ("judge", agents.JUDGE_MODEL),
+                          ("access_summary", SUMMARY_MODEL)):
         policy = model(profile)
         try:
             profiles[role] = {"profile": profile, **model_metadata(policy)}
@@ -247,6 +249,7 @@ async def describe_run(args):
         *sorted((REPO_ROOT / "gyms/wideseek").glob("*.py")),
         *sorted((REPO_ROOT / "sft/wideseek").glob("*.py")),
         *sorted((REPO_ROOT / "external/wideseek_reward").glob("*.py")),
+        *sorted((REPO_ROOT / "external/wideseek_tools").glob("*.py")),
         REPO_ROOT / "gyms/model_logging.py", REPO_ROOT / "gyms/usage.py",
         REPO_ROOT / "gyms/wideseek/langgraph.json",
     ]
@@ -257,6 +260,7 @@ async def describe_run(args):
     harness = {
         "source_sha256": digest.hexdigest(),
         "agent_system_prompt": agents.AGENT_SYSTEM_PROMPT,
+        "worker_system_prompt": agents.WORKER_SYSTEM_PROMPT,
         "agent_run_budget_seconds": agents.AGENT_RUN_BUDGET_SECONDS,
         "agent_shutdown_grace_seconds": agents.AGENT_SHUTDOWN_GRACE_SECONDS,
     }
@@ -269,6 +273,9 @@ async def describe_run(args):
                 "retrieval": retrieval,
                 "model_calls": args.model_calls, "output_tokens": args.output_tokens,
                 "episode_timeout": args.episode_timeout,
+                "access_summary": {"profile": SUMMARY_MODEL, "enabled": True,
+                                   "input_characters": ACCESS_CHARACTERS, "max_tokens": 2048,
+                                   "budget_scope": "auxiliary", "temperature": 0.},
                 "judge": {"model": profiles["judge"]["model_name"], "profile": agents.JUDGE_MODEL,
                           "enabled": not getattr(args, "skip_judge", False),
                           "temperature": 0., "thinking": False, "paper_comparable": False}}

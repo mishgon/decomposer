@@ -167,6 +167,20 @@ class ModelLog(AgentMiddleware):
             if limit is not None:
                 settings["max_tokens"] = limit
             system = request.system_message
+            if remaining is not None:
+                turn = 1 + sum(m.type == "ai" and not m.additional_kwargs.get("budget_control")
+                               for m in request.messages)
+                notice = (f"This is your model turn {turn}. The shared episode budget has "
+                          f"{remaining + 1} model calls including this turn ({remaining} after it). "
+                          "This budget is shared by the coordinator and all researchers, not per agent. "
+                          "Other agents may consume the remaining calls concurrently. "
+                          "Tool batches count as one model turn; access summarization is outside this budget. "
+                          "Finish your answer or report within the available budget. "
+                          "Reserved reports or time limits may require you to finish earlier.")
+                content = system.content if system else ""
+                blocks = [{"type": "text", "text": content}] if isinstance(content, str) else list(content)
+                system = SystemMessage(content=[*blocks, {"type": "text", "text": notice}])
+                row["budget_remaining_calls"] = remaining
             overrides = {}
             if final_response:
                 # Reserve the last permitted call for an answer, not another tool request.
@@ -219,7 +233,8 @@ class ModelLog(AgentMiddleware):
                 "generation": {**model_metadata(request.model), **settings},
                 "effective_tool_count": len(overrides.get("tools", request.tools)),
                 **{key: row[key] for key in ("budget_finalization", "budget_finalization_temperature") if key in row},
-                **({"effective_system_message": message_to_dict(system)} if overrides else {}),
+                **({"effective_system_message": message_to_dict(system)} if system else {}),
+                **({"budget_remaining_calls": remaining} if remaining is not None else {}),
                 "finished_at": datetime.now(timezone.utc).isoformat(),
                 "duration_seconds": time.monotonic() - started})
 

@@ -4,9 +4,9 @@ from langchain.agents.middleware import ClearToolUsesEdit, ContextEditingMiddlew
 
 from decomposer.core import create_decomposer_agent
 from decomposer.run_budget import RunBudgetMiddleware
-from gyms.wideseek.prompts import AGENT_SYSTEM_PROMPT
+from gyms.wideseek.prompts import AGENT_SYSTEM_PROMPT, WORKER_SYSTEM_PROMPT
 from gyms.wideseek.runtime import Context, ModelLog, model, DEFAULT_MODEL, DEFAULT_TEACHER, MODEL_BACKEND
-from gyms.wideseek.worker import access, search
+from gyms.wideseek.worker import access, search, access_batch, search_batch
 
 REACT_MODEL = DEFAULT_MODEL
 DECOMPOSER_MODEL = DEFAULT_TEACHER
@@ -27,9 +27,9 @@ def context_middleware():
 
 
 def researcher():
-    return create_agent(model(RESEARCHER_MODEL), tools=[search, access], context_schema=Context,
+    return create_agent(model(RESEARCHER_MODEL), tools=[search_batch, access_batch], context_schema=Context,
         middleware=[RunBudgetMiddleware(), ModelLog("researcher"), *context_middleware()],
-        system_prompt=AGENT_SYSTEM_PROMPT)
+        system_prompt=WORKER_SYSTEM_PROMPT)
 
 
 def react(policy, checkpointer, *, middleware=()):
