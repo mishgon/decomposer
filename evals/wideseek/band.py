@@ -40,7 +40,7 @@ def resolved(result, threshold):
                 and math.isfinite(score) and 0 <= score <= 1):
             return qualifies(result, threshold)
         return None
-    if status in {'timeout', 'budget_exceeded', 'context_exceeded'}:
+    if status in {'timeout', 'budget_exceeded', 'context_exceeded', 'invalid_tool_call'}:
         return False
     error = str(result.get('error', ''))
     if status == 'error' and (

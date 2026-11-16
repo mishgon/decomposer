@@ -118,8 +118,9 @@ async def collect_episode(guard, run_episode, task, mode, attempt, root, args, *
             raise WorkerCleanupError(f'Worker server reset required: {result_path}')
         if any(result.get(key) for key in ('cleanup_errors', 'capture_error', 'trace_error', 'export_error')):
             raise RuntimeError(f"Unsafe episode cleanup/export: {result_path}")
+        expected_error = result.get('error') if result['status'] == 'invalid_tool_call' else None
         errors = [error for error in execution_errors(result, directory)
-                  if not _CONTEXT_OVERFLOW.search(error)]
+                  if error != expected_error and not _CONTEXT_OVERFLOW.search(error)]
         if any(_FATAL.search(error) for error in errors):
             raise RuntimeError(f"Permanent service error: {result_path}")
         retry = any(transient(error) for error in errors)

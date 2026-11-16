@@ -235,6 +235,21 @@ async def episode(task, mode, attempt, root, args, *, middleware=(), policy=None
              "agents": state.get("agents", {}), "agent_runs": state.get("agent_runs", {}),
              "decomposer_agent_runs": state.get("decomposer_agent_runs", []),
              "messages": [message_to_dict(m) for m in messages]}
+    # A malformed model-generated call can make vLLM reject the next history.
+    # Match its JSON parser error to the saved arguments; other 400s stay fatal.
+    error = result.get("error", "")
+    if (result["status"] == "error" and not result.get("cleanup_errors")
+            and not result.get("capture_error") and error.startswith((
+            "OpenAIInvalidRequestError: Error code: 400 - ", "BadRequestError: Error code: 400 - "))):
+        for message in trace["messages"]:
+            for call in message["data"].get("invalid_tool_calls", []):
+                if not isinstance(call.get("args"), str):
+                    continue
+                try:
+                    json.loads(call["args"])
+                except json.JSONDecodeError as exc:
+                    if error.endswith(str(exc)):
+                        result["status"] = "invalid_tool_call"
     try:
         save(path / "trace.json", trace)
     except Exception as exc:
