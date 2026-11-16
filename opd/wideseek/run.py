@@ -18,7 +18,7 @@ from opd.launch import add_gpu_arguments, gpu_overrides
 from opd.report import save_report
 
 
-async def main(args, overrides, *, prepare_data=prepare):
+async def main(args, overrides, *, prepare_data=prepare, smoke=False):
     trainer_env = None
     config_name = 'full'
     if bundle := os.environ.get('OPD_FAST_RUNTIME'):
@@ -27,13 +27,15 @@ async def main(args, overrides, *, prepare_data=prepare):
         subprocess.run([sys.executable, '-m', 'opd.wideseek.fast_runtime'],
                        env=trainer_env, check=True)
         config_name = 'fast'
-    baseline = json.loads((args.baseline / "manifest.json").read_text())
-    if baseline["status"] != "completed" or baseline["model"] != "vllm/qwen_3_5_4b_non_thinking":
-        raise ValueError("Finish the starting-checkpoint baseline first")
+    baseline = None
+    if not smoke:
+        baseline = json.loads((args.baseline / "manifest.json").read_text())
+        if baseline["status"] != "completed" or baseline["model"] != "vllm/qwen_3_5_4b_non_thinking":
+            raise ValueError("Finish the starting-checkpoint baseline first")
     training_gpus = args.training_gpus
     overrides = [*overrides, *gpu_overrides(args.gpus, training_gpus)]
     model = args.model.resolve()
-    if baseline.get("student_model") != str(model):
+    if baseline is not None and baseline.get("student_model") != str(model):
         raise ValueError("Baseline must use the selected starting checkpoint")
     if args.resume_from:
         checkpoint = args.resume_from.resolve()
@@ -49,8 +51,9 @@ async def main(args, overrides, *, prepare_data=prepare):
                      f'trainer.resume_from_path={checkpoint}']
     if not (model / "config.json").exists():
         raise ValueError("Student checkpoint does not exist")
-    from opd.workplace_assistant.preflight import check as check_workplace_worker
-    await check_workplace_worker()
+    if not smoke:
+        from opd.workplace_assistant.preflight import check as check_workplace_worker
+        await check_workplace_worker()
     for patch in (ROOT / "opd/patches").glob("*.patch"):
         subprocess.run(["git", "-C", str(ROOT / "external/verl"), "apply", "--recount",
                         "--reverse", "--check", str(patch)], check=True, capture_output=True)
@@ -58,7 +61,7 @@ async def main(args, overrides, *, prepare_data=prepare):
     output.mkdir(parents=True, exist_ok=False)
     data = output / "data"
     panel = prepare_data(args.source, data)
-    if baseline.get("source_sha256") != panel["source_sha256"]:
+    if baseline is not None and baseline.get("source_sha256") != panel["source_sha256"]:
         raise ValueError("Baseline and training WideSeek source differ")
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
@@ -73,8 +76,10 @@ async def main(args, overrides, *, prepare_data=prepare):
     if trainer_env is not None:
         trainer_env = environment(Path(bundle))
     manifest = {"status": "preflight", "started_at": time.time(), "model": str(model),
-                "baseline": str(args.baseline.resolve()), "gpus": args.gpus,
+                "baseline": str(args.baseline.resolve()) if baseline is not None else None, "gpus": args.gpus,
                 "overrides": overrides, "pid": os.getpid()}
+    manifest['smoke'] = smoke
+    manifest['commit'] = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
     manifest['config_name'] = config_name
     manifest['training_gpus'] = training_gpus
     manifest['rollout_gpus'] = max(1, len(args.gpus) - training_gpus)
@@ -92,8 +97,7 @@ async def main(args, overrides, *, prepare_data=prepare):
         async with agent_server(ROOT / "gyms/wideseek/langgraph.json", port=port, n_jobs_per_worker=64,
                                 python_executable=args.worker_python):
             from opd.wideseek.preflight import check
-            await check(model, output / "preflight", worker_url=os.environ["WS_WORKER_URL"],
-                        search_url=os.environ["WS_SEARCH_URL"])
+            await check(model, output / "preflight", worker_url=os.environ["WS_WORKER_URL"])
             command = [sys.executable, "-u", "-m", "opd.wideseek.trainer", "--config-path",
                        str(ROOT / "opd/wideseek"), "--config-name",
                        config_name,
@@ -118,14 +122,16 @@ async def main(args, overrides, *, prepare_data=prepare):
     finally:
         manifest["finished_at"] = time.time()
         (output / "run.json").write_text(json.dumps(manifest, indent=2))
-    save_report(output)
+    if not smoke:
+        save_report(output)
 
 
-def create_parser():
+def create_parser(*, smoke=False):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", type=Path, required=True, help="Pinned normalized WideSeek task JSONL")
-    parser.add_argument("--baseline", type=Path, required=True)
-    parser.add_argument("--model", type=Path, default=Path.home() / "models/Qwen3.5-4B")
+    parser.add_argument("--baseline", type=Path, required=not smoke)
+    parser.add_argument("--model", type=Path, required=smoke,
+                        default=None if smoke else Path.home() / "models/Qwen3.5-4B")
     parser.add_argument("--output", type=Path, required=True)
     add_gpu_arguments(parser)
     parser.add_argument("--resume-from", type=Path, help="Restore full veRL checkpoint into a new output directory")
