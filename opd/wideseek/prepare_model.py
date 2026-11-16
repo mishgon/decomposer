@@ -1,4 +1,4 @@
-"""Rebuild the pinned SFT v1.2.0 release on the shared disk and verify its hash."""
+"""Rebuild the pinned SFT v1.7.0 release on the shared disk and verify its hash."""
 import argparse
 import hashlib
 import json
@@ -7,7 +7,7 @@ from pathlib import Path
 import subprocess
 
 REPO = 'decomposer-datasets/decomposer-manager-qwen35-4b-sft'
-REVISION = '70f7732e58f25be7787d7ff75761ef85fe90c98e'
+REVISION = 'ac9747fd7dff94201bd82faf393cdf64f5de3e80'
 
 
 def main(args):
@@ -16,7 +16,7 @@ def main(args):
     if args.output.exists():
         raise FileExistsError(args.output)
     source = Path(snapshot_download(REPO, revision=REVISION, token=token,
-                                   allow_patterns=['merge.py', '1.2.0/*']))
+                                   allow_patterns=['merge.py', '1.7.0/*']))
     used = int(subprocess.check_output(['nvidia-smi', '-i', str(args.gpu),
                '--query-gpu=memory.used', '--format=csv,noheader,nounits'], text=True).strip())
     if used > 1024:
@@ -27,17 +27,17 @@ def main(args):
     subprocess.run(['uv', 'run', '--no-project', '--python', '3.12',
                     '--with', 'torch==2.11.0', '--with', 'transformers==5.14.1',
                     '--with', 'peft==0.21.2', '--with', 'huggingface_hub',
-                    'python', str(source / 'merge.py'), '1.2.0', str(args.output.resolve()),
-                    '--source', str(source / '1.2.0')], env=env, check=True)
+                    'python', str(source / 'merge.py'), '1.7.0', str(args.output.resolve()),
+                    '--source', str(source / '1.7.0')], env=env, check=True)
     # merge.py exits unsuccessfully if this does not match the published hash.
     weights = args.output / 'model.safetensors'
     with weights.open('rb') as stream:
         digest = hashlib.file_digest(stream, 'sha256').hexdigest()
-    expected = (source / '1.2.0/merged/model.safetensors.sha256').read_text().split()[0]
+    expected = (source / '1.7.0/merged/model.safetensors.sha256').read_text().split()[0]
     assert digest == expected
     (args.output / 'opd_initialization.json').write_text(json.dumps(
-        {'repo': REPO, 'tag': 'v1.2.0', 'revision': REVISION, 'sha256': digest}, indent=2))
-    print(f'Verified SFT v1.2.0: {args.output}')
+        {'repo': REPO, 'tag': 'v1.7.0', 'revision': REVISION, 'sha256': digest}, indent=2))
+    print(f'Verified SFT v1.7.0: {args.output}')
 
 
 if __name__ == '__main__':
