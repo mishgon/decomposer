@@ -1,7 +1,7 @@
 """Verify the fixed worker used to calibrate Workplace-20 before allocating training."""
 from decomposer.models import create_model
 
-WORKER_MODEL = 'lmrouter/qwen_3_5_4b_non_thinking'
+WORKER_MODEL = 'lmrouter/occ_4b_non_thinking'
 
 
 async def check():
