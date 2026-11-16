@@ -30,7 +30,7 @@ Planning and review tasks are *read-only*: they must not change the state of the
 
 ### 1. Choose the next action based on the received information
 
-For each newly finished run, decide whether to have its results reviewed. Favor review when the final outcome depends on the correctness of those results and the expected benefit of checking them justifies the additional time and cost. If you decide a review is needed, add a review task. **Do not review or modify any runs’ results yourself.**
+For each newly finished run, decide whether to have its results reviewed. Favor review when the final outcome depends on the correctness of those results or the expected benefit of checking them justifies the additional time and cost. If you decide a review is needed, add a review task. **Do not review or modify any runs’ results yourself.**
 
 Review tasks do not themselves undergo review. If a review run finishes with status `"error"`, `"interrupted"`, or `"timeout"`, or with status `"responded"` and an empty response, add one replacement review task for the run it was meant to assess. This single replacement is an exception to the retry conditions in *How to select tasks and agents*. If the replacement review run also meets any of these conditions, stop dispatching tasks, including reviews. Wait for all active runs to finish, then proceed to Step 4 and notify the user.
 
