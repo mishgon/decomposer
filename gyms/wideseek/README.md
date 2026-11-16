@@ -214,11 +214,44 @@ References: [Qwen3.5 vLLM recipe](https://github.com/vllm-project/recipes/blob/m
 
 ## Context Bounds and Generation-only Checks
 
-Search returns at most 1500 characters per passage, with a notice when the
-preview is truncated. `access` defaults to 3000 characters, permits up to 6000,
-and accepts a character `offset`. Its truncation notice supplies the next offset;
-read further slices when the required fact is absent from the current slice.
+Search returns at most 1500 characters per passage. ReAct uses
+`search(query, count=3)` and `access(url, info_to_extract)`. Researchers use the
+upstream batch schemas: `search(queries=[{"query": ..., "count": 3}])` and
+`access(urls=[{"url": ..., "info_to_extract": ...}])`, with up to five items.
+`count` maps to retrieval's `topk`; the public tool enforces 1–9 as described
+upstream. Retrieval itself still accepts 1–10.
+
+Access sends the first 6000 **characters** to Qwen3.5-4B without thinking, using
+WideSeek's unchanged extraction prompt from RLinf `6a7dcbd`. It returns the URL,
+extraction request, and summary. Empty pages bypass inference. Summary errors
+remain tool errors, never fabricated evidence. Summary requests use temperature
+0 and at most 2048 output tokens. They run independently of answer evaluation,
+including with `--skip-judge`, and do not consume the policy-call/token budget.
+Their full inputs, outputs, timing, and token usage are recorded in
+`model_calls.jsonl` under `access_summary`, included in `result.json` usage.
+Raw retrieval responses remain in `tool_calls/`.
+
+Deliberate differences from upstream: passage limit 1500 instead of 5000;
+page prefix 6000 instead of 25000; local Qwen3.5-4B instead of Qwen3-30B-A3B;
+strict schema validation instead of silently dropping excess batch items.
+The summarizer's output limit is independent of the page's character limit.
+Our Decomposer lifecycle and context editing remain harness-specific.
 The agent prompt asks researchers to retain concise verified facts and source URLs.
+
+ReAct and researchers now use separate upstream role prompts. Researchers return
+evidence for their assigned subtask, without the ReAct final-table instruction.
+We use the no-shot ReAct prompt and omit the explicit `<think>` instruction for
+the non-thinking local model. The offline-corpus limits are appended to both.
+The coordinator retains Decomposer's `create/run/wait` lifecycle prompt; upstream
+uses `create_sub_agents`, few-shot decomposition examples, and automatic joins.
+
+Before every policy call, the effective system prompt includes the current turn
+and the remaining **shared** episode-call budget, captured after atomic reservation.
+The default remains 40 shared calls. Other workers may spend calls concurrently.
+Upstream instead caps planner/worker/single-agent turns separately at 10/20/50
+and appends a turn notice to the initial question and each tool response. Our
+notice does not modify stored history; the effective prompt is saved in the model
+log. Auxiliary access summaries do not increment the policy-turn count.
 
 Local agents use LangChain ContextEditingMiddleware: above approximately 8000
 message tokens it clears older tool-result bodies while retaining the latest four.
@@ -263,9 +296,10 @@ Worker history is paginated back to its input checkpoint when collecting results
 The call cap bounds requested model invocations; provider transport retries remain
 part of the model client's retry policy.
 
-Use `access(url, contains="keyword or year")` to find a relevant passage directly,
-starting at `offset`, rather than stepping through a long page. Keyword matching
-is literal and case-insensitive; a no-match response is explicit.
+Use `info_to_extract` to specify the facts required from a page. The tool no
+longer exposes `offset`, `contains`, or `access_token`. Evidence beyond the first
+6000 characters requires another search result; an absent fact in a summary
+does not establish its absence from the complete page.
 
 The reserved ReAct final response uses temperature 0 and can reserve up to 16384
 output tokens, bounded by the remaining shared token budget. Research calls keep

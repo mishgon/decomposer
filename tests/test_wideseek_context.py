@@ -1,37 +1,10 @@
 import asyncio
-import re
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-from gyms.wideseek import agents, worker
-
-
-def test_page_slices_can_recover_every_character(monkeypatch):
-    text = 'Wikipedia: αβγ 日本語\n' * 500
-    monkeypatch.setattr(worker, 'request_tool', AsyncMock(return_value={'contents': text}))
-    offset, slices = 0, []
-    while True:
-        result = asyncio.run(worker.access.coroutine('url', None, access_token=1000, offset=offset))
-        slices.append(result.split('\n[Page truncated;')[0].removesuffix('\n[End of page.]'))
-        match = re.search(r'next offset=(\d+)', result)
-        if not match:
-            break
-        offset = int(match[1])
-    assert ''.join(slices) == text
-    assert asyncio.run(worker.access.coroutine('url', None, offset=len(text))) == '[End of page.]'
-
-
-def test_search_marks_only_truncated_previews(monkeypatch):
-    monkeypatch.setattr(worker, 'request_tool', AsyncMock(return_value=[
-        {'url': 'long', 'contents': 'x' * 2000},
-        {'url': 'short', 'contents': 'complete passage'},
-    ]))
-    result = asyncio.run(worker.search.coroutine('question', None))
-    assert 'x' * 1500 in result and 'x' * 1501 not in result
-    assert result.count('Passage preview truncated') == 1
-    assert '[Doc 2](short):\ncomplete passage' in result
+from gyms.wideseek import agents
 
 
 def test_context_edits_preserve_question_tool_pairs_and_raw_state(monkeypatch):
@@ -177,16 +150,6 @@ def test_remote_researchers_do_not_force_the_manager_final_answer(tmp_path, monk
     assert 'tool_choice' not in vars(seen[0])
 
 
-def test_keyword_access_reaches_a_fact_beyond_the_preview(monkeypatch):
-    text = 'irrelevant introduction. ' * 2000 + 'Enrollment in 2016 was 12345. ' + 'tail. ' * 1000
-    monkeypatch.setattr(worker, 'request_tool', AsyncMock(return_value={'contents': text}))
-    found = asyncio.run(worker.access.coroutine('url', None, access_token=1000, contains='2016'))
-    assert 'Enrollment in 2016 was 12345.' in found
-    assert len(found) < 1200
-    missing = asyncio.run(worker.access.coroutine('url', None, contains='literal.*keyword'))
-    assert 'not found' in missing
-
-
 def test_final_answer_reservation_accounts_for_the_larger_token_allowance(tmp_path):
     import sqlite3
     from gyms.wideseek.runtime import init_budget, reserve
@@ -196,6 +159,36 @@ def test_final_answer_reservation_accounts_for_the_larger_token_allowance(tmp_pa
     assert (limit, remaining) == (16384, 0)
     with sqlite3.connect(path / 'budget.sqlite') as db:
         assert db.execute('SELECT tokens FROM budget').fetchone()[0] == 3616
+
+
+def test_each_call_sees_current_shared_budget_without_mutating_history(tmp_path, monkeypatch):
+    import json
+    from gyms.wideseek import runtime
+    path = tmp_path / 'episode'
+    runtime.init_budget(path, calls=3)
+    monkeypatch.setattr(runtime, 'get_config', lambda: {'configurable': {'thread_id': 'test'}})
+    messages = [HumanMessage(content='question')]
+    request = SimpleNamespace(runtime=SimpleNamespace(context={'directory': str(path)}),
+        model=SimpleNamespace(), model_settings={}, tools=[], system_message=None, messages=messages)
+    request.override = lambda **kwargs: SimpleNamespace(**{**vars(request), **kwargs})
+    seen = []
+
+    async def handler(actual):
+        seen.append(actual.system_message.text)
+        return SimpleNamespace(result=[AIMessage(content='partial')])
+
+    log = runtime.ModelLog('researcher')
+    asyncio.run(log.awrap_model_call(request, handler))
+    runtime.reserve(path)  # Another agent consumes a call between this agent's turns.
+    messages.append(AIMessage(content='partial'))
+    asyncio.run(log.awrap_model_call(request, handler))
+    assert 'model turn 1' in seen[0] and '3 model calls including this turn (2 after it)' in seen[0]
+    assert 'model turn 2' in seen[1] and '1 model calls including this turn (0 after it)' in seen[1]
+    assert request.system_message is None
+    assert messages[0].content == 'question'
+    rows = [json.loads(line) for line in (path / 'model_calls.jsonl').read_text().splitlines()]
+    assert rows[-1]['budget_remaining_calls'] == 0
+    assert 'shared episode budget' in str(rows[-1]['effective_system_message'])
 
 
 def test_timeout_only_generation_run_has_no_quality_score():
