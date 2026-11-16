@@ -158,6 +158,24 @@ def snapshot(run):
     return manifest, rows, unfinished
 
 
+def rescheduled_timeline(run, started):
+    """Archived rejected attempts survive successful replacements and restarts."""
+    events = []
+    for filename, reason in (('infrastructure-result.json', 'Service errors'),
+                             ('cleanup-failed-result.json', 'Worker cleanup')):
+        for path in run.glob(f'*/*/attempt-*/execution-*/{filename}'):
+            row = json.loads(path.read_text())
+            events.append((max(0, int((row['finished_at'] - started) / 60)), reason))
+    counts = Counter({'All': 0, 'Service errors': 0, 'Worker cleanup': 0})
+    points = {0: {('Errored attempts rescheduled', key): value for key, value in counts.items()}}
+    for minute, rows in groupby(sorted(events), lambda row: row[0]):
+        for _, reason in rows:
+            counts['All'] += 1
+            counts[reason] += 1
+        points[minute] = {('Errored attempts rescheduled', key): value for key, value in counts.items()}
+    return points, {('Errored attempts rescheduled', key): value for key, value in counts.items()}
+
+
 def collector_gpu_metrics(api, job_id):
     """Read only the GPUs assigned to the collector, not the reporter's host."""
     with httpx.Client(base_url=api.rstrip('/') + '/', timeout=10,
@@ -268,6 +286,10 @@ def report(args, stop=None):
             current['Throughput (episodes/hour)', 'Since collection start'] = (
                 sum(row['finished_at'] >= manifest['started_at'] for row in rows) * 3600 / elapsed)
             points[minute] = current
+            retry_points, retry_current = rescheduled_timeline(args.run, manifest['started_at'])
+            for step, values in retry_points.items():
+                points.setdefault(step, {}).update(values)
+            points[minute].update(retry_current)
             reported = state.setdefault('reported', {})
             for step, values in sorted(points.items()):
                 encoded = json.dumps(sorted((title, series, value) for (title, series), value in values.items()))

@@ -1,6 +1,6 @@
 import pytest
 
-from evals.wideseek.clearml_reporter import prefix_cache_metrics, snapshot, timeline
+from evals.wideseek.clearml_reporter import prefix_cache_metrics, rescheduled_timeline, snapshot, timeline
 from gyms.wideseek.runtime import save
 
 
@@ -76,6 +76,21 @@ def test_snapshot_requires_captured_trace_and_leaves_run_unchanged(tmp_path):
     assert values['Episodes', 'Unresolved'] == 1
     assert values['Episodes', 'Resolved'] == 0
     assert before == {p: p.read_bytes() for p in tmp_path.rglob('*') if p.is_file()}
+
+
+def test_rescheduled_errors_persist_after_success_and_exclude_scored_failures(tmp_path):
+    attempt = tmp_path / 'decomposer/depth-0/attempt-001'
+    save(attempt / 'execution-old/infrastructure-result.json', {'finished_at': 900})
+    save(attempt / 'execution-retry/cleanup-failed-result.json', {'finished_at': 1061})
+    save(attempt / 'execution-retry2/infrastructure-result.json', {'finished_at': 1120})
+    save(attempt / 'result.json', result('depth-0', 1, 1180))
+    save(tmp_path / 'decomposer/depth-1/attempt-001/result.json', result('depth-1', 0, 1190))
+    points, current = rescheduled_timeline(tmp_path, 1000)
+    assert [values['Errored attempts rescheduled', 'All'] for values in points.values()] == [1, 2, 3]
+    assert current == {('Errored attempts rescheduled', 'All'): 3,
+                       ('Errored attempts rescheduled', 'Service errors'): 2,
+                       ('Errored attempts rescheduled', 'Worker cleanup'): 1}
+    assert rescheduled_timeline(tmp_path, 1000) == (points, current)
 
 
 def test_expected_timeout_is_zero_pass_but_not_a_fake_native_score():
