@@ -18,7 +18,7 @@ from gyms.usage import build_usage_summary
 from gyms.infrastructure import failures, classify
 from decomposer.visualization import write_trace_html
 from gyms.browsecomp import REPO_ROOT
-from gyms.browsecomp.agents import AGENTS, worker_model, WORKER_BUDGET_SECONDS, WORKER_GRACE_SECONDS
+from gyms.browsecomp.agents import AGENTS, RESEARCHER_MODEL, WORKER_BUDGET_SECONDS, WORKER_GRACE_SECONDS
 from gyms.browsecomp.evaluate import FINAL_FORMAT, evaluate
 from gyms.wideseek import agentic_rag
 
@@ -112,7 +112,7 @@ async def main(args, *, episode_module="gyms.browsecomp.run", preflight_check=No
     provenance = {"revision": revision, "data_sha256": hashlib.sha256(args.data.read_bytes()).hexdigest(),
                   "backend": args.retrieval_url, "source": agentic_rag.SOURCE,
                   "researcher_max_turns": agentic_rag.MAX_TURNS, "model": AGENTS[args.agent][0],
-                  "worker_model": worker_model(args.agent) if AGENTS[args.agent][1] == "decomposer" else None,
+                  "worker_model": RESEARCHER_MODEL if AGENTS[args.agent][1] == "decomposer" else None,
                   "worker_budget_seconds": WORKER_BUDGET_SECONDS if AGENTS[args.agent][1] == "decomposer" else None,
                   "worker_grace_seconds": WORKER_GRACE_SECONDS if AGENTS[args.agent][1] == "decomposer" else None}
     await (preflight_check or preflight)(args.retrieval_url)

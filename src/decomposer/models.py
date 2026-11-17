@@ -114,7 +114,6 @@ def create_model(
         "lmrouter/qwen_3_5_4b_unlooped_thinking",
         "lmrouter/qwen_3_5_4b_unlooped_non_thinking",
         "lmrouter/occ_4b_non_thinking",
-        "vllm/timur_4b_non_thinking",
         "vllm/decomposer_manager_qwen35_4b_sft_1_0_0",
         "vllm/decomposer_manager_qwen35_4b_sft_1_2_0",
         "vllm/decomposer_manager_qwen35_4b_sft_1_4_0",
@@ -146,7 +145,6 @@ def create_model(
     match model_id:
         case (
             "vllm/qwen_3_5_4b_thinking" | "vllm/qwen_3_5_4b_non_thinking"
-            | "vllm/timur_4b_non_thinking"
             | "lmrouter/qwen_3_5_4b_thinking" | "lmrouter/qwen_3_5_4b_non_thinking"
             | "temp/qwen_3_5_4b_thinking"
             | "vllm/decomposer_manager_qwen35_4b_sft_1_0_0"
@@ -157,10 +155,9 @@ def create_model(
         ):
             sft = model_id.startswith("vllm/decomposer_manager_qwen35_4b_sft_")
             early_sft = model_id == "vllm/decomposer_manager_qwen35_4b_sft_1_0_0"
-            timur = model_id == "vllm/timur_4b_non_thinking"
             thinking = not sft and not model_id.endswith("_non_thinking")
             if model_id.startswith("vllm/"):
-                port = 18036 if timur else 18025 if early_sft else 18024 if sft else _QWEN_3_5_4B_PORT
+                port = 18025 if early_sft else 18024 if sft else _QWEN_3_5_4B_PORT
                 url = base_url or f"http://{os.environ.get('VLLM_HOST', '127.0.0.1')}:{port}/v1"
                 key = "EMPTY"
             elif model_id.startswith("lmrouter/"):
@@ -171,7 +168,7 @@ def create_model(
                 key = os.environ.get("TEMP_LLM_PROXY_MASTER_KEY", "EMPTY")
             return ChatVLLM(
                 model=("decomposer-manager-qwen35-4b-sft-" + model_id.rsplit("sft_", 1)[1].replace("_", ".")
-                       if sft else "timur-qwen35-4b" if timur else "Qwen/Qwen3.5-4B"),
+                       if sft else "Qwen/Qwen3.5-4B"),
                 base_url=url,
                 api_key=key,
                 # https://huggingface.co/Qwen/Qwen3.5-4B#best-practices
