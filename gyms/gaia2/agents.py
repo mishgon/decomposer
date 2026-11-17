@@ -63,11 +63,15 @@ builder.add_node("agent", run_agent)
 builder.add_edge(START, "agent")
 builder.add_edge("agent", END)
 qwen_3_5_4b_thinking = builder.compile()
-timur_4b_non_thinking = qwen_3_5_4b_thinking
+occ_4b_non_thinking = qwen_3_5_4b_thinking
 
 
 def decomposer():
-    timur_workers = os.environ["GAIA2_AGENT_MODEL_ID"] == "vllm/timur_4b_non_thinking"
+    worker_model = os.environ["GAIA2_AGENT_MODEL_ID"]
+    if worker_model == "lmrouter/occ_4b_non_thinking":
+        worker_id, worker_name = "occ_4b_non_thinking", "OCC-4B non-thinking"
+    else:
+        worker_id, worker_name = "qwen_3_5_4b_thinking", "Qwen3.5-4B thinking"
     return create_decomposer_agent(
         decomposer_model=create_model(
             os.environ["GAIA2_DECOMPOSER_MODEL_ID"],
@@ -75,10 +79,9 @@ def decomposer():
         ),
         agent_types=[
             {
-                "agent_type_id": "timur_4b_non_thinking" if timur_workers else "qwen_3_5_4b_thinking",
-                "description": ("Timur Qwen3.5-4B non-thinking agent equipped with all the required tools."
-                                if timur_workers else "Qwen3.5-4B thinking agent equipped with all the required tools."),
-                "assistant_id": "timur_4b_non_thinking" if timur_workers else "qwen_3_5_4b_thinking",
+                "agent_type_id": worker_id,
+                "description": f"{worker_name} agent equipped with all the required tools.",
+                "assistant_id": worker_id,
                 "url": os.environ["GAIA2_AGENT_SERVER_URL"],
             }
         ],
@@ -109,9 +112,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         port=args.port,
         reload=False,
         graphs={
+            "occ_4b_non_thinking": "gyms.gaia2.agents:occ_4b_non_thinking",
             "decomposer": "gyms.gaia2.agents:decomposer",
             "qwen_3_5_4b_thinking": "gyms.gaia2.agents:qwen_3_5_4b_thinking",
-            "timur_4b_non_thinking": "gyms.gaia2.agents:timur_4b_non_thinking",
         },
         n_jobs_per_worker=args.n_jobs_per_worker,
         open_browser=False,

@@ -117,7 +117,7 @@ def episode(tmp_path, monkeypatch):
             ],
             "agent_runs": {"run": {"agent_id": "a", "status": "responded", "messages": [],
                                    "tool_calls": [{"id": "x", "name": "filesystem-read", "args": {"p": 1}}]}},
-            "agents": {"a": {"agent_type_id": "qwen_3_5_4b_thinking"}},
+            "agents": {"a": {"agent_type_id": "occ_4b_non_thinking"}},
             "decomposer_agent_runs": [{"status": "responded"}],
         },
     )
@@ -260,7 +260,7 @@ def test_episode_runs_toolathlon_phases_in_trusted_order(episode):
 
 def test_react_episode_reports_react_usage(episode):
     episode.agent_state.pop("agent_runs")
-    episode.run_episode("task", "--agent", "qwen_3_5_4b_thinking")
+    episode.run_episode("task", "--agent", "occ_4b_non_thinking")
     trace = json.loads((episode.episode_dir / "trace.json").read_text())
     assert trace["harness"] == "react" and trace["decomposer_model"] is None
     assert trace["teacher_backend"] == "agent"
@@ -673,14 +673,14 @@ def test_parallel_runs_each_repetition_as_an_episode(tmp_path, monkeypatch):
 
     monkeypatch.setattr(parallel, "execute", execute)
     args = bench.create_parser().parse_args(["task", "-n", "2", "--output-dir", str(tmp_path / "raw"),
-                                             "--agent", "qwen_3_5_4b_thinking"])
+                                             "--agent", "occ_4b_non_thinking"])
     root = parallel.run(args)
     manifest = json.loads((root / "manifest.json").read_text())
     assert manifest["status"] == "completed" and manifest["harness"] == "react"
     assert sorted(episode["repetition"] for episode in manifest["episodes"]) == [1, 2]
     command = commands[0]
     assert command[1] == bench.__file__ and command[2] == "task"
-    assert command[command.index("--agent") + 1] == "qwen_3_5_4b_thinking"
+    assert command[command.index("--agent") + 1] == "occ_4b_non_thinking"
     assert command[command.index("--artifacts-dir") + 1] == str(root / "traces")
     assert "--tasks" not in command and "--repetitions" not in command
 
@@ -760,7 +760,7 @@ def test_serve_hides_bundle_then_runs_agent_server_until_signal(serve_env, monke
         "agent_workspace": "/workspace/dumps/workspace",
         "gateway_url": "http://127.0.0.1:4001/sse",
         "agent_server_url": "http://127.0.0.1:4002",
-        "agent_model": {"model_id": "lmrouter/qwen_3_5_4b_thinking"},
+        "agent_model": {"model_id": "lmrouter/occ_4b_non_thinking"},
         "decomposer_model": {"model_id": "lmrouter/qwen_3_8_flash_next_non_thinking"},
     }
     assert serve_env.killed == []
@@ -806,10 +806,10 @@ def test_wait_ready_fails_fast_or_times_out(monkeypatch):
 
 def test_model_metadata_has_sampling_without_credentials(monkeypatch):
     monkeypatch.setenv("LLM_PROXY_MASTER_KEY", "test-secret")
-    metadata = task.model_metadata("lmrouter/qwen_3_5_4b_thinking")
-    assert metadata["api_model"] == "Qwen/Qwen3.5-4B"
+    metadata = task.model_metadata("lmrouter/occ_4b_non_thinking")
+    assert metadata["api_model"] == "occ-4b"
     assert metadata["base_url"] == "https://lmrouter.2a2i.org/v1"
-    assert metadata["generation_config"]["preserve_reasoning"] is True
+    assert metadata["generation_config"]["preserve_reasoning"] is False
     assert "test-secret" not in json.dumps(metadata)
 
 
@@ -901,9 +901,9 @@ def test_agents_use_task_prompt_tools_and_server_url(monkeypatch, container_modu
     monkeypatch.setattr(agents, "create_agent", create_agent)
     monkeypatch.setattr(agents, "create_decomposer_agent", create_decomposer)
 
-    assert agents.qwen_3_5_4b_thinking() == "agent"
+    assert agents.occ_4b_non_thinking() == "agent"
     kwargs = create_agent.call_args.kwargs
-    assert kwargs["model"].model_name == "Qwen/Qwen3.5-4B"
+    assert kwargs["model"].model_name == "occ-4b"
     assert kwargs["tools"] == [gateway_tool]
     assert kwargs["system_prompt"] == agents.AGENT_SYSTEM_PROMPT.format(workspace_dir="/workspace")
     assert len(kwargs["middleware"]) == 3
@@ -915,10 +915,13 @@ def test_agents_use_task_prompt_tools_and_server_url(monkeypatch, container_modu
     kwargs = create_decomposer.call_args.kwargs
     assert kwargs["decomposer_model"].model_name == "Qwen/Qwen3.8-Flash-Next-NVFP4"
     assert kwargs["agent_types"][0]["url"] == "http://127.0.0.1:4002"
-    assert kwargs["agent_types"][0]["assistant_id"] == "qwen_3_5_4b_thinking"
+    assert kwargs["agent_types"][0]["assistant_id"] == "occ_4b_non_thinking"
     assert kwargs["agent_recursion_limit"] == 410
+    assert kwargs["agent_run_budget_seconds"] == 60
+    assert kwargs["agent_shutdown_grace_seconds"] == 60
+    assert create_agent.call_args.kwargs["model"].extra_body["chat_template_kwargs"] == {"enable_thinking": False}
     graphs = json.loads((BENCH_DIR / "langgraph.json").read_text())["graphs"]
-    assert set(graphs) == {"qwen_3_5_4b_thinking", "decomposer"}
+    assert set(graphs) == {"occ_4b_non_thinking", "decomposer"}
 
 
 # --- tool_gateway.py: Toolathlon MCP gateway with native local tools ------------

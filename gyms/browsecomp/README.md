@@ -1,8 +1,8 @@
 # BrowseComp-Plus
 
-This gym migrates the `browse-bench-2` evaluation. It uses the **BrowseComp-Plus**
-fixed corpus through agentic-rag's `/search` and `/fetch`, not live-web BrowseComp
-or WideSeek's Wiki-2018 service. No corpus is downloaded or indexed by the runner.
+This gym uses BrowseComp-Plus questions and answers with the shared WideSeek
+agentic-rag harness and hosted Search API (`source=wikipedia`). It does not use
+the old BrowseComp-Plus retrieval corpus or claim official live-web reproduction.
 
 ## Setup
 
@@ -17,45 +17,41 @@ Preparation decodes `Tevatron/browsecomp-plus` into the ignored
 `artifacts/gyms/browsecomp/tasks.jsonl`. Keep these benchmark questions and answers
 private. The optional datasets dependency is needed only for preparation.
 
-Load model credentials as documented in the repository README. Model profiles
-are constants in `agents.py`: Qwen3.8 Flash Next non-thinking orchestrates
-Qwen3.5-4B thinking researchers. The standalone agent uses the same
-researcher. Generation parameters come from `decomposer.models`; recursion is
-410 for both roles, and the default episode agent timeout is 45 minutes.
+Load `LLM_PROXY_MASTER_KEY` for models and `AGENTIC_RAG_API_KEY` for retrieval.
+The default Flash Next non-thinking manager delegates to OCC-4B non-thinking.
+Sampling comes from `decomposer.models`. Both workers and standalone researchers
+use `gyms.wideseek.agentic_rag` unchanged: search, open, find, finish, and 32 model
+calls per run (the last reserved for finish). There is no per-worker time budget.
+The outer episode timeout remains 45 minutes.
 
 ## Retrieval Connection
 
-Supply an HTTP endpoint for the existing agentic-rag deployment. It must have
-the `browsecomp_plus` source loaded. An SSH-forwarded loopback address also works:
+The default endpoint is `https://lmrouter.2a2i.org/rag`. Override it with
+`AGENTIC_RAG_URL` or `--retrieval-url` for a compatible Search API.
+Preflight checks the authenticated health endpoint with a 30-second deadline.
+
+The shared research protocol counts context tokens with the public
+`Qwen/Qwen3.5-4B` tokenizer (no model weights are loaded). Install this gym's
+requirements and cache the tokenizer before running offline:
 
 ```bash
-# RAG_HOST must already be a working SSH alias for the retrieval machine.
-ssh -N -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 \
-  -L 127.0.0.1:18000:127.0.0.1:8000 RAG_HOST
+uv pip install -r gyms/browsecomp/requirements.txt
+python -c 'from transformers import AutoTokenizer; AutoTokenizer.from_pretrained("Qwen/Qwen3.5-4B")'
 ```
-
-Run this on the machine executing the gym and pass
-`--retrieval-url http://127.0.0.1:18000`. Keep SSH host-key checking enabled.
-The deployment host and Hertz-2 route still need live verification. The runner
-tests both search and fetch before starting any episodes or paid model calls.
-It does not start or restart the remote retrieval service.
 
 ## Run
 
 ```bash
 PYTHONPATH=src:. python -m gyms.browsecomp.run \
-  --agent researcher --tasks browsecomp-0001 --retrieval-url http://127.0.0.1:18000
+  --agent researcher_occ_non_thinking --tasks browsecomp-0001
 
 PYTHONPATH=src:. python -m gyms.browsecomp.run \
   --agent decomposer --tasks browsecomp-0001 browsecomp-0002 --concurrency 2
 ```
 
-Each episode has its own Agent Server and checkpointed researcher state. Agents
-can fetch only URLs they have searched; forks inherit that state. Found URLs persist across successive runs of one agent. There is no search-count
-limit. Decomposer workers retain the per-run time budget (180 seconds of work plus
-180 seconds to finish the current step and respond); standalone researchers use the episode timeout and
-recursion limit.
-Fetch returns the server's page body, not a query-specific LLM summary. The prompt uses native tools.
+Each episode has its own Agent Server and checkpointed researcher state.
+Workers receive the episode directory through runtime context for tool logs.
+Only URLs returned by search can be opened or cited; forks inherit this state.
 
 Runs save `manifest.json`, then `traces/<task>-rNNN/` with `task.json`, `trace.json`,
 optional `trace.html` (when the shared renderer has captured agent runs),
@@ -93,16 +89,17 @@ Choose a Python factory with `--agent`:
 
 | Agent | Model | Harness |
 | --- | --- | --- |
+| `researcher_occ_non_thinking` | OCC-4B non-thinking | Shared research protocol |
 | `researcher_4b_thinking` | Qwen3.5-4B thinking | ReAct |
 | `researcher_27b_thinking` | Qwen3.8-27B-FP8 thinking (medium) | ReAct |
 | `decomposer_4b_non_thinking` | Qwen3.5-4B non-thinking | Decomposer |
 | `decomposer_sft_1_0_0` | Decomposer manager SFT 1.0.0 | Decomposer |
 | `decomposer_sft_1_2_0` | Decomposer manager SFT 1.2.0 | Decomposer |
 
-All Decomposer variants use the `researcher` graph, a Qwen3.5-4B thinking
-subagent with the same search and fetch tools as the standalone researcher.
-The existing `researcher` and `decomposer` factories remain available;
-`decomposer` uses the Flash Next manager.
+Decomposer variants use the OCC `researcher` graph. The `researcher` alias is also the OCC single agent;
+`decomposer` uses the Flash Next manager. Legacy model factories remain available,
+but now use the shared research protocol. Start new runs after this migration;
+do not combine their metrics with results from the old retrieval harness.
 
 SFT 1.0.0 is available for historical comparisons through `decomposer_sft_1_0_0`.
 Its server must serve `decomposer-manager-qwen35-4b-sft-1.0.0` on
@@ -115,11 +112,11 @@ Forward that port from the inference machine before running locally.
 The other evaluation models use `https://lmrouter.2a2i.org/v1` and
 `LLM_PROXY_MASTER_KEY`.
 
-For example, after loading environment variables and forwarding retrieval:
+For example, after loading environment variables:
 
 ```bash
 python -m evals.browsecomp.run --agent decomposer_sft_1_2_0 \
-  --tasks TASK_ID_1 TASK_ID_2 --retrieval-url http://127.0.0.1:18082
+  --tasks TASK_ID_1 TASK_ID_2
 ```
 
 Queue recovery: infrastructure failures in model, worker and web logs are monitored

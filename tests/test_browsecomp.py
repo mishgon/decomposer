@@ -44,19 +44,15 @@ def test_search_continues_beyond_ten_calls(monkeypatch):
 def test_retrieval_contract(monkeypatch):
     calls = []
     def respond(request):
-        calls.append((request.url.path, json.loads(request.content)))
-        if request.url.path == "/search":
-            return httpx.Response(200, json={"results": [{"page_id": "p1"}]})
-        return httpx.Response(200, json={"content": "evidence"})
+        calls.append(request)
+        return httpx.Response(200, json={"status": "ok"})
     original = httpx.AsyncClient
+    monkeypatch.setenv("AGENTIC_RAG_API_KEY", "test-key")
     monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: original(
         transport=httpx.MockTransport(respond), **kwargs))
     asyncio.run(run.preflight("http://retrieval"))
-    assert [c[0] for c in calls] == ["/search", "/fetch"]
-    assert all(c[1]["source"] == "browsecomp_plus" for c in calls)
-    monkeypatch.setenv("BROWSECOMP_RETRIEVAL_URL", "http://retrieval")
-    asyncio.run(tools.request("/fetch", {"page_id": "p1"}))
-    assert calls[-1][1] == {"page_id": "p1", "source": "browsecomp_plus"}
+    assert str(calls[0].url) == "http://retrieval/health"
+    assert calls[0].headers["Authorization"] == "Bearer test-key"
 
 
 def test_judge_errors_are_unscored_and_inclusion_is_not_a_pass(monkeypatch, tmp_path):
@@ -141,7 +137,7 @@ def test_failed_preflight_does_not_schedule(monkeypatch, tmp_path):
     assert not (tmp_path / "runs").exists()
 
 
-def test_compiled_researcher_search_fetch_and_fresh_thread(monkeypatch, tmp_path):
+def test_compiled_researcher_search_open_finish_and_fresh_thread(monkeypatch, tmp_path):
     from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
     from gyms.browsecomp import agents
 
@@ -153,27 +149,28 @@ def test_compiled_researcher_search_fetch_and_fresh_thread(monkeypatch, tmp_path
 
     model = Model(responses=[
         AIMessage(content="", tool_calls=[{"id": "s", "name": "search", "args": {"query": "Q"}}]),
-        AIMessage(content="", tool_calls=[{"id": "f", "name": "fetch", "args": {"url": "https://page"}}]),
-        AIMessage(content='A'),
+        AIMessage(content="", tool_calls=[{"id": "f", "name": "open", "args": {"url": "https://page"}}]),
+        AIMessage(content="", tool_calls=[{"id": "end", "name": "finish", "args": {"answer": "A", "sources": []}}]),
     ])
     monkeypatch.setattr(agents, "create_model", lambda _: model)
     monkeypatch.setenv("BROWSECOMP_MODEL_LOG", str(tmp_path / "calls.jsonl"))
     request = AsyncMock(side_effect=[{"results": [
-        {"url": "https://page", "page_id": "p1", "title": "Page", "snippet": "Evidence"}]},
+        {"url": "https://page", "page_id": 1, "title": "Page", "snippet": "Evidence"}]},
         {"content": "A"}])
-    monkeypatch.setattr(tools, "request", request)
+    monkeypatch.setattr(agents.agentic_rag, "_post", request)
+    monkeypatch.setattr(agents.agentic_rag, "prompt_tokens", lambda *args: 1)
     graph = agents.researcher()
-    state = asyncio.run(graph.ainvoke({"messages": [{"role": "user", "content": "Q"}]}))
-    assert state["pages"] == {"https://page": "p1"}
+    state = asyncio.run(graph.ainvoke({"messages": [{"role": "user", "content": "Q"}]}, context={"directory": str(tmp_path)}))
+    assert state["pages"] == {"https://page": 1}
     assert state["messages"][-1].content == "A"
     records = [json.loads(line) for line in (tmp_path / "calls.jsonl").read_text().splitlines()]
     assert sum(r["status"] == "success" for r in records) == 3
     # A separate invocation must not inherit URLs from the preceding episode.
-    model.responses = [AIMessage(content="", tool_calls=[{"id": "f2", "name": "fetch", "args": {"url": "https://page"}}]),
-                       AIMessage(content="No evidence")]
+    model.responses = [AIMessage(content="", tool_calls=[{"id": "f2", "name": "open", "args": {"url": "https://page"}}]),
+                       AIMessage(content="", tool_calls=[{"id": "end2", "name": "finish", "args": {"answer": "No evidence", "sources": []}}])]
     model.i = 0
-    fresh = asyncio.run(graph.ainvoke({"messages": [{"role": "user", "content": "Q2"}]}))
-    assert "url_not_in_session" in fresh["messages"][-2].content
+    fresh = asyncio.run(graph.ainvoke({"messages": [{"role": "user", "content": "Q2"}]}, context={"directory": str(tmp_path)}))
+    assert any("url_not_in_session" in m.content for m in fresh["messages"])
     assert request.await_count == 2
 
 
@@ -190,8 +187,8 @@ def test_real_agent_server_with_mock_retrieval(monkeypatch, tmp_path):
     class Retrieval(BaseHTTPRequestHandler):
         def do_POST(self):
             payload = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
-            assert payload["source"] == "browsecomp_plus"
-            result = {"results": [{"url": "https://page", "page_id": "p1", "title": "Page", "snippet": "A"}]} if self.path == "/search" else {"content": "A"}
+            assert payload["source"] == "wikipedia"
+            result = {"results": [{"url": "https://page", "page_id": 1, "title": "Page", "snippet": "A"}]} if self.path == "/search" else {"content": "A"}
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.end_headers()
@@ -213,10 +210,10 @@ class Model(FakeMessagesListChatModel):
     def bind_tools(self, tools, **kwargs):
         return self
 def researcher():
+    agents.agentic_rag.prompt_tokens = lambda *args: 1
     agents.create_model = lambda _: Model(responses=[
         AIMessage(content="", tool_calls=[{"id":"s", "name":"search", "args":{"query":"Q"}}]),
-        AIMessage(content="", tool_calls=[{"id":"f", "name":"fetch", "args":{"url":"https://page"}}]),
-        AIMessage(content='A'),
+        AIMessage(content="", tool_calls=[{"id":"f", "name":"finish", "args":{"answer":"A", "sources":[]}}]),
     ])
     return agents.researcher()
 ''')
@@ -224,7 +221,8 @@ def researcher():
     config.write_text(json.dumps({"dependencies": [str(run.REPO_ROOT)],
                                  "graphs": {"researcher": str(fixture) + ":researcher"}}))
     monkeypatch.setenv("PYTHONPATH", f"{run.REPO_ROOT / 'src'}:{run.REPO_ROOT}")
-    monkeypatch.setenv("BROWSECOMP_RETRIEVAL_URL", f"http://127.0.0.1:{service.server_port}")
+    monkeypatch.setenv("AGENTIC_RAG_URL", f"http://127.0.0.1:{service.server_port}")
+    monkeypatch.setenv("AGENTIC_RAG_API_KEY", "test-key")
     monkeypatch.setenv("BROWSECOMP_MODEL_LOG", str(tmp_path / "model_calls.jsonl"))
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
@@ -234,11 +232,11 @@ def researcher():
         async with run.agent_server(config, port=port) as url:
             return await run.invoke_and_capture(url, "researcher",
                 {"messages": [{"role": "user", "content": "Q"}]}, timeout=30,
-                config={"recursion_limit": 410})
+                config={"recursion_limit": 410}, context={"directory": str(tmp_path)})
     try:
         state, error = asyncio.run(smoke())
         assert error is None
-        assert state["pages"] == {"https://page": "p1"}
+        assert state["pages"] == {"https://page": 1}
         assert state["messages"][-1]["content"] == "A"
         assert (tmp_path / "model_calls.jsonl").exists()
     finally:
@@ -260,25 +258,16 @@ def test_registered_factories_match_trace_models_and_worker_identity(monkeypatch
     model, harness = run.AGENTS[name]
     if harness == "react":
         assert config["model"] == model
-        assert config["tools"] == [tools.search, tools.fetch]
+        assert config["tools"] == agents.agentic_rag.TOOLS
     else:
         assert config["decomposer_model"] == model
-        assert config["agent_run_budget_seconds"] == 180.0
-        assert config["agent_shutdown_grace_seconds"] == 180.0
+        assert config["agent_run_budget_seconds"] is None
+        assert config["agent_shutdown_grace_seconds"] is None
         expected_worker = {
-            "agent_type_id": "qwen_3_5_4b_thinking", "assistant_id": "researcher",
-            "description": "Qwen3.5-4B thinking agent equipped with search and access tools.",
+            "agent_type_id": "occ_4b_non_thinking", "assistant_id": "researcher",
+            "description": "OCC-4B non-thinking agent equipped with search, open, find and finish tools.",
             "url": "http://worker",
         }
-        if name == "decomposer_sft_1_5_0_timur":
-            expected_worker.update(
-                agent_type_id="timur_4b_non_thinking", assistant_id="researcher_timur_non_thinking",
-                description="Timur Qwen3.5-4B non-thinking agent equipped with search and access tools.",
-            )
-            assert agents.worker_model(name) == "vllm/timur_4b_non_thinking"
-            assert agents.researcher_timur_non_thinking()["model"] == agents.worker_model(name)
-        else:
-            assert agents.worker_model(name) == "vllm/qwen_3_5_4b_thinking"
         assert config["agent_types"] == [expected_worker]
 
 
@@ -301,6 +290,7 @@ def test_resume_keeps_completed_episodes_and_archives_partial_logs(monkeypatch, 
         "finished_at": run.now(), "assistant_id": "researcher", "tasks": ["a"],
         "repetitions": 3, "config": config, "provenance": {
             "revision": run.subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=run.REPO_ROOT, text=True).strip(),
+            "source": run.agentic_rag.SOURCE, "researcher_max_turns": run.agentic_rag.MAX_TURNS,
             "data_sha256": run.hashlib.sha256(data.read_bytes()).hexdigest(), "backend": args.retrieval_url,
             "model": run.AGENTS[args.agent][0], "worker_model": None, "worker_budget_seconds": None, "worker_grace_seconds": None,
         }, "episodes": [{"task": "a", "repetition": 1,

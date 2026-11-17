@@ -15,7 +15,7 @@ PID_FILE = Path("/run/decomposer-agent-server.pid")
 
 
 async def serve() -> None:
-    from agents import DECOMPOSER_MODEL_ID, QWEN_3_5_4B_THINKING_MODEL_ID
+    from agents import DECOMPOSER_MODEL_ID, OCC_4B_NON_THINKING_MODEL_ID
     from decomposer.agent_server import agent_server
 
     bundle_path = Path(os.environ["TOOLATHLON_BUNDLE"])
@@ -49,7 +49,7 @@ async def serve() -> None:
             "agent_workspace": bundle["container_paths"]["agent_workspace"],
             "gateway_url": f"{gateway_url}/sse",
             "agent_server_url": f"http://127.0.0.1:{agent_port}",
-            "agent_model": model_metadata(QWEN_3_5_4B_THINKING_MODEL_ID),
+            "agent_model": model_metadata(OCC_4B_NON_THINKING_MODEL_ID),
             "decomposer_model": model_metadata(DECOMPOSER_MODEL_ID),
         }
         (data_dir / "runtime.json").write_text(json.dumps(runtime, indent=2), encoding="utf-8")
