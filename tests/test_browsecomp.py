@@ -268,15 +268,6 @@ def test_registered_factories_match_trace_models_and_worker_identity(monkeypatch
             "description": "OCC-4B non-thinking agent equipped with search, open, find and finish tools.",
             "url": "http://worker",
         }
-        if name == "decomposer_sft_1_5_0_timur":
-            expected_worker.update(
-                agent_type_id="timur_4b_non_thinking", assistant_id="researcher_timur_non_thinking",
-                description="Timur Qwen3.5-4B non-thinking agent equipped with search and access tools.",
-            )
-            assert agents.worker_model(name) == "vllm/timur_4b_non_thinking"
-            assert agents.researcher_timur_non_thinking()["model"] == agents.worker_model(name)
-        else:
-            assert agents.worker_model(name) == "lmrouter/occ_4b_non_thinking"
         assert config["agent_types"] == [expected_worker]
 
 

@@ -4,7 +4,7 @@ from gyms.gaia2 import agents
 from gyms.gaia2.tools import EpisodeContext
 
 
-@pytest.mark.parametrize("worker", ["lmrouter/occ_4b_non_thinking", "vllm/qwen_3_5_4b_thinking", "vllm/timur_4b_non_thinking"])
+@pytest.mark.parametrize("worker", ["lmrouter/occ_4b_non_thinking", "vllm/qwen_3_5_4b_thinking"])
 def test_manager_uses_core_factory_and_server_checkpointing(tmp_path, monkeypatch, worker):
     for name, value in {
         "GAIA2_DECOMPOSER_MODEL_ID": "fake",
@@ -31,14 +31,6 @@ def test_manager_uses_core_factory_and_server_checkpointing(tmp_path, monkeypatc
             "url": "http://server",
         }
     ]
-    if worker == "vllm/timur_4b_non_thinking":
-        expected[0].update(
-            agent_type_id="timur_4b_non_thinking", assistant_id="timur_4b_non_thinking",
-            description="Timur Qwen3.5-4B non-thinking agent equipped with all the required tools.",
-        )
-        assert agents.timur_4b_non_thinking is agents.qwen_3_5_4b_thinking
-        from gyms.gaia2.run import build_parser
-        assert build_parser().parse_args(["--agent", "timur_4b_non_thinking"]).agent == "timur_4b_non_thinking"
     if worker == "lmrouter/occ_4b_non_thinking":
         expected[0].update(agent_type_id="occ_4b_non_thinking", assistant_id="occ_4b_non_thinking",
                            description="OCC-4B non-thinking agent equipped with all the required tools.")

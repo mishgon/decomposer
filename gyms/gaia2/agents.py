@@ -63,7 +63,6 @@ builder.add_node("agent", run_agent)
 builder.add_edge(START, "agent")
 builder.add_edge("agent", END)
 qwen_3_5_4b_thinking = builder.compile()
-timur_4b_non_thinking = qwen_3_5_4b_thinking
 occ_4b_non_thinking = qwen_3_5_4b_thinking
 
 
@@ -71,8 +70,6 @@ def decomposer():
     worker_model = os.environ["GAIA2_AGENT_MODEL_ID"]
     if worker_model == "lmrouter/occ_4b_non_thinking":
         worker_id, worker_name = "occ_4b_non_thinking", "OCC-4B non-thinking"
-    elif worker_model == "vllm/timur_4b_non_thinking":
-        worker_id, worker_name = "timur_4b_non_thinking", "Timur Qwen3.5-4B non-thinking"
     else:
         worker_id, worker_name = "qwen_3_5_4b_thinking", "Qwen3.5-4B thinking"
     return create_decomposer_agent(
@@ -118,7 +115,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             "occ_4b_non_thinking": "gyms.gaia2.agents:occ_4b_non_thinking",
             "decomposer": "gyms.gaia2.agents:decomposer",
             "qwen_3_5_4b_thinking": "gyms.gaia2.agents:qwen_3_5_4b_thinking",
-            "timur_4b_non_thinking": "gyms.gaia2.agents:timur_4b_non_thinking",
         },
         n_jobs_per_worker=args.n_jobs_per_worker,
         open_browser=False,

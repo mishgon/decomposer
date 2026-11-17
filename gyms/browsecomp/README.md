@@ -96,8 +96,7 @@ Choose a Python factory with `--agent`:
 | `decomposer_sft_1_0_0` | Decomposer manager SFT 1.0.0 | Decomposer |
 | `decomposer_sft_1_2_0` | Decomposer manager SFT 1.2.0 | Decomposer |
 
-Decomposer variants use the OCC `researcher` graph, except the explicitly named
-historical `_timur` variant. The `researcher` alias is also the OCC single agent;
+Decomposer variants use the OCC `researcher` graph. The `researcher` alias is also the OCC single agent;
 `decomposer` uses the Flash Next manager. Legacy model factories remain available,
 but now use the shared research protocol. Start new runs after this migration;
 do not combine their metrics with results from the old retrieval harness.
