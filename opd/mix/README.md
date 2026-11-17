@@ -32,6 +32,16 @@ are evaluated at step zero and every eight updates. Held-out questions never ent
 training batches or train probes. The manifest records both partitions and their
 source counts. Infrastructure errors remain excluded from selection.
 
+For a single pass through 512 training tasks and 20 held-out tasks, add
+`--prioritize-strict --steps 64 --holdout-tasks 20`. This keeps every strict
+in-band task (1/4 or 2/4 successes) in the combined pool and fills the remaining
+slots with seed-42 samples from the known-solvable 0/4 bucket. It requires the
+snapshot's `selection.json` and fails if the strict pool alone exceeds 532 tasks
+or the combined pool is too small. Holdout stratification then uses pass buckets
+instead of sources. Integer allocations approximate the same proportions in
+both partitions; the manifest records each bucket count. Every training task
+appears once and held-out tasks remain excluded from training.
+
 ## Mixed-Gym Smoke
 
 The smoke selects one task from each of `deepdive-qa_rl`, `deepdive-qa_sft`,

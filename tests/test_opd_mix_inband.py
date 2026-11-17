@@ -100,3 +100,30 @@ def test_holdout_is_stratified_disjoint_and_stable_under_input_reordering(tmp_pa
     for count in (-1, 3, 186):
         with pytest.raises(ValueError, match='every source'):
             overfit.prepare(source, tmp_path / f'bad-{count}', steps=64, holdout_tasks=count)
+
+
+def test_strict_priority_fills_one_epoch_and_stratifies_pass_buckets(tmp_path, monkeypatch):
+    outcomes = [[0] * 4] * 732 + [[1, 0, 0, 0]] * 151 + [[1, 1, 0, 0]] * 121
+    run, source = pool(tmp_path, 'known', outcomes)
+    snapshot = tmp_path / 'snapshot'
+    selected = select_inband.select([run], [source], snapshot)
+    source = snapshot / 'tasks.jsonl'
+    monkeypatch.setattr(overfit, 'validation_rows', lambda: [])
+    manifest = overfit.prepare(source, tmp_path / 'data', steps=64, holdout_tasks=20, prioritize_strict=True)
+    assert manifest['train_tasks'] == manifest['training_episodes'] == 512
+    assert manifest['heldout_tasks'] == 20
+    assert manifest['pool_pass_counts'] == {0: 260, 1: 151, 2: 121}
+    assert manifest['heldout_pass_counts'] == {0: 10, 1: 6, 2: 4}
+    assert manifest['train_pass_counts'] == {0: 250, 1: 145, 2: 117}
+    strict = {e['task_id'] for e in selected['evidence'] if e['passes'] > 0}
+    assert strict <= set(manifest['task_ids'])
+    assert not set(manifest['train_task_ids']) & set(manifest['heldout_task_ids'])
+    rows = pd.read_parquet(tmp_path / 'data/train.parquet').to_dict('records')
+    assert len({r['extra_info']['task_id'] for r in rows}) == 512
+    repeat = overfit.prepare(source, tmp_path / 'repeat', steps=64, holdout_tasks=20, prioritize_strict=True)
+    assert manifest == repeat
+    with pytest.raises(ValueError, match='fit every strict'):
+        overfit.prepare(source, tmp_path / 'too-small', steps=1, holdout_tasks=20, prioritize_strict=True)
+    source.write_text(source.read_text() + '\n')
+    with pytest.raises(ValueError, match='unchanged'):
+        overfit.prepare(source, tmp_path / 'changed', steps=64, holdout_tasks=20, prioritize_strict=True)
