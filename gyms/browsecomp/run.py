@@ -12,7 +12,6 @@ import subprocess
 import sys
 from uuid import uuid4
 
-import httpx
 from decomposer.agent_server import agent_server
 from gyms.agent_server import invoke_and_capture
 from gyms.usage import build_usage_summary
@@ -21,6 +20,7 @@ from decomposer.visualization import write_trace_html
 from gyms.browsecomp import REPO_ROOT
 from gyms.browsecomp.agents import AGENTS, worker_model, WORKER_BUDGET_SECONDS, WORKER_GRACE_SECONDS
 from gyms.browsecomp.evaluate import FINAL_FORMAT, evaluate
+from gyms.wideseek import agentic_rag
 
 
 def save(path, value):
@@ -38,7 +38,7 @@ async def episode(args, *, server_config=None, final_format=FINAL_FORMAT, evalua
     model_id, harness = AGENTS[args.agent]
     root = args.output_dir.resolve()
     task = json.loads((root / "task.json").read_text())
-    os.environ["BROWSECOMP_RETRIEVAL_URL"] = args.retrieval_url
+    os.environ["AGENTIC_RAG_URL"] = args.retrieval_url
     os.environ["BROWSECOMP_MODEL_LOG"] = str(root / "model_calls.jsonl")
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
@@ -54,6 +54,7 @@ async def episode(args, *, server_config=None, final_format=FINAL_FORMAT, evalua
                 os.environ["BROWSECOMP_AGENT_URL"], args.agent,
                 {"messages": [{"role": "user", "content": task["question"] + final_format}]},
                 timeout=args.timeout, config={"recursion_limit": 410},
+                context={"directory": str(root)},
             )
     except Exception as exc:
         error = exc
@@ -87,19 +88,10 @@ async def episode(args, *, server_config=None, final_format=FINAL_FORMAT, evalua
 
 
 async def preflight(url):
-    """Require the correct retrieval corpus before scheduling model calls."""
-    async with httpx.AsyncClient(timeout=20, trust_env=False) as client:
-        response = await client.post(url.rstrip("/") + "/search", json={
-            "query": "Albert Einstein", "limit": 1, "source": "browsecomp_plus"})
-        response.raise_for_status()
-        hits = response.json()["results"]
-        if not hits:
-            raise RuntimeError("BrowseComp retrieval preflight returned no documents")
-        response = await client.post(url.rstrip("/") + "/fetch",
-                                    json={"page_id": hits[0]["page_id"], "source": "browsecomp_plus"})
-        response.raise_for_status()
-        if response.json().get("error"):
-            raise RuntimeError(f"BrowseComp fetch preflight failed: {response.json()['error']}")
+    """Check the same authenticated Search API used by the researcher."""
+    os.environ["AGENTIC_RAG_URL"] = url
+    async with asyncio.timeout(30):
+        await agentic_rag.health()
 
 
 async def main(args, *, episode_module="gyms.browsecomp.run", preflight_check=None):
@@ -118,7 +110,8 @@ async def main(args, *, episode_module="gyms.browsecomp.run", preflight_check=No
     config = {k: str(v) if isinstance(v, Path) else v for k, v in vars(args).items()}
     revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=REPO_ROOT, text=True).strip()
     provenance = {"revision": revision, "data_sha256": hashlib.sha256(args.data.read_bytes()).hexdigest(),
-                  "backend": args.retrieval_url, "model": AGENTS[args.agent][0],
+                  "backend": args.retrieval_url, "source": agentic_rag.SOURCE,
+                  "researcher_max_turns": agentic_rag.MAX_TURNS, "model": AGENTS[args.agent][0],
                   "worker_model": worker_model(args.agent) if AGENTS[args.agent][1] == "decomposer" else None,
                   "worker_budget_seconds": WORKER_BUDGET_SECONDS if AGENTS[args.agent][1] == "decomposer" else None,
                   "worker_grace_seconds": WORKER_GRACE_SECONDS if AGENTS[args.agent][1] == "decomposer" else None}
@@ -267,7 +260,7 @@ def parser():
     select.add_argument("--all", action="store_true")
     cli.add_argument("--data", type=Path, default=REPO_ROOT / "artifacts/gyms/browsecomp/tasks.jsonl")
     cli.add_argument("--output-dir", type=Path, default=REPO_ROOT / "artifacts/gyms/browsecomp")
-    cli.add_argument("--retrieval-url", default="http://127.0.0.1:18082")
+    cli.add_argument("--retrieval-url", default=os.environ.get("AGENTIC_RAG_URL", "https://lmrouter.2a2i.org/rag"))
     cli.add_argument("--resume", type=Path, help="Continue an interrupted run directory, keeping completed episodes")
     cli.add_argument("--concurrency", type=int, default=2)
     cli.add_argument("-n", "--repetitions", type=int, default=1)

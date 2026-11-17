@@ -5,7 +5,7 @@ This is the Toolathlon benchmark, not Toolathlon Gym.
 
 ```bash
 PYTHONPATH=src:. python -m evals.toolathlon_bench.run \
-  --all --agent qwen_3_5_4b_thinking -n 3 --concurrency 8
+  --all --agent occ_4b_non_thinking -n 3 --concurrency 8
 ```
 
 Models are configured in `gyms/toolathlon_bench/agents.py`.

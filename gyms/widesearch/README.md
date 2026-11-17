@@ -1,4 +1,4 @@
-# WideSearch With BrowseComp-Plus Retrieval
+# WideSearch With OCC Researchers
 
 Before running or scoring, prepare the pinned upstream checkout:
 
@@ -9,26 +9,22 @@ bash gyms/widesearch/setup.sh
 This applies the tracked evaluator fix for tables with no matching rows.
 The setup is safe to repeat and fails if the checkout cannot accept the patch.
 
-This experiment uses WideSearch questions and gold tables with the same
-agentic-rag harness as BrowseComp: the research prompt, `search` and `fetch`,
-per-agent URL access, and model profiles are shared directly. There is no
-per-agent search-count budget. Decomposer workers have 180 seconds of work and
-180 seconds to finish and respond; the recursion limit remains 410.
+This experiment uses WideSearch questions and gold tables with the same OCC-4B
+non-thinking researcher as BrowseComp. It reuses the WideSeek agentic-rag prompt,
+search/open/find/finish tools, and 32-call limit. Workers have no time budget;
+the episode timeout still applies. Single agents and workers use the same harness.
 
-This is a local-corpus experiment, not the upstream live-web benchmark.
-The corpus is BrowseComp-Plus, served by agentic-rag with BGE-M3 and Qdrant.
-Both single agents and Decomposer workers use the same corpus and tools.
-`fetch` accepts only URLs returned by that agent's searches.
+Load `LLM_PROXY_MASTER_KEY` and `AGENTIC_RAG_API_KEY`. The default Search API is
+`https://lmrouter.2a2i.org/rag` (`source=wikipedia`), overridable with
+`AGENTIC_RAG_URL` or `--retrieval-url`. This is a corpus-backed experiment,
+not the upstream live-web benchmark. Keenable is not used.
 
-Start agentic-rag locally and pass its URL with `--retrieval-url` (default
-`http://127.0.0.1:18082`). Preflight checks both search and page fetch before
-scheduling episodes. Keenable credentials are not needed for this experiment.
-The previous web adapter remains in `tools.py` but is not used by these agents.
+Use `--agent researcher_occ_non_thinking` for the OCC single-agent baseline.
 
 ```bash
 PYTHONPATH=src:. python -m gyms.widesearch.run \
   --agent decomposer_sft_1_4_0 --tasks ws_en_001 \
-  --retrieval-url http://127.0.0.1:18082 --concurrency 1 -n 1
+  --concurrency 1 -n 1
 PYTHONPATH=src:. python -m evals.widesearch.run PATH_TO_RUN
 ```
 

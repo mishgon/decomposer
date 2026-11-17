@@ -4,7 +4,7 @@ from gyms.gaia2 import agents
 from gyms.gaia2.tools import EpisodeContext
 
 
-@pytest.mark.parametrize("worker", ["vllm/qwen_3_5_4b_thinking", "vllm/timur_4b_non_thinking"])
+@pytest.mark.parametrize("worker", ["lmrouter/occ_4b_non_thinking", "vllm/qwen_3_5_4b_thinking", "vllm/timur_4b_non_thinking"])
 def test_manager_uses_core_factory_and_server_checkpointing(tmp_path, monkeypatch, worker):
     for name, value in {
         "GAIA2_DECOMPOSER_MODEL_ID": "fake",
@@ -39,6 +39,9 @@ def test_manager_uses_core_factory_and_server_checkpointing(tmp_path, monkeypatc
         assert agents.timur_4b_non_thinking is agents.qwen_3_5_4b_thinking
         from gyms.gaia2.run import build_parser
         assert build_parser().parse_args(["--agent", "timur_4b_non_thinking"]).agent == "timur_4b_non_thinking"
+    if worker == "lmrouter/occ_4b_non_thinking":
+        expected[0].update(agent_type_id="occ_4b_non_thinking", assistant_id="occ_4b_non_thinking",
+                           description="OCC-4B non-thinking agent equipped with all the required tools.")
     assert result["agent_types"] == expected
     assert result["agent_run_budget_seconds"] == 17
     assert result["agent_shutdown_grace_seconds"] == 23
@@ -93,3 +96,15 @@ def test_shared_agent_graph_applies_budget_only_when_supplied(monkeypatch, budge
     assert result["messages"][-1].content == "Done"
     assert (observed[0]["shutdown_at"] is None) == (budget is None)
     assert (observed[0]["timeout_at"] is None) == (budget is None)
+
+
+def test_occ_default_model_and_worker_budgets():
+    from gyms.gaia2.run import build_parser
+    from decomposer.models import create_model
+
+    args = build_parser().parse_args(["--agent", "occ_4b_non_thinking"])
+    assert args.agent_model_id == "lmrouter/occ_4b_non_thinking"
+    assert (args.agent_run_budget_seconds, args.agent_shutdown_grace_seconds) == (60, 60)
+    model = create_model(args.agent_model_id)
+    assert model.model_name == "occ-4b"
+    assert model.extra_body["chat_template_kwargs"] == {"enable_thinking": False}

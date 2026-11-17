@@ -14,7 +14,7 @@ PYTHONPATH=src:. python -m gyms.toolathlon_bench.run \
   --tasks find-alita-paper academic-pdf-report --agent decomposer --concurrency 8 -n 1
 ```
 
-Use `--agent qwen_3_5_4b_thinking` for the same tool-equipped worker acting directly
+Use `--agent occ_4b_non_thinking` for the same tool-equipped worker acting directly
 on the task, without a Decomposer. Use a positional task for one task, `--tasks` for
 a subset, or `--all`. Task names are directories under `tasks/finalpool`.
 
@@ -23,7 +23,10 @@ task, tasks in one group of Toolathlon's `task_conflict.json`, and Kubernetes
 tasks therefore run one after another; `--concurrency` applies across them.
 
 Both roles use `create_model(model_id)` from [models.py](../../src/decomposer/models.py).
-Choose models in [agents.py](agents.py). The runner passes the key into the task
+Choose models in [agents.py](agents.py). Workers and the single-agent baseline
+use OCC-4B non-thinking. Workers retain ordinary ReAct with environment tools,
+with 60 seconds of work and 60 seconds to finish; no web-search finish tool or
+step limit is added. The runner passes the key into the task
 container by its environment variable name, without storing it in artifacts.
 
 Defaults: 100-minute total episode timeout (Toolathlon
@@ -92,7 +95,7 @@ Workflows depend on this benchmark executor, never the reverse.
 
 This container-local LangGraph server exposes two assistants:
 
-- `qwen_3_5_4b_thinking`: a tool-equipped agent with the task's Toolathlon system
+- `occ_4b_non_thinking`: a tool-equipped agent with the task's Toolathlon system
   prompt, which names the workspace directory.
 - `decomposer`: orchestrates agents on the same server.
 

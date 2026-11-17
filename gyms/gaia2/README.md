@@ -24,13 +24,13 @@ Data, preparation manifests, and the environment live in `artifacts/data/gaia2/`
 ## Evaluation
 
 Models use IDs from `src/decomposer/models.py`. The default manager is local
-Qwen3.8; the default worker is local Qwen3.5-4B with thinking enabled.
+Qwen3.8; the default worker is hosted OCC-4B with thinking disabled.
 The ARE judge uses `LLM_PROXY_URL` and `LLM_PROXY_MASTER_KEY` from the environment.
 `--judge-model` selects its served model name, retaining the existing Llama-3.3-70B
 judge by default. Judge credentials are passed through the environment, not saved
 in configuration files.
 `--agent` is the Agent Server assistant ID: `decomposer` or
-`qwen_3_5_4b_thinking`. Both graphs and the agent type description are defined
+`occ_4b_non_thinking`. Both graphs and the agent type description are defined
 directly in `agents.py`; the runner passes model and budget settings through
 explicit environment variables.
 
@@ -38,22 +38,19 @@ explicit environment variables.
 PYTHONPATH=src:. uv run --env-file .env python -m evals.gaia2.run \
   --agent decomposer \
   --decomposer-model-id vllm/qwen_3_8_flash_next_non_thinking \
-  --agent-model-id vllm/qwen_3_5_4b_thinking \
-  --agent-base-url http://127.0.0.1:18024/v1 \
+  --agent-model-id lmrouter/occ_4b_non_thinking \
   --domains execution search --num-repeats 3 --concurrency 8 \
   --episode-timeout 3600 \
   --agent-run-budget-seconds 60 --agent-shutdown-grace-seconds 60
 ```
 
-For the single-agent baseline, use `--agent qwen_3_5_4b_thinking --agent-model-id
-vllm/qwen_3_5_4b_thinking`. It uses the same agent graph, system prompt, tools,
+For the single-agent baseline, use `--agent occ_4b_non_thinking`. It uses the same agent graph, system prompt, tools,
 and simulated clock as Decomposer's workers. Only the episode deadline applies;
 it receives no worker run budget. Both modes use `create_model` directly.
 
 `--agent-base-url` and `--decomposer-base-url` override the respective vLLM
 server addresses. Without an override, addresses come from `models.py`.
-On this VM, port `18024` forwards to Qwen3.5-4B on `occ-cds-2:8024`;
-port `8024` serves the local model. The example above uses `occ-cds-2`.
+
 
 Use repeated `--task SCENARIO_ID` arguments to select tasks, or `--limit N` to
 select the first N tasks per domain in stable scenario-ID order.
@@ -136,3 +133,11 @@ tunnel running for the duration of the evaluation.
 
 ARE schedules parallel episodes. Each episode has an isolated tool session;
 agents within one episode share its environment and serialize tool execution.
+
+## OCC Workers
+
+The default worker model is `lmrouter/occ_4b_non_thinking`; use
+`--agent occ_4b_non_thinking` for its single-agent baseline. Both use the existing
+ReAct graph and native environment tools. Decomposer workers have 60 seconds of
+work plus 60 seconds to finish by default. Web-search finish tools and step limits
+are not added. Legacy model overrides remain available for historical experiments.

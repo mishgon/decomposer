@@ -34,10 +34,10 @@ def test_researchers_share_browsecomp_prompt_tools_and_registry_models(monkeypat
     assert calls[0][0] == "vllm/qwen_3_5_4b_thinking"
     assert calls[1][0] == "lmrouter/qwen_3_8_27b_medium_thinking"
     for _, kwargs in calls:
-        assert [t.name for t in kwargs["tools"]] == ["search", "fetch"]
-        assert "BrowseComp-Plus" in kwargs["system_prompt"]
+        assert kwargs["tools"] is browsecomp_agents.agentic_rag.TOOLS
+        assert kwargs["system_prompt"] == browsecomp_agents.agentic_rag.SYSTEM_PROMPT
     assert calls[0][1]["system_prompt"] == calls[1][1]["system_prompt"] == calls[2][1]["system_prompt"]
-    assert browsecomp_agents.AGENT_SYSTEM_PROMPT in calls[2][1]["system_prompt"]
+    assert calls[2][0] == "lmrouter/occ_4b_non_thinking"
     assert agents.decomposer_sft_1_2_0 is browsecomp_agents.decomposer_sft_1_2_0
     assert agents.decomposer_sft_1_4_0 is browsecomp_agents.decomposer_sft_1_4_0
     assert "decomposer_sft_1_4_0" in run.AGENTS
@@ -183,7 +183,7 @@ def test_widesearch_shares_budget_free_browsecomp_harness():
     assert agents.researcher_4b_thinking is browsecomp.researcher_4b_thinking
     assert agents.decomposer_sft_1_4_0 is browsecomp.decomposer_sft_1_4_0
     assert run.preflight is run.browsecomp.preflight
-    assert run.parser().get_default("retrieval_url") == "http://127.0.0.1:18082"
+    assert run.parser().get_default("retrieval_url") == run.BACKEND
 
 
 @pytest.mark.parametrize('failure', [None, 'transient', 'permanent', 'credentials'])
