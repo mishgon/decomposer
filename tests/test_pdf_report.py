@@ -25,14 +25,14 @@ def save(path, value):
     path.write_text(json.dumps(value))
 
 
-def events(run, name, points):
+def events(run, name, points, tag="training/global_step"):
     writer = EventFileWriter(str(run / "train/tensorboard" / name))
     for step, timestamp, value in points:
         writer.add_event(
             Event(
                 step=step,
                 wall_time=timestamp,
-                summary=Summary(value=[Summary.Value(tag="training/global_step", simple_value=value)]),
+                summary=Summary(value=[Summary.Value(tag=tag, simple_value=value)]),
             )
         )
     writer.close()
@@ -126,3 +126,51 @@ def test_completed_training_overrides_parent_still_running(tmp_path):
 def test_repeated_validation_uses_actual_logged_mean():
     tags = report.validation_tags({"val-core/synth/heldout/reward/mean@4": []}, "synth")
     assert tags[1] == "val-core/synth/heldout/reward/mean@4"
+
+
+def test_mixed_validation_weights_tasks_and_excludes_incomplete_panels():
+    series = {
+        "val-core/wideseek/heldout/reward/mean@1": [
+            {"step": 0, "value": 1.0, "time": 100},
+            {"step": 8, "value": 0.5, "time": 200},
+        ],
+        "val-core/deepdive/heldout/reward/mean@1": [
+            {"step": 0, "value": 0.0, "time": 101},
+        ],
+    }
+    panels = {
+        ("wideseek/heldout", 0): {"1": {"status": "finished"}},
+        ("deepdive/heldout", 0): {"1": {"status": "timeout"}},
+    }
+    report.combine_validation(series, panels, "heldout", {"wideseek": 3, "deepdive": 1})
+    assert series["val-core/mix/heldout/reward/mean@1"] == [
+        {"step": 0, "value": 0.75, "time": 101}
+    ]
+    assert len(panels[("mix/heldout", 0)]) == 2
+    assert sum(report.timeout(r) for r in panels[("mix/heldout", 0)].values()) == 1
+
+
+def test_mixed_validation_with_one_gym_in_probe_panel():
+    series = {"val-core/deepdive/train_probe/reward/mean@1": [
+        {"step": 0, "value": 0.5, "time": 100}
+    ]}
+    report.combine_validation(series, {}, "train_probe", {"deepdive": 6})
+    assert series["val-core/mix/train_probe/reward/mean@1"] == series["val-core/deepdive/train_probe/reward/mean@1"]
+
+
+def test_load_mixed_run_uses_saved_panel_membership(tmp_path):
+    events(tmp_path, "training", [(2, 120, 1)])
+    for gym, score in (("wideseek", 1), ("deepdive", 0)):
+        events(tmp_path, gym, [(0, 100, score)], f"val-core/{gym}/heldout/reward/mean@1")
+    save(tmp_path / "train/data/manifest.json", {
+        "heldout_task_ids": ["depth-1", "width-2", "deepdive-qa_rl-1"],
+        "train_probe_task_ids": [],
+    })
+    tasks = [{"task_id": task, "source": source} for task, source in [
+        ("depth-1", "depth"), ("width-2", "width"), ("deepdive-qa_rl-1", "deepdive-qa_rl")
+    ]]
+    (tmp_path / "train/data/tasks.jsonl").write_text("\n".join(json.dumps(t) for t in tasks))
+    data = report.load_run(tmp_path)
+    assert data["gym"] == "mix"
+    assert not data["depth"]
+    assert data["series"]["val-core/mix/heldout/reward/mean@1"][0]["value"] == pytest.approx(2 / 3)

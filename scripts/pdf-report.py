@@ -16,7 +16,7 @@ The first uv invocation installs the pinned plotting dependencies.
 """
 
 import argparse
-from collections import defaultdict
+from collections import Counter, defaultdict
 from datetime import datetime, timezone
 import io
 import json
@@ -131,6 +131,13 @@ def load_run(run):
         )
         else "synth"
     )
+    if any(tag.startswith("val-core/deepdive/") for tag in series):
+        gym = "mix"
+        tasks = [json.loads(line) for line in (train / "data/tasks.jsonl").read_text().splitlines() if line.strip()]
+        task_gyms = {t["task_id"]: "deepdive" if t["source"].startswith("deepdive-") else "wideseek" for t in tasks}
+        for split in ("train_probe", "heldout"):
+            counts = Counter(task_gyms[t] for t in manifest[f"{split}_task_ids"])
+            combine_validation(series, panels, split, counts)
     depth = gym == "wideseek" and (
         manifest.get("source") == "depth" or bool(task_ids) and all(t.startswith("depth-") for t in task_ids)
     )
@@ -168,6 +175,30 @@ def validation_tags(series, gym):
     return tags
 
 
+def combine_validation(series, panels, split, counts):
+    """Combine logged pass@1 gym means by fixed-panel task counts."""
+    if not counts:
+        return
+    parts = {
+        gym: {p["step"]: p for p in series.get(f"val-core/{gym}/{split}/reward/mean@1", [])}
+        for gym in counts
+    }
+    # An unfinished validation must not appear as a smaller, easier panel.
+    steps = sorted(set.intersection(*(set(points) for points in parts.values())))
+    series[f"val-core/mix/{split}/reward/mean@1"] = [
+        {"step": step,
+         "value": sum(parts[gym][step]["value"] * count for gym, count in counts.items()) / sum(counts.values()),
+         "time": max(points[step]["time"] for points in parts.values())}
+        for step in steps
+    ]
+    for step in steps:
+        panels[(f"mix/{split}", step)] = {
+            f"{gym}/{task_id}": result
+            for gym in counts
+            for task_id, result in panels.get((f"{gym}/{split}", step), {}).items()
+        }
+
+
 def planned_updates(d):
     metadata, config, manifest = d["run_metadata"], d["config"], d["manifest"]
     if metadata.get("optimizer_updates") is not None:
@@ -193,7 +224,7 @@ def planned_updates(d):
 def render_report(d, output):
     s, proxy, metadata = d["series"], d["proxy"], d["run_metadata"]
     gym = d["gym"]
-    name = "WideSeek depth" if d["depth"] else "WideSeek" if gym == "wideseek" else "Synth"
+    name = "WideSeek + DeepDive" if gym == "mix" else "WideSeek depth" if d["depth"] else "WideSeek" if gym == "wideseek" else "Synth"
     model = Path(metadata.get("model", "Starting model not recorded")).name
     data_config = d["config"].get("data", {})
     response_budget = data_config.get("max_response_length")
@@ -368,7 +399,9 @@ def render_report(d, output):
             else f"{label}: traces unavailable"
         )
     reward_kind = (
-        "binary QA accuracy"
+        "task-weighted native score (QA accuracy / item-F1)"
+        if gym == "mix"
+        else "binary QA accuracy"
         if d["depth"]
         else "native item-F1"
         if gym == "wideseek"
@@ -702,7 +735,7 @@ def render_report(d, output):
             ]),
             ("Budgets and reproducibility", [
                 ("Prompt / response token limits", values("data.max_prompt_length", "data.max_response_length")),
-                ("Episode timeout, seconds", values(f"{gym}.timeout")),
+                ("Episode timeout, seconds", values(f"{'wideseek' if gym == 'mix' else gym}.timeout")),
                 ("Data seed", values("data.seed")),
                 ("Rollout groups / dataset epochs", values("rollout.total_rollout_steps", "trainer.total_epochs")),
                 ("Validation / save interval", values("trainer.test_freq", "trainer.save_freq")),
