@@ -156,6 +156,35 @@ def test_batch_fatal_error_cancels_and_awaits_other_workers(tmp_path):
     assert json.loads((tmp_path/'manifest.json').read_text())['status'] == 'interrupted'
 
 
+@pytest.mark.parametrize('status', ['timeout', 'budget_exceeded'])
+def test_inband_budget_failure_counts_once_without_retry(tmp_path, status):
+    from evals.wideseek.band import compute
+    path = tmp_path / 'decomposer/task/attempt-001'
+    calls = []
+
+    async def episode(task, mode, attempt, root, args, **kwargs):
+        calls.append(attempt)
+        save(path / 'execution-1/trace.json', {'messages': []})
+        save(path / 'result.json', {'task_id': 'task', 'status': status,
+             'execution_directory': 'execution-1', 'error': 'Episode exceeded 900s',
+             'evaluation': {'status': status, 'score': None}})
+
+    async def run():
+        guard = OutageGuard(tmp_path, AsyncMock())
+        await collect_episode(guard, episode, {'task_id': 'task'}, 'decomposer', 1,
+                              tmp_path, SimpleNamespace(episode_timeout=900))
+        guard.probe.assert_not_awaited()
+
+    asyncio.run(run())
+    save(tmp_path / 'manifest.json', {'status': 'completed', 'repetitions': 1,
+         'settings': {'tasks': ['task'], 'modes': ['decomposer']}})
+    band = compute([tmp_path], .9, max_pass_rate=.5)
+    assert calls == [1]
+    assert band['passes'] == [['task', 0, 1]]
+    assert band['rerun'] == []
+    assert (path / 'execution-1/trace.json').exists()
+
+
 def test_watch_displays_pause(tmp_path, capsys):
     import fcntl
     import time

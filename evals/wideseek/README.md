@@ -110,6 +110,27 @@ See [Gym setup and scoring](../../gyms/wideseek/README.md) and
 [SFT collection](../../sft/wideseek/README.md). Table item-F1 and development-set
 results are not binary benchmark pass rates or public WideSearch scores.
 
+## Seen-Pool Recipe on OCCtopus
+
+`occtopus/seen.json` pins the 4,783-task pool, four attempts per task,
+concurrency 256 and a 900-second episode budget. Allocate one GPU and run:
+
+```bash
+bash evals/wideseek/occtopus/run.sh <new-run-directory> <shared-runtime> \
+  <frozen-tasks.jsonl> <merged-models-directory> <vllm-python>
+```
+
+Bind `HF_TOKEN`, `LLM_PROXY_MASTER_KEY`, `AGENTIC_RAG_API_KEY` and
+`CLEARML_CONFIG_FILE`. The recipe defaults to SFT v1.8.0; append
+`--sft-version 1.7.0` to verify the same full-pool launch with the previous release.
+Missing checkpoints are merged with the release's `merge.py` and checked against
+its published SHA256. The resolved Hugging Face revision is saved with the model.
+The pool and checkpoint are verified before inference starts. Use a fresh run
+directory when changing the checkpoint or budget; prior attempts are not imported.
+Clean episode budget exhaustion counts as a failed attempt without retry.
+Infrastructure and cleanup failures retain their existing recovery rules.
+ClearML reporting runs inside the collector.
+
 ## Teacher-Solved Depth Evaluation
 
 `teacher_solved_local` freezes every depth task with a saved Flash Next QA score

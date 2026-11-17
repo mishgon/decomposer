@@ -1,0 +1,10 @@
+{
+  "sft_version": "1.8.0",
+  "pool_tasks": 4783,
+  "pool_sha256": "f4393c69f129e00dec65a3402e539aa79e5224fede241ed79ac736e6656e5406",
+  "repetitions": 4,
+  "concurrency": 256,
+  "episode_timeout": 900,
+  "success_threshold": 0.9,
+  "max_pass_rate": 0.5
+}
