@@ -32,6 +32,10 @@ are evaluated at step zero and every eight updates. Held-out questions never ent
 training batches or train probes. The manifest records both partitions and their
 source counts. Infrastructure errors remain excluded from selection.
 
+Mix OPD gives WideSeek and DeepDive episodes 45 minutes (2700 seconds), for
+both training and policy validation. The control, selected-pool and smoke
+entry points share this override. Workplace-20 retains its separate timeout.
+
 For a single pass through 512 training tasks and 20 held-out tasks, add
 `--prioritize-strict --steps 64 --holdout-tasks 20`. This keeps every strict
 in-band task (1/4 or 2/4 successes) in the combined pool and fills the remaining

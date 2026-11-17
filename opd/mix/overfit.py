@@ -11,12 +11,13 @@ import subprocess
 from gyms.wideseek import REPO_ROOT
 from gyms.wideseek.prepare import agent_input
 from opd.launch import gpu_overrides
+from opd.mix.run import OVERRIDES as MIX_OVERRIDES
 from opd.wideseek.local import check_inputs, reserve_gpus
 from opd.wideseek.prepare import DEPTH_VALIDATION_PANEL, VALIDATION_PANEL
 from opd.wideseek.run import create_parser, main as train
 from opd.workplace_assistant.prepare import validation_rows
 
-OVERRIDES = ['trainer.project_name=decomposer-mix-opd', 'trainer.total_epochs=1']
+OVERRIDES = [*MIX_OVERRIDES, 'trainer.total_epochs=1']
 
 
 def prepare(source, output, *, steps=32, holdout_tasks=0, prioritize_strict=False):

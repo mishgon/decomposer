@@ -5,13 +5,14 @@ import subprocess
 
 from gyms.wideseek import REPO_ROOT
 from opd.launch import gpu_overrides
+from opd.mix.run import OVERRIDES as MIX_OVERRIDES
 from opd.mix.smoke_data import prepare
 from opd.wideseek.local import check_inputs, reserve_gpus
 from opd.wideseek.run import create_parser, main as train
 
 # Inherit the production optimizer, LoRA, token budgets, sampling and checkpointing.
 OVERRIDES = [
-    'trainer.project_name=decomposer-mix-opd',
+    *MIX_OVERRIDES,
     'trainer.total_epochs=1',
     'rollout.total_rollout_steps=8',
     'trainer.val_before_train=false',

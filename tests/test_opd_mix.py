@@ -80,7 +80,8 @@ def test_run_preserves_arguments_and_uses_mixture_preparer(monkeypatch):
     monkeypatch.setattr(run, 'run', launch)
     asyncio.run(run.main(args, overrides))
     launch.assert_awaited_once_with(args, [
-        'trainer.project_name=decomposer-mix-opd', 'trainer.experiment_name=mix-test'],
+        'trainer.project_name=decomposer-mix-opd', 'wideseek.timeout=2700',
+        'trainer.experiment_name=mix-test'],
         prepare_data=mix.prepare)
     assert args.gpus == [4, 5, 6] and args.training_gpus == 2
     assert args.resume_from == Path('/previous/global_step_31')
