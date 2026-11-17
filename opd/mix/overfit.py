@@ -4,7 +4,9 @@ from collections import Counter
 from functools import partial
 import hashlib
 import json
+from pathlib import Path
 import random
+import shutil
 import signal
 import subprocess
 
@@ -13,11 +15,39 @@ from gyms.wideseek.prepare import agent_input
 from opd.launch import gpu_overrides
 from opd.mix.run import OVERRIDES as MIX_OVERRIDES
 from opd.wideseek.local import check_inputs, reserve_gpus
-from opd.wideseek.prepare import DEPTH_VALIDATION_PANEL, VALIDATION_PANEL
+from opd.wideseek.prepare import DEPTH_VALIDATION_PANEL, VALIDATION_PANEL, check
 from opd.wideseek.run import create_parser, main as train
 from opd.workplace_assistant.prepare import validation_rows
 
 OVERRIDES = [*MIX_OVERRIDES, 'trainer.total_epochs=1']
+
+
+def frozen_manifest(source, directory, steps, holdout_tasks):
+    """Validate an already selected split without drawing a new holdout."""
+    import pandas as pd
+
+    manifest = check(directory)
+    if (hashlib.sha256(source.read_bytes()).hexdigest() != manifest['source_sha256']
+            or source.read_bytes() != (directory / 'tasks.jsonl').read_bytes()):
+        raise ValueError('Frozen data and selected task pool differ')
+    train = pd.read_parquet(directory / 'train.parquet')
+    evaluation = pd.read_parquet(directory / 'evaluation.parquet')
+    train_ids = {row['task_id'] for row in train.extra_info}
+    heldout_ids = {row['task_id'] for row in
+                   evaluation[evaluation.data_source.str.endswith('/heldout')].extra_info}
+    if (len(train) != steps * 8 or manifest['optimizer_steps'] != steps
+            or len(heldout_ids) != holdout_tasks
+            or train_ids != set(manifest['train_task_ids'])
+            or heldout_ids != set(manifest['heldout_task_ids'])
+            or train_ids & heldout_ids):
+        raise ValueError('Frozen training budget or holdout differs')
+    return manifest
+
+
+def stage_frozen(source, output, *, directory, steps, holdout_tasks):
+    manifest = frozen_manifest(source, directory, steps, holdout_tasks)
+    shutil.copytree(directory, output)
+    return manifest
 
 
 def prepare(source, output, *, steps=32, holdout_tasks=0, prioritize_strict=False):
@@ -133,13 +163,25 @@ async def main(args):
             raise ValueError('Training checkpoint differs from in-band selection checkpoint')
         if selected['tasks_sha256'] != hashlib.sha256(args.source.read_bytes()).hexdigest():
             raise ValueError('Frozen in-band tasks changed')
+    prepare_data = partial(prepare, steps=args.steps, holdout_tasks=args.holdout_tasks,
+                           prioritize_strict=args.prioritize_strict)
+    overrides = list(OVERRIDES)
+    if args.prepared_data:
+        if args.prioritize_strict:
+            raise ValueError('Cannot resample an already prepared split')
+        manifest = frozen_manifest(args.source, args.prepared_data, args.steps, args.holdout_tasks)
+        initialization = json.loads((args.model / 'opd_initialization.json').read_text())
+        if manifest['initialization'] != initialization:
+            raise ValueError('Prepared split and training checkpoint differ')
+        overrides.append(f"wideseek.timeout={manifest['episode_timeout']}")
+        prepare_data = partial(stage_frozen, directory=args.prepared_data,
+                               steps=args.steps, holdout_tasks=args.holdout_tasks)
     from opd.workplace_assistant.preflight import check
     await check()
     with reserve_gpus(args.gpus, args.output.resolve().parent):
-        await train(args, [*OVERRIDES, f'rollout.total_rollout_steps={args.steps * 8}',
+        await train(args, [*overrides, f'rollout.total_rollout_steps={args.steps * 8}',
                           f'trainer.experiment_name={args.output.resolve().parent.name}'],
-                    prepare_data=partial(prepare, steps=args.steps, holdout_tasks=args.holdout_tasks,
-                                         prioritize_strict=args.prioritize_strict), smoke=True)
+                    prepare_data=prepare_data, smoke=True)
 
 
 if __name__ == '__main__':
@@ -149,6 +191,8 @@ if __name__ == '__main__':
     signal.signal(signal.SIGTERM, interrupt)
     parser = create_parser(smoke=True)
     parser.add_argument('--steps', type=int, default=32)
+    parser.add_argument('--prepared-data', type=Path,
+                        help='Reuse a checksummed prepared split, episode order and time budget')
     parser.add_argument('--holdout-tasks', type=int, required=True,
                         help='Fixed seed-42 holdout stratified by source; use 0 only for deliberate overfit runs')
     parser.add_argument('--prioritize-strict', action='store_true',
