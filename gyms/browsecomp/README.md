@@ -30,6 +30,15 @@ The default endpoint is `https://lmrouter.2a2i.org/rag`. Override it with
 `AGENTIC_RAG_URL` or `--retrieval-url` for a compatible Search API.
 Preflight checks the authenticated health endpoint with a 30-second deadline.
 
+The shared research protocol counts context tokens with the public
+`Qwen/Qwen3.5-4B` tokenizer (no model weights are loaded). Install this gym's
+requirements and cache the tokenizer before running offline:
+
+```bash
+uv pip install -r gyms/browsecomp/requirements.txt
+python -c 'from transformers import AutoTokenizer; AutoTokenizer.from_pretrained("Qwen/Qwen3.5-4B")'
+```
+
 ## Run
 
 ```bash

@@ -19,6 +19,15 @@ Load `LLM_PROXY_MASTER_KEY` and `AGENTIC_RAG_API_KEY`. The default Search API is
 `AGENTIC_RAG_URL` or `--retrieval-url`. This is a corpus-backed experiment,
 not the upstream live-web benchmark. Keenable is not used.
 
+The shared research protocol counts context tokens with the public
+`Qwen/Qwen3.5-4B` tokenizer (no model weights are loaded). Install this gym's
+requirements and cache the tokenizer before running offline:
+
+```bash
+uv pip install -r gyms/widesearch/requirements.txt
+python -c 'from transformers import AutoTokenizer; AutoTokenizer.from_pretrained("Qwen/Qwen3.5-4B")'
+```
+
 Use `--agent researcher_occ_non_thinking` for the OCC single-agent baseline.
 
 ```bash
