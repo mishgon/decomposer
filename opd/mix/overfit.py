@@ -206,14 +206,16 @@ async def main(args):
         if args.rollout_concurrency < 1:
             raise ValueError('Rollout concurrency must be positive')
         overrides.extend([f'async_training.concurrent_samples_per_replica={args.rollout_concurrency}',
-                          f'async_training.staleness_threshold={max(1, math.ceil(args.rollout_concurrency / 8) - 1)}',
-                          f'data.val_batch_size={args.rollout_concurrency}'])
+                          f'async_training.staleness_threshold={max(1, math.ceil(args.rollout_concurrency / 8) - 1)}'])
+    if args.validation_concurrency < 1:
+        raise ValueError('Validation concurrency must be positive')
+    overrides.append(f'data.val_batch_size={args.validation_concurrency}')
     from opd.workplace_assistant.preflight import check
     await check()
     with reserve_gpus(args.gpus, args.output.resolve().parent):
         await train(args, [*overrides, f'rollout.total_rollout_steps={args.steps * 8}',
                           f'trainer.experiment_name={args.output.resolve().parent.name}'],
-                    prepare_data=prepare_data, smoke=True)
+                    prepare_data=prepare_data, smoke=True, worker_slots=max(64, args.validation_concurrency))
 
 
 if __name__ == '__main__':
@@ -230,6 +232,7 @@ if __name__ == '__main__':
     parser.add_argument('--prioritize-strict', action='store_true',
                         help='Keep every 1/4 and 2/4 task, fill the update budget with 0/4 tasks, '
                              'and stratify holdout by pass bucket; requires selection.json')
-    parser.add_argument('--rollout-concurrency', type=int, help='Episodes per rollout replica and validation batch size')
+    parser.add_argument('--rollout-concurrency', type=int, help='In-flight training episodes per rollout replica')
+    parser.add_argument('--validation-concurrency', type=int, default=32, help='Episodes per validation batch')
     parser.description = __doc__
     asyncio.run(main(parser.parse_args()))

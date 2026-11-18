@@ -18,7 +18,7 @@ from opd.launch import add_gpu_arguments, gpu_overrides
 from opd.report import save_report
 
 
-async def main(args, overrides, *, prepare_data=prepare, smoke=False):
+async def main(args, overrides, *, prepare_data=prepare, smoke=False, worker_slots=64):
     trainer_env = None
     config_name = 'full'
     if bundle := os.environ.get('OPD_FAST_RUNTIME'):
@@ -94,7 +94,7 @@ async def main(args, overrides, *, prepare_data=prepare, smoke=False):
                                             {"role": "assistant", "content": "I will delegate the copy."}],
             tokenize=True, return_dict=False, enable_thinking=False)
         await asyncio.wait_for(score(ids, tokenizer=tokenizer, output=output / "teacher-preflight.json"), 90)
-        async with agent_server(ROOT / "gyms/wideseek/langgraph.json", port=port, n_jobs_per_worker=64,
+        async with agent_server(ROOT / "gyms/wideseek/langgraph.json", port=port, n_jobs_per_worker=worker_slots,
                                 python_executable=args.worker_python):
             from opd.wideseek.preflight import check
             await check(model, output / "preflight", worker_url=os.environ["WS_WORKER_URL"])
