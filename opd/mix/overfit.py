@@ -45,8 +45,19 @@ def frozen_manifest(source, directory, steps, holdout_tasks):
 
 
 def stage_frozen(source, output, *, directory, steps, holdout_tasks):
+    import pandas as pd
+
     manifest = frozen_manifest(source, directory, steps, holdout_tasks)
     shutil.copytree(directory, output)
+    path = output / 'evaluation.parquet'
+    evaluation = pd.read_parquet(path)
+    probes = evaluation.data_source.str.endswith('/train_probe')
+    if probes.any():
+        evaluation.loc[~probes].to_parquet(path, index=False)
+        manifest.update(train_probe_tasks=0, train_probe_task_ids=[],
+                        evaluation='Fixed held-out and Workplace-20; pass@1')
+        manifest['files']['evaluation.parquet'] = hashlib.sha256(path.read_bytes()).hexdigest()
+        (output / 'manifest.json').write_text(json.dumps(manifest, indent=2))
     return manifest
 
 
@@ -120,9 +131,8 @@ def prepare(source, output, *, steps=32, holdout_tasks=0, prioritize_strict=Fals
     rng.shuffle(ordered)
     training = [row(ordered[i % len(ordered)], 'train') for i in range(steps * 8)]
     rng.shuffle(training)
-    probes = ordered[:6]
     workplace = validation_rows()
-    validation = [row(t, 'train_probe') for t in probes] + [row(t, 'heldout') for t in holdout] + workplace
+    validation = [row(t, 'heldout') for t in holdout] + workplace
     output.mkdir(parents=True, exist_ok=False)
     (output / 'tasks.jsonl').write_text(''.join(json.dumps(t, ensure_ascii=False) + '\n' for t in tasks))
     pd.DataFrame(training).to_parquet(output / 'train.parquet', index=False)
@@ -131,12 +141,12 @@ def prepare(source, output, *, steps=32, holdout_tasks=0, prioritize_strict=Fals
                 'task_ids': [t['task_id'] for t in tasks],
                 'train_task_ids': [t['task_id'] for t in ordered], 'train_tasks': len(ordered),
                 'heldout_task_ids': [t['task_id'] for t in holdout], 'heldout_tasks': len(holdout),
-                'heldout_sources': dict(Counter(t['source'] for t in holdout)), 'train_probe_tasks': len(probes),
-                'train_probe_task_ids': [t['task_id'] for t in probes],
+                'heldout_sources': dict(Counter(t['source'] for t in holdout)), 'train_probe_tasks': 0,
+                'train_probe_task_ids': [],
                 'training_sources': dict(Counter(t['source'] for t in ordered)),
                 'workplace_validation_tasks': len(workplace), 'training_episodes': steps * 8,
                 'optimizer_steps': steps,
-                'evaluation': f'Up to six fixed training probes, {len(holdout)} disjoint heldout tasks '
+                'evaluation': f'{len(holdout)} disjoint heldout tasks '
                               'and frozen Workplace-20; pass@1',
                 'files': {name: hashlib.sha256((output / name).read_bytes()).hexdigest()
                           for name in ('tasks.jsonl', 'train.parquet', 'evaluation.parquet')}}

@@ -223,19 +223,19 @@ def show(root, run=None):
     normalized = {tag: [{'step': p.step, 'value': p.value, 'time': p.wall_time} for p in points]
                   for tag, points in series.items()}
     rewards = reward_series(train, normalized)
-    print('\nReward (native score; fixed panels):')
+    print('\nReward (native score):')
     if read_json(train / 'data/manifest.json').get('stratify_by') == 'dataset_and_passes':
-        print('Train and validation use the same frozen pool dataset/pass-bucket weights.')
+        print('Validation uses frozen pool dataset/pass-bucket weights.')
     print('  Panel                         Base    Latest     Delta   Trend')
     for name, label in LABELS.items():
-        points = rewards[f'reward/{name}']
+        points = rewards[f'rewards/{name}']
         values = [p['value'] for p in points]
         base = next((p['value'] for p in points if p['step'] == 0), None)
         first = f'{base:.3f}' if base is not None else '--'
         latest = f'{values[-1]:.3f}' if values else '--'
         delta = f'{values[-1]-base:+.3f}' if values and base is not None else '--'
         print(f'  {label:<28} {first:>6}  {latest:>8}  {delta:>8}   {trend(values)}')
-    print('Train = fixed training probes; validation = held-out; OOD = Workplace-20.')
+    print('Train = rollout batch mean; validation = fixed held-out; OOD = Workplace-20.')
     for tag, label in [('actor/loss', 'Actor total loss'),
                        ('actor/distillation/loss', 'Distillation loss'), ('actor/pg_loss', 'Task PG metric')]:
         values = [p.value for p in series.get(tag, [])]

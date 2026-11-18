@@ -28,7 +28,7 @@ def test_frozen_panel_is_resolved_once_and_validation_only(tmp_path, monkeypatch
     assert set(train.data_source) == {'synth/train'}
     assert len(train) == 128
     workplace = val[val.data_source == 'workplace-assistant/validation20']
-    assert len(workplace) == 20 and len(val) == 32
+    assert len(workplace) == 20 and len(val) == 28
     assert set(workplace.agent_name) == {'workplace_decomposer'}
     assert [int(info['task_id']) for info in workplace.extra_info] == task_ids
     by_id = {row['id']: row for row in rows}

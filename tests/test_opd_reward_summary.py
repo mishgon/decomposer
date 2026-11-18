@@ -28,7 +28,7 @@ def panel(tmp_path):
                   'evaluation': {'score': score}}
         save(train / 'episodes' / tid / 'trajectory.json', {'task_id': tid, 'data_source': source,
              'weight_versions': {'global_steps': 0}, 'result': result})
-    logged = {'val-core/wideseek/train_probe/reward/mean@1': 0.,
+    logged = {'critic/rewards/mean': .625, 'val-core/wideseek/train_probe/reward/mean@1': 0.,
               'val-core/deepdive/train_probe/reward/mean@1': 1.,
               'val-core/wideseek/heldout/reward/mean@1': .5,
               'val-core/deepdive/heldout/reward/mean@1': 0.,
@@ -39,16 +39,16 @@ def panel(tmp_path):
 def test_common_mixture_and_timeout_zero(panel):
     train, manifest, tasks, selection, logged = panel
     w = weights(manifest, tasks, selection)
-    assert w['train'] == {'depth-0': .8, 'deepdive-0': .2}
+    assert set(w) == {'validation'}
     assert sum(w['validation'].values()) == pytest.approx(1)
     assert RewardSummary(train).metrics(logged, 0) == pytest.approx(
-        {'reward/train': .2, 'reward/validation': .4, 'reward/ood': .85})
+        {'rewards/train': .625, 'rewards/validation': .4, 'rewards/ood': .85})
 
 
 def test_incomplete_logged_panel_is_not_renormalized(panel):
     train, _, _, _, logged = panel
     del logged['val-core/deepdive/heldout/reward/mean@1']
-    assert 'reward/validation' not in RewardSummary(train).metrics(logged, 0)
+    assert 'rewards/validation' not in RewardSummary(train).metrics(logged, 0)
 
 
 def test_missing_or_mixed_version_task_is_not_zero(panel):
@@ -56,7 +56,7 @@ def test_missing_or_mixed_version_task_is_not_zero(panel):
     p = train / 'episodes/depth-2/trajectory.json'
     d = json.loads(p.read_text()); d['weight_versions']['max_global_steps'] = 1
     save(p, d)
-    assert 'reward/validation' not in RewardSummary(train).metrics(logged, 0)
+    assert 'rewards/validation' not in RewardSummary(train).metrics(logged, 0)
 
 
 def test_judge_failure_is_explicit(panel):
@@ -89,9 +89,9 @@ def test_watcher_can_start_before_manifest(panel):
     path = train / 'data/manifest.json'
     contents = path.read_text()
     path.unlink()
-    assert 'reward/train' not in summarize(train, logged, 0)
+    assert 'rewards/validation' not in summarize(train, logged, 0)
     path.write_text(contents)
-    assert summarize(train, logged, 0)['reward/train'] == pytest.approx(.2)
+    assert summarize(train, logged, 0)['rewards/validation'] == pytest.approx(.4)
 
 
 def test_old_mixed_panels_use_task_counts(tmp_path):
@@ -101,4 +101,22 @@ def test_old_mixed_panels_use_task_counts(tmp_path):
         [('depth-1', 'depth'), ('depth-2', 'depth'), ('deepdive-1', 'deepdive-qa_rl')]))
     logged = {'val-core/wideseek/heldout/reward/mean@1': [{'step': 0, 'value': 1., 'time': 100}],
               'val-core/deepdive/heldout/reward/mean@1': [{'step': 0, 'value': 0., 'time': 101}]}
-    assert series(train, logged)['reward/validation'] == [{'step': 0, 'value': 2/3, 'time': 101}]
+    assert series(train, logged)['rewards/validation'] == [{'step': 0, 'value': 2/3, 'time': 101}]
+
+
+def test_training_uses_all_rollout_batches_without_probe_baseline(panel):
+    train, _, _, _, _ = panel
+    logged = {
+        'critic/rewards/mean': [{'step': 1, 'value': .3, 'time': 10}, {'step': 2, 'value': .7, 'time': 20}],
+        'val-core/wideseek/train_probe/reward/mean@1': [{'step': 0, 'value': .99, 'time': 1}],
+        'reward/train': [{'step': 0, 'value': .88, 'time': 1}],
+    }
+    assert series(train, logged)['rewards/train'] == logged['critic/rewards/mean']
+    assert summarize(train, {'critic/rewards/mean': .6}, 3) == {'rewards/train': .6}
+
+
+def test_validation_does_not_require_training_probes(panel):
+    train, manifest, _, _, logged = panel
+    manifest.pop('train_probe_task_ids')
+    save(train / 'data/manifest.json', manifest)
+    assert summarize(train, logged, 0)['rewards/validation'] == pytest.approx(.4)

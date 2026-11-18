@@ -141,7 +141,7 @@ def load_run(run):
         tasks = [json.loads(line) for line in (train / "data/tasks.jsonl").read_text().splitlines() if line.strip()]
         task_gyms = {t["task_id"]: "deepdive" if t["source"].startswith("deepdive-") else "wideseek" for t in tasks}
         for split in ("train_probe", "heldout"):
-            counts = Counter(task_gyms[t] for t in manifest[f"{split}_task_ids"])
+            counts = Counter(task_gyms[t] for t in manifest.get(f"{split}_task_ids", []))
             combine_validation(series, panels, split, counts)
     series.update(reward_series(train, series))
     depth = gym == "wideseek" and (
@@ -377,16 +377,17 @@ def render_report(d, output):
             mask="auto",
         )
 
-    tags = [f"reward/{name}" for name in LABELS]
+    tags = ["rewards/validation", "rewards/ood"]
+    labels = [LABELS["validation"], LABELS["ood"]]
     latest_val = max((int(xy(t)[0][-1]) for t in tags if len(xy(t)[0])), default=0)
-    held_x, held_y = xy(tags[1])
+    held_x, held_y = xy(tags[0])
     held_note = (
         f"Held-out: {held_y[0]:.1%} initial, {max(held_y):.1%} peak (step {held_x[np.argmax(held_y)]:.0f}), {held_y[-1]:.1%} latest."
         if len(held_y)
         else "Held-out validation not recorded."
     )
     validation_notes = []
-    for tag, source_tag, label in zip(tags, validation_tags(s, gym), ["train probes", "held-out", "Workplace"]):
+    for tag, source_tag, label in zip(tags, validation_tags(s, gym)[1:], ["held-out", "Workplace"]):
         x, _ = xy(tag)
         results = (
             d["panels"].get(
@@ -413,7 +414,7 @@ def render_report(d, output):
         if gym == "wideseek"
         else "native synthetic reward"
     )
-    weighting = ("Train and validation use frozen pool dataset/pass weights."
+    weighting = ("Validation uses frozen pool dataset/pass weights."
                  if d["manifest"].get("stratify_by") == "dataset_and_passes"
                  else "Fixed-panel means weight each task equally.")
     status = metadata.get("status", "unknown")
@@ -423,7 +424,7 @@ def render_report(d, output):
         f"{name} OPD: validation through step {latest_val}",
         subtitle,
         [
-            f"{name}: {reward_kind}. {weighting} Train reward uses fixed probes.",
+            f"{name}: {reward_kind}. {weighting} Train reward is the rollout batch mean.",
             held_note,
             "Latest validation (last attempt/task): "
             + "; ".join(validation_notes)
@@ -433,8 +434,8 @@ def render_report(d, output):
     f, a = base("Fixed-panel validation", "Mean reward / success rate", "Validation step")
     for tag, label, col in zip(
         tags,
-        LABELS.values(),
-        [C["blue"], C["green"], C["brown"]],
+        labels,
+        [C["green"], C["brown"]],
     ):
         _, y = xy(tag)
         label = f"{label}: {y[-1]:.3f}" if len(y) else label
@@ -454,9 +455,9 @@ def render_report(d, output):
     if common:
         delta = [dict(zip(*xy(t)))[last] - dict(zip(*xy(t)))[first] for t in tags]
         a.bar(
-            list(LABELS.values()),
+            labels,
             delta,
-            color=[C["blue"], C["green"], C["brown"]],
+            color=[C["green"], C["brown"]],
             width=0.55,
         )
         a.axhline(0, color=C["gray"], lw=0.8)
@@ -469,10 +470,10 @@ def render_report(d, output):
                 ha="center",
             )
     place(f, 1, 0)
-    f, a = base("Training rollout reward", "Native batch mean reward")
+    f, a = base("Train reward", "Native batch mean reward")
     x, y = line(
         a,
-        "critic/rewards/mean",
+        "rewards/train",
         "Raw batch (changing tasks)",
         C["blue"],
         alpha=0.32,

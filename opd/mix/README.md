@@ -27,10 +27,10 @@ The required `--holdout-tasks` argument reserves a fixed seed-42 sample, stratif
 by source, before constructing training batches. Every source retains both training
 and held-out questions. Use `--holdout-tasks 0` only for deliberate overfit experiments.
 Training visits every remaining question with balanced exposure: 512 episodes at
-batch 8 for 64 updates. Six fixed train probes, the disjoint holdout and Workplace-20
-are evaluated at step zero and every eight updates. Held-out questions never enter
-training batches or train probes. The manifest records both partitions and their
-source counts. Infrastructure errors remain excluded from selection.
+batch 8 for 64 updates. Training reward is the mean reward of each rollout batch.
+The disjoint holdout and Workplace-20 are evaluated at step zero and every eight
+updates. Held-out questions never enter training batches. The manifest records
+both partitions and their source counts. Infrastructure errors remain excluded from selection.
 
 Mix OPD gives WideSeek and DeepDive episodes 45 minutes (2700 seconds), for
 both training and policy validation. The control, selected-pool and smoke

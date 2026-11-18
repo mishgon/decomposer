@@ -1,4 +1,4 @@
-"""Fixed-panel native rewards with a common, frozen task-mixture weighting.
+"""Mean training rollout reward, fixed held-out reward, and Workplace OOD reward.
 
 These are estimates for the selected pool. Weighting does not correct selection
 bias, differences in serving conditions, or uncertainty from small panels.
@@ -14,7 +14,7 @@ LABELS = {'train': 'Train reward', 'validation': 'Validation reward', 'ood': 'OO
 
 
 def weights(manifest, tasks, selection):
-    """Give train probes and held-out the same dataset/pass-bucket mixture."""
+    """Weight held-out tasks to match the frozen pool dataset/pass-bucket mixture."""
     passes = {r['task_id']: r['passes'] for r in selection['evidence']}
     strata = {t['task_id']: f"{'deepdive' if t['source'].startswith('deepdive-') else t['source']}/{passes[t['task_id']]}"
               for t in tasks}
@@ -22,7 +22,7 @@ def weights(manifest, tasks, selection):
     if population != manifest['pool_cell_counts']:
         raise ValueError('Reward strata differ from the frozen pool')
     result = {}
-    for name, field in [('train', 'train_probe_task_ids'), ('validation', 'heldout_task_ids')]:
+    for name, field in [('validation', 'heldout_task_ids')]:
         ids = manifest[field]
         counts = Counter(strata[t] for t in ids)
         if set(counts) != set(population) or len(ids) != len(set(ids)):
@@ -53,7 +53,7 @@ class RewardSummary:
             self.task_weights = weights(self.manifest, tasks, selection)
         self.counts = {}
         if self.manifest and tasks:
-            for split in ('train_probe', 'heldout'):
+            for split in ('heldout',):
                 ids = self.manifest.get(f'{split}_task_ids', [])
                 if ids:
                     self.counts[split] = Counter(self.gyms[t] for t in ids)
@@ -66,7 +66,7 @@ class RewardSummary:
             stamp = path.stat().st_mtime_ns
             cached = self.cache.get(path)
             if cached is None or cached[0] != stamp:
-                # Training episodes can share probe task IDs, so inspect data_source.
+                # Select held-out evaluations, including historical runs with probes.
                 try:
                     d = json.loads(path.read_text())
                 except json.JSONDecodeError:
@@ -74,7 +74,7 @@ class RewardSummary:
                 source, tid = d.get('data_source', ''), d.get('task_id')
                 v = policy_version(d.get('weight_versions', {}))
                 record = None
-                if tid in expected and v is not None and source.endswith(('/heldout', '/train_probe')) and d.get('result'):
+                if tid in expected and v is not None and source.endswith('/heldout') and d.get('result'):
                     record = (source.rsplit('/', 1)[-1], v, tid, d['result'])
                 self.cache[path] = (stamp, record)
             record = self.cache[path][1]
@@ -88,8 +88,11 @@ class RewardSummary:
     def metrics(self, logged, step):
         """Only aggregate a validation after every constituent gym was logged."""
         output = {}
-        panels = self.panels() if self.task_weights else {}
-        for name, split in [('train', 'train_probe'), ('validation', 'heldout')]:
+        if 'critic/rewards/mean' in logged:
+            output['rewards/train'] = logged['critic/rewards/mean']
+        has_validation = any('/heldout/reward/mean@' in tag for tag in logged)
+        panels = self.panels() if self.task_weights and has_validation else {}
+        for name, split in [('validation', 'heldout')]:
             tags = {tag: value for tag, value in logged.items()
                     if tag.startswith('val-core/') and f'/{split}/reward/mean@' in tag
                     and not tag.startswith('val-core/mix/')}
@@ -120,18 +123,18 @@ class RewardSummary:
                     if len(values) != count or not math.isclose(sum(values) / count, tags[tag], abs_tol=1e-6):
                         raise ValueError(f'Raw results disagree with logged validation: {tag}, step {step}')
                 else:
-                    output[f'reward/{name}'] = sum(scores[t] * w for t, w in expected.items())
+                    output[f'rewards/{name}'] = sum(scores[t] * w for t, w in expected.items())
                 continue
             # Older single-gym and mixed runs retain their fixed-panel task means.
             if counts:
                 keys = {gym: f'val-core/{gym}/{split}/reward/mean@1' for gym in counts}
                 if all(tag in tags for tag in keys.values()):
-                    output[f'reward/{name}'] = sum(tags[keys[gym]] * n for gym, n in counts.items()) / sum(counts.values())
+                    output[f'rewards/{name}'] = sum(tags[keys[gym]] * n for gym, n in counts.items()) / sum(counts.values())
             elif len(tags) == 1:
-                output[f'reward/{name}'] = next(iter(tags.values()))
+                output[f'rewards/{name}'] = next(iter(tags.values()))
         ood = {k: v for k, v in logged.items() if k.startswith('val-core/workplace-assistant/validation20/reward/mean@')}
         if ood:
-            output['reward/ood'] = ood[max(ood, key=lambda k: int(k.rsplit('@', 1)[1]))]
+            output['rewards/ood'] = ood[max(ood, key=lambda k: int(k.rsplit('@', 1)[1]))]
         return output
 
 
@@ -152,12 +155,12 @@ def series(train, logged_series):
     by_step = defaultdict(dict)
     times = defaultdict(float)
     for tag, points in logged_series.items():
-        if not tag.startswith('val-core/'):
+        if not (tag.startswith('val-core/') or tag == 'critic/rewards/mean'):
             continue
         for p in points:
             by_step[p['step']][tag] = p['value']
             times[p['step']] = max(times[p['step']], p['time'])
-    output = {f'reward/{key}': [] for key in LABELS}
+    output = {f'rewards/{key}': [] for key in LABELS}
     for step, values in sorted(by_step.items()):
         for tag, value in summarize(train, values, step).items():
             output[tag].append({'step': step, 'value': value, 'time': times[step]})

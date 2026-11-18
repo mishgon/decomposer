@@ -107,6 +107,6 @@ def test_prepared_data_has_no_answers_in_prompts(tmp_path):
     train = pd.read_parquet(output / "train.parquet")
     val = pd.read_parquet(output / "evaluation.parquet")
     assert len(train) == 128
-    assert len(val) == 12
-    assert set(val.data_source) == {"synth/train_probe", "synth/heldout"}
+    assert len(val) == 8
+    assert set(val.data_source) == {"synth/heldout"}
     assert "expected" not in train.columns

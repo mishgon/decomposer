@@ -46,11 +46,11 @@ def test_full_pool_disjoint_questions_and_unchanged_ood_panel(tmp_path):
     assert check(out) == manifest
     train = pd.read_parquet(out / 'train.parquet')
     validation = pd.read_parquet(out / 'evaluation.parquet')
-    assert len(train) == 32 and len(validation) == 32
+    assert len(train) == 32 and len(validation) == 28
     assert train.extra_info.map(lambda x: x['task_id']).value_counts().tolist() == [1] * 32
     assert set(manifest['train_task_ids']).isdisjoint(manifest['heldout_task_ids'])
     assert validation.data_source.value_counts().to_dict() == {
-        'workplace-assistant/validation20': 20, 'wideseek/heldout': 8, 'wideseek/train_probe': 4}
+        'workplace-assistant/validation20': 20, 'wideseek/heldout': 8}
     assert 'secret reference' not in str(train.to_dict()) + str(validation.to_dict())
     panel = json.loads((Path(__file__).resolve().parents[1] /
                        'gyms/workplace_assistant/validation20.json').read_text())
@@ -102,7 +102,7 @@ def test_depth_pool_rotates_unique_tasks_and_excludes_frozen_holdout(tmp_path, m
     assert len({row['task_id'] for row in train.extra_info}) == 32
     assert all(r'\boxed{}' in prompt[0]['content'] for prompt in train.prompt)
     val = pd.read_parquet(tmp_path / 'first/evaluation.parquet')
-    assert len(val) == 32
+    assert len(val) == 28
     for info in val[val.data_source == 'workplace-assistant/validation20'].extra_info:
         assert json.loads(info['task'])['id'] == int(info['task_id'])
     source.write_text(''.join(json.dumps(t) + '\n' for t in reversed(tasks)))

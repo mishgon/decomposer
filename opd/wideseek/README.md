@@ -30,7 +30,8 @@ nor Workplace reward enters the distillation objective.
 
 Preparation accepts one source split per run. It uses `validation_panel.json`
 for width and `validation_panel_depth.json` for depth, checking both task IDs and
-question hashes. Each panel freezes four train probes and eight held-out questions.
+question hashes. Each panel supplies eight held-out questions; legacy train probes
+are unused. Training reward is the mean reward of each rollout batch.
 The depth panel was selected from the unique source questions with seed 42, without
 filtering by observed scores. All other
 unique questions enter the training pool. References stay in the task store for

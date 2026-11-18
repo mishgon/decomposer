@@ -27,14 +27,13 @@ def prepare(source, output):
         raise ValueError('OPD requires one WideSeek split: width or depth')
     validation_panel = DEPTH_VALIDATION_PANEL if sources == {'depth'} else VALIDATION_PANEL
     frozen = json.loads(validation_panel.read_text())
-    for entry in frozen['heldout'] + frozen['train_probe']:
+    for entry in frozen['heldout']:
         task = by_id.get(entry['task_id'])
         if task is None or task['question_sha256'] != entry['question_sha256']:
             raise ValueError(f"Frozen validation task changed or missing: {entry['task_id']}")
     heldout = [by_id[t['task_id']] for t in frozen['heldout']]
     heldout_hashes = {t['question_sha256'] for t in heldout}
     train = [t for t in selected if t['question_sha256'] not in heldout_hashes]
-    probes = [by_id[t['task_id']] for t in frozen['train_probe']]
     panel_path = Path(__file__).resolve().parents[2] / 'gyms/workplace_assistant/validation20.json'
     from opd.workplace_assistant.prepare import validation_rows
     workplace = validation_rows()
@@ -49,21 +48,20 @@ def prepare(source, output):
 
     pd.DataFrame([row(t, 'wideseek/train') for t in train]).to_parquet(
         output / 'train.parquet', index=False)
-    validation = [row(t, 'wideseek/train_probe') for t in probes]
-    validation += [row(t, 'wideseek/heldout') for t in heldout]
+    validation = [row(t, 'wideseek/heldout') for t in heldout]
     validation += workplace
     pd.DataFrame(validation).to_parquet(output / 'evaluation.parquet', index=False)
     files = ('tasks.jsonl', 'train.parquet', 'evaluation.parquet')
     manifest = {'task_ids': [t['task_id'] for t in selected],
                 'train_task_ids': [t['task_id'] for t in train],
                 'heldout_task_ids': [t['task_id'] for t in heldout],
-                'train_tasks': len(train), 'heldout_tasks': len(heldout), 'train_probe_tasks': len(probes),
+                'train_tasks': len(train), 'heldout_tasks': len(heldout), 'train_probe_tasks': 0,
                 'attempts_per_task_per_epoch': 1, 'workplace_validation_tasks': len(workplace),
                 'source': next(iter(sources)),
                 'validation_panel_sha256': hashlib.sha256(validation_panel.read_bytes()).hexdigest(),
                 'source_sha256': hashlib.sha256(raw).hexdigest(),
                 'workplace_panel_sha256': hashlib.sha256(panel_path.read_bytes()).hexdigest(),
-                'evaluation': '4 train probes, 8 disjoint WideSeek questions, frozen Workplace-20; pass@1',
+                'evaluation': '8 disjoint WideSeek questions, frozen Workplace-20; pass@1',
                 'files': {f: hashlib.sha256((output / f).read_bytes()).hexdigest() for f in files}}
     (output / 'manifest.json').write_text(json.dumps(manifest, indent=2))
     return manifest

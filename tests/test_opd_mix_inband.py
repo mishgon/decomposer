@@ -61,7 +61,7 @@ def test_mixed_selection_visits_all_tasks_in_exactly_64_batches(tmp_path, monkey
     assert len(counts) == 149 and max(counts.values()) - min(counts.values()) == 1
     assert {r['data_source'] for r in rows} == {'wideseek/train', 'deepdive/train'}
     assert all('SECRET' not in str(r['prompt']) for r in rows)
-    assert len(pd.read_parquet(data / 'evaluation.parquet')) == 6
+    assert len(pd.read_parquet(data / 'evaluation.parquet')) == 0
     with pytest.raises(ValueError, match='visit every'):
         overfit.prepare(source, tmp_path / 'short', steps=1)
 
@@ -85,7 +85,7 @@ def test_holdout_is_stratified_disjoint_and_stable_under_input_reordering(tmp_pa
     probe_ids = {r['extra_info']['task_id'] for r in evaluation if r['data_source'].endswith('/train_probe')}
     assert len(train) == 512 and len(train_ids) == manifest['train_tasks'] == 169
     assert len(heldout_ids) == manifest['heldout_tasks'] == 20
-    assert not train_ids & heldout_ids and probe_ids <= train_ids
+    assert not train_ids & heldout_ids and not probe_ids
     assert train_ids | heldout_ids == {t['task_id'] for t in tasks}
     hashes = {t['task_id']: t['question_sha256'] for t in tasks}
     assert not {hashes[i] for i in train_ids} & {hashes[i] for i in heldout_ids}

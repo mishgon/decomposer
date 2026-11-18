@@ -46,9 +46,9 @@ def test_validation_dataset_is_opt_in_and_excluded_from_training(tmp_path):
     train = pd.read_parquet(demo / 'train.parquet')
     pd.testing.assert_frame_equal(train, pd.read_parquet(plain / 'train.parquet'))
     assert set(train.data_source) == {'synth/train'}
-    assert len(pd.read_parquet(plain / 'evaluation.parquet')) == 12
+    assert len(pd.read_parquet(plain / 'evaluation.parquet')) == 8
     validation = pd.read_parquet(demo / 'evaluation.parquet')
-    assert len(validation) == 52
+    assert len(validation) == 48
     rows = validation[validation.agent_name == 'demo_decomposer'].to_dict('records')
     assert len(rows) == 40
     assert {(r['extra_info']['task_id'], r['extra_info']['language']) for r in rows} == {

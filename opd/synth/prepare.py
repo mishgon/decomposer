@@ -1,4 +1,4 @@
-"""Fixed training names, disjoint evaluation names, and a same-task train probe."""
+"""Fixed training names and disjoint evaluation names."""
 import argparse
 import json
 from pathlib import Path
@@ -23,7 +23,7 @@ def prepare(directory, demo_validation=False, workplace_validation=False):
 
     # Replication is explicit: 16 tasks x 8 attempts x 4 epochs = 512 episodes.
     pd.DataFrame([row(t, "synth/train") for t in train for _ in range(8)]).to_parquet(directory / "train.parquet", index=False)
-    validation = [row(t, "synth/train_probe") for t in train[:4]] + [row(t, "synth/heldout") for t in heldout]
+    validation = [row(t, "synth/heldout") for t in heldout]
     if demo_validation:
         from gyms.decomposer_demo.tasks import task_ids, task_spec
         for language in ('en', 'ru'):
@@ -38,7 +38,7 @@ def prepare(directory, demo_validation=False, workplace_validation=False):
         validation.extend(validation_rows())
     pd.DataFrame(validation).to_parquet(directory / "evaluation.parquet", index=False)
     (directory / "manifest.json").write_text(json.dumps({"version": "synth-swap-v1",
-        "train_tasks": 16, "heldout_tasks": 8, "train_probe_tasks": 4,
+        "train_tasks": 16, "heldout_tasks": 8, "train_probe_tasks": 0,
         "attempts_per_task_per_epoch": 8, "demo_validation_tasks": 20 if demo_validation else 0,
         "demo_validation_rows": 40 if demo_validation else 0,
         "workplace_validation_tasks": 20 if workplace_validation else 0,

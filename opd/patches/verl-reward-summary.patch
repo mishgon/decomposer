@@ -5,7 +5,7 @@ diff --git a/verl/utils/tracking.py b/verl/utils/tracking.py
      def log(self, data, step, backend=None):
 +        import os
 +
-+        if os.environ.get("OPD_ARTIFACTS") and any(k.startswith("val-core/") for k in data):
++        if os.environ.get("OPD_ARTIFACTS") and any(k.startswith("val-core/") or k == "critic/rewards/mean" for k in data):
 +            from opd.reward_summary import summarize
 +
 +            try:
