@@ -18,6 +18,7 @@ from opd.wideseek.local import check_inputs, reserve_gpus
 from opd.wideseek.prepare import DEPTH_VALIDATION_PANEL, VALIDATION_PANEL, check
 from opd.wideseek.run import create_parser, main as train
 from opd.workplace_assistant.prepare import validation_rows
+from opd.wideseek.reward import WIDTH_REWARD
 
 OVERRIDES = [*MIX_OVERRIDES, 'trainer.total_epochs=1']
 
@@ -57,7 +58,8 @@ def stage_frozen(source, output, *, directory, steps, holdout_tasks):
         manifest.update(train_probe_tasks=0, train_probe_task_ids=[],
                         evaluation='Fixed held-out and Workplace-20; pass@1')
         manifest['files']['evaluation.parquet'] = hashlib.sha256(path.read_bytes()).hexdigest()
-        (output / 'manifest.json').write_text(json.dumps(manifest, indent=2))
+    manifest['width_reward'] = WIDTH_REWARD
+    (output / 'manifest.json').write_text(json.dumps(manifest, indent=2))
     return manifest
 
 
@@ -137,7 +139,8 @@ def prepare(source, output, *, steps=32, holdout_tasks=0, prioritize_strict=Fals
     (output / 'tasks.jsonl').write_text(''.join(json.dumps(t, ensure_ascii=False) + '\n' for t in tasks))
     pd.DataFrame(training).to_parquet(output / 'train.parquet', index=False)
     pd.DataFrame(validation).to_parquet(output / 'evaluation.parquet', index=False)
-    manifest = {'overfit': not bool(holdout), 'seed': 42, 'source_sha256': hashlib.sha256(raw).hexdigest(),
+    manifest = {'overfit': not bool(holdout), 'width_reward': WIDTH_REWARD,
+                'seed': 42, 'source_sha256': hashlib.sha256(raw).hexdigest(),
                 'task_ids': [t['task_id'] for t in tasks],
                 'train_task_ids': [t['task_id'] for t in ordered], 'train_tasks': len(ordered),
                 'heldout_task_ids': [t['task_id'] for t in holdout], 'heldout_tasks': len(holdout),

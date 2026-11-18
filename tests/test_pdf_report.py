@@ -174,4 +174,5 @@ def test_load_mixed_run_uses_saved_panel_membership(tmp_path):
     assert data["gym"] == "mix"
     assert not data["depth"]
     assert data["series"]["val-core/mix/heldout/reward/mean@1"][0]["value"] == pytest.approx(2 / 3)
-    assert data["series"]["rewards/validation"][0]["value"] == pytest.approx(2 / 3)
+    # A historical F1 aggregate is not evidence of binary success without traces.
+    assert data["series"]["rewards/validation"] == []

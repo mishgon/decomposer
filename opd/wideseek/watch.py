@@ -72,6 +72,7 @@ def update_eta(points, step, total):
 def resume_history(train, series):
     """Include ancestor metrics only through the checkpoint actually restored."""
     merged = {tag: {p.step: p for p in points} for tag, points in series.items()}
+    width_reward = read_json(train / 'data/manifest.json').get('width_reward')
     seen = {train.resolve()}
     restored_step = 0
     cutoff = None
@@ -86,6 +87,8 @@ def resume_history(train, series):
             raise ValueError('Cycle in checkpoint resume history')
         seen.add(train)
         for tag, points in scalars(train / 'tensorboard').items():
+            if tag == 'critic/rewards/mean' and read_json(train / 'data/manifest.json').get('width_reward') != width_reward:
+                continue  # Do not splice old F1 means into a binary training-reward curve.
             history = merged.setdefault(tag, {})
             for point in points:
                 if point.step <= cutoff:
@@ -223,7 +226,7 @@ def show(root, run=None):
     normalized = {tag: [{'step': p.step, 'value': p.value, 'time': p.wall_time} for p in points]
                   for tag, points in series.items()}
     rewards = reward_series(train, normalized)
-    print('\nReward (native score):')
+    print('\nReward (width: finished with F1 > 0.9; depth/DeepDive/OOD: success):')
     if read_json(train / 'data/manifest.json').get('stratify_by') == 'dataset_and_passes':
         print('Validation uses frozen pool dataset/pass-bucket weights.')
     print('  Panel                         Base    Latest     Delta   Trend')
@@ -236,6 +239,8 @@ def show(root, run=None):
         delta = f'{values[-1]-base:+.3f}' if values and base is not None else '--'
         print(f'  {label:<28} {first:>6}  {latest:>8}  {delta:>8}   {trend(values)}')
     print('Train = rollout batch mean; validation = fixed held-out; OOD = Workplace-20.')
+    if not rewards['rewards/train'] and 'critic/rewards/mean' in series:
+        print('Binary train reward unavailable: historical batch means include raw width F1.')
     for tag, label in [('actor/loss', 'Actor total loss'),
                        ('actor/distillation/loss', 'Distillation loss'), ('actor/pg_loss', 'Task PG metric')]:
         values = [p.value for p in series.get(tag, [])]

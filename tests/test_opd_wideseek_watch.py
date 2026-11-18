@@ -29,3 +29,15 @@ def test_fresh_run_has_no_inherited_progress(tmp_path):
     series, step = watch.resume_history(tmp_path, {'reward': [point(0, .3)]})
     assert step == 0
     assert series['reward'][0].value == .3
+
+
+def test_resume_does_not_mix_reward_conventions(tmp_path, monkeypatch):
+    old, new = tmp_path / 'old/train', tmp_path / 'new/train'
+    (new / 'data').mkdir(parents=True)
+    (new / 'run.json').write_text(json.dumps({'resume_from': str(old / 'checkpoints/global_step_8')}))
+    (new / 'data/manifest.json').write_text(json.dumps({'width_reward': 'f1>0.9'}))
+    monkeypatch.setattr(watch, 'scalars', lambda _: {
+        'critic/rewards/mean': [point(8, .8)], 'training/global_step': [point(8, 8)]})
+    series, _ = watch.resume_history(new, {'critic/rewards/mean': [point(9, .5)]})
+    assert [p.step for p in series['critic/rewards/mean']] == [9]
+    assert [p.step for p in series['training/global_step']] == [8]

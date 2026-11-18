@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 from gyms.wideseek.prepare import agent_input
+from opd.wideseek.reward import WIDTH_REWARD
 
 VALIDATION_PANEL = Path(__file__).with_name("validation_panel.json")
 DEPTH_VALIDATION_PANEL = Path(__file__).with_name("validation_panel_depth.json")
@@ -52,7 +53,7 @@ def prepare(source, output):
     validation += workplace
     pd.DataFrame(validation).to_parquet(output / 'evaluation.parquet', index=False)
     files = ('tasks.jsonl', 'train.parquet', 'evaluation.parquet')
-    manifest = {'task_ids': [t['task_id'] for t in selected],
+    manifest = {'task_ids': [t['task_id'] for t in selected], 'width_reward': WIDTH_REWARD,
                 'train_task_ids': [t['task_id'] for t in train],
                 'heldout_task_ids': [t['task_id'] for t in heldout],
                 'train_tasks': len(train), 'heldout_tasks': len(heldout), 'train_probe_tasks': 0,

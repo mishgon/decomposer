@@ -14,6 +14,7 @@ from gyms.wideseek import REPO_ROOT
 from gyms.wideseek.run import episode
 from gyms.wideseek.runtime import close_model, save
 from opd.wideseek.prepare import prepare
+from opd.wideseek.reward import task_reward, WIDTH_REWARD
 
 
 async def main(args):
@@ -29,6 +30,7 @@ async def main(args):
     manifest = {'status': 'running', 'model': 'vllm/qwen_3_5_4b_non_thinking',
                 'student_model': str(args.model.resolve()),
                 'episode_timeout': 900,
+                'width_reward': WIDTH_REWARD,
                 'tasks': 8, 'repetitions': 4, 'concurrency': 8, 'episodes': [],
                 'source_sha256': panel['source_sha256'], 'started_at': time.time()}
     save(root / 'manifest.json', manifest)
@@ -42,13 +44,9 @@ async def main(args):
             result = await episode(task, 'decomposer', attempt, root, settings, policy=policy)
             if result.get('cleanup_errors'):
                 raise RuntimeError(f'Baseline worker cleanup failed: {task["task_id"]}')
-            score = result['evaluation']['score']
-            if score is None and result['status'] == 'timeout':
-                score = 0.0
-            if score is None:
-                raise RuntimeError(f'Unscored baseline episode: {task["task_id"]}; inspect saved result')
+            score = task_reward(result, task['source'])
             manifest['episodes'].append({'task_id': task['task_id'], 'attempt': attempt,
-                'status': result['status'], 'score': score,
+                'status': result['status'], 'score': score, 'native_score': result['evaluation']['score'],
                 'passed': result['status'] == 'finished' and score == 1})
             save(root / 'manifest.json', manifest)
     try:

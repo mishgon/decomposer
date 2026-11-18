@@ -12,6 +12,7 @@ from gyms.wideseek.run import episode
 from gyms.wideseek.runtime import save
 from opd.policy import PolicyTokens, VerlChatModel, is_episode_failure
 from opd.synth.retry import check_episode, retry_episode
+from opd.wideseek.reward import task_reward
 
 
 @cache
@@ -50,14 +51,9 @@ class WideSeekAgentLoop(AgentLoopBase):
             failure = {'error_type': error_type, 'error': result.get('error')}
             if result['status'] == 'error' and not is_episode_failure(failure):
                 raise RuntimeError(f"Episode infrastructure failure: {result.get('error')}")
-            if result['evaluation']['score'] is None:
-                if result['status'] == 'timeout':
-                    # A completed wall-clock budget has no final answer to grade.
-                    reward = 0.0
-                else:
-                    raise RuntimeError('Native judge failed; see episode result')
-            else:
-                reward = result['evaluation']['score']
+            reward = task_reward(result, task['source'])
+            result['reward'] = reward
+            save(directory / 'result.json', {**result, 'score': result['evaluation']['score']})
             if not tokens.response_ids or not any(tokens.mask):
                 raise RuntimeError('Episode produced no student tokens')
             return AgentLoopOutput(prompt_ids=tokens.prompt_ids, response_ids=tokens.response_ids,

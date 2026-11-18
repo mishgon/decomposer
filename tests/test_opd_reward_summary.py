@@ -120,3 +120,31 @@ def test_validation_does_not_require_training_probes(panel):
     manifest.pop('train_probe_task_ids')
     save(train / 'data/manifest.json', manifest)
     assert summarize(train, logged, 0)['rewards/validation'] == pytest.approx(.4)
+
+
+@pytest.mark.parametrize('binary_logged', [False, True])
+def test_width_binarizes_episodes_before_averaging(tmp_path, binary_logged):
+    from opd.wideseek.reward import WIDTH_REWARD
+
+    train = tmp_path / 'train'
+    ids = ['width-1', 'width-2']
+    manifest = {'heldout_task_ids': ids}
+    if binary_logged:
+        manifest['width_reward'] = WIDTH_REWARD
+    save(train / 'data/manifest.json', manifest)
+    (train / 'data/tasks.jsonl').write_text('\n'.join(json.dumps({'task_id': t, 'source': 'width'}) for t in ids))
+    for tid, score in zip(ids, [.9, .95]):
+        save(train / f'episodes/{tid}/trajectory.json', {
+            'task_id': tid, 'data_source': 'wideseek/heldout', 'weight_versions': {'global_steps': 0},
+            'result': {'status': 'finished', 'finished_at': 1, 'evaluation': {'score': score}}})
+    logged = {'val-core/wideseek/heldout/reward/mean@1': .5 if binary_logged else .925,
+              'critic/rewards/mean': .5 if binary_logged else .925}
+    result = summarize(train, logged, 0)
+    assert result['rewards/validation'] == .5  # Not threshold(mean F1), which would be 1.
+    if binary_logged:
+        assert result['rewards/train'] == .5
+    else:
+        assert 'rewards/train' not in result  # No exact historical training-batch membership.
+    logged['val-core/wideseek/heldout/reward/mean@1'] = .2
+    with pytest.raises(ValueError, match='Raw results disagree'):
+        summarize(train, logged, 0)

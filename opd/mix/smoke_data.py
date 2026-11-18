@@ -8,6 +8,7 @@ import random
 
 from gyms.wideseek.prepare import agent_input
 from opd.wideseek.prepare import DEPTH_VALIDATION_PANEL, VALIDATION_PANEL
+from opd.wideseek.reward import WIDTH_REWARD
 
 SOURCES = ('deepdive-qa_rl', 'deepdive-qa_sft', 'depth', 'width')
 
@@ -50,7 +51,8 @@ def prepare(source, output):
     pd.DataFrame(rows * 2).to_parquet(output / 'train.parquet', index=False)
     # veRL constructs a validation loader even when validation is disabled.
     pd.DataFrame(rows).to_parquet(output / 'evaluation.parquet', index=False)
-    manifest = {'smoke': True, 'seed': 42, 'source_sha256': hashlib.sha256(raw).hexdigest(),
+    manifest = {'smoke': True, 'width_reward': WIDTH_REWARD,
+                'seed': 42, 'source_sha256': hashlib.sha256(raw).hexdigest(),
                 'task_ids': [t['task_id'] for t in selected],
                 'train_task_ids': [t['task_id'] for t in selected], 'train_tasks': 4,
                 'heldout_task_ids': [], 'heldout_tasks': 0, 'train_probe_tasks': 0,

@@ -82,11 +82,12 @@ def test_teacher_next_token_alignment():
 
 
 @pytest.mark.parametrize('cleanup_error', [False, True])
-def test_adapter_uses_shared_gym_and_preserves_tokens(tmp_path, monkeypatch, cleanup_error):
+@pytest.mark.parametrize('source,reward', [('depth', .5), ('width', 0)])
+def test_adapter_uses_shared_gym_and_preserves_tokens(tmp_path, monkeypatch, cleanup_error, source, reward):
     from opd.wideseek.agent_loop import WideSeekAgentLoop
     monkeypatch.setenv('OPD_DATA', str(tmp_path))
     monkeypatch.setenv('OPD_ARTIFACTS', str(tmp_path / 'run'))
-    (tmp_path / 'tasks.jsonl').write_text(json.dumps({'task_id': 'a'}) + '\n')
+    (tmp_path / 'tasks.jsonl').write_text(json.dumps({'task_id': 'a', 'source': source}) + '\n')
     loop = object.__new__(WideSeekAgentLoop)
     loop.config = config('smoke')
     loop.rollout_config = loop.config.actor_rollout_ref.rollout
@@ -102,11 +103,12 @@ def test_adapter_uses_shared_gym_and_preserves_tokens(tmp_path, monkeypatch, cle
                 asyncio.run(loop.run({}, extra_info={'task_id': 'a'}))
         else:
             output = asyncio.run(loop.run({}, extra_info={'task_id': 'a'}))
-            assert output.reward_score == .5
+            assert output.reward_score == reward
             assert output.response_mask == [1, 0, 1]
             assert run.await_args.kwargs['policy'].tokens is tokens
     trace = json.loads(next((tmp_path / 'run/episodes').glob('*/trajectory.json')).read_text())
     assert trace['response_mask'] == [1, 0, 1]
+    assert trace['result']['evaluation']['score'] == .5
 
 
 def test_effective_recipe_matches_final_synth_except_gym():

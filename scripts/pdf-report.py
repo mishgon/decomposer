@@ -406,11 +406,11 @@ def render_report(d, output):
             else f"{label}: traces unavailable"
         )
     reward_kind = (
-        "native score (QA accuracy / item-F1)"
+        "binary success (width: F1 > 0.9; depth/DeepDive: QA accuracy)"
         if gym == "mix"
         else "binary QA accuracy"
         if d["depth"]
-        else "native item-F1"
+        else "binary success (F1 > 0.9)"
         if gym == "wideseek"
         else "native synthetic reward"
     )
@@ -424,7 +424,7 @@ def render_report(d, output):
         f"{name} OPD: validation through step {latest_val}",
         subtitle,
         [
-            f"{name}: {reward_kind}. {weighting} Train reward is the rollout batch mean.",
+            f"{name}: {reward_kind}. {weighting}",
             held_note,
             "Latest validation (last attempt/task): "
             + "; ".join(validation_notes)
@@ -470,7 +470,7 @@ def render_report(d, output):
                 ha="center",
             )
     place(f, 1, 0)
-    f, a = base("Train reward", "Native batch mean reward")
+    f, a = base("Train reward", "Batch mean reward")
     x, y = line(
         a,
         "rewards/train",
@@ -482,6 +482,9 @@ def render_report(d, output):
     if len(y) >= 5:
         smooth = np.convolve(y, np.ones(5) / 5, mode="valid")
         a.plot(x[4:], smooth, color=C["blue"], lw=2, label="Trailing 5 batches")
+    if not len(y) and "critic/rewards/mean" in s:
+        a.text(.5, .5, "Binary batch rewards unavailable\nHistorical means include raw width F1",
+               transform=a.transAxes, ha="center", va="center", color=C["gray"])
     a.set_ylim(0, 1)
     a.legend()
     place(f, 0, 1)

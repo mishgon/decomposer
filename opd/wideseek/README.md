@@ -28,6 +28,11 @@ Qwen3.5-4B researchers, fixed Wiki-2018 search/access tools and native scorer.
 Workplace continues using its fixed non-thinking workers. Neither task reward
 nor Workplace reward enters the distillation objective.
 
+OPD reports width reward as binary success: a finished episode with item-F1
+strictly greater than 0.9 scores 1; otherwise it scores 0. Depth and DeepDive
+retain binary QA accuracy. Saved Gym evaluations retain raw F1, alongside the
+OPD reward. Judge failures remain explicit errors, while episode timeouts score 0.
+
 Preparation accepts one source split per run. It uses `validation_panel.json`
 for width and `validation_panel_depth.json` for depth, checking both task IDs and
 question hashes. Each panel supplies eight held-out questions; legacy train probes

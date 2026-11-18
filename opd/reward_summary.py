@@ -9,6 +9,8 @@ import json
 import math
 from pathlib import Path
 
+from opd.wideseek.reward import native_score, task_reward, WIDTH_REWARD
+
 
 LABELS = {'train': 'Train reward', 'validation': 'Validation reward', 'ood': 'OOD reward'}
 
@@ -47,10 +49,16 @@ class RewardSummary:
         self.cache = {}
         tasks_path = self.train / 'data/tasks.jsonl'
         tasks = [json.loads(line) for line in tasks_path.read_text().splitlines() if line.strip()] if tasks_path.exists() else []
+        self.sources = {t['task_id']: t.get('source') for t in tasks}
+        self.has_width = 'width' in self.sources.values() or self.manifest.get('source') == 'width'
+        self.binary_width = self.manifest.get('width_reward') == WIDTH_REWARD
         self.gyms = {t['task_id']: 'deepdive' if t.get('source', '').startswith('deepdive-') else 'wideseek' for t in tasks}
         if self.manifest.get('stratify_by') == 'dataset_and_passes':
             selection = json.loads((self.train.parent / 'selected/selection.json').read_text())
             self.task_weights = weights(self.manifest, tasks, selection)
+        elif self.has_width:
+            ids = self.manifest.get('heldout_task_ids', [])
+            self.task_weights = {'validation': {t: 1 / len(ids) for t in ids}}
         self.counts = {}
         if self.manifest and tasks:
             for split in ('heldout',):
@@ -88,7 +96,9 @@ class RewardSummary:
     def metrics(self, logged, step):
         """Only aggregate a validation after every constituent gym was logged."""
         output = {}
-        if 'critic/rewards/mean' in logged:
+        # An old mean F1 cannot be converted to a binary success rate.
+        # Exact historical optimizer batches are not identified by policy versions.
+        if 'critic/rewards/mean' in logged and (not self.has_width or self.binary_width):
             output['rewards/train'] = logged['critic/rewards/mean']
         has_validation = any('/heldout/reward/mean@' in tag for tag in logged)
         panels = self.panels() if self.task_weights and has_validation else {}
@@ -102,19 +112,15 @@ class RewardSummary:
             if self.task_weights:
                 expected = self.task_weights[name]
                 results = panels.get((split, step), {})
-                if not set(expected) <= results.keys():
+                if not expected or not set(expected) <= results.keys():
                     continue
-                # Independently verify task scores reproduce the trainer's native means.
+                # Verify task scores reproduce the trainer's recorded reward convention.
                 # This detects mismatched retries, versions, missing tasks and judge failures.
-                scores = {}
+                scores, rewards = {}, {}
                 for tid in expected:
                     result = results[tid]
-                    score = result.get('evaluation', {}).get('score')
-                    if score is None and result.get('status') == 'timeout':
-                        score = 0.0
-                    if type(score) not in (int, float) or not math.isfinite(score) or not 0 <= score <= 1:
-                        raise ValueError(f'Invalid validation score: {tid} at step {step}')
-                    scores[tid] = score
+                    rewards[tid] = task_reward(result, self.sources[tid])
+                    scores[tid] = rewards[tid] if self.binary_width else native_score(result)
                 for gym, count in counts.items():
                     tag = f'val-core/{gym}/{split}/reward/mean@1'
                     if tag not in tags:
@@ -123,7 +129,7 @@ class RewardSummary:
                     if len(values) != count or not math.isclose(sum(values) / count, tags[tag], abs_tol=1e-6):
                         raise ValueError(f'Raw results disagree with logged validation: {tag}, step {step}')
                 else:
-                    output[f'rewards/{name}'] = sum(scores[t] * w for t, w in expected.items())
+                    output[f'rewards/{name}'] = sum(rewards[t] * w for t, w in expected.items())
                 continue
             # Older single-gym and mixed runs retain their fixed-panel task means.
             if counts:

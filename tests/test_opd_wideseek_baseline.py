@@ -10,10 +10,11 @@ from opd.wideseek import baseline
 
 
 @pytest.mark.parametrize('failure', ['timeout', 'evaluation_error', 'cleanup'])
-def test_baseline_timeout_completes_but_infrastructure_errors_fail(tmp_path, monkeypatch, failure):
-    def prepare(source, output):
+@pytest.mark.parametrize('source,score', [('depth', 1.0), ('width', .91)])
+def test_baseline_timeout_completes_but_infrastructure_errors_fail(tmp_path, monkeypatch, failure, source, score):
+    def prepare(_source, output):
         output.mkdir()
-        tasks = [{'task_id': str(i)} for i in range(8)]
+        tasks = [{'task_id': str(i), 'source': source} for i in range(8)]
         (output / 'tasks.jsonl').write_text('\n'.join(map(json.dumps, tasks)))
         return {'heldout_task_ids': [t['task_id'] for t in tasks], 'source_sha256': 'source'}
 
@@ -27,7 +28,7 @@ def test_baseline_timeout_completes_but_infrastructure_errors_fail(tmp_path, mon
             return {'status': 'timeout' if failure != 'evaluation_error' else 'error',
                     'evaluation': {'score': None},
                     'cleanup_errors': ['worker still running'] if failure == 'cleanup' else []}
-        return {'status': 'finished', 'evaluation': {'score': 1.0}}
+        return {'status': 'finished', 'evaluation': {'score': score}}
 
     monkeypatch.setattr(baseline, 'prepare', prepare)
     monkeypatch.setattr(baseline, 'agent_server', server)
@@ -47,6 +48,7 @@ def test_baseline_timeout_completes_but_infrastructure_errors_fail(tmp_path, mon
         assert timeout['score'] == 0 and timeout['passed'] is False
         summary = json.loads((args.output / 'summary.json').read_text())
         assert summary['mean_score'] == 31 / 32
+        assert all(r['native_score'] == score for r in manifest['episodes'] if r['status'] == 'finished')
     else:
         with pytest.raises(ExceptionGroup):
             asyncio.run(baseline.main(args))
