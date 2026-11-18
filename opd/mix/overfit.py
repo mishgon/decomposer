@@ -4,6 +4,7 @@ from collections import Counter
 from functools import partial
 import hashlib
 import json
+import math
 from pathlib import Path
 import random
 import shutil
@@ -42,6 +43,18 @@ def frozen_manifest(source, directory, steps, holdout_tasks):
             or heldout_ids != set(manifest['heldout_task_ids'])
             or train_ids & heldout_ids):
         raise ValueError('Frozen training budget or holdout differs')
+    if repeats := manifest.get('validation_repeats'):
+        expected = Counter()
+        sources = {task['task_id']: task['source'] for task in map(json.loads, source.read_text().splitlines())}
+        for tid in heldout_ids:
+            panel = 'width/heldout' if sources[tid] == 'width' else 'qa/heldout'
+            expected[panel, tid] = repeats
+        workplace_ids = json.loads((REPO_ROOT / 'gyms/workplace_assistant/validation20.json').read_text())
+        for tid in workplace_ids:
+            expected['workplace-assistant/validation20', str(tid)] = repeats
+        actual = Counter((row.data_source, row.extra_info['task_id']) for row in evaluation.itertuples())
+        if actual != expected:
+            raise ValueError('Evaluation rows differ from the frozen panels or repeat count')
     return manifest
 
 
@@ -189,6 +202,12 @@ async def main(args):
         overrides.append(f"wideseek.timeout={manifest['episode_timeout']}")
         prepare_data = partial(stage_frozen, directory=args.prepared_data,
                                steps=args.steps, holdout_tasks=args.holdout_tasks)
+    if args.rollout_concurrency is not None:
+        if args.rollout_concurrency < 1:
+            raise ValueError('Rollout concurrency must be positive')
+        overrides.extend([f'async_training.concurrent_samples_per_replica={args.rollout_concurrency}',
+                          f'async_training.staleness_threshold={max(1, math.ceil(args.rollout_concurrency / 8) - 1)}',
+                          f'data.val_batch_size={args.rollout_concurrency}'])
     from opd.workplace_assistant.preflight import check
     await check()
     with reserve_gpus(args.gpus, args.output.resolve().parent):
@@ -211,5 +230,6 @@ if __name__ == '__main__':
     parser.add_argument('--prioritize-strict', action='store_true',
                         help='Keep every 1/4 and 2/4 task, fill the update budget with 0/4 tasks, '
                              'and stratify holdout by pass bucket; requires selection.json')
+    parser.add_argument('--rollout-concurrency', type=int, help='Episodes per rollout replica and validation batch size')
     parser.description = __doc__
     asyncio.run(main(parser.parse_args()))

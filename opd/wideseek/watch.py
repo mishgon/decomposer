@@ -226,11 +226,17 @@ def show(root, run=None):
     normalized = {tag: [{'step': p.step, 'value': p.value, 'time': p.wall_time} for p in points]
                   for tag, points in series.items()}
     rewards = reward_series(train, normalized)
-    print('\nReward (width: finished with F1 > 0.9; depth/DeepDive/OOD: success):')
-    if read_json(train / 'data/manifest.json').get('stratify_by') == 'dataset_and_passes':
+    separate = read_json(train / 'data/manifest.json').get('validation_repeats')
+    if separate:
+        print(f'\nWidth validation: mean F1. QA and OOD: mean reward. {separate} attempts/task.')
+    else:
+        print('\nReward (width: finished with F1 > 0.9; depth/DeepDive/OOD: success):')
+    if not separate and read_json(train / 'data/manifest.json').get('stratify_by') == 'dataset_and_passes':
         print('Validation uses frozen pool dataset/pass-bucket weights.')
     print('  Panel                         Base    Latest     Delta   Trend')
     for name, label in LABELS.items():
+        if name == 'width_f1' and not separate:
+            continue
         points = rewards[f'rewards/{name}']
         values = [p['value'] for p in points]
         base = next((p['value'] for p in points if p['step'] == 0), None)

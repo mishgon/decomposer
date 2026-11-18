@@ -12,7 +12,7 @@ from pathlib import Path
 from opd.wideseek.reward import native_score, task_reward, WIDTH_REWARD
 
 
-LABELS = {'train': 'Train reward', 'validation': 'Validation reward', 'ood': 'OOD reward'}
+LABELS = {'train': 'Train reward', 'validation': 'Validation reward', 'ood': 'OOD reward', 'width_f1': 'Width validation F1'}
 
 
 def weights(manifest, tasks, selection):
@@ -53,10 +53,10 @@ class RewardSummary:
         self.has_width = 'width' in self.sources.values() or self.manifest.get('source') == 'width'
         self.binary_width = self.manifest.get('width_reward') == WIDTH_REWARD
         self.gyms = {t['task_id']: 'deepdive' if t.get('source', '').startswith('deepdive-') else 'wideseek' for t in tasks}
-        if self.manifest.get('stratify_by') == 'dataset_and_passes':
+        if self.manifest.get('stratify_by') == 'dataset_and_passes' and not self.manifest.get('validation_repeats'):
             selection = json.loads((self.train.parent / 'selected/selection.json').read_text())
             self.task_weights = weights(self.manifest, tasks, selection)
-        elif self.has_width:
+        elif self.has_width and not self.manifest.get('validation_repeats'):
             ids = self.manifest.get('heldout_task_ids', [])
             self.task_weights = {'validation': {t: 1 / len(ids) for t in ids}}
         self.counts = {}
@@ -100,6 +100,15 @@ class RewardSummary:
         # Exact historical optimizer batches are not identified by policy versions.
         if 'critic/rewards/mean' in logged and (not self.has_width or self.binary_width):
             output['rewards/train'] = logged['critic/rewards/mean']
+        if self.manifest.get('validation_repeats'):
+            # Each row is one sampled episode with its own veRL UID. Each task has
+            # exactly the same number of rows, so the row mean is the task mean.
+            for name, panel in [('validation', 'qa/heldout'), ('width_f1', 'width/heldout'),
+                                ('ood', 'workplace-assistant/validation20')]:
+                key = f'val-core/{panel}/reward/mean@1'
+                if key in logged:
+                    output[f'rewards/{name}'] = logged[key]
+            return output
         has_validation = any('/heldout/reward/mean@' in tag for tag in logged)
         panels = self.panels() if self.task_weights and has_validation else {}
         for name, split in [('validation', 'heldout')]:

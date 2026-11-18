@@ -143,6 +143,8 @@ def load_run(run):
         for split in ("train_probe", "heldout"):
             counts = Counter(task_gyms[t] for t in manifest.get(f"{split}_task_ids", []))
             combine_validation(series, panels, split, counts)
+    if manifest.get("validation_repeats"):
+        gym = "mix"
     series.update(reward_series(train, series))
     depth = gym == "wideseek" and (
         manifest.get("source") == "depth" or bool(task_ids) and all(t.startswith("depth-") for t in task_ids)
@@ -379,6 +381,12 @@ def render_report(d, output):
 
     tags = ["rewards/validation", "rewards/ood"]
     labels = [LABELS["validation"], LABELS["ood"]]
+    repeats = d["manifest"].get("validation_repeats")
+    colors = [C["green"], C["brown"]]
+    if repeats:
+        tags.append("rewards/width_f1")
+        labels = ["QA reward", "Workplace reward", "Width F1"]
+        colors.append(C["blue"])
     latest_val = max((int(xy(t)[0][-1]) for t in tags if len(xy(t)[0])), default=0)
     held_x, held_y = xy(tags[0])
     held_note = (
@@ -426,9 +434,9 @@ def render_report(d, output):
         f"{name} OPD: validation through step {latest_val}",
         subtitle,
         [
-            f"{name}: {reward_kind}. {weighting}",
+            f"Each validation panel averages {repeats} sampled episodes per task." if repeats else f"{name}: {reward_kind}. {weighting}",
             held_note,
-            "Latest validation (last attempt/task): "
+            "Width uses mean F1. QA and Workplace use mean reward." if repeats else "Latest validation (last attempt/task): "
             + "; ".join(validation_notes)
             + ". Timeouts count toward reward.",
         ],
@@ -437,7 +445,7 @@ def render_report(d, output):
     for tag, label, col in zip(
         tags,
         labels,
-        [C["green"], C["brown"]],
+        colors,
     ):
         _, y = xy(tag)
         label = f"{label}: {y[-1]:.3f}" if len(y) else label
@@ -459,7 +467,7 @@ def render_report(d, output):
         a.bar(
             labels,
             delta,
-            color=[C["green"], C["brown"]],
+            color=colors,
             width=0.55,
         )
         a.axhline(0, color=C["gray"], lw=0.8)

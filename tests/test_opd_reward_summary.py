@@ -148,3 +148,14 @@ def test_width_binarizes_episodes_before_averaging(tmp_path, binary_logged):
     logged['val-core/wideseek/heldout/reward/mean@1'] = .2
     with pytest.raises(ValueError, match='Raw results disagree'):
         summarize(train, logged, 0)
+
+
+def test_repeated_panels_keep_width_f1_separate_from_binary_reward(panel):
+    train, manifest, _, _, _ = panel
+    save(train / 'data/manifest.json', {**manifest, 'validation_repeats': 5})
+    logged = {'val-core/qa/heldout/reward/mean@1': .43,
+              'val-core/width/heldout/reward/mean@1': .735,
+              'val-core/workplace-assistant/validation20/reward/mean@1': .82,
+              'critic/rewards/mean': .375}
+    assert RewardSummary(train).metrics(logged, 8) == {
+        'rewards/train': .375, 'rewards/validation': .43, 'rewards/width_f1': .735, 'rewards/ood': .82}

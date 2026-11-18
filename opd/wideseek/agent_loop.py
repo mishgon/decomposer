@@ -12,7 +12,7 @@ from gyms.wideseek.run import episode
 from gyms.wideseek.runtime import save
 from opd.policy import PolicyTokens, VerlChatModel, is_episode_failure
 from opd.synth.retry import check_episode, retry_episode
-from opd.wideseek.reward import task_reward
+from opd.wideseek.reward import native_score, task_reward
 
 
 @cache
@@ -51,7 +51,12 @@ class WideSeekAgentLoop(AgentLoopBase):
             failure = {'error_type': error_type, 'error': result.get('error')}
             if result['status'] == 'error' and not is_episode_failure(failure):
                 raise RuntimeError(f"Episode infrastructure failure: {result.get('error')}")
-            reward = task_reward(result, task['source'])
+            if kwargs.get('data_source') == 'width/heldout':
+                if task['source'] != 'width':
+                    raise ValueError('Width validation requires a width task')
+                reward = native_score(result)
+            else:
+                reward = task_reward(result, task['source'])
             result['reward'] = reward
             save(directory / 'result.json', {**result, 'score': result['evaluation']['score']})
             if not tokens.response_ids or not any(tokens.mask):
