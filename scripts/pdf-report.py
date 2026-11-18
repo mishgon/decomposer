@@ -384,6 +384,8 @@ def render_report(d, output):
     held_note = (
         f"Held-out: {held_y[0]:.1%} initial, {max(held_y):.1%} peak (step {held_x[np.argmax(held_y)]:.0f}), {held_y[-1]:.1%} latest."
         if len(held_y)
+        else "Binary held-out reward unavailable: per-task results are needed to convert historical width F1."
+        if any('/heldout/reward/mean@' in tag for tag in s)
         else "Held-out validation not recorded."
     )
     validation_notes = []
