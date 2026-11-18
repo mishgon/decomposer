@@ -11,6 +11,9 @@ import subprocess
 import sys
 import time
 
+# The watcher is also invoked by absolute file path.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
 
 def duration(seconds):
     minutes = max(0, round(seconds / 60))
@@ -216,16 +219,23 @@ def show(root, run=None):
         print(f"ETA remaining updates: ~{duration(eta)} (recent update cadence)" if eta is not None
               else 'ETA remaining updates: -- (warming up; need two logged updates)')
         print('Whole-run ETA: -- (final validation / teardown duration not yet known)')
-    print('\nReward (native partial score, NOT pass rate):')
-    print('  Fixed panel                       Base    Latest     Delta   Trend')
-    for tag in sorted(series):
-        if tag.startswith('val-core/') and re.search(r'/mean@\d+$', tag):
-            values = [p.value for p in series[tag]]
-            base = next((p.value for p in series[tag] if p.step == 0), None)
-            first = f'{base:.3f}' if base is not None else '--'
-            delta = f'{values[-1]-base:+.3f}' if base is not None else '--'
-            print(f"  {tag.removeprefix('val-core/'):<32} "
-                  f'{first:>6}  {values[-1]:>8.3f}  {delta:>8}   {trend(values)}')
+    from opd.reward_summary import LABELS, series as reward_series
+    normalized = {tag: [{'step': p.step, 'value': p.value, 'time': p.wall_time} for p in points]
+                  for tag, points in series.items()}
+    rewards = reward_series(train, normalized)
+    print('\nReward (native score; fixed panels):')
+    if read_json(train / 'data/manifest.json').get('stratify_by') == 'dataset_and_passes':
+        print('Train and validation use the same frozen pool dataset/pass-bucket weights.')
+    print('  Panel                         Base    Latest     Delta   Trend')
+    for name, label in LABELS.items():
+        points = rewards[f'reward/{name}']
+        values = [p['value'] for p in points]
+        base = next((p['value'] for p in points if p['step'] == 0), None)
+        first = f'{base:.3f}' if base is not None else '--'
+        latest = f'{values[-1]:.3f}' if values else '--'
+        delta = f'{values[-1]-base:+.3f}' if values and base is not None else '--'
+        print(f'  {label:<28} {first:>6}  {latest:>8}  {delta:>8}   {trend(values)}')
+    print('Train = fixed training probes; validation = held-out; OOD = Workplace-20.')
     for tag, label in [('actor/loss', 'Actor total loss'),
                        ('actor/distillation/loss', 'Distillation loss'), ('actor/pg_loss', 'Task PG metric')]:
         values = [p.value for p in series.get(tag, [])]

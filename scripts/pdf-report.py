@@ -10,7 +10,8 @@
 
 Usage: ./scripts/pdf-report.py /path/to/run [--output /path/to/report.pdf]
 Defaults to RUN/opd-report.pdf. Run on the experiment host or on a copied run;
-no ClearML credentials, GPU, repository imports or network API calls are needed.
+no ClearML credentials, GPU or network API calls are needed.
+Uses the repository's standard-library-only opd.reward_summary module.
 Keep the bundled scripts/report-assets directory beside this script.
 The first uv invocation installs the pinned plotting dependencies.
 """
@@ -21,6 +22,7 @@ from datetime import datetime, timezone
 import io
 import json
 import math
+import sys
 from pathlib import Path
 
 import matplotlib
@@ -38,6 +40,9 @@ from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen import canvas
 from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
 import yaml
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from opd.reward_summary import LABELS, series as reward_series
 
 
 def read_json(path):
@@ -138,6 +143,7 @@ def load_run(run):
         for split in ("train_probe", "heldout"):
             counts = Counter(task_gyms[t] for t in manifest[f"{split}_task_ids"])
             combine_validation(series, panels, split, counts)
+    series.update(reward_series(train, series))
     depth = gym == "wideseek" and (
         manifest.get("source") == "depth" or bool(task_ids) and all(t.startswith("depth-") for t in task_ids)
     )
@@ -371,7 +377,7 @@ def render_report(d, output):
             mask="auto",
         )
 
-    tags = validation_tags(s, gym)
+    tags = [f"reward/{name}" for name in LABELS]
     latest_val = max((int(xy(t)[0][-1]) for t in tags if len(xy(t)[0])), default=0)
     held_x, held_y = xy(tags[1])
     held_note = (
@@ -380,12 +386,12 @@ def render_report(d, output):
         else "Held-out validation not recorded."
     )
     validation_notes = []
-    for tag, label in zip(tags, ["train probes", "held-out", "Workplace"]):
+    for tag, source_tag, label in zip(tags, validation_tags(s, gym), ["train probes", "held-out", "Workplace"]):
         x, _ = xy(tag)
         results = (
             d["panels"].get(
                 (
-                    tag.removeprefix("val-core/").split("/reward/")[0],
+                    source_tag.removeprefix("val-core/").split("/reward/")[0],
                     int(x[-1]),
                 ),
                 {},
@@ -399,7 +405,7 @@ def render_report(d, output):
             else f"{label}: traces unavailable"
         )
     reward_kind = (
-        "task-weighted native score (QA accuracy / item-F1)"
+        "native score (QA accuracy / item-F1)"
         if gym == "mix"
         else "binary QA accuracy"
         if d["depth"]
@@ -407,6 +413,9 @@ def render_report(d, output):
         if gym == "wideseek"
         else "native synthetic reward"
     )
+    weighting = ("Train and validation use frozen pool dataset/pass weights."
+                 if d["manifest"].get("stratify_by") == "dataset_and_passes"
+                 else "Fixed-panel means weight each task equally.")
     status = metadata.get("status", "unknown")
     subtitle = f"{model} | {d['manifest'].get('train_tasks', '?')} training tasks | {total_budget} total tokens | {status}"
     page(
@@ -414,7 +423,7 @@ def render_report(d, output):
         f"{name} OPD: validation through step {latest_val}",
         subtitle,
         [
-            f"{name}: {reward_kind}. Workplace: binary success. Fixed panels use logged means; training tasks change between batches.",
+            f"{name}: {reward_kind}. {weighting} Train reward uses fixed probes.",
             held_note,
             "Latest validation (last attempt/task): "
             + "; ".join(validation_notes)
@@ -424,18 +433,12 @@ def render_report(d, output):
     f, a = base("Fixed-panel validation", "Mean reward / success rate", "Validation step")
     for tag, label, col in zip(
         tags,
-        ["Train probes", "Held-out", "Workplace OOD"],
+        LABELS.values(),
         [C["blue"], C["green"], C["brown"]],
     ):
-        x, y = line(a, tag, label, col, marker="o", lw=2)
-        if len(y):
-            a.annotate(
-                f"{y[-1]:.3f}",
-                (x[-1], y[-1]),
-                xytext=(5, -10 if "train_probe" in tag else 8),
-                textcoords="offset points",
-                color="black",
-            )
+        _, y = xy(tag)
+        label = f"{label}: {y[-1]:.3f}" if len(y) else label
+        line(a, tag, label, col, marker="o", lw=2)
     a.set_ylim(-0.04, 1.04)
     a.set_xlim(-1, latest_val + 8)
     a.set_xticks(range(0, latest_val + 1, 8))
@@ -451,7 +454,7 @@ def render_report(d, output):
     if common:
         delta = [dict(zip(*xy(t)))[last] - dict(zip(*xy(t)))[first] for t in tags]
         a.bar(
-            ["Train probes", "Held-out", "Workplace OOD"],
+            list(LABELS.values()),
             delta,
             color=[C["blue"], C["green"], C["brown"]],
             width=0.55,
